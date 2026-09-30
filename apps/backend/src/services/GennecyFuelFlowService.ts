@@ -173,7 +173,7 @@ function buildSummary(payload: FuelFlowPayload): string {
     '',
     'Após confirmar, seguirá para aprovação do gestor e depois Suprimentos.',
     '',
-    'Confirma o envio? (sim / não)',
+    'Confirma o envio?',
   ].join('\n');
 }
 

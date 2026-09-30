@@ -110,9 +110,14 @@ function buildSummary(payload: Record<string, unknown>): string {
     `• Cupom fiscal: ${hasStoredPhoto(payload.receiptPhotoUrl, payload.receiptPhotoKey) ? 'enviado' : '—'}`,
     `• Observações: ${String(payload.observations || '').trim() || '—'}`,
     '',
-    'Confirma o envio? (sim / não)',
+    'Confirma o envio?',
   ].join('\n');
 }
+
+const CONFIRM_YES_NO_BUTTONS = [
+  { id: 'SIM', title: 'Sim' },
+  { id: 'NAO', title: 'Não' },
+];
 
 export function isWhatsAppFuelReportFlowStatus(status: string): boolean {
   return status.startsWith('FUEL_REPORT_');
@@ -441,7 +446,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
     case 'FUEL_REPORT_ASK_OBSERVATIONS': {
       newPayload.observations = SKIP_WORDS.test(textRaw) ? '' : textRaw.trim();
       return {
-        sendAction: waButtons(buildSummary(newPayload)),
+        sendAction: waButtons(buildSummary(newPayload), CONFIRM_YES_NO_BUTTONS),
         newStatus: 'FUEL_REPORT_CONFIRM',
         newPayload,
       };
@@ -460,15 +465,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
       }
       if (!YES_WORDS.test(textRaw)) {
         return {
-          sendAction: {
-            type: 'buttons',
-            body: 'Responda «sim» para confirmar ou «não» para cancelar.',
-            buttons: [
-              { id: 'SIM', title: 'Sim' },
-              { id: 'NAO', title: 'Não' },
-              { id: 'MENU', title: 'Menu' },
-            ],
-          },
+          sendAction: waButtons('Confirma o envio?', CONFIRM_YES_NO_BUTTONS),
           newStatus,
           newPayload,
         };

@@ -864,7 +864,6 @@ export async function processWhatsAppFuelFlow(params: {
         sendAction: waButtons(buildSummary(newPayload), [
           { id: 'SIM', title: 'Sim' },
           { id: 'NAO', title: 'Não' },
-          { id: 'MENU', title: 'Menu' },
         ]),
         newStatus: 'FUEL_CONFIRM',
         newPayload,
@@ -882,15 +881,10 @@ export async function processWhatsAppFuelFlow(params: {
       }
       if (!YES_WORDS.test(textRaw)) {
         return {
-          sendAction: {
-            type: 'buttons',
-            body: 'Responda «sim» para confirmar ou «não» para cancelar.',
-            buttons: [
-              { id: 'SIM', title: 'Sim' },
-              { id: 'NAO', title: 'Não' },
-              { id: 'MENU', title: 'Menu' },
-            ],
-          },
+          sendAction: waButtons('Confirma o envio?', [
+            { id: 'SIM', title: 'Sim' },
+            { id: 'NAO', title: 'Não' },
+          ]),
           newStatus,
           newPayload,
         };

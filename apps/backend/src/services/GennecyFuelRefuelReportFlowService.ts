@@ -145,7 +145,7 @@ function buildSummary(payload: ReportFlowPayload): string {
     `• Cupom fiscal: ${hasStoredPhoto(payload.receiptPhotoUrl, payload.receiptPhotoKey) ? '✅ enviado' : '—'}`,
     `• Observações: ${payload.observations?.trim() || '—'}`,
     '',
-    'Confirma o envio? (sim / não)',
+    'Confirma o envio?',
   ].join('\n');
 }
 
