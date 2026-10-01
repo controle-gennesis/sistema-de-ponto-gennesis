@@ -183,7 +183,7 @@ export class ContractController {
         valuePlusAddenda: c.valuePlusAddenda ? Number(c.valuePlusAddenda) : 0
       }));
 
-      res.json({
+      return res.json({
         success: true,
         data: contractsWithNumbers,
         pagination: {
@@ -194,7 +194,7 @@ export class ContractController {
         }
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 

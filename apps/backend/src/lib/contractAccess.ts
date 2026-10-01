@@ -115,8 +115,8 @@ export async function getAssignedContractIds(
 ): Promise<string[] | null> {
   if (isAdmin) return null;
   const access = await getLiberadoContractAccessForUser(userId, false);
-  if (access.filter === 'none') return [];
-  return access.ids;
+  if (access.filter === 'ids') return access.ids;
+  return [];
 }
 
 /**

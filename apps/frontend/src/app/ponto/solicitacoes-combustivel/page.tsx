@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -473,12 +473,31 @@ function formatRefuelDeadline(
   return `${amount} ${unitLabel}`;
 }
 
-export default function SolicitacoesCombustivelPage() {
+function parseSuppliesCardFilter(value: string | null): SuppliesCardFilter | null {
+  if (
+    value === 'all' ||
+    value === 'analysis' ||
+    value === 'awaiting_refuel' ||
+    value === 'CONCLUDED' ||
+    value === 'CANCELLED'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function SolicitacoesCombustivelPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { isAdministrator } = usePermissions();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [cardFilter, setCardFilter] = useState<SuppliesCardFilter>(DEFAULT_CARD_FILTER);
+  const openFromUrlHandled = useRef<string | null>(null);
+  const initialQ = searchParams.get('q')?.trim() || '';
+  const initialCard = parseSuppliesCardFilter(searchParams.get('card'));
+  const [searchTerm, setSearchTerm] = useState(initialQ);
+  const [cardFilter, setCardFilter] = useState<SuppliesCardFilter>(
+    initialCard ?? DEFAULT_CARD_FILTER,
+  );
   const [detailStatusFilter, setDetailStatusFilter] = useState<DetailStatusFilter>('ALL');
   const [refuelDateFrom, setRefuelDateFrom] = useState('');
   const [refuelDateTo, setRefuelDateTo] = useState('');
@@ -844,6 +863,32 @@ export default function SolicitacoesCombustivelPage() {
       setActionMenu(null);
     }
   }, [actionMenu, requestForMenu]);
+
+  useEffect(() => {
+    const q = searchParams.get('q')?.trim() || '';
+    const card = parseSuppliesCardFilter(searchParams.get('card'));
+    if (q && q !== searchTerm) setSearchTerm(q);
+    if (card && card !== cardFilter) setCardFilter(card);
+    // Só sincroniza quando a URL muda (drill-down das análises).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intencional: reagir a searchParams
+  }, [searchParams]);
+
+  useEffect(() => {
+    const openId = searchParams.get('open')?.trim();
+    if (!openId || loadingList) return;
+    if (openFromUrlHandled.current === openId) return;
+    const row = records.find((r) => r.id === openId);
+    if (!row) return;
+    openFromUrlHandled.current = openId;
+    openRequestDetail(row);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('open');
+    const qs = next.toString();
+    router.replace(
+      qs ? `/ponto/solicitacoes-combustivel?${qs}` : '/ponto/solicitacoes-combustivel',
+      { scroll: false },
+    );
+  }, [loadingList, records, searchParams, router]);
 
   useEffect(() => {
     if (selected?.status === 'PENDING_SUPPLIES') {
@@ -2255,5 +2300,14 @@ export default function SolicitacoesCombustivelPage() {
         </Modal>
       </MainLayout>
     </ProtectedRoute>
+  );
+}
+
+/** Next.js exige Suspense em volta de `useSearchParams` na geração estática. */
+export default function SolicitacoesCombustivelPage() {
+  return (
+    <Suspense fallback={<Loading message="Carregando..." fullScreen size="lg" />}>
+      <SolicitacoesCombustivelPageContent />
+    </Suspense>
   );
 }

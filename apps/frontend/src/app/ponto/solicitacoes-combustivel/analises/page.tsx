@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { format, parseISO, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -322,9 +323,11 @@ function WeeklyQuotaPanel({
 function RankList({
   rows,
   formatValue,
+  onSelect,
 }: {
   rows: Array<{ key: string; label: string; value: number; meta?: string }>;
   formatValue: (n: number) => string;
+  onSelect?: (row: { key: string; label: string }) => void;
 }) {
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
@@ -332,10 +335,26 @@ function RankList({
       {rows.map((row, i) => {
         const widthPct = Math.min(100, Math.max(6, Math.round((row.value / max) * 100)));
         const color = CHART_PALETTE[i % CHART_PALETTE.length];
+        const interactive = Boolean(onSelect);
         return (
-          <div key={row.key} className="space-y-1.5">
+          <button
+            key={row.key}
+            type="button"
+            disabled={!interactive}
+            onClick={() => onSelect?.({ key: row.key, label: row.label })}
+            className={`w-full space-y-1.5 text-left ${
+              interactive
+                ? 'cursor-pointer rounded-lg px-1.5 py-1 -mx-1.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                : 'cursor-default'
+            }`}
+            title={interactive ? `Ver solicitações de ${row.label}` : undefined}
+          >
             <div className="flex items-baseline justify-between gap-2 text-sm">
-              <span className="min-w-0 truncate font-medium text-gray-800 dark:text-gray-200">
+              <span
+                className={`min-w-0 truncate font-medium text-gray-800 dark:text-gray-200 ${
+                  interactive ? 'underline-offset-2 group-hover:underline hover:underline' : ''
+                }`}
+              >
                 <span className="mr-1.5 text-xs font-semibold text-gray-400">{i + 1}.</span>
                 {row.label}
               </span>
@@ -352,7 +371,7 @@ function RankList({
                 style={{ width: `${widthPct}%`, backgroundColor: color }}
               />
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
@@ -449,8 +468,8 @@ function buildInsights(rows: FuelRefuelRequest[]) {
     gasto: Math.round(c.value * 100) / 100,
   }));
 
-  const topDrivers = [...byDriver.values()]
-    .map((v, i) => ({ key: `${v.label}-${i}`, label: v.label, value: v.spend, meta: `${v.count}×` }))
+  const topDrivers = [...byDriver.entries()]
+    .map(([key, v]) => ({ key, label: v.label, value: v.spend, meta: `${v.count}×` }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
 
@@ -500,11 +519,19 @@ function buildInsights(rows: FuelRefuelRequest[]) {
   };
 }
 
+type RankDrillDown = {
+  kind: 'driver' | 'plate';
+  key: string;
+  label: string;
+};
+
 function AnalisesCombustivelContent() {
+  const router = useRouter();
   const theme = useChartTheme();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [rankDrillDown, setRankDrillDown] = useState<RankDrillDown | null>(null);
 
   const { data: rows = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['fuel-refuel-requests-analytics'],
@@ -550,6 +577,108 @@ function AnalisesCombustivelContent() {
 
   const insights = useMemo(() => buildInsights(filteredRows), [filteredRows]);
   const hasPeriodFilter = Boolean(dateFrom || dateTo);
+
+  const drillDownRequests = useMemo(() => {
+    if (!rankDrillDown) return [];
+    return filteredRows
+      .filter((r) => r.status === 'COMPLETED')
+      .filter((r) => {
+        if (rankDrillDown.kind === 'driver') {
+          return (r.driverName?.trim() || 'Sem condutor') === rankDrillDown.key;
+        }
+        return (r.vehiclePlate?.trim().toUpperCase() || 'SEM PLACA') === rankDrillDown.key;
+      })
+      .map((r) => {
+        const liters = toNum(r.litersRefueled);
+        const total = totalValue(r.litersRefueled, r.pricePerLiter);
+        return { row: r, liters, total };
+      })
+      .filter((x) => x.liters != null && x.total != null)
+      .sort((a, b) => {
+        const da = resolveRowDate(a.row)?.getTime() ?? 0;
+        const db = resolveRowDate(b.row)?.getTime() ?? 0;
+        return db - da;
+      });
+  }, [filteredRows, rankDrillDown]);
+
+  const openRequestInQueue = (id: string, searchHint: string) => {
+    const params = new URLSearchParams({
+      q: searchHint,
+      card: 'CONCLUDED',
+      open: id,
+    });
+    router.push(`/ponto/solicitacoes-combustivel?${params.toString()}`);
+  };
+
+  const rankDrillDownModal = (
+    <Modal
+      isOpen={Boolean(rankDrillDown)}
+      onClose={() => setRankDrillDown(null)}
+      title={
+        rankDrillDown?.kind === 'driver'
+          ? `Condutor: ${rankDrillDown.label}`
+          : rankDrillDown
+            ? `Veículo: ${rankDrillDown.label}`
+            : 'Solicitações'
+      }
+      size="lg"
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Abastecimentos concluídos no período filtrado. Clique para abrir na fila.
+        </p>
+        {drillDownRequests.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-500">Nenhuma solicitação encontrada.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+            {drillDownRequests.map(({ row, liters, total }) => {
+              const when = resolveRowDate(row);
+              const whenLabel = when
+                ? format(when, 'dd/MM/yyyy', { locale: ptBR })
+                : '—';
+              const searchHint =
+                rankDrillDown?.kind === 'plate'
+                  ? row.vehiclePlate
+                  : row.driverName || String(row.displayNumber);
+              return (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    onClick={() => openRequestInQueue(row.id, searchHint)}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        #{row.displayNumber}
+                        <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                          {whenLabel}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {shortContractName(row)}
+                        {rankDrillDown?.kind === 'driver' && row.vehiclePlate
+                          ? ` · ${row.vehiclePlate}`
+                          : null}
+                        {rankDrillDown?.kind === 'plate' && row.driverName
+                          ? ` · ${row.driverName}`
+                          : null}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right text-sm tabular-nums">
+                      <p className="font-semibold text-gray-800 dark:text-gray-200">
+                        {formatCurrency(total ?? 0)}
+                      </p>
+                      <p className="text-xs text-gray-400">{formatLiters(liters ?? 0)}</p>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Modal>
+  );
 
   if (isLoading) {
     return (
@@ -913,19 +1042,28 @@ function AnalisesCombustivelContent() {
       <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartCard
           title="Condutores com maior gasto"
-          subtitle="Ranking por nome do condutor no pedido."
+          subtitle="Clique no nome para ver as solicitações."
           Icon={Users}
         >
-          <RankList rows={insights.topDrivers} formatValue={formatCurrency} />
+          <RankList
+            rows={insights.topDrivers}
+            formatValue={formatCurrency}
+            onSelect={({ key, label }) => setRankDrillDown({ kind: 'driver', key, label })}
+          />
         </ChartCard>
         <ChartCard
           title="Veículos que mais consomem"
-          subtitle="Top placas por gasto e litros."
+          subtitle="Clique na placa para ver as solicitações."
           Icon={Car}
         >
-          <RankList rows={insights.topPlates} formatValue={formatCurrency} />
+          <RankList
+            rows={insights.topPlates}
+            formatValue={formatCurrency}
+            onSelect={({ key, label }) => setRankDrillDown({ kind: 'plate', key, label })}
+          />
         </ChartCard>
       </div>
+      {rankDrillDownModal}
     </div>
   );
 }
