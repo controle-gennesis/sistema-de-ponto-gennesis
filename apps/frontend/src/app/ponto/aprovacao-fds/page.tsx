@@ -37,7 +37,7 @@ const ITEMS_PER_PAGE = 20;
 export default function AprovacaoFdsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contratoFiltro = (searchParams.get('contrato') || '').trim();
+  const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);

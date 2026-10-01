@@ -219,7 +219,7 @@ function CurrencyStepperInput({
 export default function CaixinhaPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contratoFiltro = (searchParams.get('contrato') || '').trim();
+  const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 

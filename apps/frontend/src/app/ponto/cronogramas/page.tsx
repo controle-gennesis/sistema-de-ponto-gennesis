@@ -73,7 +73,7 @@ function formatPctLista(v: number | undefined): string {
 export default function CronogramasPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contratoFromUrl = (searchParams.get('contrato') || '').trim();
+  const contratoFromUrl = (searchParams?.get('contrato') || '').trim();
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
