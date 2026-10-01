@@ -11,7 +11,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import {
-  fetchEmployeeSelectOptions,
+  fetchJuridicoAdvogadoOptions,
   isCargoAdvogado,
 } from '@/lib/employeeSelectOptions';
 import {
@@ -308,8 +308,8 @@ export function JuridicoProcessoEditModal({
   });
 
   const { data: employees = [] } = useQuery({
-    queryKey: ['employees-for-juridico-processo', 'Advogado'],
-    queryFn: () => fetchEmployeeSelectOptions({ position: 'Advogado' }),
+    queryKey: ['juridico-processos-advogados'],
+    queryFn: () => fetchJuridicoAdvogadoOptions(),
     enabled: isOpen,
     staleTime: 10 * 60 * 1000,
   });
