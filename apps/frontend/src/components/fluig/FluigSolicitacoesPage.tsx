@@ -45,6 +45,7 @@ import {
   formatWorkflowValorDisplay,
   readFluigDatasetValor,
 } from '@/lib/fluigWorkflowApproval';
+import { filterActiveFluigDatasets } from '@/lib/fluigDisabledDatasets';
 import api from '@/lib/api';
 import * as XLSX from 'xlsx';
 import { DatePickerField } from '@/components/ui/DatePickerField';
@@ -1185,7 +1186,13 @@ export function FluigSolicitacoesPage({
   });
 
   const { costCenters: dbCostCenters } = useCostCenters();
-  const datasets = config?.datasets?.length ? config.datasets : DEFAULT_BI_DATASETS;
+  const datasets = useMemo(
+    () =>
+      filterActiveFluigDatasets(
+        config?.datasets?.length ? config.datasets : DEFAULT_BI_DATASETS
+      ),
+    [config?.datasets]
+  );
   const datasetTabLabels = useMemo(() => {
     return datasets.reduce<Record<string, string>>((acc, ds) => {
       acc[ds] = config?.datasetTabLabels?.[ds] ?? DEFAULT_DATASET_TAB_LABELS[ds] ?? ds;

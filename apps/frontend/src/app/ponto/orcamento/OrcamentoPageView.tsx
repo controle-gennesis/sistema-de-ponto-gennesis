@@ -2089,7 +2089,7 @@ type InsumoAnaliticoManual = {
 };
 
 /** Unidades do insumo manual (Ficha de demanda) — mesmo seletor da memória de cálculo. */
-const UND_INSUMO_MANUAL_OPTIONS = [
+const UND_INSUMO_MANUAL_OPTIONS: string[] = [
   'UN',
   'M',
   'M²',
@@ -2100,7 +2100,7 @@ const UND_INSUMO_MANUAL_OPTIONS = [
   'L',
   'CJ',
   'VB',
-] as const;
+];
 
 export interface ItemServico {
   chave: string;

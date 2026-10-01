@@ -705,8 +705,7 @@ try {
       const FLUIG_WARM_DATASETS = [
         'Processos_Workflow_Aprovacao_G3',
         'Processos_Workflow_Aprovacao_G5',
-        'DataSet_G3FollowUp',
-        'DataSet_G4FollowUp',
+        // DataSet_G3FollowUp / DataSet_G4FollowUp temporariamente desativados
         'G5-Relatorio-DF-GO-TODOS-SETORES',
         'G5-Relatorio-DF-GO-DP',
         'G5-Relatorio-DF-GO-JURIDICO',

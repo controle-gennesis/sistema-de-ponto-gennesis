@@ -3,7 +3,8 @@
  * alinhado às etapas usadas em FluigSolicitacoesPage.
  */
 
-export const FLUIG_CONTRACT_PAID_DATASETS = ['DataSet_G4FollowUp', 'G5-Relatorio-DF-GO-TODOS-SETORES'] as const;
+export const FLUIG_CONTRACT_PAID_DATASETS = ['G5-Relatorio-DF-GO-TODOS-SETORES'] as const;
+// DataSet_G4FollowUp temporariamente fora — ver fluigDisabledDatasets.ts
 
 export type FluigContractPaidTarget = {
   name: string;

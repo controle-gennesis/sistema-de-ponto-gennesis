@@ -247,7 +247,7 @@ export default function ProcessosAtivosPage() {
   const router = useRouter();
   const { isAdministrator, can } = usePermissions();
   const canSeeDashboard =
-    isAdministrator || can(pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'));
+    isAdministrator || can(pathToModuleKey('/ponto/juridico/processos-ativos'));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [listFilters, setListFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);

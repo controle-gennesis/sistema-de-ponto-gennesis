@@ -876,10 +876,10 @@ export function useRoutePermission(route: string) {
     '/ponto/noticias': isAdministrator || can(pk('/ponto/noticias')),
     '/ponto/juridico/processos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos/dashboard':
-      isAdministrator || can(pk('/ponto/juridico/processos-ativos/dashboard')),
+      isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos-ativos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos-ativos/dashboard':
-      isAdministrator || can(pk('/ponto/juridico/processos-ativos/dashboard')),
+      isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/solicitacoes-fluig':
       isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
     '/ponto/financeiro/controle-financeiro':

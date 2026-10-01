@@ -226,7 +226,10 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   // Jurídico
   { key: pathToModuleKey('/ponto/juridico/processos-ativos'), name: 'Processos', href: '/ponto/juridico/processos', category: 'Jurídico' },
-  { key: pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'), name: 'Dashboards dos Processos', href: '/ponto/juridico/processos/dashboard', category: 'Jurídico' },
+  /**
+   * Dashboards dos Processos: sem entrada na matriz «Acesso».
+   * Quem tem «Processos» já acessa o dashboard.
+   */
   {
     key: pathToModuleKey('/ponto/juridico/solicitacoes-fluig'),
     name: 'Solicitações - Fluig',
