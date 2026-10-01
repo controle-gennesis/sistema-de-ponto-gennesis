@@ -143,7 +143,7 @@ export default function OrcamentosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const contratoFromUrl = (searchParams.get('contrato') || '').trim();
+  const contratoFromUrl = (searchParams?.get('contrato') || '').trim();
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
