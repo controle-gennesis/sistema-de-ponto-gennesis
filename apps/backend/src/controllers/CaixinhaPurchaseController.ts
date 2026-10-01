@@ -4,7 +4,10 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { listCaixinhaAccountNames, upsertCaixinhaAccountName } from '../lib/ensureCaixinhaAccounts';
-import { assertContractAccess, getContractAccessForUser } from '../lib/contractAccess';
+import {
+  assertLiberadoContractAccess,
+  getLiberadoContractAccessForUser,
+} from '../lib/contractAccess';
 
 function trimOrNull(value: unknown): string | null {
   const s = String(value ?? '').trim();
@@ -103,12 +106,12 @@ async function resolvePerson(personUserId: string | null, personNameRaw: unknown
   return { personUserId: null as string | null, personName: typedName };
 }
 
-/** Próprios lançamentos + os dos contratos liberados na página de Contratos. */
+/** Próprios lançamentos + os dos contratos com Liberado (aba Contratos). */
 async function listWhereForUser(
   userId: string,
   isAdmin: boolean,
 ): Promise<Prisma.CaixinhaPurchaseWhereInput> {
-  const access = await getContractAccessForUser(userId, isAdmin);
+  const access = await getLiberadoContractAccessForUser(userId, isAdmin);
   if (access.filter === 'all') return {};
 
   const or: Prisma.CaixinhaPurchaseWhereInput[] = [
@@ -126,7 +129,7 @@ async function assertCanSeePurchase(req: AuthRequest, row: CaixinhaPurchase): Pr
   if (req.user.isAdmin) return;
   if (row.createdById === req.user.id || row.personUserId === req.user.id) return;
   if (row.contractId) {
-    const access = await getContractAccessForUser(req.user.id, false);
+    const access = await getLiberadoContractAccessForUser(req.user.id, false);
     if (access.filter === 'all' || (access.filter === 'ids' && access.ids.includes(row.contractId))) {
       return;
     }
@@ -179,7 +182,7 @@ export class CaixinhaPurchaseController {
   async options(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Não autenticado', 401);
-      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
       const contractWhere: Prisma.ContractWhereInput =
         access.filter === 'all'
           ? {}
@@ -253,7 +256,7 @@ export class CaixinhaPurchaseController {
       const person = await resolvePerson(trimOrNull(body.personUserId), body.personName);
       const contract = await resolveContract(trimOrNull(body.contractId));
       if (contract.contractId) {
-        await assertContractAccess(req, contract.contractId);
+        await assertLiberadoContractAccess(req, contract.contractId);
       }
       const obra = await resolveObra(trimOrNull(body.obraId), contract.contractId);
       const filledAtRaw = body.filledAt ? new Date(body.filledAt) : new Date();
@@ -310,7 +313,7 @@ export class CaixinhaPurchaseController {
         body.contractId !== undefined ? trimOrNull(body.contractId) : existing.contractId
       );
       if (contract.contractId && contract.contractId !== existing.contractId) {
-        await assertContractAccess(req, contract.contractId);
+        await assertLiberadoContractAccess(req, contract.contractId);
       }
       const obra = await resolveObra(
         body.obraId !== undefined ? trimOrNull(body.obraId) : existing.obraId,

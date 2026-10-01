@@ -380,7 +380,6 @@ function buildInsights(rows: FuelRefuelRequest[]) {
   const weightedAvgPrice = totalLiters > 0 ? totalSpend / totalLiters : 0;
 
   const byContract = new Map<string, { label: string; spend: number; liters: number; count: number }>();
-  const byRequester = new Map<string, { label: string; spend: number; count: number }>();
   const byDriver = new Map<string, { label: string; spend: number; count: number }>();
   const byPlate = new Map<string, { label: string; spend: number; liters: number; count: number }>();
   const byVehicleType = { COMPANY: 0, PRIVATE: 0, OTHER: 0 };
@@ -396,16 +395,6 @@ function buildInsights(rows: FuelRefuelRequest[]) {
     c.liters += liters;
     c.count += 1;
     byContract.set(cKey, c);
-
-    const rKey = row.requester?.id || row.requester?.email || row.requester?.name || 'unknown';
-    const r = byRequester.get(rKey) ?? {
-      label: row.requester?.name?.trim() || 'Sem nome',
-      spend: 0,
-      count: 0,
-    };
-    r.spend += total;
-    r.count += 1;
-    byRequester.set(rKey, r);
 
     const dKey = row.driverName?.trim() || 'Sem condutor';
     const d = byDriver.get(dKey) ?? { label: dKey, spend: 0, count: 0 };
@@ -460,11 +449,6 @@ function buildInsights(rows: FuelRefuelRequest[]) {
     gasto: Math.round(c.value * 100) / 100,
   }));
 
-  const topRequesters = [...byRequester.values()]
-    .map((v, i) => ({ key: `${v.label}-${i}`, label: v.label, value: v.spend, meta: `${v.count}×` }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-
   const topDrivers = [...byDriver.values()]
     .map((v, i) => ({ key: `${v.label}-${i}`, label: v.label, value: v.spend, meta: `${v.count}×` }))
     .sort((a, b) => b.value - a.value)
@@ -509,7 +493,6 @@ function buildInsights(rows: FuelRefuelRequest[]) {
     avgTicket,
     topContracts,
     contractBars,
-    topRequesters,
     topDrivers,
     topPlates,
     vehiclePie,
@@ -927,14 +910,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-3">
-        <ChartCard
-          title="Quem mais gasta"
-          subtitle="Top solicitantes por valor total."
-          Icon={Users}
-        >
-          <RankList rows={insights.topRequesters} formatValue={formatCurrency} />
-        </ChartCard>
+      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartCard
           title="Condutores com maior gasto"
           subtitle="Ranking por nome do condutor no pedido."

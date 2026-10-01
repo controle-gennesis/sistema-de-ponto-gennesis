@@ -11,6 +11,7 @@ import {
   assertUserCanDeleteContract,
   assertUserCanEditContract,
   getContractAccessForUser,
+  getLiberadoContractAccessForUser,
   getOrcamentoContractIdsForUser,
   userCanAccessGastosOperacionais
 } from '../lib/contractAccess';
@@ -110,19 +111,33 @@ export class ContractController {
   async getAllContracts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Não autenticado', 401);
-      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      // Lista operacional: contratos Liberado (sem exigir módulo Contratos).
+      // A ficha sensível continua protegida por getContractAccessForUser / assertContractAccess.
+      const liberado = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
       const orcamentoIds = await getOrcamentoContractIdsForUser(req.user.id, req.user.isAdmin);
-      if (access.filter === 'none' && (!orcamentoIds || orcamentoIds.length === 0)) {
-        throw createError('Sem permissão para acessar contratos', 403);
+      if (
+        liberado.filter === 'none' &&
+        (!orcamentoIds || orcamentoIds.length === 0)
+      ) {
+        return res.json({
+          success: true,
+          data: [],
+          pagination: {
+            page: Number(req.query.page) || 1,
+            limit: Math.min(Number(req.query.limit) || 20, 200),
+            total: 0,
+            pages: 0,
+          },
+        });
       }
 
       const { search, page = 1, limit = 20 } = req.query;
 
       const where: any = {};
 
-      if (access.filter === 'ids' || (access.filter === 'none' && orcamentoIds)) {
+      if (liberado.filter === 'ids' || (liberado.filter === 'none' && orcamentoIds)) {
         const ids = new Set<string>([
-          ...(access.filter === 'ids' ? access.ids : []),
+          ...(liberado.filter === 'ids' ? liberado.ids : []),
           ...(Array.isArray(orcamentoIds) ? orcamentoIds : []),
         ]);
         where.id = { in: [...ids] };

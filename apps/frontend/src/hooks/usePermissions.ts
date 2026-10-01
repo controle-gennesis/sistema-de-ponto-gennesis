@@ -204,8 +204,10 @@ export function usePermissions() {
     return items.filter((item) => fluigApproverNameKeySet.has(item.nameKey));
   };
 
-  const hasOrcamentoViaAnyAllowedContract =
-    Object.values(contractModuleFlags).some((f) => f?.orcamento === true);
+  const hasOrcamentoViaAnyAllowedContract = Object.entries(contractModuleFlags).some(
+    ([contractId, f]) =>
+      f?.orcamento === true && allowedContractIdSet.has(contractId)
+  );
   const hasOrdemServicoViaAnyAllowedContract = Object.values(contractModuleFlags).some(
     (f) => f?.ordemServico === true
   );
@@ -523,7 +525,11 @@ export function usePermissions() {
   const canAccessContractOrcamentoTab = (contractId: string) => {
     if (hideContractOrcamento) return false;
     if (isElevatedUser) return true;
-    return contractModuleFlags[contractId]?.orcamento === true;
+    // Orçamento operacional: Liberado + flag Orçamento (sem precisar abrir a ficha).
+    return (
+      allowedContractIdSet.has(contractId) &&
+      contractModuleFlags[contractId]?.orcamento === true
+    );
   };
 
   const canAccessContractRelatoriosTab = (contractId: string) => {
@@ -874,6 +880,8 @@ export function useRoutePermission(route: string) {
     '/ponto/juridico/processos-ativos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos-ativos/dashboard':
       isAdministrator || can(pk('/ponto/juridico/processos-ativos/dashboard')),
+    '/ponto/juridico/solicitacoes-fluig':
+      isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || can(pk('/ponto/financeiro/controle-financeiro')),
     '/ponto/financeiro/receitas': isAdministrator || can(pk('/ponto/financeiro/receitas')),

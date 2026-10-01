@@ -776,8 +776,6 @@ export default function SolicitacoesCombustivelPage() {
     setShowRejectForm(!!opts?.reject);
     setShowCancelConfirm(!!opts?.cancel);
     if (!opts?.reject) setRejectReason('');
-    setAdminEditing(false);
-    setEditContractId(row.contract?.id || '');
     setIsReplacingReceipt(!!opts?.replaceReceipt);
     setReceiptReplacePhoto('');
   };

@@ -116,16 +116,19 @@ const FLUIG_PROCESSOS_DATASET_IDS = [
   'G5-Relatorio-DF-GO-TODOS-SETORES',
 ];
 const FLUIG_DP_DATASET_IDS = ['G5-Relatorio-DF-GO-DP'];
+const FLUIG_JURIDICO_DATASET_IDS = ['G5-Relatorio-DF-GO-JURIDICO'];
 const FLUIG_PREFETCH_HREFS = new Set([
   '/ponto/fluig/aprovacoes-workflow',
   '/ponto/fluig/aprovadores',
 ]);
 const FLUIG_PROCESSOS_HREF = '/ponto/financeiro/gestao-solicitacoes';
 const FLUIG_DP_HREF = '/ponto/solicitacoes-fluig';
+const FLUIG_JURIDICO_HREF = '/ponto/juridico/solicitacoes-fluig';
 const GASTOS_OPERACIONAIS_HREF = '/ponto/contratos/gastos-operacionais';
 const GASTOS_OPERACIONAIS_MODULE_KEY = pathToModuleKey(GASTOS_OPERACIONAIS_HREF);
 const FLUIG_PROCESSOS_MODULE_KEY = pathToModuleKey(FLUIG_PROCESSOS_HREF);
 const FLUIG_DP_MODULE_KEY = pathToModuleKey(FLUIG_DP_HREF);
+const FLUIG_JURIDICO_MODULE_KEY = pathToModuleKey(FLUIG_JURIDICO_HREF);
 
 const pk = pathToModuleKey;
 
@@ -382,6 +385,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       if (href === FLUIG_DP_HREF) {
         return () => prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
       }
+      if (href === FLUIG_JURIDICO_HREF) {
+        return () =>
+          prefetchFluigProcessDatasets(FLUIG_JURIDICO_DATASET_IDS, FLUIG_JURIDICO_HREF);
+      }
       if (href === GASTOS_OPERACIONAIS_HREF) return prefetchGastosOperacionais;
       if (
         href === '/ponto/orcamento' ||
@@ -408,6 +415,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       isAdministrator || can(FLUIG_PROCESSOS_MODULE_KEY);
     const canPrefetchDp =
       isAdministrator || can(FLUIG_DP_MODULE_KEY);
+    const canPrefetchJuridicoFluig =
+      isAdministrator || can(FLUIG_JURIDICO_MODULE_KEY);
 
     const timer = setTimeout(() => {
       router.prefetch('/ponto/fluig/aprovacoes-workflow');
@@ -436,6 +445,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
 
       if (canPrefetchDp) {
         prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
+      }
+
+      if (canPrefetchJuridicoFluig) {
+        prefetchFluigProcessDatasets(FLUIG_JURIDICO_DATASET_IDS, FLUIG_JURIDICO_HREF);
       }
 
       if (canPrefetchGastos) {
@@ -1279,7 +1292,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Briefcase,
             description: 'Lista de processos jurídicos em andamento',
             permission: isAdministrator || can(pk('/ponto/juridico/processos-ativos'))
-          }
+          },
+          {
+            name: 'Solicitações - Fluig',
+            href: '/ponto/juridico/solicitacoes-fluig',
+            icon: Workflow,
+            description: 'Solicitações do Jurídico no Fluig',
+            permission: isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
+          },
         ]
       },
       {

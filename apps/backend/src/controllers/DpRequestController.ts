@@ -663,12 +663,23 @@ export class DpRequestController {
     if (!req.user) throw createError('Usuário não autenticado', 401);
 
     const { status } = req.query;
-    const where: Prisma.DpRequestWhereInput = {
-      ...(scope === 'ADM_TST' ? admTstOnlyWhere() : admTstManagerApprovalExclusionWhere()),
-    };
-    if (status && typeof status === 'string' && status !== 'all') {
-      where.status = status as Prisma.EnumDpRequestStatusFilter['equals'];
+    const andParts: Prisma.DpRequestWhereInput[] = [
+      scope === 'ADM_TST' ? admTstOnlyWhere() : admTstManagerApprovalExclusionWhere(),
+    ];
+    // Gerenciar DP: só após aprovação do gestor (não lista "Aguardando aprovação").
+    if (scope === 'DP') {
+      andParts.push({ status: { not: 'WAITING_MANAGER' } });
     }
+    if (status && typeof status === 'string' && status !== 'all') {
+      if (scope === 'DP' && status === 'WAITING_MANAGER') {
+        return res.json({ success: true, data: [] });
+      }
+      andParts.push({
+        status: status as Prisma.EnumDpRequestStatusFilter['equals'],
+      });
+    }
+
+    const where: Prisma.DpRequestWhereInput = { AND: andParts };
 
     const requests = await prisma.dpRequest.findMany({
       where,

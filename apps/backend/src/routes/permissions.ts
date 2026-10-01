@@ -743,13 +743,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         )
         .map(([id]) => id);
       contractIdsToSave = [...new Set([...liberadoContractIds, ...flaggedIds])];
-      const hasContractsModule = normalized.some((p) => p.module === CONTRACTS_MODULE_KEY);
-      if (liberadoContractIds.size > 0 && !hasContractsModule) {
-        throw createError(
-          'Marque a permissão do módulo Contratos antes de liberar a ficha do contrato',
-          400
-        );
-      }
+      // Liberado define escopo operacional (Caixinha, FD, Orçamentos…).
+      // Abrir a ficha sensível exige também o módulo Contratos em Acesso — sem forçar aqui.
       if (contractIdsToSave.length > 0) {
         const existing = await prisma.contract.findMany({
           where: { id: { in: contractIdsToSave } },
@@ -1234,13 +1229,6 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     let contractIdsToSave: string[] = [];
     if (shouldSyncContracts) {
       contractIdsToSave = rawContractIds.filter((id: unknown) => typeof id === 'string' && id.length > 0);
-      const hasContractsModule = normalized.some((p) => p.module === CONTRACTS_MODULE_KEY);
-      if (contractIdsToSave.length > 0 && !hasContractsModule) {
-        throw createError(
-          'Marque a permissão do módulo Contratos antes de autorizar contratos específicos',
-          400
-        );
-      }
       if (contractIdsToSave.length > 0) {
         const existing = await prisma.contract.findMany({
           where: { id: { in: contractIdsToSave } },

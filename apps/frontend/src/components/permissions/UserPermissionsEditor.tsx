@@ -433,7 +433,13 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Contratos e Licitações';
   }
-  if (h === '/ponto/juridico/processos' || h.startsWith('/ponto/juridico/processos')) return 'Jurídico';
+  if (
+    h === '/ponto/juridico/processos' ||
+    h.startsWith('/ponto/juridico/processos') ||
+    h === '/ponto/juridico/solicitacoes-fluig'
+  ) {
+    return 'Jurídico';
+  }
   if (
     [
       '/ponto/gerenciar-materiais',
@@ -1530,12 +1536,7 @@ export function UserPermissionsEditor({
         // Desmarcar Liberado não apaga flags (ex.: Orçamento sozinho).
       } else {
         n.add(contractId);
-        // Liberado exige módulo Contratos na aba Acesso.
-        setSelectedSet((mods) => {
-          const next = new Set(mods);
-          next.add(CONTRACTS_MODULE_KEY);
-          return next;
-        });
+        // Liberado = escopo operacional. Módulo Contratos em Acesso abre a ficha sensível.
         setContractModuleFlags((f) => ({
           ...f,
           [contractId]: f[contractId] ?? emptyContractModuleFlags(),
@@ -1546,8 +1547,8 @@ export function UserPermissionsEditor({
   };
 
   const setContractModuleFlag = (contractId: string, key: keyof ContractModuleFlags, value: boolean) => {
-    // Orçamento sozinho não marca Liberado — libera só a página Orçamentos.
-    if (value && key !== 'orcamento') {
+    // Flags (incl. Orçamento) exigem Liberado — escopo operacional unificado.
+    if (value) {
       setSelectedContractIds((prev) => new Set(prev).add(contractId));
     }
     setContractModuleFlags((prev) => {
@@ -2360,21 +2361,27 @@ export function UserPermissionsEditor({
               <PermissionPageHeader
                 icon={FileText}
                 title="Contratos"
-                subtitle="Libere a ficha do contrato ou só o Orçamento, sem abrir os dados do contrato."
+                subtitle="Liberado define em quais contratos a pessoa opera (Caixinha, FD, Orçamentos…). A ficha com dados sensíveis só abre com Contratos em Acesso."
                 actions={permissionActionsButton}
               />
             </CardHeader>
             <CardContent>
-            {!selectedSet.has(CONTRACTS_MODULE_KEY) ? (
-              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  Sem o módulo <strong>Contratos</strong> em Acesso, use só a coluna{' '}
-                  <strong>Orçamento</strong> (sem Liberado). A pessoa entra em Orçamentos e vê
-                  esses contratos. Para abrir a ficha do contrato, marque Liberado — isso ativa
-                  Contratos em Acesso automaticamente.
-                </p>
-              </div>
-            ) : null}
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                <strong>Liberado</strong> — aparece em Caixinha, Ficha de Demanda, OS, etc.
+                {!selectedSet.has(CONTRACTS_MODULE_KEY) ? (
+                  <>
+                    {' '}
+                    Sem o módulo <strong>Contratos</strong> em Acesso, a pessoa <strong>não</strong>{' '}
+                    abre a ficha do contrato.
+                  </>
+                ) : (
+                  <> Com <strong>Contratos</strong> em Acesso, também abre a ficha do contrato.</>
+                )}{' '}
+                <strong>Orçamento</strong> — além do Liberado, marca a coluna para usar a página
+                Orçamentos naquele contrato.
+              </p>
+            </div>
             {contractsList.length === 0 ? (
               <div className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhum contrato cadastrado ainda.

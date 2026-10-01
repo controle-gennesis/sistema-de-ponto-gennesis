@@ -476,6 +476,9 @@ export function GerenciarSolicitacoesGeraisPage({
       const statusParam = cardFilter === 'pending' || cardFilter === 'all' ? 'all' : cardFilter;
       const res = await api.get(scopeConfig.apiPath, { params: { status: statusParam } });
       let data = (res.data?.data ?? []) as DpRequest[];
+      if (scope === 'DP') {
+        data = data.filter((r) => r.status !== 'WAITING_MANAGER');
+      }
       if (cardFilter === 'pending') {
         data = data.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
       }
@@ -488,7 +491,11 @@ export function GerenciarSolicitacoesGeraisPage({
     queryKey: [scopeConfig.queryKeyPrefix, 'stats'],
     queryFn: async () => {
       const res = await api.get(scopeConfig.apiPath, { params: { status: 'all' } });
-      return res.data?.data ?? [];
+      let data = (res.data?.data ?? []) as DpRequest[];
+      if (scope === 'DP') {
+        data = data.filter((r) => r.status !== 'WAITING_MANAGER');
+      }
+      return data;
     },
     enabled: !loadingUser,
   });
@@ -496,12 +503,14 @@ export function GerenciarSolicitacoesGeraisPage({
   const requests = (resp as DpRequest[]) || [];
 
   const manageStats = useMemo(() => {
-    const list = (statsResp as DpRequest[]) || [];
+    const list = ((statsResp as DpRequest[]) || []).filter((r) =>
+      scope === 'DP' ? r.status !== 'WAITING_MANAGER' : true
+    );
     const concluded = list.filter((r) => r.status === 'CONCLUDED').length;
     const cancelled = list.filter((r) => r.status === 'CANCELLED').length;
     const pending = list.length - concluded - cancelled;
     return { total: list.length, pending, concluded, cancelled };
-  }, [statsResp]);
+  }, [statsResp, scope]);
 
   const contractFilterOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -526,6 +535,8 @@ export function GerenciarSolicitacoesGeraisPage({
   );
 
   const filteredRequests = requests.filter((r) => {
+    // Gerenciar DP nunca exibe fila do gestor.
+    if (scope === 'DP' && r.status === 'WAITING_MANAGER') return false;
     if (activeStatus !== 'all' && r.status !== activeStatus) return false;
     if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
     if (filterRequestType !== 'all' && r.requestType !== filterRequestType) return false;

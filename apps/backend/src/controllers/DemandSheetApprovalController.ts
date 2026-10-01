@@ -13,7 +13,10 @@ import {
   assertUserCanApproveFd,
   getFdManagerApprovalVisibilityWhere,
 } from '../lib/fdApprovalAccess';
-import { getContractAccessForUser } from '../lib/contractAccess';
+import {
+  assertLiberadoContractAccess,
+  getLiberadoContractAccessForUser,
+} from '../lib/contractAccess';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import {
   importDemandSheets,
@@ -277,7 +280,7 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
 
   const hasModule = await userCanAccessFdModule(userId, isAdmin);
   if (hasModule) {
-    const access = await getContractAccessForUser(userId, false);
+    const access = await getLiberadoContractAccessForUser(userId, false);
     if (access.filter === 'all') {
       return {};
     }
@@ -350,6 +353,7 @@ export class DemandSheetApprovalController {
       }
 
       const body = formSchema.parse(req.body);
+      await assertLiberadoContractAccess(req, body.contratoId);
 
       const anexos: Array<Record<string, unknown>> = Array.isArray(body.anexos)
         ? body.anexos.map((a) => ({ ...a }))
@@ -420,6 +424,7 @@ export class DemandSheetApprovalController {
       }
 
       const body = formSchema.parse(req.body);
+      await assertLiberadoContractAccess(req, body.contratoId);
 
       const row = await prisma.demandSheetApproval.update({
         where: { id },
@@ -1062,20 +1067,30 @@ export class DemandSheetApprovalController {
     }
   }
 
-  /** Todos os contratos para vincular na FD (não restringe às permissões de contrato). */
+  /** Contratos com Liberado para vincular na FD. */
   async listContratoOptions(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
+      const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        return res.json({ success: true, data: [] });
+      }
+
       const search = String(req.query.search ?? '').trim();
-      const where = search
-        ? {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' as const } },
-              { number: { contains: search, mode: 'insensitive' as const } },
-            ],
-          }
-        : undefined;
+      const where: {
+        id?: { in: string[] };
+        OR?: Array<{ name: { contains: string; mode: 'insensitive' }; } | { number: { contains: string; mode: 'insensitive' } }>;
+      } = {};
+      if (access.filter === 'ids') {
+        where.id = { in: access.ids };
+      }
+      if (search) {
+        where.OR = [
+          { name: { contains: search, mode: 'insensitive' } },
+          { number: { contains: search, mode: 'insensitive' } },
+        ];
+      }
 
       const rows = await prisma.contract.findMany({
         where,

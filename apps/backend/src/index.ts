@@ -709,6 +709,7 @@ try {
         'DataSet_G4FollowUp',
         'G5-Relatorio-DF-GO-TODOS-SETORES',
         'G5-Relatorio-DF-GO-DP',
+        'G5-Relatorio-DF-GO-JURIDICO',
       ];
       // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
       setTimeout(() => {

@@ -15,6 +15,10 @@ export type ContractAccessFilter =
   | { filter: 'none' }
   | { filter: 'ids'; ids: string[] };
 
+/**
+ * Ficha do contrato (dados sensíveis): módulo Contratos em Acesso + Liberado.
+ * Não usar em selects operacionais (Caixinha, FD, OS…) — use `getLiberadoContractAccessForUser`.
+ */
 export async function getContractAccessForUser(
   userId: string,
   isAdmin: boolean
@@ -40,14 +44,46 @@ export async function getContractAccessForUser(
   return { filter: 'ids', ids: rows.map((r) => r.contractId) };
 }
 
-/** Contratos com flag Orçamento (com ou sem «Liberado» / módulo Contratos). */
+/**
+ * Escopo operacional: só contratos com Liberado (aba Contratos).
+ * Não exige o módulo Contratos — a ficha sensível continua em `getContractAccessForUser`.
+ */
+export async function getLiberadoContractAccessForUser(
+  userId: string,
+  isAdmin: boolean
+): Promise<ContractAccessFilter> {
+  if (isAdmin) return { filter: 'all' };
+
+  const rows = await prisma.userContractPermission.findMany({
+    where: { userId, accessLiberado: true },
+    select: { contractId: true },
+  });
+
+  if (rows.length === 0) return { filter: 'none' };
+  return { filter: 'ids', ids: rows.map((r) => r.contractId) };
+}
+
+export async function assertLiberadoContractAccess(
+  req: AuthRequest,
+  contractId: string
+): Promise<void> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+
+  const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+  if (access.filter === 'all') return;
+  if (access.filter === 'none' || !access.ids.includes(contractId)) {
+    throw createError('Sem permissão para este contrato', 403);
+  }
+}
+
+/** Contratos Liberado + flag Orçamento (lista da página Orçamentos). */
 export async function getOrcamentoContractIdsForUser(
   userId: string,
   isAdmin: boolean
 ): Promise<string[] | null> {
   if (isAdmin) return null;
   const rows = await prisma.userContractPermission.findMany({
-    where: { userId, accessOrcamento: true },
+    where: { userId, accessLiberado: true, accessOrcamento: true },
     select: { contractId: true },
   });
   return rows.map((r) => r.contractId);
@@ -69,22 +105,18 @@ export async function getCostCenterIdsForContractAccess(
 }
 
 /**
- * IDs de contrato explicitamente liberados.
- * `null` = não restringir (admin ou nenhum cadastro de contrato).
- * `[]` = tem o módulo Contratos, mas nenhum contrato liberado.
+ * IDs de contrato com Liberado.
+ * `null` = admin (não restringir).
+ * `[]` = usuário sem nenhum contrato liberado.
  */
 export async function getAssignedContractIds(
   userId: string,
   isAdmin: boolean
 ): Promise<string[] | null> {
   if (isAdmin) return null;
-  const rows = await prisma.userContractPermission.findMany({
-    where: { userId, accessLiberado: true },
-    select: { contractId: true },
-  });
-  if (rows.length > 0) return rows.map((r) => r.contractId);
-  const hasModule = await userHasContractsModuleAccess(userId, false);
-  return hasModule ? [] : null;
+  const access = await getLiberadoContractAccessForUser(userId, false);
+  if (access.filter === 'none') return [];
+  return access.ids;
 }
 
 /**
@@ -141,7 +173,7 @@ export async function assertContractAccess(req: AuthRequest, contractId: string)
   }
 }
 
-/** Leitura básica do contrato (nome/CC): Liberado ou flag Orçamento. */
+/** Leitura básica do contrato (nome/CC): Liberado (operacional) ou ficha (módulo+Liberado). */
 export async function assertContractSummaryAccess(
   req: AuthRequest,
   contractId: string
@@ -150,20 +182,13 @@ export async function assertContractSummaryAccess(
   if (req.user.isAdmin) return;
 
   try {
-    await assertContractAccess(req, contractId);
+    await assertLiberadoContractAccess(req, contractId);
     return;
   } catch {
-    /* tenta orçamento */
+    /* tenta ficha completa */
   }
 
-  const row = await prisma.userContractPermission.findUnique({
-    where: {
-      userId_contractId: { userId: req.user.id, contractId },
-    },
-    select: { accessOrcamento: true },
-  });
-  if (row?.accessOrcamento === true) return;
-  throw createError('Sem permissão para este contrato', 403);
+  await assertContractAccess(req, contractId);
 }
 
 /** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal, reuniões). */
@@ -194,8 +219,11 @@ export async function assertContractModulePermission(
   if (!req.user) throw createError('Usuário não autenticado', 401);
   if (req.user.isAdmin) return;
 
-  // Orçamento pode existir sem «Liberado» e sem módulo Contratos.
-  if (module !== 'orcamento') {
+  // Orçamento: Liberado + flag Orçamento (sem precisar do módulo Contratos / ficha).
+  // Demais abas: ficha (módulo Contratos + Liberado) + flag correspondente.
+  if (module === 'orcamento') {
+    await assertLiberadoContractAccess(req, contractId);
+  } else {
     await assertContractAccess(req, contractId);
   }
 
