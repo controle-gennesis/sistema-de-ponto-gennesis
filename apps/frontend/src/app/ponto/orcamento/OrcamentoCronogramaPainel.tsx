@@ -71,7 +71,13 @@ import {
   type CronogramaPersist,
   type CronogramaSubServico
 } from './orcamentoCronogramaTypes';
-import { gradeTableCls, gradeTableRowTrCls, tdGradeDateCls } from './orcamentoGradeCellClasses';
+import {
+  gradeTableCls,
+  gradeTableRowTrCls,
+  gradeTableViewportCls,
+  gradeThStickyCls,
+  tdGradeDateCls
+} from './orcamentoGradeCellClasses';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { Modal } from '@/components/ui/Modal';
@@ -1227,19 +1233,18 @@ export function OrcamentoCronogramaPainel({
         )}
 
         {viewMode === 'tabela' && (
-          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-          <div className="table-scroll">
-            <table className={`min-w-[72rem] w-full border-collapse table-fixed ${gradeTableCls}`}>
-              <thead className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+          <div data-orc-table-viewport className={gradeTableViewportCls}>
+            <table className={`min-w-[72rem] w-full border-separate border-spacing-0 table-fixed ${gradeTableCls}`}>
+              <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr className={gradeTableRowTrCls}>
-                  <th className={thServicoColCls}>Serviço</th>
-                  <th className={thDateColCls}>Início Plan.</th>
-                  <th className={thDateColCls}>Fim Plan.</th>
-                  <th className={thDateColCls}>Início Real</th>
-                  <th className={thDateColCls}>Fim Real</th>
-                  <th className={thDiasColCls}>Dias</th>
-                  <th className={thPctColCls}>% Exec.</th>
-                  <th className={thStatusColCls}>Status</th>
+                  <th className={`${gradeThStickyCls} ${thServicoColCls}`}>Serviço</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início Plan.</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim Plan.</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início Real</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim Real</th>
+                  <th className={`${gradeThStickyCls} ${thDiasColCls}`}>Dias</th>
+                  <th className={`${gradeThStickyCls} ${thPctColCls}`}>% Exec.</th>
+                  <th className={`${gradeThStickyCls} ${thStatusColCls}`}>Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -1449,7 +1454,6 @@ export function OrcamentoCronogramaPainel({
                 })}
               </tbody>
             </table>
-          </div>
           </div>
         )}
     </div>

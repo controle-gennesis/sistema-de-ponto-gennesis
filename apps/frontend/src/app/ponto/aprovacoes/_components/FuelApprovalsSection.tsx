@@ -106,6 +106,7 @@ export function FuelApprovalsSection() {
 
   const [searchFuel, setSearchFuel] = useState('');
   const [fuelPhase, setFuelPhase] = useState<FuelPhaseFilter>('PENDING');
+  const [filterContractId, setFilterContractId] = useState<string>('all');
   const [isFuelFiltersOpen, setIsFuelFiltersOpen] = useState(false);
   const [detailFuel, setDetailFuel] = useState<FuelRefuelRequest | null>(null);
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
@@ -133,10 +134,45 @@ export function FuelApprovalsSection() {
 
   const fuelList = fuelResp ?? [];
 
+  const contractFilterOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of fuelList) {
+      const name = fuelContractLabel(r);
+      if (!name || name === '—') continue;
+      const id = r.contract?.id?.trim();
+      if (id) map.set(id, name);
+      else map.set(`label:${name}`, name);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
+  }, [fuelList]);
+
+  const contractFilterSelectOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Todos', searchText: 'Todos' },
+      ...contractFilterOptions.map(([id, name]) => ({
+        value: id,
+        label: name,
+        searchText: name,
+      })),
+    ],
+    [contractFilterOptions]
+  );
+
   const fuelFiltered = useMemo(() => {
+    let list = fuelList;
+    if (filterContractId !== 'all') {
+      list = list.filter((r) => {
+        const id = r.contract?.id?.trim();
+        if (id && id === filterContractId) return true;
+        if (filterContractId.startsWith('label:')) {
+          return fuelContractLabel(r) === filterContractId.slice('label:'.length);
+        }
+        return false;
+      });
+    }
     const q = searchFuel.trim();
-    if (!q) return fuelList;
-    return fuelList.filter((r) => {
+    if (!q) return list;
+    return list.filter((r) => {
       return (
         String(r.displayNumber).includes(q) ||
         textMatchesSearch(r.route, q) ||
@@ -146,7 +182,9 @@ export function FuelApprovalsSection() {
         textMatchesSearch(fuelContractLabel(r), q)
       );
     });
-  }, [fuelList, searchFuel]);
+  }, [fuelList, searchFuel, filterContractId]);
+
+  const hasActiveFuelFilters = fuelPhase !== 'PENDING' || filterContractId !== 'all';
 
   const requestForMenu = useMemo(() => {
     if (!actionMenu) return null;
@@ -265,15 +303,15 @@ export function FuelApprovalsSection() {
                   type="button"
                   onClick={() => setIsFuelFiltersOpen(true)}
                   className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                    fuelPhase !== 'PENDING'
+                    hasActiveFuelFilters
                       ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                       : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                   }`}
                   aria-label="Abrir filtro"
-                  title={fuelPhase !== 'PENDING' ? 'Filtro (status ativo)' : 'Filtro'}
+                  title={hasActiveFuelFilters ? 'Filtro ativo' : 'Filtro'}
                 >
                   <Filter className="h-4 w-4" />
-                  {fuelPhase !== 'PENDING' ? (
+                  {hasActiveFuelFilters ? (
                     <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                   ) : null}
                 </button>
@@ -578,15 +616,50 @@ export function FuelApprovalsSection() {
         size="sm"
       >
         <div className="space-y-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
-          <StringSingleSelectDropdown
-            value={fuelPhase}
-            onChange={(value) => setFuelPhase(value as FuelPhaseFilter)}
-            options={FUEL_PHASE_FILTER_OPTIONS}
-            allowEmpty={false}
-            className="w-full"
-          />
-          <div className="flex justify-end gap-2">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Status
+            </label>
+            <StringSingleSelectDropdown
+              value={fuelPhase}
+              onChange={(value) => setFuelPhase(value as FuelPhaseFilter)}
+              options={FUEL_PHASE_FILTER_OPTIONS}
+              allowEmpty={false}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Contrato
+            </label>
+            <StringSingleSelectDropdown
+              value={filterContractId}
+              onChange={setFilterContractId}
+              options={contractFilterSelectOptions}
+              allowEmpty={false}
+              placeholder="Todos"
+              searchPlaceholder="Pesquisar contrato..."
+              className="w-full"
+            />
+            {contractFilterOptions.length === 0 ? (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Nenhum contrato na lista atual — altere o status ou aguarde novas solicitações.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            {hasActiveFuelFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setFuelPhase('PENDING');
+                  setFilterContractId('all');
+                }}
+              >
+                Limpar
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => setIsFuelFiltersOpen(false)}>
               Fechar
             </Button>

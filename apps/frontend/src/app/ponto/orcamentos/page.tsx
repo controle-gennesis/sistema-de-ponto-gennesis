@@ -254,12 +254,21 @@ export default function OrcamentosPage() {
       for (const r of settled) {
         if (r.status === 'fulfilled') items.push(...r.value);
       }
-      items.sort((a, b) => {
+      // Mesmo centro de custo em 2 contratos espelhava o mesmo orçamento duas vezes.
+      const vistos = new Set<string>();
+      const unicos: OrcamentoListItem[] = [];
+      for (const item of items) {
+        const chave = `${item.costCenterId}::${item.orcamentoId}`;
+        if (vistos.has(chave)) continue;
+        vistos.add(chave);
+        unicos.push(item);
+      }
+      unicos.sort((a, b) => {
         const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
         const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
         return tb - ta;
       });
-      return items;
+      return unicos;
     },
     enabled: !loadingContracts && !loadingPermissions && contractsComOrcamento.length > 0,
   });
@@ -489,26 +498,6 @@ export default function OrcamentosPage() {
                         ? 'Você não tem contratos com acesso a orçamento'
                         : 'Não há orçamentos nos contratos disponíveis'}
                   </p>
-                  {contractsComOrcamento.length > 0 && !searchTerm.trim() && !hasActiveFilters ? (
-                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={abrirFluxoImportar}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <Upload className="h-4 w-4" aria-hidden />
-                        Importar orçamento
-                      </button>
-                      <button
-                        type="button"
-                        onClick={abrirFluxoNovoOrcamento}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                      >
-                        <Plus className="h-4 w-4" aria-hidden />
-                        Criar orçamento
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               ) : (
                 <>

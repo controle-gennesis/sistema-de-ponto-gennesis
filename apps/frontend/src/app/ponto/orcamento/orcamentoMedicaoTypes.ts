@@ -1,6 +1,16 @@
 export type TipoUnidadeFormula = 'm3' | 'm2' | 'm' | 'un';
 
 /** Linha de medição para memória de cálculo dos quantitativos (C, L, H, N, empolamento, descrição) */
+/** Campos numéricos da memória que aceitam fórmula (=2*4): no foco mostra a fórmula, fora mostra o valor. */
+export type CampoFormulaMedicao =
+  | 'C'
+  | 'L'
+  | 'H'
+  | 'N'
+  | 'empolamento'
+  | 'valorManual'
+  | 'subtotalManual';
+
 export interface LinhaMedicao {
   /** Linha visual de seção (cabeçalho da grade no corpo); não entra em totais nem na carga agregada. */
   cabecalhoSecao?: boolean;
@@ -17,6 +27,8 @@ export interface LinhaMedicao {
   valorManual?: number;
   /** Quantidade final da linha, quando o subtotal é digitado no lugar do cálculo automático. */
   subtotalManual?: number;
+  /** Fórmulas digitadas (=expr); o valor numérico fica em C/L/H/… */
+  formulas?: Partial<Record<CampoFormulaMedicao, string>>;
   /**
    * Carga agregada: soma na origem — para m³ soma de volumes; para m² soma de áreas (base para A e para V = A×H na carga).
    */
@@ -44,7 +56,7 @@ export interface RotulosColunasMedicao {
 
 /**
  * Opções do cabeçalho (só rótulo; ordem dos dados C/L/H/N no cálculo não muda).
- * Inclui letras de coluna e unidades / períodos usuais.
+ * Inclui letras de coluna, constantes e unidades / períodos usuais em obra.
  */
 export const ROTULO_COLUNA_MEDICAO_OPCOES = [
   'C',
@@ -52,16 +64,71 @@ export const ROTULO_COLUNA_MEDICAO_OPCOES = [
   'H',
   'N',
   '%',
-  'Mês',
+  'π',
+  'pi',
+  'e',
+  'D',
+  'R',
+  'φ',
+  'A',
+  'V',
+  'P',
+  'Q',
+  'F',
+  'K',
+  'i',
+  'n',
   'm',
   'M',
+  'cm',
+  'mm',
+  'km',
   'm²',
   'm³',
+  'cm²',
+  'cm³',
+  'ha',
   'UN',
+  'und',
+  'cj',
+  'vb',
+  'pç',
+  'par',
+  'dz',
   'Kg',
+  'g',
   't',
+  'L',
+  'mL',
+  'm³/h',
+  'L/s',
+  'L/min',
   'h',
+  'min',
+  's',
   'dia',
+  'sem',
+  'Mês',
+  'ano',
+  'vez',
+  'vb/mês',
+  'h/dia',
+  'kWh',
+  'CV',
+  'HP',
+  'kW',
+  'W',
+  '°C',
+  'bar',
+  'MPa',
+  'kgf/cm²',
+  'kg/m',
+  'kg/m²',
+  'kg/m³',
+  't/m³',
+  'sc',
+  'gal',
+  'ton',
   '—'
 ] as const;
 
@@ -78,4 +145,6 @@ export interface DimensoesItem {
   linhasContagem?: LinhaContagem[];
   /** Cabeçalhos editáveis C/L/H/N/% (ex.: Mês, Kg). */
   rotulosColunas?: RotulosColunasMedicao;
+  /** Observação livre na faixa do item (memória de cálculo). */
+  observacao?: string;
 }

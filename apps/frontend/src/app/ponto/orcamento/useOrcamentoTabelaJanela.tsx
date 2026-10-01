@@ -6,6 +6,10 @@ const LIMITE_JANELA = 80;
 const RANGE_FOLGA = 8;
 
 function acharScrollParent(el: HTMLElement | null): HTMLElement | Window {
+  /** Viewport da grade (FD/analítico) com scroll próprio — necessário p/ thead sticky. */
+  const viewport = el?.closest?.('[data-orc-table-viewport]');
+  if (viewport instanceof HTMLElement) return viewport;
+
   const page = el?.closest?.('.app-page-scroll');
   if (page instanceof HTMLElement) return page;
 

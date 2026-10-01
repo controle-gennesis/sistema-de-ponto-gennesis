@@ -7,6 +7,27 @@ export const gradeTableRowTrCls =
   '[&>td]:min-h-[2.75rem] [&>th]:min-h-[2.75rem] [&>td]:align-middle [&>th]:align-middle';
 
 /**
+ * Esconde a barra vertical; o scroll continua no mouse. Barra horizontal permanece visível.
+ * Estilo real em globals.css (.orc-hide-v-scroll) — precisa de !important contra o scrollbar global.
+ */
+export const gradeHideVerticalScrollbarCls = 'orc-hide-v-scroll';
+
+/**
+ * Viewport com scroll próprio — preenche o pai (layout fill da tela) e segura o sticky do header.
+ * Use com `data-orc-table-viewport` para a janela virtual alinhar o scroll.
+ */
+export const gradeTableViewportCls =
+  `h-full min-h-0 flex-1 overflow-auto overscroll-contain rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`;
+
+/** Sticky nos `<th>` (mais confiável que sticky no `<thead>` + border-collapse). */
+export const gradeThStickyCls =
+  'sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
+
+/** Segunda linha de cabeçalho (ex.: colunas C/L/H abaixo do título do item na memória). */
+export const gradeThStickySecondRowCls =
+  'sticky top-[2.75rem] z-[19] bg-slate-50 dark:bg-slate-800/95 shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
+
+/**
  * Mesma regra aplicada na `<table>` (orçamento / analítico / memória): cobre todas as linhas de uma vez.
  */
 export const gradeTableCls =
