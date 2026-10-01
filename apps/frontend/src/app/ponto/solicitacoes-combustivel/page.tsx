@@ -493,7 +493,7 @@ function SolicitacoesCombustivelPageContent() {
   const { isAdministrator } = usePermissions();
   const openFromUrlHandled = useRef<string | null>(null);
   const initialQ = searchParams?.get('q')?.trim() || '';
-  const initialCard = parseSuppliesCardFilter(searchParams?.get('card'));
+  const initialCard = parseSuppliesCardFilter(searchParams?.get('card') ?? null);
   const [searchTerm, setSearchTerm] = useState(initialQ);
   const [cardFilter, setCardFilter] = useState<SuppliesCardFilter>(
     initialCard ?? DEFAULT_CARD_FILTER,
@@ -866,7 +866,7 @@ function SolicitacoesCombustivelPageContent() {
 
   useEffect(() => {
     const q = searchParams?.get('q')?.trim() || '';
-    const card = parseSuppliesCardFilter(searchParams?.get('card'));
+    const card = parseSuppliesCardFilter(searchParams?.get('card') ?? null);
     if (q && q !== searchTerm) setSearchTerm(q);
     if (card && card !== cardFilter) setCardFilter(card);
     // Só sincroniza quando a URL muda (drill-down das análises).
