@@ -45,7 +45,7 @@ import api from '@/lib/api';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useLogout } from '@/hooks/useLogout';
-import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface CostCenter {
@@ -87,7 +87,6 @@ type UserPermissionPayload = {
 const CONTRACT_ACTION_MENU_WIDTH_PX = 224; // w-56
 
 const pk = pathToModuleKey;
-const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 
 function formatDate(dateStr: string) {
   if (!dateStr) return '-';
@@ -323,13 +322,8 @@ export default function ContratosPage() {
         throw new Error('Usuário inválido para edição.');
       }
 
+      // Liberado no contrato não concede o módulo Contratos (página/ficha).
       const nextPermissions = Array.isArray(source.permissions) ? [...source.permissions] : [];
-      const hasContractsAccess = nextPermissions.some(
-        (p) => p.module === CONTRACTS_MODULE_KEY && p.action === PERMISSION_ACCESS_ACTION
-      );
-      if (!hasContractsAccess) {
-        nextPermissions.push({ module: CONTRACTS_MODULE_KEY, action: PERMISSION_ACCESS_ACTION });
-      }
 
       const currentIds = new Set(source.allowedContractIds || []);
       if (allow) currentIds.add(permissionsContract.id);
@@ -347,7 +341,7 @@ export default function ContratosPage() {
       queryClient.setQueryData(['permission-contract-users', permissionsContract?.id], (prev: unknown) => {
         if (!Array.isArray(prev)) return prev;
         return (prev as ContractPermissionUser[]).map((u) =>
-          u.id === userId ? { ...u, hasContractAccess: allow, hasContractsModule: true } : u
+          u.id === userId ? { ...u, hasContractAccess: allow } : u
         );
       });
       toast.success(allow ? 'Contrato liberado para o usuário.' : 'Contrato removido para o usuário.');

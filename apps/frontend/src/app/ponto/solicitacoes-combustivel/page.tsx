@@ -1065,27 +1065,27 @@ function SolicitacoesCombustivelPageContent() {
                         {showFuelValueColumns ? (
                           <>
                             <col className="w-[5%]" />
-                            <col className="w-[16%]" />
+                            <col className="w-[15%]" />
                             <col className="w-[9%]" />
-                            <col className="w-[14%]" />
-                            <col className="w-[11%]" />
+                            <col className="w-[13%]" />
+                            <col className="w-[10%]" />
                             <col className="w-[6%]" />
                             <col className="w-[7%]" />
                             <col className="w-[8%]" />
                             <col className="w-[8%]" />
-                            <col className="w-[10%]" />
-                            <col className="w-[6%]" />
+                            <col className="w-[11rem]" />
+                            <col className="w-14" />
                           </>
                         ) : (
                           <>
                             <col className="w-[5%]" />
-                            <col className="w-[22%]" />
+                            <col className="w-[20%]" />
                             <col className="w-[11%]" />
-                            <col className="w-[18%]" />
-                            <col className="w-[18%]" />
+                            <col className="w-[17%]" />
+                            <col className="w-[16%]" />
                             <col className="w-[8%]" />
-                            <col className="w-[12%]" />
-                            <col className="w-[6%]" />
+                            <col className="w-[11rem]" />
+                            <col className="w-14" />
                           </>
                         )}
                       </colgroup>
@@ -1110,7 +1110,9 @@ function SolicitacoesCombustivelPageContent() {
                               </th>
                             </>
                           ) : null}
-                          <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>Status</th>
+                          <th className="w-[11rem] min-w-[11rem] max-w-[11rem] px-2 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3 sm:py-4">
+                            Status
+                          </th>
                           <th className={listTableRowClasses.actionTh}>Ação</th>
                         </tr>
                       </thead>
@@ -1201,12 +1203,14 @@ function SolicitacoesCombustivelPageContent() {
                                 </td>
                               </>
                             ) : null}
-                            <td className={cadastroListClasses.tdCenter}>
-                              <span
-                                className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
-                              >
-                                {STATUS_LABELS[row.status]}
-                              </span>
+                            <td className="w-[11rem] min-w-[11rem] max-w-[11rem] whitespace-nowrap px-2 py-3 text-center text-sm sm:px-3 sm:py-4">
+                              <div className="flex w-full items-center justify-center">
+                                <span
+                                  className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
+                                >
+                                  {STATUS_LABELS[row.status]}
+                                </span>
+                              </div>
                             </td>
                             <td
                               className={listTableRowClasses.actionTd}

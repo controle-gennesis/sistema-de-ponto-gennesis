@@ -267,18 +267,17 @@ function isEmptyPermissionBaseline(
 function buildPermissionsSnapshotForCache(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
-  contractIds: Set<string>,
+  _contractIds: Set<string>,
   employeeActions: Set<ContractAction>,
   cadastroCrud: CadastroCrudMap = {}
 ): PermissionItem[] {
-  const hasAnyContractsData =
-    selected.has(CONTRACTS_MODULE_KEY) ||
-    contractActions.size > 0 ||
-    contractIds.size > 0;
+  // Liberado (contractIds) NÃO implica módulo Contratos — escopo operacional separado da ficha.
+  const hasContractsModule =
+    selected.has(CONTRACTS_MODULE_KEY) || contractActions.size > 0;
   const hasAnyEmployeesData =
     selected.has(EMPLOYEES_MODULE_KEY) || employeeActions.size > 0;
   const modules = new Set(selected);
-  if (hasAnyContractsData) {
+  if (hasContractsModule) {
     modules.add(CONTRACTS_MODULE_KEY);
   }
   if (hasAnyEmployeesData) {
@@ -298,7 +297,7 @@ function buildPermissionsSnapshotForCache(
   // Coluna «Ver» grava acesso ao módulo; persistir também `ver` para a matriz
   // granular não cair no legado «só acesso = editar/excluir».
   const contractActionsToSave = new Set(contractActions);
-  if (hasAnyContractsData && contractActionsToSave.size === 0) {
+  if (hasContractsModule && contractActionsToSave.size === 0) {
     contractActionsToSave.add('ver');
   }
   for (const action of Array.from(contractActionsToSave)) {
@@ -971,15 +970,13 @@ export function UserPermissionsEditor({
       const currentContractIds = Array.from(selectedContractIdsRef.current);
       const currentCadastroCrud = cadastroCrudByModuleRef.current;
       const cadastroCrudPermissions = flattenCadastroCrud(currentCadastroCrud);
-      const hasAnyContractsData =
-        currentSelected.has(CONTRACTS_MODULE_KEY) ||
-        currentContractActions.length > 0 ||
-        currentContractIds.length > 0;
+      // Liberado (allowedContractIds) não abre a página/ficha de Contratos.
+      const hasContractsModule =
+        currentSelected.has(CONTRACTS_MODULE_KEY) || currentContractActions.length > 0;
       const hasAnyEmployeesData =
         currentSelected.has(EMPLOYEES_MODULE_KEY) || currentEmployeeActions.length > 0;
 
-      // Segurança: se houver qualquer dado de contratos, garante o acesso base no payload.
-      if (hasAnyContractsData) {
+      if (hasContractsModule) {
         currentSelected.add(CONTRACTS_MODULE_KEY);
       }
       if (hasAnyEmployeesData) {
@@ -1371,8 +1368,8 @@ export function UserPermissionsEditor({
       if (n.has(key)) {
         n.delete(key);
         if (key === CONTRACTS_MODULE_KEY) {
+          // Só remove acesso à página/ficha; Liberado (operacional) permanece.
           setContractActionsSet(new Set());
-          setSelectedContractIds(new Set());
         }
         if (key === EMPLOYEES_MODULE_KEY) {
           setEmployeeActionsSet(new Set());
@@ -1941,17 +1938,17 @@ export function UserPermissionsEditor({
   const employeeVerChecked = selectedSet.has(EMPLOYEES_MODULE_KEY) || employeeActionsSet.has('ver');
 
   const toggleContractVerCell = () => {
-    const hasAnyContractsPermission =
-      selectedSet.has(CONTRACTS_MODULE_KEY) || contractActionsSet.size > 0 || selectedContractIds.size > 0;
+    const hasContractsModule =
+      selectedSet.has(CONTRACTS_MODULE_KEY) || contractActionsSet.size > 0;
 
-    if (hasAnyContractsPermission) {
+    if (hasContractsModule) {
       setSelectedSet((prev) => {
         const next = new Set(prev);
         next.delete(CONTRACTS_MODULE_KEY);
         return next;
       });
       setContractActionsSet(new Set());
-      setSelectedContractIds(new Set());
+      // Não limpa Liberado — escopo operacional independente da página Contratos.
       return;
     }
 

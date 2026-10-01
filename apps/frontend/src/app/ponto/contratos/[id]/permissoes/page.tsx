@@ -4,7 +4,6 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Search } from 'lucide-react';
-import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -40,8 +39,6 @@ type UserPermissionPayload = {
   permissions: Array<{ module: string; action: string }>;
   allowedContractIds: string[];
 };
-
-const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 
 function ContractAccessCheckbox({
   checked,
@@ -121,13 +118,8 @@ export default function ContractPermissionsPage() {
         throw new Error('Usuário inválido para edição.');
       }
 
+      // Liberado no contrato não concede o módulo Contratos (página/ficha).
       const nextPermissions = Array.isArray(source.permissions) ? [...source.permissions] : [];
-      const hasContractsAccess = nextPermissions.some(
-        (p) => p.module === CONTRACTS_MODULE_KEY && p.action === PERMISSION_ACCESS_ACTION
-      );
-      if (!hasContractsAccess) {
-        nextPermissions.push({ module: CONTRACTS_MODULE_KEY, action: PERMISSION_ACCESS_ACTION });
-      }
 
       const currentIds = new Set(source.allowedContractIds || []);
       if (allow) currentIds.add(contractId);
@@ -143,7 +135,7 @@ export default function ContractPermissionsPage() {
       queryClient.setQueryData(['permission-contract-users', contractId], (prev: unknown) => {
         if (!Array.isArray(prev)) return prev;
         return (prev as ContractPermissionUser[]).map((u) =>
-          u.id === userId ? { ...u, hasContractAccess: allow, hasContractsModule: true } : u
+          u.id === userId ? { ...u, hasContractAccess: allow } : u
         );
       });
       toast.success(allow ? 'Contrato liberado para o usuário.' : 'Contrato removido para o usuário.');

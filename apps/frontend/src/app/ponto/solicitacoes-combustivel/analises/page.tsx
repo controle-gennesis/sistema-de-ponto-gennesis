@@ -350,11 +350,7 @@ function RankList({
             title={interactive ? `Ver solicitações de ${row.label}` : undefined}
           >
             <div className="flex items-baseline justify-between gap-2 text-sm">
-              <span
-                className={`min-w-0 truncate font-medium text-gray-800 dark:text-gray-200 ${
-                  interactive ? 'underline-offset-2 group-hover:underline hover:underline' : ''
-                }`}
-              >
+              <span className="min-w-0 truncate font-medium text-gray-800 dark:text-gray-200">
                 <span className="mr-1.5 text-xs font-semibold text-gray-400">{i + 1}.</span>
                 {row.label}
               </span>
