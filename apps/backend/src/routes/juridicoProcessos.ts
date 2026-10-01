@@ -109,6 +109,7 @@ function handleFileUploadError(
 router.use(authenticate);
 
 router.get('/', (req, res, next) => controller.getAll(req, res, next));
+router.get('/advogados', (req, res, next) => controller.listAdvogados(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));
 router.post(
   '/import',

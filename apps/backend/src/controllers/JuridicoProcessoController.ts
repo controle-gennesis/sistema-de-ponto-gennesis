@@ -456,6 +456,50 @@ const PROCESSO_INCLUDE = {
 };
 
 export class JuridicoProcessoController {
+  /**
+   * Lista funcionários com cargo Advogado/Advogada para o select do processo.
+   * Autenticado via rota jurídico — não exige módulo Funcionários (/users).
+   */
+  async listAdvogados(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const employees = await prisma.employee.findMany({
+        where: {
+          position: { contains: 'advogad', mode: 'insensitive' },
+          user: {
+            isActive: true,
+            role: 'EMPLOYEE',
+          },
+        },
+        select: {
+          id: true,
+          position: true,
+          user: {
+            select: {
+              name: true,
+              cpf: true,
+              profilePhotoUrl: true,
+            },
+          },
+        },
+        orderBy: { user: { name: 'asc' } },
+      });
+
+      const data = employees
+        .filter((row) => row.user?.name?.trim())
+        .map((row) => ({
+          id: row.id,
+          name: String(row.user!.name).trim(),
+          cpf: row.user!.cpf ?? null,
+          profilePhotoUrl: row.user!.profilePhotoUrl ?? null,
+          position: row.position ?? null,
+        }));
+
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const q = str(req.query.q);

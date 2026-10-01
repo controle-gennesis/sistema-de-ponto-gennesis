@@ -29,7 +29,31 @@ export function mapUsersToEmployeeOptions(users: any[]): EmployeeSelectOption[] 
 }
 
 export function isCargoAdvogado(position?: string | null): boolean {
-  return String(position || '').trim().toLowerCase() === 'advogado';
+  const raw = String(position || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return raw === 'advogado' || raw === 'advogada' || raw.includes('advogad');
+}
+
+/** Advogados para o formulário jurídico (não depende do módulo Funcionários). */
+export async function fetchJuridicoAdvogadoOptions(): Promise<EmployeeSelectOption[]> {
+  const { default: api } = await import('@/lib/api');
+  const res = await api.get('/juridico-processos/advogados');
+  const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+  return rows
+    .map((row: any) => ({
+      id: String(row.id || ''),
+      name: String(row.name || '').trim(),
+      cpf: row.cpf ? String(row.cpf) : null,
+      profilePhotoUrl: row.profilePhotoUrl ? String(row.profilePhotoUrl) : null,
+      position: row.position ? String(row.position) : null,
+    }))
+    .filter((employee: EmployeeSelectOption) => employee.id && employee.name)
+    .sort((a: EmployeeSelectOption, b: EmployeeSelectOption) =>
+      a.name.localeCompare(b.name, 'pt-BR')
+    );
 }
 
 export async function fetchEmployeeSelectOptions(params?: {
