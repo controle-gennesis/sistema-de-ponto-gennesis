@@ -983,6 +983,96 @@ export class DpRequestController {
     }
   }
 
+  /**
+   * Cancelamento administrativo — permite cancelar mesmo depois da aprovação do gestor
+   * (ou em qualquer etapa, exceto se já estiver cancelada).
+   */
+  async adminCancel(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      if (!req.user.isAdmin) {
+        throw createError('Apenas administrador pode cancelar solicitações já aprovadas', 403);
+      }
+      const requestId = String(req.params.id || '').trim();
+      if (!requestId) throw createError('ID inválido', 400);
+
+      const dpRequest = await prisma.dpRequest.findUnique({ where: { id: requestId } });
+      if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
+      if (dpRequest.status === 'CANCELLED') {
+        throw createError('Esta solicitação já está cancelada', 400);
+      }
+
+      const payload = rejectDpRequestSchema.parse(req.body);
+      const cancellationReason = payload.cancellationReason;
+      const actorName = await getUserDisplayName(req.user.id);
+
+      const updated = await prisma.dpRequest.update({
+        where: { id: requestId, status: dpRequest.status },
+        data: {
+          status: 'CANCELLED',
+          managerRejectionReason: cancellationReason,
+          managerRejectionComment: null,
+          statusHistory: appendStatusTransition(
+            {
+              createdAt: dpRequest.createdAt,
+              updatedAt: dpRequest.updatedAt,
+              managerApprovedAt: dpRequest.managerApprovedAt,
+              status: dpRequest.status,
+            },
+            dpRequest.statusHistory,
+            'CANCELLED',
+            {
+              note: `Cancelamento administrativo: ${cancellationReason}`,
+              actorUserId: req.user.id,
+              actorName,
+            }
+          ),
+        },
+      });
+
+      const requesterEmployee = await prisma.employee.findUnique({
+        where: { id: dpRequest.employeeId },
+        select: { userId: true },
+      });
+      if (requesterEmployee) {
+        void notifyRequesterCancelledWhatsApp({
+          requesterUserId: requesterEmployee.userId,
+          actorUserId: req.user.id,
+          subjectLine: updated.title,
+        });
+      }
+
+      if (dpRequest.costCenterId) {
+        const notifyIds = await getDpApprovalNotifyUserIds({
+          contractId: dpRequest.contractId,
+          costCenterId: dpRequest.costCenterId,
+          isSensitive: isSensitiveDpRequestType(dpRequest.requestType),
+          sectorSolicitante: dpRequest.sectorSolicitante,
+        });
+        void notifyApprovalDecisionWhatsApp(
+          notifyIds,
+          updated.title,
+          `Cancelada pelo administrador (${actorName}).`,
+          false
+        );
+      }
+
+      return res.json({ success: true, data: updated });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Dados inválidos', details: e.issues });
+      }
+      if (isConcurrentUpdateConflict(e)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
+      }
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode && typeof err.statusCode === 'number') {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao cancelar solicitação DP' });
+    }
+  }
+
   async dpFeedback(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);

@@ -306,8 +306,11 @@ function AprovacoesPage() {
     canApproveMaterialRequests,
     canApproveEmpreiteiroDaily,
     isLinkedEmpreiteiro,
+    isAdministrator,
+    isElevatedUser,
   } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
+  const isAdminUser = isAdministrator || isElevatedUser;
   const searchParams = useSearchParams();
   const tabFromUrl = searchParams?.get('tab') ?? null;
   const initialTab: AprovacaoTabId =
@@ -657,8 +660,19 @@ function AprovacoesPage() {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async ({ id, cancellationReason }: { id: string; cancellationReason: string }) => {
-      const res = await api.put(`/solicitacoes-dp/${id}/manager-reject`, { cancellationReason });
+    mutationFn: async ({
+      id,
+      cancellationReason,
+      asAdmin,
+    }: {
+      id: string;
+      cancellationReason: string;
+      asAdmin?: boolean;
+    }) => {
+      const path = asAdmin
+        ? `/solicitacoes-dp/${id}/admin-cancel`
+        : `/solicitacoes-dp/${id}/manager-reject`;
+      const res = await api.put(path, { cancellationReason });
       return res.data?.data as DpRequest;
     },
     onSuccess: async (_, variables) => {
@@ -681,7 +695,13 @@ function AprovacoesPage() {
     setManagerRejectingId(null);
   };
 
-  const handleManagerRejectClick = (id: string) => {
+  const canCancelDetailRequest = (req: DpRequest | null | undefined) => {
+    if (!req || req.status === 'CANCELLED') return false;
+    if (req.status === 'WAITING_MANAGER') return true;
+    return isAdminUser;
+  };
+
+  const handleManagerRejectClick = (id: string, status: string) => {
     if (managerRejectingId !== id) {
       setManagerRejectingId(id);
       return;
@@ -691,7 +711,12 @@ function AprovacoesPage() {
       toast.error('Informe o motivo do cancelamento');
       return;
     }
-    rejectMutation.mutate({ id, cancellationReason: reason });
+    const asAdmin = status !== 'WAITING_MANAGER';
+    if (asAdmin && !isAdminUser) {
+      toast.error('Apenas administrador pode cancelar após aprovação');
+      return;
+    }
+    rejectMutation.mutate({ id, cancellationReason: reason, asAdmin });
   };
   const applyEspelhoDecision = async (
     mirrorId: string,
@@ -1012,35 +1037,39 @@ function AprovacoesPage() {
                     <span>Ver detalhes</span>
                   </button>
                   {dpForActionMenu.status === 'WAITING_MANAGER' && (
-                    <>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDpActionMenu(null);
-                          approveMutation.mutate({ id: dpForActionMenu.id });
-                        }}
-                        className={DP_MENU_ITEM_BORDER_CLASS}
-                      >
-                        <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                        <span>Aprovar solicitação</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDpActionMenu(null);
-                          setDetailRequest(dpForActionMenu);
-                          setManagerRejectingId(dpForActionMenu.id);
-                        }}
-                        className={DP_MENU_ITEM_BORDER_CLASS}
-                      >
-                        <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                        <span>Cancelar solicitação</span>
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDpActionMenu(null);
+                        approveMutation.mutate({ id: dpForActionMenu.id });
+                      }}
+                      className={DP_MENU_ITEM_BORDER_CLASS}
+                    >
+                      <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>Aprovar solicitação</span>
+                    </button>
+                  )}
+                  {canCancelDetailRequest(dpForActionMenu) && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDpActionMenu(null);
+                        setDetailRequest(dpForActionMenu);
+                        setManagerRejectingId(dpForActionMenu.id);
+                      }}
+                      className={DP_MENU_ITEM_BORDER_CLASS}
+                    >
+                      <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                      <span>
+                        {dpForActionMenu.status === 'WAITING_MANAGER'
+                          ? 'Cancelar solicitação'
+                          : 'Cancelar (admin)'}
+                      </span>
+                    </button>
                   )}
                 </div>
               </div>,
@@ -1347,16 +1376,24 @@ function AprovacoesPage() {
                 />
 
                 <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
-                  <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Decisão</h3>
+                  <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {detailRequest.status === 'WAITING_MANAGER'
+                      ? 'Decisão'
+                      : canCancelDetailRequest(detailRequest)
+                        ? 'Cancelamento administrativo'
+                        : 'Ações'}
+                  </h3>
                   <div className="space-y-3">
-                    <Input
-                      value={managerComment[detailRequest.id] || ''}
-                      onChange={(e) =>
-                        setManagerComment((p) => ({ ...p, [detailRequest.id]: e.target.value }))
-                      }
-                      placeholder="Comentário (opcional)"
-                    />
-                    {managerRejectingId === detailRequest.id ? (
+                    {detailRequest.status === 'WAITING_MANAGER' ? (
+                      <Input
+                        value={managerComment[detailRequest.id] || ''}
+                        onChange={(e) =>
+                          setManagerComment((p) => ({ ...p, [detailRequest.id]: e.target.value }))
+                        }
+                        placeholder="Comentário (opcional)"
+                      />
+                    ) : null}
+                    {managerRejectingId === detailRequest.id && canCancelDetailRequest(detailRequest) ? (
                       <div>
                         <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                           Motivo do cancelamento *
@@ -1374,38 +1411,43 @@ function AprovacoesPage() {
                         />
                       </div>
                     ) : null}
+                    {detailRequest.status !== 'WAITING_MANAGER' &&
+                    canCancelDetailRequest(detailRequest) &&
+                    managerRejectingId !== detailRequest.id ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Como administrador, você pode cancelar esta solicitação mesmo após a aprovação.
+                      </p>
+                    ) : null}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Button type="button" variant="outline" onClick={closeDetailModal}>
                         Fechar
                       </Button>
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="error"
-                          onClick={() => handleManagerRejectClick(detailRequest.id)}
-                          disabled={
-                            approveMutation.isPending ||
-                            rejectMutation.isPending ||
-                            detailRequest.status !== 'WAITING_MANAGER'
-                          }
-                        >
-                          {rejectMutation.isPending
-                            ? 'Cancelando…'
-                            : managerRejectingId === detailRequest.id
-                              ? 'Confirmar cancelamento'
-                              : 'Cancelar'}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => approveMutation.mutate({ id: detailRequest.id })}
-                          disabled={
-                            approveMutation.isPending ||
-                            rejectMutation.isPending ||
-                            detailRequest.status !== 'WAITING_MANAGER'
-                          }
-                        >
-                          {approveMutation.isPending ? 'Aprovando…' : 'Aprovar'}
-                        </Button>
+                        {canCancelDetailRequest(detailRequest) ? (
+                          <Button
+                            type="button"
+                            variant="error"
+                            onClick={() =>
+                              handleManagerRejectClick(detailRequest.id, detailRequest.status)
+                            }
+                            disabled={approveMutation.isPending || rejectMutation.isPending}
+                          >
+                            {rejectMutation.isPending
+                              ? 'Cancelando…'
+                              : managerRejectingId === detailRequest.id
+                                ? 'Confirmar cancelamento'
+                                : 'Cancelar'}
+                          </Button>
+                        ) : null}
+                        {detailRequest.status === 'WAITING_MANAGER' ? (
+                          <Button
+                            type="button"
+                            onClick={() => approveMutation.mutate({ id: detailRequest.id })}
+                            disabled={approveMutation.isPending || rejectMutation.isPending}
+                          >
+                            {approveMutation.isPending ? 'Aprovando…' : 'Aprovar'}
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
