@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -56,6 +56,7 @@ import {
   parseCurrencyToNumber
 } from '@/lib/fichaDemandaApproval';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 
 type CaixinhaPurchase = {
   id: string;
@@ -237,8 +238,6 @@ export default function CaixinhaPageClient() {
   const searchParams = useSearchParams();
   const contratoFiltroUrl = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [search, setSearch] = useState('');
   const [filterContractId, setFilterContractId] = useState(contratoFiltroUrl);
   const [filterObraId, setFilterObraId] = useState('');
@@ -249,6 +248,7 @@ export default function CaixinhaPageClient() {
   const [editing, setEditing] = useState<CaixinhaPurchase | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm({}));
   const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [invoiceDragOver, setInvoiceDragOver] = useState(false);
   const [showCreateObra, setShowCreateObra] = useState(false);
   const [novaObraNome, setNovaObraNome] = useState('');
   const [showCreateCaixinha, setShowCreateCaixinha] = useState(false);
@@ -531,6 +531,7 @@ export default function CaixinhaPageClient() {
 
   const uploadPdf = async (file: File) => {
     setUploadingPdf(true);
+    setInvoiceDragOver(false);
     try {
       const data = new FormData();
       data.append('file', file);
@@ -549,8 +550,16 @@ export default function CaixinhaPageClient() {
       toast.error(ax?.response?.data?.message || ax?.response?.data?.error || 'Falha no upload');
     } finally {
       setUploadingPdf(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleInvoiceFileDrop = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setInvoiceDragOver(false);
+    if (uploadingPdf) return;
+    const file = event.dataTransfer.files?.[0];
+    if (file) void uploadPdf(file);
   };
 
   const canSave = Boolean(form.personUserId || form.personName.trim()) && Boolean(form.caixinha.trim());
@@ -921,27 +930,27 @@ export default function CaixinhaPageClient() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   Anexos
                 </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  disabled={uploadingPdf}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void uploadPdf(file);
-                    e.target.value = '';
-                  }}
-                />
-                {uploadingPdf ? (
-                  <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Enviando anexo...
-                  </p>
-                ) : null}
                 <div>
                   <label className={GESTAO_OS_FORM_LABEL_CLS}>Nota fiscal</label>
                   {form.invoicePdfUrl ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40">
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!uploadingPdf) setInvoiceDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setInvoiceDragOver(false);
+                      }}
+                      onDrop={handleInvoiceFileDrop}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                        invoiceDragOver
+                          ? 'border-red-400 bg-red-50 dark:border-red-700 dark:bg-red-950/30'
+                          : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                      }`}
+                    >
                       <a
                         href={resolveApiMediaUrl(form.invoicePdfUrl)}
                         target="_blank"
@@ -952,14 +961,24 @@ export default function CaixinhaPageClient() {
                         {form.invoicePdfName || 'nota-fiscal'}
                       </a>
                       <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={uploadingPdf}
-                          onClick={() => fileInputRef.current?.click()}
-                          className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                        <label
+                          className={`rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
+                            uploadingPdf ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                          }`}
                         >
                           Trocar
-                        </button>
+                          <input
+                            type="file"
+                            accept="image/*,.pdf,application/pdf"
+                            className="hidden"
+                            disabled={uploadingPdf}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void uploadPdf(file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                         <button
                           type="button"
                           disabled={uploadingPdf}
@@ -972,15 +991,15 @@ export default function CaixinhaPageClient() {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      disabled={uploadingPdf}
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
-                    >
-                      <Plus className="h-4 w-4 shrink-0" />
-                      Adicionar nota fiscal
-                    </button>
+                    <FileDropZone
+                      label="Adicionar nota fiscal"
+                      hint="Clique ou arraste imagem/PDF"
+                      uploading={uploadingPdf}
+                      onFiles={(files) => {
+                        const file = files[0];
+                        if (file) void uploadPdf(file);
+                      }}
+                    />
                   )}
                 </div>
               </div>

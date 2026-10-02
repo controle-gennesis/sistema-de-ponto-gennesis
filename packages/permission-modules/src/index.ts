@@ -44,7 +44,6 @@ export function pathToModuleKey(href: string): string {
  * Permanecem em `PERMISSION_MODULES` para sincronização/orfãos; a matriz «Acesso» as ignora na UI.
  */
 export const PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX: readonly string[] = [
-  pathToModuleKey('/ponto/orcamento'),
   pathToModuleKey('/ponto/contratos/relatorios'),
   /** Legado: acesso migrado para Controle «Gerenciar página de aprovadores». */
   pathToModuleKey('/ponto/fluig/aprovadores'),
@@ -140,7 +139,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/financeiro/nfs-recebidas'), name: 'Entrada Fiscal', href: '/ponto/financeiro/nfs-recebidas', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/financeiro'), name: 'Pagamento da Folha', href: '/ponto/financeiro', category: 'Financeiro' },
   // Engenharia
-  { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
+  { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamentos', href: '/ponto/orcamentos', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/empreiteiros'), name: 'Empreitas', href: '/ponto/empreiteiros', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/relatorios'), name: 'Relatórios Fotográficos', href: '/ponto/contratos/relatorios', category: 'Engenharia' },
