@@ -101,6 +101,7 @@ import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
 import { orcafascioService } from './controllers/OrcafascioController';
+import { fluigService } from './controllers/FluigController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';

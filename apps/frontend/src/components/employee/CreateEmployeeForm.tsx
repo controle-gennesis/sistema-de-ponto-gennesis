@@ -312,7 +312,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   const companyOptions = useMemo(() => stringsToSelectOptions(companies), [companies]);
   const sectorOptions = useMemo(() => stringsToSelectOptions(sectors), [sectors]);
   const positionOptions = useMemo(() => stringsToSelectOptions(positions), [positions]);
-  const costCenterOptions = useMemo(() => stringsToSelectOptions(costCenters), [costCenters]);
+  const costCenterOptions = useMemo(
+    () => stringsToSelectOptions(costCentersList),
+    [costCentersList],
+  );
   const tomadorOptions = useMemo(() => stringsToSelectOptions(TOMADORES_LIST), []);
   const bankOptions = useMemo(() => stringsToSelectOptions(banks), [banks]);
   const accountTypeOptions = useMemo(() => stringsToSelectOptions(accountTypes), [accountTypes]);

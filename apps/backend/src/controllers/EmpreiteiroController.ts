@@ -432,7 +432,7 @@ const empreiteiroInclude = {
       profilePhotoKey: true,
     },
   },
-} as const;
+};
 
 async function profilePhotoFromUser(userId: string) {
   const user = await prisma.user.findUnique({
@@ -893,7 +893,7 @@ function serializeEmpreiteiro(
     cpf: string | null;
     phone: string;
     specialty: string;
-    contractId: string;
+    contractId: string | null;
     isActive: boolean;
     contactName: string | null;
     email: string | null;
@@ -934,6 +934,7 @@ function serializeEmpreiteiro(
       sortOrder: number;
       photoUrl: string | null;
       photoKey: string | null;
+      empreiteiroContractId?: string | null;
     }>;
   },
   measurementStatsByContract: Record<string, ContractMeasurementStats | number> = {}

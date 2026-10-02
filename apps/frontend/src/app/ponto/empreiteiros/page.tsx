@@ -9,6 +9,7 @@ import {
   Building2,
   Camera,
   ClipboardList,
+  ChevronDown,
   FileText,
   HardHat,
   Link2Off,
@@ -646,6 +647,7 @@ export default function EmpreiteirosPage() {
   const [savingTeamLinkId, setSavingTeamLinkId] = useState<string | null>(null);
   const [openTeamLinkIds, setOpenTeamLinkIds] = useState<Record<string, boolean>>({});
   const [openParcelLinkIds, setOpenParcelLinkIds] = useState<Record<string, boolean>>({});
+  const [openServiceDetailIds, setOpenServiceDetailIds] = useState<Record<string, boolean>>({});
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
   const [empSkipAutoDetail, setEmpSkipAutoDetail] = useState(false);
 
@@ -3034,6 +3036,7 @@ export default function EmpreiteirosPage() {
                         (link.measurementCount ?? 0) === 1
                           ? '1 medição'
                           : `${link.measurementCount ?? 0} medições`;
+                      const serviceDetailsOpen = Boolean(openServiceDetailIds[link.id]);
                       const lastAddendumNumber = (link.addenda || []).reduce(
                         (max, a) => Math.max(max, a.number),
                         0
@@ -3234,9 +3237,9 @@ export default function EmpreiteirosPage() {
                                     <div className="flex flex-wrap gap-1.5">
                                       {(
                                         [
-                                          { value: 'avista' as const, label: 'À vista' },
-                                          { value: 'parcelado' as const, label: 'Parcelado' },
-                                        ] as const
+                                          { value: 'avista' as 'avista' | 'parcelado', label: 'À vista' },
+                                          { value: 'parcelado' as 'avista' | 'parcelado', label: 'Parcelado' },
+                                        ]
                                       ).map((opt) => {
                                         const active = editServicePayMode === opt.value;
                                         return (
@@ -3256,7 +3259,7 @@ export default function EmpreiteirosPage() {
                                                       n
                                                     )
                                                   );
-                                                } else if (next !== 'parcelado') {
+                                                } else {
                                                   setEditServiceParcelAmounts([]);
                                                 }
                                                 return next;
@@ -3456,6 +3459,24 @@ export default function EmpreiteirosPage() {
                             </button>
                           </div>
 
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenServiceDetailIds((prev) => ({
+                                ...prev,
+                                [link.id]: !prev[link.id],
+                              }))
+                            }
+                            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                          >
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 transition ${serviceDetailsOpen ? 'rotate-180' : ''}`}
+                            />
+                            {serviceDetailsOpen ? 'Ocultar detalhes' : 'Ver detalhes do serviço'}
+                          </button>
+
+                          {serviceDetailsOpen ? (
+                          <>
                           {!isOwnEmpreiteiroAccount ? (
                           <div
                             className="mt-4 space-y-4 border-t border-gray-100 pt-4 dark:border-gray-800"
@@ -3907,6 +3928,8 @@ export default function EmpreiteirosPage() {
                           </div>
                           ) : null}
                           {renderContractTeamSection(link)}
+                          </>
+                          ) : null}
                         </article>
                       );
                     })}
