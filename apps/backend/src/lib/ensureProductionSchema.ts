@@ -28,6 +28,14 @@ async function tableExists(prisma: PrismaClient, tableName: string): Promise<boo
   return (rows[0]?.c ?? BigInt(0)) > BigInt(0);
 }
 
+async function ensureUserProfileSetupColumn(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'users', 'profileSetupCompletedAt')) return;
+  console.warn('[Schema] Coluna users.profileSetupCompletedAt ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "profileSetupCompletedAt" TIMESTAMP(3);
+  `);
+}
+
 async function ensureEmployeePhoneColumn(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'employees', 'phone')) return;
   console.warn('[Schema] Coluna employees.phone ausente — adicionando.');
@@ -2884,6 +2892,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
   try {
     await ensureUnaccentExtension(prisma);
     await ensureEmployeePhoneColumn(prisma);
+    await ensureUserProfileSetupColumn(prisma);
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);
     await ensureMaterialRequestColumns(prisma);

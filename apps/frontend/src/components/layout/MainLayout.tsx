@@ -34,6 +34,7 @@ import { isSociosBlockedCollaborationPath } from '@/lib/sociosCollaborationAcces
 import { PageEnter } from './PageEnter';
 import { bootAuthenticatedPageReveal } from '@/lib/pageReveal';
 import { ImpersonationBanner } from './ImpersonationBanner';
+import { ProfileSetupGate } from './ProfileSetupGate';
 import { ScheduledNewsGate } from './ScheduledNewsGate';
 import { EMPREITEIROS_PATH, isEmpreiteiroAllowedPath } from '@/lib/postLoginPath';
 
@@ -286,6 +287,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
             }}
           />
           <ScheduledNewsGate userId={user?.id} />
+          <ProfileSetupGate />
         </div>
       </NativeCallProvider>
     </MainLayoutShellContext.Provider>

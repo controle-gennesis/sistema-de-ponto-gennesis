@@ -80,6 +80,7 @@ const userMeSelect = {
   isFirstLogin: true,
   profilePhotoUrl: true,
   profilePhotoKey: true,
+  profileSetupCompletedAt: true,
   lastLoginAt: true,
   lastSeenAt: true,
   lastActivityPath: true,
@@ -815,6 +816,63 @@ export class AuthController {
       return res.json({
         success: true,
         message: 'Senha redefinida com sucesso. Faça login com a nova senha.',
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /** Uma vez: funcionário sem foto envia avatar e confirma o celular. */
+  async completeProfileSetup(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const file = (req as unknown as Express.Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer) throw createError('Envie uma foto', 400);
+
+      const mime = String(file.mimetype || '').toLowerCase();
+      const name = String(file.originalname || '').toLowerCase();
+      const imageOk =
+        mime.startsWith('image/') ||
+        ['.jpg', '.jpeg', '.png', '.webp'].some((ext) => name.endsWith(ext));
+      if (!imageOk) throw createError('Envie uma imagem (JPG, PNG ou WEBP)', 400);
+
+      const phoneDigits = String(req.body?.phone || '').replace(/\D/g, '');
+      if (phoneDigits.length < 10 || phoneDigits.length > 11) {
+        throw createError('Informe um celular válido com DDD', 400);
+      }
+
+      const current = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          profilePhotoUrl: true,
+          profileSetupCompletedAt: true,
+          employee: { select: { id: true } },
+        },
+      });
+      if (!current?.employee) {
+        throw createError('Este pedido é só para funcionários cadastrados', 400);
+      }
+      if (current.profileSetupCompletedAt) {
+        throw createError('Foto e celular já foram confirmados', 400);
+      }
+
+      const uploadResult = await chatUploadService.uploadFile(file, userId);
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          profilePhotoUrl: uploadResult.url,
+          profilePhotoKey: uploadResult.key,
+          profileSetupCompletedAt: new Date(),
+          employee: { update: { phone: phoneDigits } },
+        },
+        select: userMeSelect,
+      });
+
+      const { tokenVersion: _tokenVersion, ...userWithoutTokenVersion } = updated;
+      return res.json({
+        success: true,
+        data: userWithoutTokenVersion,
+        message: 'Foto e celular salvos',
       });
     } catch (error) {
       return next(error);

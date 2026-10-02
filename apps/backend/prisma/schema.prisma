@@ -30,6 +30,8 @@ model User {
   facePhotoUrl      String?
   /// Chave no S3 da foto de confronto do ponto
   facePhotoKey      String?
+  /// Preenchido uma vez, quando o funcionario sem foto salvou foto e celular
+  profileSetupCompletedAt DateTime?
   /// Ãltimo login bem-sucedido
   lastLoginAt       DateTime?
   /// Ãltima atividade observada (page view / heartbeat)

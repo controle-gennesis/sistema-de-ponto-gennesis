@@ -32,6 +32,11 @@ router.post('/logout', authController.logout);
 router.get('/me', authController.getProfile);
 router.put('/profile', authController.updateProfile);
 router.patch('/me/photo', uploadAvatar.single('profileAvatar'), authController.uploadProfilePhoto);
+router.post(
+  '/me/profile-setup',
+  uploadAvatar.single('profileAvatar'),
+  authController.completeProfileSetup
+);
 router.delete('/me/photo', authController.removeProfilePhoto);
 router.patch('/me/face-photo', uploadAvatar.single('facePhoto'), authController.uploadMyFacePhoto);
 router.put('/change-password', authController.changePassword);
