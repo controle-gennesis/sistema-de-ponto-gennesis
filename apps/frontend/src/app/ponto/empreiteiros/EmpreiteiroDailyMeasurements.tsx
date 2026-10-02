@@ -3,23 +3,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2,
   CalendarDays,
-  CheckCircle2,
-  MapPin,
+  Camera,
+  Eye,
+  FileText,
+  ImageIcon,
+  MoreVertical,
   Pencil,
   Plus,
-  Trash2,
-  Users,
-  Camera,
-  ImageIcon,
   RotateCcw,
-  ShieldCheck,
-  Clock3,
-  AlertTriangle,
+  Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import {
+  APPROVAL_STATUS_COLUMN_TITLE,
+  ApprovalStatusBadge,
+  type ApprovalStatusKind,
+} from '@/app/ponto/aprovacoes/_components/ApprovalStatusBadge';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import {
+  ListRowNavigableLabel,
+  getListTableRowClassName,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
+import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
@@ -187,28 +195,31 @@ function normalizeStatus(value: unknown): DailyMeasurementStatus {
   return 'SUBMITTED';
 }
 
-function statusMeta(status: DailyMeasurementStatus) {
-  if (status === 'APPROVED') {
-    return {
-      label: 'Aprovado',
-      className:
-        'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
-      Icon: ShieldCheck,
-    };
-  }
-  if (status === 'CORRECTION') {
-    return {
-      label: 'Correção',
-      className: 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-300',
-      Icon: AlertTriangle,
-    };
-  }
-  return {
-    label: 'Enviado',
-    className: 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-300',
-    Icon: Clock3,
-  };
+function statusKind(status: DailyMeasurementStatus): ApprovalStatusKind {
+  if (status === 'APPROVED') return 'aprovado';
+  if (status === 'CORRECTION') return 'cancelado';
+  return 'pendente';
 }
+
+function statusLabel(status: DailyMeasurementStatus) {
+  if (status === 'APPROVED') return 'Aprovado';
+  if (status === 'CORRECTION') return 'Devolvida';
+  return 'Pendente';
+}
+
+function DetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+      <p className="font-medium text-gray-900 dark:text-gray-100">{value || '—'}</p>
+    </div>
+  );
+}
+
+const ACTION_MENU_WIDTH_PX = 224;
+const MENU_ITEM_CLASS =
+  'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
+const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 
 const inputClass =
   'w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-100 dark:focus:border-red-500';
@@ -224,20 +235,9 @@ function formatDateBr(ymd: string) {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-function formatWeekdayBr(ymd: string) {
-  const match = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return '';
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return date.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' });
-}
-
 function isImageFile(file: { url: string; name?: string }) {
   const source = `${file.name || ''} ${file.url || ''}`.toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(source) || source.includes('data:image/');
-}
-
-function mapsUrl(lat: number, lng: number) {
-  return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
 type FormState = {
@@ -291,81 +291,6 @@ function asGeoPhotos(raw: PaymentFile[] | TeamGeoPhoto[] | undefined): TeamGeoPh
   return out;
 }
 
-function PhotoThumb({
-  url,
-  alt,
-  onClick,
-  caption,
-  mapHref,
-  badge,
-}: {
-  url: string;
-  alt: string;
-  onClick: () => void;
-  caption?: string | null;
-  mapHref?: string | null;
-  badge?: string | null;
-}) {
-  const href = resolveApiMediaUrl(url) || url;
-  return (
-    <div className="group relative w-[7.5rem] shrink-0 overflow-hidden rounded-xl border border-gray-200/80 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/50 sm:w-36">
-      <button type="button" onClick={onClick} className="relative block w-full">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={href}
-          alt={alt}
-          className="aspect-[4/3] w-full object-cover transition duration-200 group-hover:scale-[1.03]"
-        />
-        {badge ? (
-          <span className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm backdrop-blur-sm">
-            {badge}
-          </span>
-        ) : null}
-      </button>
-      {caption || mapHref ? (
-        <div className="space-y-0.5 px-2 py-1.5">
-          {caption ? (
-            <p className="line-clamp-2 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
-              {caption}
-            </p>
-          ) : null}
-          {mapHref ? (
-            <a
-              href={mapHref}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-600 hover:underline dark:text-red-300"
-            >
-              <MapPin className="h-2.5 w-2.5" />
-              Mapa
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PhotoSection({
-  title,
-  icon: Icon,
-  children,
-}: {
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        <Icon className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
-        {title}
-      </div>
-      <div className="-mx-0.5 flex gap-2.5 overflow-x-auto px-0.5 pb-0.5">{children}</div>
-    </div>
-  );
-}
-
 export function EmpreiteiroDailyMeasurements({
   empreiteiroId,
   contracts = [],
@@ -401,6 +326,10 @@ export function EmpreiteiroDailyMeasurements({
   /** Modal de aprovação (com baixa opcional). */
   const [pendingApproveId, setPendingApproveId] = useState<string | null>(null);
   const [pendingApproveAmount, setPendingApproveAmount] = useState('');
+  const [detail, setDetail] = useState<DailyMeasurement | null>(null);
+  const [actionMenu, setActionMenu] = useState<{ id: string; top: number; left: number } | null>(
+    null,
+  );
 
   const { data, isLoading, dataUpdatedAt, isSuccess } = useQuery({
     queryKey: ['empreiteiro-daily-measurements', empreiteiroId],
@@ -507,45 +436,19 @@ export function EmpreiteiroDailyMeasurements({
     return chips;
   }, [allItems, contracts, countByContract]);
 
-  const groupedItems = useMemo(() => {
-    const groups = new Map<
-      string,
-      {
-        key: string;
-        contractId: string | null;
-        label: string;
-        centroCustoNome?: string | null;
-        items: DailyMeasurement[];
-      }
-    >();
-    for (const item of items) {
-      const key = item.contractId || '_none';
-      const fromList = contracts.find((c) => c.contractId === item.contractId);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          contractId: item.contractId || null,
-          label: item.contratoNome || fromList?.contratoNome || 'Sem contrato',
-          centroCustoNome: item.centroCustoNome || fromList?.centroCustoNome || null,
-          items: [],
-        });
-      }
-      groups.get(key)!.items.push(item);
-    }
-    for (const group of groups.values()) {
-      group.items.sort((a, b) => String(b.workDate).localeCompare(String(a.workDate)));
-    }
-    const ordered: typeof groups extends Map<string, infer V> ? V[] : never[] = [];
-    for (const contract of contracts) {
-      const group = groups.get(contract.contractId);
-      if (group) {
-        ordered.push(group);
-        groups.delete(contract.contractId);
-      }
-    }
-    for (const group of groups.values()) ordered.push(group);
-    return ordered;
-  }, [items, contracts]);
+  const sortedItems = useMemo(
+    () => [...items].sort((a, b) => String(b.workDate).localeCompare(String(a.workDate))),
+    [items],
+  );
+  const menuItem = sortedItems.find((row) => row.id === actionMenu?.id) ?? null;
+  const showContractColumn = !filterContractId;
+
+  useEffect(() => {
+    setDetail((current) => {
+      if (!current) return current;
+      return allItems.find((item) => item.id === current.id) ?? null;
+    });
+  }, [allItems]);
 
   const selectContractFilter = (contractId: string | null) => {
     if (onSelectContractFilter) {
@@ -727,6 +630,11 @@ export function EmpreiteiroDailyMeasurements({
     setEditing(null);
   };
 
+  const openDetail = (item: DailyMeasurement) => {
+    setActionMenu(null);
+    setDetail(item);
+  };
+
   const toggleWorker = (id: string) => {
     setForm((prev) => ({
       ...prev,
@@ -735,6 +643,28 @@ export function EmpreiteiroDailyMeasurements({
         : [...prev.workerIds, id],
     }));
   };
+
+  const detailStatus = detail ? normalizeStatus(detail.status) : null;
+  const detailPhotos = detail
+    ? [
+        ...(detail.teamPhoto?.url
+          ? [{ url: detail.teamPhoto.url, name: 'Foto da equipe', badge: 'Equipe' }]
+          : []),
+        ...detail.photos
+          .filter((file) => isImageFile(file))
+          .map((file) => ({
+            url: file.url,
+            name: file.name || 'Foto do serviço',
+            badge: 'Serviço',
+          })),
+      ]
+    : [];
+  const detailDocs = (detail?.photos || []).filter((file) => file.url && !isImageFile(file));
+  const detailCanEdit = Boolean(detail && canEdit && detailStatus !== 'APPROVED');
+  const detailCanDelete = Boolean(detail && canEdit && (detailStatus !== 'APPROVED' || canApprove));
+  const menuStatus = menuItem ? normalizeStatus(menuItem.status) : null;
+  const menuCanEdit = Boolean(menuItem && canEdit && menuStatus !== 'APPROVED');
+  const menuCanDelete = Boolean(menuItem && canEdit && (menuStatus !== 'APPROVED' || canApprove));
 
   return (
     <div className="space-y-5">
@@ -1077,282 +1007,327 @@ export function EmpreiteiroDailyMeasurements({
           ) : null}
         </div>
       ) : (
-        <div className="space-y-6">
-          {groupedItems.map((group) => (
-            <section key={group.key} className="space-y-3">
-              {!filterContractId ? (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="inline-flex max-w-full items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      <Building2 className="h-4 w-4 shrink-0 text-gray-400" />
-                      <span className="truncate">{group.label}</span>
-                    </p>
-                    {group.centroCustoNome ? (
-                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        {group.centroCustoNome}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                      {group.items.length} entrega
-                      {group.items.length === 1 ? '' : 's'}
-                    </span>
-                    {group.contractId && onSelectContractFilter ? (
-                      <button
-                        type="button"
-                        onClick={() => selectContractFilter(group.contractId)}
-                        className="rounded-xl bg-red-50 px-3 py-1.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                      >
-                        Só este contrato
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-              <div className="grid gap-4">
-                {group.items.map((item) => {
-                  const weekday = formatWeekdayBr(item.workDate);
-                  const servicePhotos = item.photos.filter((photo) => isImageFile(photo));
-                  const otherFiles = item.photos.filter((photo) => !isImageFile(photo));
-                  const status = normalizeStatus(item.status);
-                  const meta = statusMeta(status);
-                  const StatusIcon = meta.Icon;
-                  const isApproved = status === 'APPROVED';
-                  const isSubmitted = status === 'SUBMITTED';
-                  const canEditItem = canEdit && !isApproved;
-                  const canDeleteItem = canEdit && (!isApproved || canApprove);
-                  return (
-                    <article
-                      key={item.id}
-                      className="overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/55"
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/55">
+          <div className="mb-2 flex flex-col gap-1 px-3 pt-3 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-6">
+            <span>
+              Mostrando 1 a {sortedItems.length} de {sortedItems.length} medições
+            </span>
+            <span>Página 1 de 1</span>
+          </div>
+          <div className="table-scroll">
+            <table className="w-full text-sm">
+              <thead className="border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  {[
+                    'Serviço',
+                    ...(showContractColumn ? ['Contrato'] : []),
+                    'Data',
+                    'Valor',
+                    APPROVAL_STATUS_COLUMN_TITLE,
+                    'Ação',
+                  ].map((label) => (
+                    <th
+                      key={label}
+                      className={`px-3 py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 ${
+                        label === APPROVAL_STATUS_COLUMN_TITLE || label === 'Ação'
+                          ? 'text-center'
+                          : 'text-left'
+                      }`}
                     >
-                      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
-                        <div className="flex shrink-0 items-center gap-3 sm:w-28 sm:flex-col sm:items-stretch">
-                          <div className="rounded-2xl bg-red-50 px-3 py-2.5 text-center dark:bg-red-950/40 sm:w-full">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-red-700/80 dark:text-red-300/80">
-                              {weekday || 'Dia'}
-                            </p>
-                            <p className="text-sm font-bold leading-tight text-red-800 dark:text-red-200">
-                              {formatDateBr(item.workDate)}
-                            </p>
-                          </div>
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${meta.className}`}
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                {sortedItems.map((item) => {
+                  const status = normalizeStatus(item.status);
+                  return (
+                    <tr
+                      key={item.id}
+                      className={getListTableRowClassName(true)}
+                      onClick={() => openDetail(item)}
+                    >
+                      <td className="px-3 py-3 align-middle text-sm sm:px-6">
+                        <ListRowNavigableLabel className="font-medium">
+                          {item.description || '—'}
+                        </ListRowNavigableLabel>
+                      </td>
+                      {showContractColumn ? (
+                        <td
+                          className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                          title={item.contratoNome || undefined}
+                        >
+                          {item.contratoNome || '—'}
+                        </td>
+                      ) : null}
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                        {formatDateBr(item.workDate)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                        {formatMoneyCompact(item.executedAmount)}
+                      </td>
+                      <td className="px-3 py-3 text-center align-middle sm:px-6">
+                        <ApprovalStatusBadge kind={statusKind(status)} label={statusLabel(status)} />
+                      </td>
+                      <td
+                        className="px-3 py-3 text-center align-middle sm:px-6"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="flex justify-center">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              setActionMenu((prev) => {
+                                if (prev?.id === item.id) return null;
+                                let left = rect.right - ACTION_MENU_WIDTH_PX;
+                                left = Math.max(
+                                  8,
+                                  Math.min(left, window.innerWidth - ACTION_MENU_WIDTH_PX - 8),
+                                );
+                                return { id: item.id, top: rect.bottom + 4, left };
+                              });
+                            }}
+                            className={rowActionMenuButtonClass(actionMenu?.id === item.id)}
+                            aria-label="Menu de ações"
+                            aria-expanded={actionMenu?.id === item.id}
+                            aria-haspopup="menu"
                           >
-                            <StatusIcon className="h-3.5 w-3.5" />
-                            {meta.label}
-                          </span>
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
                         </div>
-
-                        <div className="min-w-0 flex-1 space-y-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <h4 className="text-base font-semibold leading-snug text-gray-900 dark:text-gray-50">
-                                {item.description}
-                              </h4>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {!filterContractId && item.contratoNome ? (
-                                  <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
-                                    <Building2 className="h-3.5 w-3.5 shrink-0" />
-                                    <span className="truncate">
-                                      {item.contratoNome}
-                                      {item.centroCustoNome
-                                        ? ` · ${item.centroCustoNome}`
-                                        : ''}
-                                    </span>
-                                  </span>
-                                ) : null}
-                                {item.confirmedBy ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
-                                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                                    <span>
-                                      <span className="font-semibold">Confirmado por:</span>{' '}
-                                      {item.confirmedBy}
-                                    </span>
-                                  </span>
-                                ) : null}
-                                {item.workers.length > 0 ? (
-                                  <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                    <Users className="h-3.5 w-3.5 shrink-0" />
-                                    <span className="truncate">
-                                      <span className="font-semibold">Equipe:</span>{' '}
-                                      {item.workers.map((worker) => worker.name).join(', ')}
-                                    </span>
-                                  </span>
-                                ) : null}
-                                {status === 'APPROVED' &&
-                                item.executedAmount != null &&
-                                item.executedAmount > 0 ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                                    Baixa: {formatMoneyCompact(item.executedAmount)}
-                                  </span>
-                                ) : null}
-                              </div>
-                              {status === 'CORRECTION' && item.correctionNote ? (
-                                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-                                  <p className="font-semibold">Devolvido para correção</p>
-                                  <p className="mt-0.5 whitespace-pre-wrap">{item.correctionNote}</p>
-                                </div>
-                              ) : null}
-                            </div>
-                            <div className="flex shrink-0 flex-col items-end gap-1">
-                              {canApprove && isSubmitted ? (
-                                <div className="flex flex-wrap justify-end gap-1">
-                                  <button
-                                    type="button"
-                                    disabled={approveMutation.isPending}
-                                    onClick={() => {
-                                      setPendingApproveId(item.id);
-                                      setPendingApproveAmount('');
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                                  >
-                                    <ShieldCheck className="h-3.5 w-3.5" />
-                                    Aprovar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={returnMutation.isPending}
-                                    onClick={() => {
-                                      setReturnId(item.id);
-                                      setReturnNote('');
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-                                  >
-                                    <RotateCcw className="h-3.5 w-3.5" />
-                                    Devolver
-                                  </button>
-                                </div>
-                              ) : null}
-                              {canApprove &&
-                              status === 'APPROVED' &&
-                              !(item.executedAmount != null && item.executedAmount > 0) ? (
-                                <button
-                                  type="button"
-                                  disabled={executionMutation.isPending}
-                                  onClick={() => {
-                                    setApproveId(item.id);
-                                    setApproveAmount('');
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
-                                >
-                                  <ShieldCheck className="h-3.5 w-3.5" />
-                                  Dar baixa
-                                </button>
-                              ) : null}
-                              {canEditItem || canDeleteItem ? (
-                                <div className="flex shrink-0 gap-1">
-                                  {canEditItem ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => openEdit(item)}
-                                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                      {status === 'CORRECTION' ? 'Corrigir e reenviar' : 'Editar'}
-                                    </button>
-                                  ) : null}
-                                  {canDeleteItem ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setDeleteId(item.id)}
-                                      className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                                      aria-label="Excluir entrega"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          {(item.teamPhoto || servicePhotos.length > 0) && (
-                            <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-950/40">
-                              {item.teamPhoto ? (
-                                <PhotoSection title="Foto da equipe" icon={Users}>
-                                  <PhotoThumb
-                                    url={item.teamPhoto.url}
-                                    alt="Foto da equipe"
-                                    badge="Equipe"
-                                    onClick={() =>
-                                      onPreviewPhoto(item.teamPhoto?.url, 'Foto da equipe')
-                                    }
-                                    caption={
-                                      item.teamPhoto.address ||
-                                      `${item.teamPhoto.latitude.toFixed(5)}, ${item.teamPhoto.longitude.toFixed(5)}`
-                                    }
-                                    mapHref={mapsUrl(
-                                      item.teamPhoto.latitude,
-                                      item.teamPhoto.longitude
-                                    )}
-                                  />
-                                </PhotoSection>
-                              ) : null}
-                              {servicePhotos.length > 0 ? (
-                                <PhotoSection title="Fotos do serviço" icon={ImageIcon}>
-                                  {servicePhotos.map((photo, index) => {
-                                    const lat = Number(photo.latitude);
-                                    const lng = Number(photo.longitude);
-                                    const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
-                                    return (
-                                      <PhotoThumb
-                                        key={`${photo.url}-${index}`}
-                                        url={photo.url}
-                                        alt={photo.name || 'Foto do serviço'}
-                                        badge="Serviço"
-                                        onClick={() =>
-                                          onPreviewPhoto(
-                                            photo.url,
-                                            photo.name || 'Foto do serviço'
-                                          )
-                                        }
-                                        caption={
-                                          photo.capturedAt
-                                            ? new Date(String(photo.capturedAt)).toLocaleString(
-                                                'pt-BR',
-                                                { timeZone: 'America/Sao_Paulo' }
-                                              )
-                                            : photo.address || null
-                                        }
-                                        mapHref={hasGeo ? mapsUrl(lat, lng) : null}
-                                      />
-                                    );
-                                  })}
-                                </PhotoSection>
-                              ) : null}
-                            </div>
-                          )}
-
-                          {otherFiles.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {otherFiles.map((photo, index) => (
-                                <a
-                                  key={`${photo.url}-${index}`}
-                                  href={resolveApiMediaUrl(photo.url) || photo.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-xs font-medium text-red-700 hover:underline dark:text-red-300"
-                                >
-                                  {photo.name || 'arquivo'}
-                                </a>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </article>
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            </section>
-          ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+      <ActionMenuOverlay
+        open={!!actionMenu && !!menuItem}
+        onClose={() => setActionMenu(null)}
+        top={actionMenu?.top ?? 0}
+        left={actionMenu?.left ?? 0}
+      >
+        {menuItem ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => openDetail(menuItem)}
+              className={MENU_ITEM_CLASS}
+            >
+              <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>Ver detalhes</span>
+            </button>
+            {menuCanEdit ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenu(null);
+                  setDetail(null);
+                  openEdit(menuItem);
+                }}
+                className={MENU_ITEM_BORDER_CLASS}
+              >
+                <Pencil className="h-4 w-4 shrink-0" />
+                <span>{menuStatus === 'CORRECTION' ? 'Corrigir e reenviar' : 'Editar'}</span>
+              </button>
+            ) : null}
+            {menuCanDelete ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenu(null);
+                  setDeleteId(menuItem.id);
+                }}
+                className={MENU_ITEM_BORDER_CLASS}
+              >
+                <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                <span>Excluir</span>
+              </button>
+            ) : null}
+          </>
+        ) : null}
+      </ActionMenuOverlay>
+
+      <Modal
+        isOpen={!!detail}
+        onClose={() => setDetail(null)}
+        title={detail?.description || 'Medição de entrega'}
+        size="lg"
+      >
+        {detail && detailStatus ? (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <DetailField label="Serviço" value={detail.description} />
+              <DetailField label="Contrato" value={detail.contratoNome || '—'} />
+              <DetailField label="Data" value={formatDateBr(detail.workDate)} />
+              <DetailField label="Status" value={statusLabel(detailStatus)} />
+              <DetailField label="Confirmado por" value={detail.confirmedBy || '—'} />
+              <DetailField
+                label="Equipe"
+                value={
+                  detail.workers.length
+                    ? detail.workers.map((worker) => worker.name).join(', ')
+                    : '—'
+                }
+              />
+              {detail.centroCustoNome ? (
+                <DetailField label="Centro de custo" value={detail.centroCustoNome} />
+              ) : null}
+              {detailStatus === 'APPROVED' ? (
+                <DetailField
+                  label="Baixa"
+                  value={`${formatMoneyCompact(detail.executedAmount)}${
+                    detail.approvedBy ? ` · aprovado por ${detail.approvedBy}` : ''
+                  }`}
+                />
+              ) : null}
+            </div>
+            {detailStatus === 'CORRECTION' && detail.correctionNote ? (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Motivo da devolução</p>
+                <p className="text-gray-900 dark:text-gray-100">{detail.correctionNote}</p>
+              </div>
+            ) : null}
+
+            {detailPhotos.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Fotos</p>
+                <div className="flex flex-wrap gap-2">
+                  {detailPhotos.map((photo, index) => {
+                    const src = resolveApiMediaUrl(photo.url) || photo.url;
+                    return (
+                      <button
+                        key={`${photo.url}-${index}`}
+                        type="button"
+                        onClick={() => onPreviewPhoto(src, photo.name)}
+                        className="overflow-hidden rounded-xl border border-gray-200 text-left dark:border-gray-700"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={src} alt={photo.name} className="h-28 w-28 object-cover" />
+                        <span className="block px-2 py-1 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                          {photo.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {detailDocs.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Documentos</p>
+                <ul className="space-y-1">
+                  {detailDocs.map((file, index) => {
+                    const href = resolveApiMediaUrl(file.url) || file.url;
+                    return (
+                      <li key={`${file.url}-${index}`}>
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-sm font-medium text-red-700 hover:underline dark:text-red-300"
+                        >
+                          <FileText className="h-4 w-4 shrink-0" />
+                          {file.name || 'Documento'}
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setDetail(null)}
+                className="rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Fechar
+              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {detailCanEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = detail;
+                      setDetail(null);
+                      openEdit(current);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    {detailStatus === 'CORRECTION' ? 'Corrigir e reenviar' : 'Editar'}
+                  </button>
+                ) : null}
+                {detailCanDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteId(detail.id)}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Excluir
+                  </button>
+                ) : null}
+                {canApprove && detailStatus === 'APPROVED' && !(detail.executedAmount != null && detail.executedAmount > 0) ? (
+                  <button
+                    type="button"
+                    disabled={executionMutation.isPending}
+                    onClick={() => {
+                      setApproveId(detail.id);
+                      setApproveAmount('');
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+                  >
+                    Dar baixa
+                  </button>
+                ) : null}
+                {canApprove && detailStatus === 'SUBMITTED' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={returnMutation.isPending}
+                      onClick={() => {
+                        setReturnId(detail.id);
+                        setReturnNote('');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Devolver
+                    </button>
+                    <button
+                      type="button"
+                      disabled={approveMutation.isPending}
+                      onClick={() => {
+                        setPendingApproveId(detail.id);
+                        setPendingApproveAmount('');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      Aprovar
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       {deleteId ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               Excluir esta entrega?
@@ -1382,7 +1357,7 @@ export function EmpreiteiroDailyMeasurements({
       ) : null}
 
       {pendingApproveId ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               Aprovar e dar baixa
@@ -1441,7 +1416,7 @@ export function EmpreiteiroDailyMeasurements({
       ) : null}
 
       {approveId ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               Baixa da entrega
@@ -1493,7 +1468,7 @@ export function EmpreiteiroDailyMeasurements({
       ) : null}
 
       {returnId ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               Devolver para correção

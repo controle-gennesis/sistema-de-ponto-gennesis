@@ -48,6 +48,7 @@ import {
 } from '@/lib/maskCurrencyBr';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { formatDateBr as formatDateBrLib, parseDateSafe } from '@/lib/dateTimeBr';
+import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
@@ -1660,6 +1661,18 @@ export default function EmpreiteirosPage() {
     (isOwnEmpreiteiroAccount ? ownEmpreitaItem : null);
   const showMedicaoPage = pageSection === 'medicao' && Boolean(medicaoTargetItem);
   const showDetailPage = pageSection === 'detalhe' && Boolean(viewingItem);
+  const breadcrumbEmpreitaName = showDetailPage
+    ? viewingItem?.name
+    : showMedicaoPage
+      ? medicaoTargetItem?.name
+      : null;
+  useBreadcrumbEntity(
+    showMedicaoPage && breadcrumbEmpreitaName
+      ? [{ label: breadcrumbEmpreitaName }, { label: 'Medições de entrega' }]
+      : breadcrumbEmpreitaName
+        ? { label: breadcrumbEmpreitaName }
+        : null,
+  );
 
   const openMedicaoPage = (item?: EmpreiteiroRow | null, contractId?: string | null) => {
     const target =
