@@ -3322,17 +3322,34 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
 
 function sessaoTemDados(s: SessaoOrcamentoPersist | null | undefined): boolean {
   if (!s) return false;
+  const crono = s.cronograma;
+  const cronogramaTemDados = Boolean(
+    crono &&
+      (Object.keys(crono.porItem ?? {}).length > 0 ||
+        Object.keys(crono.porBloco ?? {}).length > 0 ||
+        Object.keys(crono.porServico ?? {}).length > 0 ||
+        Object.keys(crono.subServicosPorServico ?? {}).length > 0 ||
+        Object.keys(crono.dependenciasPorEtapa ?? {}).length > 0 ||
+        Object.keys(crono.config ?? {}).length > 0)
+  );
   return (
     s.subtitulosNoOrcamento.length > 0 ||
     (s.itensOcultosNoOrcamento ?? []).length > 0 ||
+    (s.insumosAnaliticoOcultos ?? []).length > 0 ||
+    (s.colunasOcultasMontagem ?? []).length > 0 ||
     Object.keys(s.quantidadesPorItem).length > 0 ||
+    Object.keys(s.formulasQuantidadePorItem ?? {}).length > 0 ||
     Object.keys(s.dimensoesPorItem).length > 0 ||
     Object.keys(s.planilhaQuantidadeCompra ?? {}).length > 0 ||
     Object.keys(s.planilhaValorUnitCompraReal ?? {}).length > 0 ||
     Object.keys(s.planilhaTipoInsumo ?? {}).length > 0 ||
     Object.keys(s.observacoesPorItem ?? {}).length > 0 ||
+    Object.keys(s.coresLinhaPorKey ?? {}).length > 0 ||
+    Object.keys(s.coresCelulaPorKey ?? {}).length > 0 ||
+    Object.keys(s.moMatManualPorItem ?? {}).length > 0 ||
     Object.keys(s.fichaDemandaObservacoes ?? {}).length > 0 ||
-    Object.keys(s.insumosAnaliticoManuais ?? {}).length > 0
+    Object.keys(s.insumosAnaliticoManuais ?? {}).length > 0 ||
+    cronogramaTemDados
   );
 }
 
@@ -6044,6 +6061,63 @@ export function OrcamentoPageView({
     hadData: false
   });
   const autosaveProtecaoAvisadaRef = useRef<string | null>(null);
+  const loadingFromApiRef = useRef(loadingFromApi);
+  loadingFromApiRef.current = loadingFromApi;
+  const orcamentoPersistIdsRef = useRef<{
+    centroCustoId: string | null;
+    orcamentoId: string | null;
+  }>({ centroCustoId: null, orcamentoId: null });
+  orcamentoPersistIdsRef.current = {
+    centroCustoId: centroCustoId ?? null,
+    orcamentoId: orcamentoAtivoId ?? null,
+  };
+
+  /** Grava sessão (local + API). Usado pelo debounce e ao sair da página. */
+  const flushOrcamentoPersistencia = useCallback(() => {
+    const { centroCustoId: cc, orcamentoId: oid } = orcamentoPersistIdsRef.current;
+    if (!cc || !oid || loadingFromApiRef.current) return;
+
+    const { servicos: s, imports: i } = servicosImportsRef.current;
+    const sessaoAtual = sessaoRef.current;
+
+    try {
+      localStorage.setItem(storageKey(cc, 'sessao', oid), JSON.stringify(sessaoAtual));
+    } catch {
+      /* quota */
+    }
+
+    const atualTemDados = s.length > 0 || i.length > 0 || sessaoTemDados(sessaoAtual);
+    const baseline = autosaveBaselineRef.current;
+    const bloquearSobrescritaVazia =
+      baseline.orcamentoId === oid && baseline.hadData && !atualTemDados;
+
+    if (bloquearSobrescritaVazia) {
+      if (autosaveProtecaoAvisadaRef.current !== oid) {
+        autosaveProtecaoAvisadaRef.current = oid;
+        toast.error(
+          'Proteção ativada: salvamento automático bloqueado para evitar sobrescrever orçamento com dados vazios.'
+        );
+      }
+      console.warn('Autosave bloqueado para evitar sobrescrita vazia do orçamento.', {
+        orcamentoId: oid,
+      });
+      return;
+    }
+
+    if (baseline.orcamentoId === oid && atualTemDados) {
+      autosaveBaselineRef.current = { ...baseline, hadData: true };
+      const snapPayload = montarPayloadSalvarOrcamento(s, i, sessaoAtual);
+      saveOrcamentoSnapshot(cc, oid, {
+        servicos: s,
+        imports: i,
+        sessaoOrcamento: (snapPayload.sessaoOrcamento ?? sessaoAtual) as SessaoOrcamentoPersist,
+      });
+    }
+
+    saveOrcamentoToApi(cc, oid, montarPayloadSalvarOrcamento(s, i, sessaoAtual)).catch((err) =>
+      console.warn('Erro ao salvar orçamento no servidor:', err)
+    );
+  }, []);
 
   const embeddedOrcamentoBasePath = embeddedContractId
     ? listaGlobalEntry
@@ -6443,8 +6517,9 @@ export function OrcamentoPageView({
   useEffect(() => {
     if (!centroCustoId || !orcamentoAtivoId) return;
     let cancelled = false;
+    const cc = centroCustoId;
     const oid = orcamentoAtivoId;
-    const localReady = tryHydrateLocalOrcamento(centroCustoId, oid);
+    const localReady = tryHydrateLocalOrcamento(cc, oid);
 
     // Com dado local: não zera a UI nem espera o S3.
     if (!localReady) {
@@ -6697,6 +6772,23 @@ export function OrcamentoPageView({
     return () => {
       cancelled = true;
       setLoadingFromApi(false);
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      // Ao trocar de orçamento: grava o que estava aberto neste `oid` (não no próximo).
+      const sessaoAtual = sessaoRef.current;
+      const { servicos: s, imports: i } = servicosImportsRef.current;
+      try {
+        localStorage.setItem(storageKey(cc, 'sessao', oid), JSON.stringify(sessaoAtual));
+      } catch {
+        /* quota */
+      }
+      if (s.length > 0 || i.length > 0 || sessaoTemDados(sessaoAtual)) {
+        saveOrcamentoToApi(cc, oid, montarPayloadSalvarOrcamento(s, i, sessaoAtual)).catch((err) =>
+          console.warn('Erro ao salvar orçamento ao sair:', err)
+        );
+      }
     };
   }, [centroCustoId, orcamentoAtivoId]);
 
@@ -6768,51 +6860,7 @@ export function OrcamentoPageView({
     if (orcamentoAutosaveTimerRef.current) clearTimeout(orcamentoAutosaveTimerRef.current);
     orcamentoAutosaveTimerRef.current = setTimeout(() => {
       orcamentoAutosaveTimerRef.current = null;
-      const { servicos: s, imports: i } = servicosImportsRef.current;
-      const sessaoAtual = sessaoRef.current;
-      const atualTemDados =
-        s.length > 0 ||
-        i.length > 0 ||
-        sessaoAtual.subtitulosNoOrcamento.length > 0 ||
-        (sessaoAtual.itensOcultosNoOrcamento ?? []).length > 0 ||
-        Object.keys(sessaoAtual.quantidadesPorItem).length > 0 ||
-        Object.keys(sessaoAtual.dimensoesPorItem).length > 0 ||
-        Object.keys(sessaoAtual.planilhaQuantidadeCompra ?? {}).length > 0 ||
-        Object.keys(sessaoAtual.planilhaValorUnitCompraReal ?? {}).length > 0 ||
-        Object.keys(sessaoAtual.insumosAnaliticoManuais ?? {}).length > 0 ||
-        Object.keys(sessaoAtual.fichaDemandaObservacoes ?? {}).length > 0;
-
-      const baseline = autosaveBaselineRef.current;
-      const bloquearSobrescritaVazia =
-        baseline.orcamentoId === orcamentoAtivoId &&
-        baseline.hadData &&
-        !atualTemDados;
-
-      if (bloquearSobrescritaVazia) {
-        if (autosaveProtecaoAvisadaRef.current !== orcamentoAtivoId) {
-          autosaveProtecaoAvisadaRef.current = orcamentoAtivoId;
-          toast.error('Proteção ativada: salvamento automático bloqueado para evitar sobrescrever orçamento com dados vazios.');
-        }
-        console.warn('Autosave bloqueado para evitar sobrescrita vazia do orçamento.', {
-          orcamentoId: orcamentoAtivoId
-        });
-        return;
-      }
-
-      if (baseline.orcamentoId === orcamentoAtivoId && atualTemDados) {
-        autosaveBaselineRef.current = { ...baseline, hadData: true };
-        const snapPayload = montarPayloadSalvarOrcamento(s, i, sessaoAtual);
-        saveOrcamentoSnapshot(centroCustoId, orcamentoAtivoId, {
-          servicos: s,
-          imports: i,
-          sessaoOrcamento: (snapPayload.sessaoOrcamento ?? sessaoAtual) as SessaoOrcamentoPersist
-        });
-      }
-      saveOrcamentoToApi(
-        centroCustoId,
-        orcamentoAtivoId,
-        montarPayloadSalvarOrcamento(s, i, sessaoRef.current)
-      ).catch(err => console.warn('Erro ao salvar orçamento no servidor:', err));
+      flushOrcamentoPersistencia();
     }, ORCAMENTO_AUTOSAVE_MS);
 
     return () => {
@@ -6827,19 +6875,45 @@ export function OrcamentoPageView({
     loadingFromApi,
     subtitulosNoOrcamento,
     quantidadesPorItem,
+    formulasQuantidadePorItem,
     dimensoesPorItem,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
     planilhaTipoInsumo,
+    observacoesPorItem,
+    coresLinhaPorKey,
+    coresCelulaPorKey,
+    colunasOcultasMontagem,
+    moMatManualPorItem,
     fichaDemandaObservacoes,
     insumosAnaliticoManuais,
     meta,
     itensOcultosNoOrcamento,
+    insumosAnaliticoOcultos,
     cronograma,
     servicos,
     imports,
     orcamentoViewTab,
+    flushOrcamentoPersistencia,
   ]);
+
+  /** Ao fechar/trocar de página: não perde edição pendente do debounce. */
+  useEffect(() => {
+    const onLeave = () => {
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      flushOrcamentoPersistencia();
+    };
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('beforeunload', onLeave);
+    return () => {
+      window.removeEventListener('pagehide', onLeave);
+      window.removeEventListener('beforeunload', onLeave);
+      onLeave();
+    };
+  }, [flushOrcamentoPersistencia]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -11010,21 +11084,21 @@ export function OrcamentoPageView({
   }, []);
 
   const commitFichaDemandaObservacao = useCallback((lineKey: string, raw: string) => {
-    startTransition(() => {
-      setFichaDemandaObservacoes((prev) => {
-        if ((prev[lineKey] ?? '') === raw) return prev;
-        return { ...prev, [lineKey]: raw };
-      });
+    setFichaDemandaObservacoes((prev) => {
+      if ((prev[lineKey] ?? '') === raw) return prev;
+      const next = { ...prev, [lineKey]: raw };
+      sessaoRef.current = { ...sessaoRef.current, fichaDemandaObservacoes: next };
+      return next;
     });
   }, []);
 
   const commitObservacaoOrcamento = useCallback((lineKey: string, raw: string) => {
     if (gradeTravadaRef.current) return;
-    startTransition(() => {
-      setObservacoesPorItem((prev) => {
-        if ((prev[lineKey] ?? '') === raw) return prev;
-        return { ...prev, [lineKey]: raw };
-      });
+    setObservacoesPorItem((prev) => {
+      if ((prev[lineKey] ?? '') === raw) return prev;
+      const next = { ...prev, [lineKey]: raw };
+      sessaoRef.current = { ...sessaoRef.current, observacoesPorItem: next };
+      return next;
     });
   }, []);
 
@@ -11066,15 +11140,16 @@ export function OrcamentoPageView({
   const setMoMatManualCampo = useCallback(
     (itemKey: string, campo: 'mo' | 'mat', valor: number | null) => {
       if (gradeTravadaRef.current) return;
-      startTransition(() => {
-        setMoMatManualPorItem((prev) => {
-          const atual = prev[itemKey] ?? {};
-          if (Object.prototype.hasOwnProperty.call(atual, campo) && atual[campo] === valor) {
-            return prev;
-          }
-          const nextEntry = { ...atual, [campo]: valor };
-          return { ...prev, [itemKey]: nextEntry };
-        });
+      setMoMatManualPorItem((prev) => {
+        const atual = prev[itemKey] ?? {};
+        if (Object.prototype.hasOwnProperty.call(atual, campo) && atual[campo] === valor) {
+          return prev;
+        }
+        const nextEntry = { ...atual, [campo]: valor };
+        const next = { ...prev, [itemKey]: nextEntry };
+        // Sincroniza na hora: o autosave/leave leem sessaoRef antes do próximo effect.
+        sessaoRef.current = { ...sessaoRef.current, moMatManualPorItem: next };
+        return next;
       });
     },
     []
@@ -15150,7 +15225,7 @@ export function OrcamentoPageView({
                       setOrcamentoViewTab(next);
                       irParaTopoDasAbas();
                     }}
-                    className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800"
+                    className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800"
                     pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
                     buttonClassName="px-2.5 py-1.5 text-xs sm:px-3.5 sm:text-sm"
                     activeButtonClassName="font-semibold text-white"
