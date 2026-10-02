@@ -595,6 +595,8 @@ export type ContratoResumoAbastecimento = {
   weekStart?: string;
   weekEnd?: string;
   loading?: boolean;
+  /** Detalhe do «Usado» exige Fila de Abastecimento (`/fuel-refuel-requests`). */
+  canInspectUsed?: boolean;
 };
 
 type AbastecimentoUsedRequest = {
@@ -737,6 +739,7 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
   const barPct = Math.max(0, Math.min(100, usedPct));
   const contractId = data.contractId?.trim() || '';
 
+  const canInspectUsed = Boolean(data.canInspectUsed);
   const { data: usedRows = [], isLoading: loadingUsed } = useQuery({
     queryKey: ['fuel-refuel-requests', 'contract-abastecimento-used', contractId, data.weekStart, data.weekEnd],
     queryFn: async () => {
@@ -745,7 +748,7 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
       });
       return (res.data?.data || []) as AbastecimentoUsedRequest[];
     },
-    enabled: usedOpen && Boolean(contractId),
+    enabled: canInspectUsed && usedOpen && Boolean(contractId),
     staleTime: 15_000,
   });
 
@@ -774,12 +777,13 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
   }, [usedRows, contractId, data.weekStart, data.weekEnd]);
 
   const openUsedSolicitacoes = () => {
-    if (!contractId) return;
+    if (!canInspectUsed || !contractId) return;
     setUsedOpen(true);
   };
 
-  const usedBlockClass =
-    'flex w-full items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:bg-gray-800/60 dark:hover:bg-gray-800';
+  const usedBlockClass = canInspectUsed
+    ? 'flex w-full items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:bg-gray-800/60 dark:hover:bg-gray-800'
+    : 'flex w-full items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 text-left dark:bg-gray-800/60';
 
   return (
     <>
@@ -859,23 +863,34 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                     </p>
                   </div>
                 )}
-                <button
-                  type="button"
-                  className={usedBlockClass}
-                  onClick={openUsedSolicitacoes}
-                  title="Ver solicitações usadas na semana"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
-                    <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                      {formatCurrency(used)}
-                    </p>
+                {canInspectUsed ? (
+                  <button
+                    type="button"
+                    className={usedBlockClass}
+                    onClick={openUsedSolicitacoes}
+                    title="Ver solicitações usadas na semana"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
+                      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                        {formatCurrency(used)}
+                      </p>
+                    </div>
+                    <ExternalLink
+                      className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+                      aria-hidden
+                    />
+                  </button>
+                ) : (
+                  <div className={usedBlockClass}>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
+                      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                        {formatCurrency(used)}
+                      </p>
+                    </div>
                   </div>
-                  <ExternalLink
-                    className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
-                    aria-hidden
-                  />
-                </button>
+                )}
               </div>
             </div>
           )}

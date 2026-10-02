@@ -78,8 +78,12 @@ import {
   Calculator,
   ShieldCheck,
   HardHat,
+  LayoutGrid,
+  Star,
   type LucideIcon,
 } from 'lucide-react';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
+import { useTheme } from '@/context/ThemeContext';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
@@ -90,6 +94,8 @@ import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
   readSelectedModuleId,
   readSidebarCollapsed,
+  readRailFavorites,
+  writeRailFavorites,
   SIDEBAR_TRANSITION_CLASS,
   SIDEBAR_TRANSITION_MS,
   writeSelectedModuleId,
@@ -97,6 +103,7 @@ import {
   isHomeRoute,
   isRailFooterRoute,
   shouldForceSidebarCollapsed,
+  type RailFooterRoute,
 } from '@/lib/sidebarStorage';
 import {
   LAYOUT_CHROME,
@@ -251,9 +258,17 @@ function SidebarRailTooltip({
 }
 
 export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
+  const { isDark } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsedState] = useState(false);
   const [sidebarHydrated, setSidebarHydrated] = useState(false);
+  const [menuAtalhosRail, setMenuAtalhosRail] = useState<{
+    top: number;
+    left: number;
+    arrowLeft: number;
+  } | null>(null);
+  const [railFavorites, setRailFavorites] = useState<RailFooterRoute[]>([]);
+  const btnAtalhosRailRef = useRef<HTMLButtonElement>(null);
 
   const setCollapsed = useCallback(
     (collapsed: boolean) => {
@@ -748,21 +763,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator ||
               can(pk('/ponto/controle/gerenciar-aprovadores-fluig')) ||
               fluigApproverNameKeys.length > 0
-          },
-          {
-            name: 'Aprovações',
-            href: '/ponto/aprovacoes',
-            icon: FileCheck,
-            description: 'Caixa de entrada de aprovações',
-            // Aparece para quem aprova algum bloco (SI via Controle, ou RM/OC/FD/etc.).
-            permission:
-              canAccessDpApproverPages ||
-              canApproveFd ||
-              canApproveEspelhoNf ||
-              canApproveOc ||
-              canApproveFuel ||
-              canApproveMaterialRequests ||
-              canApproveEmpreiteiroDaily,
           },
           {
             name: 'Solicitações Internas',
@@ -1629,6 +1629,110 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
 
   const menuItems = getMenuItems();
 
+  const canSeeAprovacoesAtalho =
+    canAccessDpApproverPages ||
+    canApproveFd ||
+    canApproveEspelhoNf ||
+    canApproveOc ||
+    canApproveFuel ||
+    canApproveMaterialRequests ||
+    canApproveEmpreiteiroDaily;
+
+  const showRailAtalhos = canAccessCollaborationTools || canSeeAprovacoesAtalho;
+
+  useEffect(() => {
+    setRailFavorites(readRailFavorites());
+  }, []);
+
+  const toggleRailFavorite = useCallback((href: RailFooterRoute) => {
+    setRailFavorites((prev) => {
+      const next = prev.includes(href)
+        ? prev.filter((h) => h !== href)
+        : [...prev, href];
+      writeRailFavorites(next);
+      return next;
+    });
+  }, []);
+
+  const railAtalhosDisponiveis = (
+    [
+      canAccessCollaborationTools
+        ? {
+            href: '/ponto/conversas' as const,
+            label: 'Conversas',
+            popId: 'footer:conversas',
+            Icon: MessageCircle,
+            badge: chatUnreadCount,
+          }
+        : null,
+      canAccessCollaborationTools
+        ? {
+            href: '/ponto/kanban' as const,
+            label: 'Tasks',
+            popId: 'footer:kanban',
+            Icon: SquareKanban,
+            badge: 0,
+          }
+        : null,
+      canAccessCollaborationTools
+        ? {
+            href: '/ponto/agenda' as const,
+            label: 'Agenda',
+            popId: 'footer:agenda',
+            Icon: CalendarRange,
+            badge: 0,
+          }
+        : null,
+      canAccessCollaborationTools
+        ? {
+            href: '/ponto/flow' as const,
+            label: 'Flow',
+            popId: 'footer:flow',
+            Icon: Workflow,
+            badge: 0,
+          }
+        : null,
+      canAccessCollaborationTools
+        ? {
+            href: '/ponto/drive' as const,
+            label: 'Drive',
+            popId: 'footer:drive',
+            Icon: HardDrive,
+            badge: 0,
+          }
+        : null,
+      canSeeAprovacoesAtalho
+        ? {
+            href: '/ponto/aprovacoes' as const,
+            label: 'Aprovações',
+            popId: 'footer:aprovacoes',
+            Icon: BadgeCheck,
+            badge: approvalCounts.total,
+          }
+        : null,
+    ].filter(Boolean) as {
+      href: RailFooterRoute;
+      label: string;
+      popId: string;
+      Icon: LucideIcon;
+      badge: number;
+    }[]
+  );
+
+  const railAtalhosByHref = new Map(
+    railAtalhosDisponiveis.map((item) => [item.href, item])
+  );
+  const railFavoritosVisiveis = railFavorites
+    .map((href) => railAtalhosByHref.get(href))
+    .filter((item): item is (typeof railAtalhosDisponiveis)[number] => item != null);
+
+  const favoritosHrefSet = new Set(railFavoritosVisiveis.map((i) => i.href));
+  const atalhosBadgeOculto =
+    (favoritosHrefSet.has('/ponto/conversas') ? 0 : chatUnreadCount) +
+    (canSeeAprovacoesAtalho && !favoritosHrefSet.has('/ponto/aprovacoes')
+      ? approvalCounts.total
+      : 0);
+
   const isFooterShortcutActive = (href: string) => {
     if (pathname == null) return false;
     return pathname === href || pathname.startsWith(`${href}/`);
@@ -1929,7 +2033,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (!sidebarHydrated) return;
     if (isLoading && menuItems.length === 0) return;
     if (railEnterPlayedRef.current) return;
-    if (menuItems.length === 0 && !canAccessCollaborationTools) return;
+    if (menuItems.length === 0 && !canAccessCollaborationTools && !canSeeAprovacoesAtalho) return;
 
     railEnterPlayedRef.current = true;
     setRailEnterClass(false);
@@ -1947,7 +2051,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         railEnterTimeoutRef.current = null;
       }
     };
-  }, [sidebarHydrated, isLoading, menuItems.length, canAccessCollaborationTools]);
+  }, [sidebarHydrated, isLoading, menuItems.length, canAccessCollaborationTools, canSeeAprovacoesAtalho]);
 
   useLayoutEffect(() => {
     if (tier2BorderHideTimeoutRef.current != null) {
@@ -1985,6 +2089,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : displayedModuleId);
 
   useEffect(() => {
+    setMenuAtalhosRail(null);
+  }, [pathname]);
+
+  useEffect(() => {
     if (railModuleActiveId) {
       bumpRailPop(railModuleActiveId);
       return;
@@ -1994,6 +2102,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     else if (isFooterShortcutActive('/ponto/agenda')) bumpRailPop('footer:agenda');
     else if (isFooterShortcutActive('/ponto/flow')) bumpRailPop('footer:flow');
     else if (isFooterShortcutActive('/ponto/drive')) bumpRailPop('footer:drive');
+    else if (isFooterShortcutActive('/ponto/aprovacoes')) bumpRailPop('footer:aprovacoes');
   }, [railModuleActiveId, pathname, bumpRailPop]);
 
   const closeSidebarPanel = useCallback(() => {
@@ -2281,127 +2390,216 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             )}
           </nav>
 
-          {/* Rodapé: atalhos (ocultos para setor Sócios) */}
-          {canAccessCollaborationTools ? (
+          {/* Rodapé: favoritos + balão layout-grid */}
+          {showRailAtalhos ? (
           <div className="relative z-20 flex flex-shrink-0 flex-col items-center overflow-visible px-2 pb-4 [@media(max-height:820px)]:pb-2">
             <div className="flex flex-col items-center gap-2 [@media(max-height:820px)]:gap-1">
-              <SidebarRailTooltip label="Conversas" enterIndex={menuItems.length + 1}>
-                <Link
-                  href="/ponto/conversas"
-                  prefetch={navLinkPrefetch}
-                  aria-label={`Conversas${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
-                  aria-current={isFooterShortcutActive('/ponto/conversas') ? 'page' : undefined}
-                  onClick={(event: React.MouseEvent) => {
-                    if (!isFooterShortcutActive('/ponto/conversas')) return;
-                    event.preventDefault();
-                    bumpRailPop('footer:conversas');
-                    dispatchReplayPageEnter();
+              {railFavoritosVisiveis.map((item, favIndex) => {
+                const active = isFooterShortcutActive(item.href);
+                return (
+                  <SidebarRailTooltip
+                    key={item.href}
+                    label={item.label}
+                    enterIndex={menuItems.length + 1 + favIndex}
+                  >
+                    <Link
+                      href={item.href}
+                      prefetch={navLinkPrefetch}
+                      aria-label={
+                        item.badge > 0
+                          ? `${item.label}, ${item.badge} pendências`
+                          : item.label
+                      }
+                      aria-current={active ? 'page' : undefined}
+                      onClick={(event: React.MouseEvent) => {
+                        if (!active) return;
+                        event.preventDefault();
+                        bumpRailPop(item.popId);
+                        dispatchReplayPageEnter();
+                      }}
+                      className={`sidebar-rail-btn relative flex h-10 w-10 items-center justify-center overflow-visible rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
+                        active
+                          ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
+                              isRailPopping(item.popId) ? ' sidebar-rail-btn--pop' : ''
+                            }`
+                          : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <item.Icon className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
+                      <NotificationCountBadge count={item.badge} rail />
+                    </Link>
+                  </SidebarRailTooltip>
+                );
+              })}
+              <SidebarRailTooltip
+                label="Atalhos"
+                enterIndex={menuItems.length + 1 + railFavoritosVisiveis.length}
+              >
+                <button
+                  ref={btnAtalhosRailRef}
+                  type="button"
+                  aria-label={`Atalhos${atalhosBadgeOculto > 0 ? ', pendências' : ''}`}
+                  aria-expanded={!!menuAtalhosRail}
+                  onClick={() => {
+                    bumpRailPop('footer:atalhos');
+                    if (menuAtalhosRail) {
+                      setMenuAtalhosRail(null);
+                      return;
+                    }
+                    const r = btnAtalhosRailRef.current?.getBoundingClientRect();
+                    if (!r) return;
+                    const gap = 4;
+                    const pad = gap;
+                    const cols = 3;
+                    const cell = 44;
+                    const panelW = cols * cell + (cols - 1) * gap + 2 * pad;
+                    const margin = 8;
+                    const left = Math.max(
+                      margin,
+                      Math.min(r.left, window.innerWidth - panelW - margin)
+                    );
+                    const arrowLeft = Math.min(
+                      panelW - 12,
+                      Math.max(12, r.left + r.width / 2 - left)
+                    );
+                    setMenuAtalhosRail({
+                      top: r.top - 10,
+                      left,
+                      arrowLeft,
+                    });
                   }}
-                  className={`sidebar-rail-btn relative flex h-10 w-10 items-center justify-center overflow-visible rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
-                    isFooterShortcutActive('/ponto/conversas')
+                  className={`sidebar-rail-btn relative inline-flex h-10 w-10 items-center justify-center overflow-visible rounded-lg border border-white shadow-none focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-800 dark:focus-visible:ring-offset-gray-900 [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
+                    menuAtalhosRail
                       ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
-                          isRailPopping('footer:conversas') ? ' sidebar-rail-btn--pop' : ''
+                          isRailPopping('footer:atalhos') ? ' sidebar-rail-btn--pop' : ''
                         }`
-                      : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+                      : `text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800${
+                          isRailPopping('footer:atalhos') ? ' sidebar-rail-btn--pop' : ''
+                        }`
                   }`}
                 >
-                  <MessageCircle className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
-                  <NotificationCountBadge count={chatUnreadCount} rail />
-                </Link>
-              </SidebarRailTooltip>
-              <SidebarRailTooltip label="Tasks" enterIndex={menuItems.length + 2}>
-                <Link
-                  href="/ponto/kanban"
-                  prefetch={navLinkPrefetch}
-                  aria-label="Tasks"
-                  aria-current={isFooterShortcutActive('/ponto/kanban') ? 'page' : undefined}
-                  onClick={(event: React.MouseEvent) => {
-                    if (!isFooterShortcutActive('/ponto/kanban')) return;
-                    event.preventDefault();
-                    bumpRailPop('footer:kanban');
-                    dispatchReplayPageEnter();
-                  }}
-                  className={`sidebar-rail-btn flex h-10 w-10 items-center justify-center rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
-                    isFooterShortcutActive('/ponto/kanban')
-                      ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
-                          isRailPopping('footer:kanban') ? ' sidebar-rail-btn--pop' : ''
-                        }`
-                      : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <SquareKanban className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
-                </Link>
-              </SidebarRailTooltip>
-              <SidebarRailTooltip label="Agenda" enterIndex={menuItems.length + 3}>
-                <Link
-                  href="/ponto/agenda"
-                  prefetch={navLinkPrefetch}
-                  aria-label="Agenda"
-                  aria-current={isFooterShortcutActive('/ponto/agenda') ? 'page' : undefined}
-                  onClick={(event: React.MouseEvent) => {
-                    if (!isFooterShortcutActive('/ponto/agenda')) return;
-                    event.preventDefault();
-                    bumpRailPop('footer:agenda');
-                    dispatchReplayPageEnter();
-                  }}
-                  className={`sidebar-rail-btn flex h-10 w-10 items-center justify-center rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
-                    isFooterShortcutActive('/ponto/agenda')
-                      ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
-                          isRailPopping('footer:agenda') ? ' sidebar-rail-btn--pop' : ''
-                        }`
-                      : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <CalendarRange className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
-                </Link>
-              </SidebarRailTooltip>
-              <SidebarRailTooltip label="Flow" enterIndex={menuItems.length + 4}>
-                <Link
-                  href="/ponto/flow"
-                  prefetch={navLinkPrefetch}
-                  aria-label="Flow"
-                  aria-current={isFooterShortcutActive('/ponto/flow') ? 'page' : undefined}
-                  onClick={(event: React.MouseEvent) => {
-                    if (!isFooterShortcutActive('/ponto/flow')) return;
-                    event.preventDefault();
-                    bumpRailPop('footer:flow');
-                    dispatchReplayPageEnter();
-                  }}
-                  className={`sidebar-rail-btn flex h-10 w-10 items-center justify-center rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
-                    isFooterShortcutActive('/ponto/flow')
-                      ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
-                          isRailPopping('footer:flow') ? ' sidebar-rail-btn--pop' : ''
-                        }`
-                      : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <Workflow className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
-                </Link>
-              </SidebarRailTooltip>
-              <SidebarRailTooltip label="Drive" enterIndex={menuItems.length + 5}>
-                <Link
-                  href="/ponto/drive"
-                  prefetch={navLinkPrefetch}
-                  aria-label="Drive"
-                  aria-current={isFooterShortcutActive('/ponto/drive') ? 'page' : undefined}
-                  onClick={(event: React.MouseEvent) => {
-                    if (!isFooterShortcutActive('/ponto/drive')) return;
-                    event.preventDefault();
-                    bumpRailPop('footer:drive');
-                    dispatchReplayPageEnter();
-                  }}
-                  className={`sidebar-rail-btn flex h-10 w-10 items-center justify-center rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
-                    isFooterShortcutActive('/ponto/drive')
-                      ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
-                          isRailPopping('footer:drive') ? ' sidebar-rail-btn--pop' : ''
-                        }`
-                      : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <HardDrive className="sidebar-rail-btn__icon h-5 w-5 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4" />
-                </Link>
+                  <LayoutGrid
+                    className="sidebar-rail-btn__icon h-5 w-5 shrink-0 [@media(max-height:820px)]:h-4 [@media(max-height:820px)]:w-4"
+                    aria-hidden
+                  />
+                  <NotificationCountBadge count={atalhosBadgeOculto} rail />
+                </button>
               </SidebarRailTooltip>
             </div>
+            {menuAtalhosRail && (
+              <ActionMenuOverlay
+                open
+                onClose={() => setMenuAtalhosRail(null)}
+                top={menuAtalhosRail.top}
+                left={menuAtalhosRail.left}
+                placement="above"
+                panelOverflow="visible"
+                panelClassName="rounded-lg !shadow-none"
+                panelStyle={{ width: 148, padding: 4 }}
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-full"
+                  style={{ left: menuAtalhosRail.arrowLeft, transform: 'translateX(-50%)' }}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      width: 0,
+                      height: 0,
+                      borderLeft: '7px solid transparent',
+                      borderRight: '7px solid transparent',
+                      borderTop: `8px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: '50%',
+                      top: 0,
+                      display: 'block',
+                      width: 0,
+                      height: 0,
+                      transform: 'translateX(-50%) translateY(-1px)',
+                      borderLeft: '6px solid transparent',
+                      borderRight: '6px solid transparent',
+                      borderTop: `7px solid ${isDark ? '#1f2937' : '#ffffff'}`,
+                    }}
+                  />
+                </span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 44px)',
+                    gridAutoRows: 44,
+                    gap: 4,
+                  }}
+                >
+                  {railAtalhosDisponiveis.map(({ href, label, popId, Icon, badge }) => {
+                    const active = isFooterShortcutActive(href);
+                    const favorito = railFavorites.includes(href);
+                    return (
+                      <div key={href} className="group relative">
+                        <Link
+                          href={href}
+                          prefetch={navLinkPrefetch}
+                          title={label}
+                          aria-label={
+                            badge > 0 ? `${label}, ${badge} pendências` : label
+                          }
+                          aria-current={active ? 'page' : undefined}
+                          onClick={(event: React.MouseEvent) => {
+                            setMenuAtalhosRail(null);
+                            if (!active) return;
+                            event.preventDefault();
+                            bumpRailPop(popId);
+                            dispatchReplayPageEnter();
+                          }}
+                          className={`relative inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                            active
+                              ? `bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
+                                  isRailPopping(popId) ? ' sidebar-rail-btn--pop' : ''
+                                }`
+                              : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                          {badge > 0 ? (
+                            <NotificationCountBadge count={badge} rail />
+                          ) : null}
+                        </Link>
+                        <button
+                          type="button"
+                          title={favorito ? 'Desfavoritar' : 'Favoritar na barra'}
+                          aria-label={
+                            favorito
+                              ? `Desfavoritar ${label}`
+                              : `Favoritar ${label} na barra`
+                          }
+                          aria-pressed={favorito}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleRailFavorite(href);
+                          }}
+                          className={`absolute -left-0.5 -top-0.5 z-10 inline-flex h-5 w-5 items-center justify-center transition-opacity ${
+                            favorito
+                              ? 'text-amber-500 opacity-100 dark:text-amber-400'
+                              : 'text-gray-400 opacity-0 group-hover:opacity-100 hover:text-amber-500 dark:text-gray-500'
+                          }`}
+                        >
+                          <Star
+                            className="h-3.5 w-3.5"
+                            fill={favorito ? 'currentColor' : 'none'}
+                            aria-hidden
+                          />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ActionMenuOverlay>
+            )}
           </div>
           ) : null}
         </div>
