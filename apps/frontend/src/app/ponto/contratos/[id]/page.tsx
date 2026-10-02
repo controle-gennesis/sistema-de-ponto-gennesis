@@ -1120,6 +1120,9 @@ export default function ContractDetailPage() {
   const [adjFormDate, setAdjFormDate] = useState('');
   const [showAddendumModal, setShowAddendumModal] = useState(false);
   const [showPaidNaturezaModal, setShowPaidNaturezaModal] = useState(false);
+  const [resumoPeriodoModal, setResumoPeriodoModal] = useState<null | 'abastecimento' | 'caixinha'>(
+    null
+  );
   const [naturezaModalMesIdx, setNaturezaModalMesIdx] = useState<number | null>(null);
   const [expandedNaturezaKey, setExpandedNaturezaKey] = useState<string | null>(null);
   const [gastosResumoModal, setGastosResumoModal] = useState<
@@ -1599,10 +1602,19 @@ export default function ContractDetailPage() {
   const { data: caixinhaListaData, isLoading: loadingCaixinhaTotal } = useQuery({
     queryKey: ['caixinha-purchases', 'contract-resumo', contractId],
     queryFn: async () => {
-      const res = await api.get<{ success: boolean; data: Array<{ amount: number; purchaseDate: string | null }> }>(
-        '/caixinha',
-        { params: { contractId } }
-      );
+      const res = await api.get<{
+        success: boolean;
+        data: Array<{
+          id: string;
+          amount: number;
+          purchaseDate: string | null;
+          personName?: string | null;
+          storeName?: string | null;
+          caixinha?: string | null;
+          osNumber?: string | null;
+          invoiceNumber?: string | null;
+        }>;
+      }>('/caixinha', { params: { contractId } });
       return res.data?.data ?? [];
     },
     enabled: !!contractId && canAccessCaixinhaModulo,
@@ -1634,9 +1646,15 @@ export default function ContractDetailPage() {
     queryFn: async () => {
       const res = await api.get('/fuel-refuel-requests');
       return (res.data?.data || []) as Array<{
+        id: string;
+        displayNumber?: number | null;
+        status?: string | null;
+        driverName?: string | null;
+        vehiclePlate?: string | null;
         contract?: { id: string } | null;
         refuelDate?: string | null;
         refuelReportedAt?: string | null;
+        requestedAt?: string | null;
         litersRefueled?: string | number | null;
         pricePerLiter?: string | number | null;
       }>;
@@ -2712,36 +2730,59 @@ export default function ContractDetailPage() {
     return result;
   }, [availableYears, producaoPorAno, faturamentoPorAno]);
 
-  const caixinhaResumo = useMemo(() => {
+  const caixinhaPeriodoRows = useMemo(() => {
     const rows = Array.isArray(caixinhaListaData) ? caixinhaListaData : [];
-    const filtered = rows.filter((row) => {
-      const raw = row.purchaseDate;
-      if (!raw) return !periodFrom && !periodTo;
-      return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
-    });
-    const total = filtered.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
-    return { total, count: filtered.length };
+    return rows
+      .filter((row) => {
+        const raw = row.purchaseDate;
+        if (!raw) return !periodFrom && !periodTo;
+        return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
+      })
+      .slice()
+      .sort((a, b) => {
+        const da = parseDateSafe(a.purchaseDate)?.getTime() ?? 0;
+        const db = parseDateSafe(b.purchaseDate)?.getTime() ?? 0;
+        return db - da;
+      });
   }, [caixinhaListaData, periodFrom, periodTo]);
 
-  const abastecimentoResumo = useMemo(() => {
+  const caixinhaResumo = useMemo(() => {
+    const total = caixinhaPeriodoRows.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
+    return { total, count: caixinhaPeriodoRows.length };
+  }, [caixinhaPeriodoRows]);
+
+  const abastecimentoPeriodoRows = useMemo(() => {
     const rows = Array.isArray(combustivelListaData) ? combustivelListaData : [];
-    const filtered = rows.filter((row) => {
-      if (row.contract?.id !== contractId) return false;
-      const raw = row.refuelReportedAt || row.refuelDate;
-      if (!raw) return !periodFrom && !periodTo;
-      return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
-    });
+    return rows
+      .filter((row) => {
+        if (row.contract?.id !== contractId) return false;
+        const raw = row.refuelReportedAt || row.refuelDate || row.requestedAt;
+        if (!raw) return !periodFrom && !periodTo;
+        return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
+      })
+      .map((row) => {
+        const liters = Number(row.litersRefueled);
+        const price = Number(row.pricePerLiter);
+        const total =
+          Number.isFinite(liters) && Number.isFinite(price) ? liters * price : 0;
+        const when = parseDateSafe(row.refuelReportedAt || row.refuelDate || row.requestedAt);
+        return { row, total, liters: Number.isFinite(liters) ? liters : null, when };
+      })
+      .sort((a, b) => (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0));
+  }, [combustivelListaData, contractId, periodFrom, periodTo]);
+
+  const abastecimentoResumo = useMemo(() => {
     let total = 0;
     let count = 0;
-    for (const row of filtered) {
-      const liters = Number(row.litersRefueled);
-      const price = Number(row.pricePerLiter);
+    for (const item of abastecimentoPeriodoRows) {
+      const liters = Number(item.row.litersRefueled);
+      const price = Number(item.row.pricePerLiter);
       if (!Number.isFinite(liters) || !Number.isFinite(price)) continue;
       total += liters * price;
       count += 1;
     }
     return { total, count };
-  }, [combustivelListaData, contractId, periodFrom, periodTo]);
+  }, [abastecimentoPeriodoRows]);
 
   const resumoAbastecimentoCota = useMemo((): ContratoResumoAbastecimento | null => {
     if (!canAccessCombustivelModulo) return null;
@@ -4393,9 +4434,7 @@ export default function ContractDetailPage() {
                         loading={loadingCombustivelTotal}
                         iconBg="bg-gray-100 dark:bg-gray-700/60"
                         iconColor="text-gray-600 dark:text-gray-300"
-                        onClick={() =>
-                          router.push('/ponto/solicitacoes-combustivel/analises')
-                        }
+                        onClick={() => setResumoPeriodoModal('abastecimento')}
                       />
                     </>
                   ) : null}
@@ -4415,9 +4454,7 @@ export default function ContractDetailPage() {
                         loading={loadingCaixinhaTotal}
                         iconBg="bg-gray-100 dark:bg-gray-700/60"
                         iconColor="text-gray-600 dark:text-gray-300"
-                        onClick={() =>
-                          router.push(`/ponto/caixinha?contrato=${contractId}`)
-                        }
+                        onClick={() => setResumoPeriodoModal('caixinha')}
                       />
                     </>
                   ) : null}
@@ -7748,6 +7785,118 @@ export default function ContractDetailPage() {
               <p className="border-t border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 {filteredBillings.length} registro(s)
               </p>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={resumoPeriodoModal === 'abastecimento'}
+            onClose={() => setResumoPeriodoModal(null)}
+            title="Abastecimento no período"
+            size="lg"
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Solicitações de {resumoPeriodLabel}
+                {abastecimentoResumo.count > 0
+                  ? ` · ${abastecimentoResumo.count} registro(s) · ${formatCurrency(abastecimentoResumo.total)}`
+                  : null}
+              </p>
+              {loadingCombustivelTotal ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
+                </div>
+              ) : abastecimentoPeriodoRows.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-500">
+                  Nenhuma solicitação neste período.
+                </p>
+              ) : (
+                <ul className="max-h-[55vh] divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                  {abastecimentoPeriodoRows.map(({ row, total, liters, when }) => (
+                    <li
+                      key={row.id}
+                      className="flex items-start justify-between gap-3 px-3 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {row.displayNumber != null ? `#${row.displayNumber}` : 'Solicitação'}
+                          <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                            {when ? formatDate(when.toISOString()) : '—'}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                          {[row.driverName, row.vehiclePlate].filter(Boolean).join(' · ') || '—'}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-sm tabular-nums">
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">
+                          {formatCurrency(total)}
+                        </p>
+                        {liters != null && liters > 0 ? (
+                          <p className="text-xs text-gray-400">
+                            {liters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L
+                          </p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={resumoPeriodoModal === 'caixinha'}
+            onClose={() => setResumoPeriodoModal(null)}
+            title="Caixinha no período"
+            size="lg"
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Compras de {resumoPeriodLabel}
+                {caixinhaResumo.count > 0
+                  ? ` · ${caixinhaResumo.count} registro(s) · ${formatCurrency(caixinhaResumo.total)}`
+                  : null}
+              </p>
+              {loadingCaixinhaTotal ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
+                </div>
+              ) : caixinhaPeriodoRows.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-500">
+                  Nenhuma solicitação neste período.
+                </p>
+              ) : (
+                <ul className="max-h-[55vh] divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                  {caixinhaPeriodoRows.map((row) => (
+                    <li
+                      key={row.id}
+                      className="flex items-start justify-between gap-3 px-3 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {row.personName?.trim() || 'Sem nome'}
+                          <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                            {row.purchaseDate ? formatDate(row.purchaseDate) : '—'}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                          {[row.storeName, row.caixinha, row.osNumber ? `OS ${row.osNumber}` : null]
+                            .filter(Boolean)
+                            .join(' · ') || '—'}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-sm tabular-nums">
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">
+                          {formatCurrency(Number(row.amount) || 0)}
+                        </p>
+                        {row.invoiceNumber ? (
+                          <p className="text-xs text-gray-400">NF {row.invoiceNumber}</p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </Modal>
 
