@@ -100,7 +100,6 @@ import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
-import { fluigService } from './controllers/FluigController';
 import { orcafascioService } from './controllers/OrcafascioController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';

@@ -293,6 +293,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
     isDepartmentFinanceiro,
     isDepartmentContabil,
@@ -307,6 +308,35 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   // apenas em desenvolvimento; em produção ele continua ativo (rotas já pré-compiladas).
   const navLinkPrefetch = process.env.NODE_ENV === 'production' ? undefined : false;
 
+  /** Prefetch de dataset Fluig no máximo 1× por id por sessão (evita loop no Fluig). */
+  const fluigPrefetchedRef = useRef<Set<string>>(new Set());
+
+  const prefetchFluigDatasetOnce = useCallback(
+    (queryKey: readonly unknown[], datasetId: string) => {
+      if (fluigPrefetchedRef.current.has(datasetId)) return;
+      const cached = queryClient.getQueryData(queryKey as unknown[]);
+      if (cached != null) {
+        fluigPrefetchedRef.current.add(datasetId);
+        return;
+      }
+      fluigPrefetchedRef.current.add(datasetId);
+      void queryClient.prefetchQuery({
+        queryKey: queryKey as unknown[],
+        queryFn: async () => {
+          const res = await api.post(
+            `/fluig/datasets/${encodeURIComponent(datasetId)}/data`,
+            {},
+            { timeout: 130000 }
+          );
+          return res.data;
+        },
+        staleTime: 15 * 60 * 1000,
+        retry: 0,
+      });
+    },
+    [queryClient]
+  );
+
   const prefetchFluigDatasets = useCallback(() => {
     router.prefetch('/ponto/fluig/aprovacoes-workflow');
     router.prefetch(
@@ -316,40 +346,23 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       })
     );
     for (const id of FLUIG_APPROVAL_DATASET_IDS) {
-      void queryClient.prefetchQuery({
-        queryKey: ['fluig-workflow-approval', id],
-        queryFn: async () => {
-          const res = await api.post(
-            `/fluig/datasets/${encodeURIComponent(id)}/data`,
-            {},
-            { timeout: 130000 }
-          );
-          return res.data;
-        },
-        staleTime: 7 * 60 * 1000,
-      });
+      prefetchFluigDatasetOnce(['fluig-workflow-approval', id], id);
     }
-  }, [queryClient, router, fluigApproverFullAccess, fluigApproverNameKeys]);
+  }, [
+    router,
+    fluigApproverFullAccess,
+    fluigApproverNameKeys,
+    prefetchFluigDatasetOnce,
+  ]);
 
   const prefetchFluigProcessDatasets = useCallback(
     (datasetIds: readonly string[], routeHref: string) => {
       router.prefetch(routeHref);
       for (const id of datasetIds) {
-        void queryClient.prefetchQuery({
-          queryKey: ['fluig-dataset', id],
-          queryFn: async () => {
-            const res = await api.post(
-              `/fluig/datasets/${encodeURIComponent(id)}/data`,
-              {},
-              { timeout: 130000 }
-            );
-            return res.data;
-          },
-          staleTime: 7 * 60 * 1000,
-        });
+        prefetchFluigDatasetOnce(['fluig-dataset', id], id);
       }
     },
-    [queryClient, router]
+    [router, prefetchFluigDatasetOnce]
   );
 
   const prefetchGastosOperacionais = useCallback(() => {
@@ -403,75 +416,24 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     [prefetchFluigDatasets, prefetchFluigProcessDatasets, prefetchGastosOperacionais]
   );
 
-  // Prefetch automático: pré-carrega rotas e dados Fluig assim que o usuário faz login.
+  // Sem prefetch automático de datasets Fluig no login — só sob demanda
+  // (abrir a página ou hover no menu, com guard 1×/sessão).
+  // Gastos operacionais (Totvs) continua com prefetch leve após login.
+  const gastosAutoPrefetchDoneRef = useRef(false);
   useEffect(() => {
     if (!user || isLoading) return;
-
-    const fluigApproversHref = buildFluigApproversNavHref({
-      fullAccess: fluigApproverFullAccess,
-      nameKeys: fluigApproverNameKeys,
-    });
-    const canPrefetchGastos =
-      isAdministrator || can(GASTOS_OPERACIONAIS_MODULE_KEY);
-    const canPrefetchProcessos =
-      isAdministrator || can(FLUIG_PROCESSOS_MODULE_KEY);
-    const canPrefetchDp =
-      isAdministrator || can(FLUIG_DP_MODULE_KEY);
-    const canPrefetchJuridicoFluig =
-      isAdministrator || can(FLUIG_JURIDICO_MODULE_KEY);
+    if (gastosAutoPrefetchDoneRef.current) return;
+    if (!(isAdministrator || can(GASTOS_OPERACIONAIS_MODULE_KEY))) return;
 
     const timer = setTimeout(() => {
-      router.prefetch('/ponto/fluig/aprovacoes-workflow');
-      router.prefetch(fluigApproversHref);
-
-      if (canAccessFluigApproversRoute) {
-        for (const id of FLUIG_APPROVAL_DATASET_IDS) {
-          void queryClient.prefetchQuery({
-            queryKey: ['fluig-workflow-approval', id],
-            queryFn: async () => {
-              const res = await api.post(
-                `/fluig/datasets/${encodeURIComponent(id)}/data`,
-                {},
-                { timeout: 130000 }
-              );
-              return res.data;
-            },
-            staleTime: 7 * 60 * 1000,
-          });
-        }
-      }
-
-      if (canPrefetchProcessos) {
-        prefetchFluigProcessDatasets(FLUIG_PROCESSOS_DATASET_IDS, FLUIG_PROCESSOS_HREF);
-      }
-
-      if (canPrefetchDp) {
-        prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
-      }
-
-      if (canPrefetchJuridicoFluig) {
-        prefetchFluigProcessDatasets(FLUIG_JURIDICO_DATASET_IDS, FLUIG_JURIDICO_HREF);
-      }
-
-      if (canPrefetchGastos) {
-        prefetchGastosOperacionais();
-      }
+      if (gastosAutoPrefetchDoneRef.current) return;
+      gastosAutoPrefetchDoneRef.current = true;
+      prefetchGastosOperacionais();
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [
-    user,
-    isLoading,
-    router,
-    queryClient,
-    fluigApproverFullAccess,
-    fluigApproverNameKeys,
-    canAccessFluigApproversRoute,
-    isAdministrator,
-    can,
-    prefetchGastosOperacionais,
-    prefetchFluigProcessDatasets,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 1× por sessão
+  }, [user?.id, isLoading]);
 
   const canSeeFuroEstoque =
     isAdministrator || can(pk('/ponto/furo-estoque'));
@@ -608,7 +570,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         canApproveEspelhoNf ||
         canApproveOc ||
         canApproveFuel ||
-        canApproveMaterialRequests;
+        canApproveMaterialRequests ||
+        canApproveEmpreiteiroDaily;
       if (aprovacoesVisible) return 0;
       return approvalCounts.rm;
     }
@@ -798,7 +761,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               canApproveEspelhoNf ||
               canApproveOc ||
               canApproveFuel ||
-              canApproveMaterialRequests,
+              canApproveMaterialRequests ||
+              canApproveEmpreiteiroDaily,
           },
           {
             name: 'Solicitações Internas',

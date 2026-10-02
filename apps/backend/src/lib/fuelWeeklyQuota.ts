@@ -34,21 +34,34 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Dinheiro em centavos (evita 525,01 / -0,00 por float). */
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Gasto que conta na cota semanal.
+ * Prefere o valor liberado pelo Suprimentos — o cupom (litros × R$/L) pode
+ * ficar 1 centavo acima e pintava a cota de vermelho sem necessidade.
+ */
 function spendOfRow(row: {
   status: string;
   released: unknown;
   liters: unknown;
   ppl: unknown;
 }): number {
+  const released = asNumber(row.released);
+  if (released != null && released > 0) {
+    return roundMoney(released);
+  }
   if (row.status === 'COMPLETED') {
     const liters = asNumber(row.liters);
     const ppl = asNumber(row.ppl);
     if (liters != null && ppl != null && liters > 0 && ppl > 0) {
-      return liters * ppl;
+      return roundMoney(liters * ppl);
     }
   }
-  const released = asNumber(row.released);
-  return released != null && released > 0 ? released : 0;
+  return 0;
 }
 
 type QuotaContractRow = {
@@ -117,19 +130,29 @@ function buildBalanceForOwner(
 ): FuelQuotaBalance {
   const weeklyTankQuota = asNumber(owner.weekly);
   const unlimited = weeklyTankQuota == null || weeklyTankQuota <= 0;
-  const weeklyBudgetReais = unlimited ? null : weeklyTankQuota * tankPriceReais;
-  const usedReais = spendRows
-    .filter((row) => row.contractId && memberIds.has(row.contractId))
-    .reduce((sum, row) => sum + spendOfRow(row), 0);
-  const remainingReais =
-    unlimited || weeklyBudgetReais == null ? null : weeklyBudgetReais - usedReais;
+  const weeklyBudgetReais = unlimited
+    ? null
+    : roundMoney(weeklyTankQuota * tankPriceReais);
+  const usedReais = roundMoney(
+    spendRows
+      .filter((row) => row.contractId && memberIds.has(row.contractId))
+      .reduce((sum, row) => sum + spendOfRow(row), 0)
+  );
+  let remainingReais: number | null =
+    unlimited || weeklyBudgetReais == null
+      ? null
+      : roundMoney(weeklyBudgetReais - usedReais);
+  // Centavo residual / float: trata como zerado (não marca negativo).
+  if (remainingReais != null && remainingReais > -0.01 && remainingReais < 0) {
+    remainingReais = 0;
+  }
 
   return {
     contractId: requestContractId,
     ownerContractId: owner.id,
     ownerName: owner.name.trim() || owner.number,
     weeklyTankQuota,
-    tankPriceReais,
+    tankPriceReais: roundMoney(tankPriceReais),
     weeklyBudgetReais,
     usedReais,
     remainingReais,

@@ -355,6 +355,12 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
 
+  /** Aprovar/devolver medições de entrega de empreita (fila Pendentes). */
+  const canApproveEmpreiteiroDaily =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-medicoes-empreita'));
+
   const canApproveOcCompras =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
   const canApproveOcDiretoria =
@@ -610,6 +616,7 @@ export function usePermissions() {
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
+    canApproveEmpreiteiroDaily,
     canApproveOc,
     canApproveOcCompras,
     canApproveOcDiretoria,
@@ -746,7 +753,8 @@ export function useRoutePermission(route: string) {
       canApproveEspelhoNf ||
       canApproveFuel ||
       canApproveOc ||
-      canApproveMaterialRequests,
+      canApproveMaterialRequests ||
+      can(pk('/ponto/controle/aprovar-medicoes-empreita')),
     '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || can(pk('/ponto/aniversariantes')),
     '/ponto/seguranca-do-trabalho': isAdministrator || can(pk('/ponto/seguranca-do-trabalho')),

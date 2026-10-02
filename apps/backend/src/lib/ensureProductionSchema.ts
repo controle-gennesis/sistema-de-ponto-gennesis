@@ -1896,6 +1896,9 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
   `);
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ALTER COLUMN "contractId" DROP NOT NULL;
+  `);
+  await prisma.$executeRawUnsafe(`
     DO $$
     BEGIN
       IF NOT EXISTS (
@@ -1984,6 +1987,338 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_contracts" (
+      "id" TEXT NOT NULL,
+      "empreiteiroId" TEXT NOT NULL,
+      "contractId" TEXT NOT NULL,
+      "startDate" TIMESTAMP(3),
+      "endDate" TIMESTAMP(3),
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "note" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiro_contracts_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    DROP INDEX IF EXISTS "empreiteiro_contracts_empreiteiroId_contractId_key";
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contracts_empreiteiroId_idx"
+      ON "empreiteiro_contracts"("empreiteiroId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contracts_contractId_idx"
+      ON "empreiteiro_contracts"("contractId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contracts_isActive_idx"
+      ON "empreiteiro_contracts"("isActive");
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'IN_PROGRESS';
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "name" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "description" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "plannedValue" DECIMAL(15, 2);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "costCenterId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "files" JSONB NOT NULL DEFAULT '[]'::jsonb;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ADD COLUMN IF NOT EXISTS "location" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contracts" ALTER COLUMN "contractId" DROP NOT NULL;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_contract_installments" (
+      "id" TEXT NOT NULL,
+      "empreiteiroContractId" TEXT NOT NULL,
+      "number" INTEGER NOT NULL,
+      "amount" DECIMAL(15, 2) NOT NULL,
+      "dueDate" DATE,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "releasedAt" TIMESTAMP(3),
+      "releasedBy" TEXT,
+      "paidAt" TIMESTAMP(3),
+      "paidBy" TEXT,
+      "measurementId" TEXT,
+      "note" TEXT,
+      "proofFiles" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiro_contract_installments_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_contract_installments"
+      ADD COLUMN IF NOT EXISTS "proofFiles" JSONB NOT NULL DEFAULT '[]'::jsonb;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiro_contract_installments_empreiteiroContractId_number_key"
+      ON "empreiteiro_contract_installments"("empreiteiroContractId", "number");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contract_installments_empreiteiroContractId_idx"
+      ON "empreiteiro_contract_installments"("empreiteiroContractId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contract_installments_status_idx"
+      ON "empreiteiro_contract_installments"("status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contract_installments_measurementId_idx"
+      ON "empreiteiro_contract_installments"("measurementId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contract_installments_empreiteiroContractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contract_installments"
+          ADD CONSTRAINT "empreiteiro_contract_installments_empreiteiroContractId_fkey"
+          FOREIGN KEY ("empreiteiroContractId") REFERENCES "empreiteiro_contracts"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contract_installments_measurementId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contract_installments"
+          ADD CONSTRAINT "empreiteiro_contract_installments_measurementId_fkey"
+          FOREIGN KEY ("measurementId") REFERENCES "empreiteiro_daily_measurements"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  // Equipe por contrato de serviço (turma daquele serviço).
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_team_members"
+      ADD COLUMN IF NOT EXISTS "empreiteiroContractId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_team_members_empreiteiroContractId_idx"
+      ON "empreiteiro_team_members"("empreiteiroContractId");
+  `);
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_team_members" m
+      SET "empreiteiroContractId" = c.id
+      FROM (
+        SELECT DISTINCT ON ("empreiteiroId") id, "empreiteiroId"
+        FROM "empreiteiro_contracts"
+        ORDER BY "empreiteiroId", "isActive" DESC, "createdAt" DESC
+      ) c
+      WHERE m."empreiteiroId" = c."empreiteiroId"
+        AND m."empreiteiroContractId" IS NULL;
+    `);
+  } catch {
+    // ignore
+  }
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_team_members_empreiteiroContractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_team_members"
+          ADD CONSTRAINT "empreiteiro_team_members_empreiteiroContractId_fkey"
+          FOREIGN KEY ("empreiteiroContractId") REFERENCES "empreiteiro_contracts"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_contract_addenda" (
+      "id" TEXT NOT NULL,
+      "empreiteiroContractId" TEXT NOT NULL,
+      "number" INTEGER NOT NULL,
+      "reason" TEXT NOT NULL,
+      "effectiveDate" DATE NOT NULL,
+      "amount" DECIMAL(15, 2) NOT NULL,
+      "servicesAdded" TEXT,
+      "servicesRemoved" TEXT,
+      "files" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "approvedByName" TEXT,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiro_contract_addenda_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiro_contract_addenda_empreiteiroContractId_number_key"
+      ON "empreiteiro_contract_addenda"("empreiteiroContractId", "number");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contract_addenda_empreiteiroContractId_idx"
+      ON "empreiteiro_contract_addenda"("empreiteiroContractId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contract_addenda_effectiveDate_idx"
+      ON "empreiteiro_contract_addenda"("effectiveDate");
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contract_addenda_empreiteiroContractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contract_addenda"
+          ADD CONSTRAINT "empreiteiro_contract_addenda_empreiteiroContractId_fkey"
+          FOREIGN KEY ("empreiteiroContractId") REFERENCES "empreiteiro_contracts"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contracts_status_idx"
+      ON "empreiteiro_contracts"("status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_contracts_costCenterId_idx"
+      ON "empreiteiro_contracts"("costCenterId");
+  `);
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_contracts" ec
+      SET "name" = COALESCE(NULLIF(ec."name", ''), c."name", 'Contrato de serviço')
+      FROM "contracts" c
+      WHERE ec."contractId" = c.id
+        AND (ec."name" IS NULL OR ec."name" = '');
+    `);
+  } catch {
+    // ignora
+  }
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_contracts"
+      SET "name" = 'Contrato de serviço'
+      WHERE "name" IS NULL OR "name" = '';
+    `);
+  } catch {
+    // ignora
+  }
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "empreiteiro_contracts" ALTER COLUMN "name" SET NOT NULL;
+    `);
+  } catch {
+    // pode falhar se ainda houver null
+  }
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_contracts"
+      SET "status" = CASE
+        WHEN "isActive" = false AND ("status" IS NULL OR "status" = 'IN_PROGRESS') THEN 'COMPLETED'
+        ELSE COALESCE(NULLIF("status", ''), 'IN_PROGRESS')
+      END
+      WHERE "status" IS NULL OR "status" = '';
+    `);
+  } catch {
+    // coluna acabou de ser criada
+  }
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contracts_empreiteiroId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contracts"
+          ADD CONSTRAINT "empreiteiro_contracts_empreiteiroId_fkey"
+          FOREIGN KEY ("empreiteiroId") REFERENCES "empreiteiros"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contracts_contractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contracts"
+          DROP CONSTRAINT "empreiteiro_contracts_contractId_fkey";
+      END IF;
+      ALTER TABLE "empreiteiro_contracts"
+        ADD CONSTRAINT "empreiteiro_contracts_contractId_fkey"
+        FOREIGN KEY ("contractId") REFERENCES "contracts"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_contracts_costCenterId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_contracts"
+          ADD CONSTRAINT "empreiteiro_contracts_costCenterId_fkey"
+          FOREIGN KEY ("costCenterId") REFERENCES "cost_centers"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  // Backfill: vínculo atual do cadastro vira o primeiro contrato de serviço.
+  try {
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "empreiteiro_contracts" (
+        "id", "empreiteiroId", "name", "contractId", "startDate", "endDate", "isActive", "status", "createdAt", "updatedAt"
+      )
+      SELECT
+        md5(e.id || ':' || e."contractId"),
+        e.id,
+        COALESCE(c."name", 'Contrato de serviço'),
+        e."contractId",
+        e."startDate",
+        e."endDate",
+        true,
+        'IN_PROGRESS',
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      FROM "empreiteiros" e
+      LEFT JOIN "contracts" c ON c.id = e."contractId"
+      WHERE e."contractId" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM "empreiteiro_contracts" x
+          WHERE x."empreiteiroId" = e.id
+        );
+    `);
+  } catch {
+    // Tabela contracts pode não existir em ambientes mínimos.
+  }
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "empreiteiro_daily_measurements" (
       "id" TEXT NOT NULL,
       "empreiteiroId" TEXT NOT NULL,
@@ -1999,9 +2334,68 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
       CONSTRAINT "empreiteiro_daily_measurements_pkey" PRIMARY KEY ("id")
     );
   `);
+  // Antes: 1 medição/dia/empreita. Agora: 1 medição/dia/contrato de serviço.
   await prisma.$executeRawUnsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_key"
-      ON "empreiteiro_daily_measurements"("empreiteiroId", "workDate");
+    DROP INDEX IF EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_key";
+  `);
+  await prisma.$executeRawUnsafe(`
+    DROP INDEX IF EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_contractId_key";
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "empreiteiroContractId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroContractId_idx"
+      ON "empreiteiro_daily_measurements"("empreiteiroContractId");
+  `);
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_daily_measurements" m
+      SET "empreiteiroContractId" = ec.id
+      FROM "empreiteiro_contracts" ec
+      WHERE m."empreiteiroContractId" IS NULL
+        AND m."empreiteiroId" = ec."empreiteiroId"
+        AND m."contractId" IS NOT NULL
+        AND m."contractId" = ec."contractId";
+    `);
+  } catch {
+    // ignora
+  }
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_daily_measurements" m
+      SET "empreiteiroContractId" = (
+        SELECT ec.id FROM "empreiteiro_contracts" ec
+        WHERE ec."empreiteiroId" = m."empreiteiroId"
+        ORDER BY ec."isActive" DESC, ec."createdAt" ASC
+        LIMIT 1
+      )
+      WHERE m."empreiteiroContractId" IS NULL;
+    `);
+  } catch {
+    // ignora
+  }
+  await prisma.$executeRawUnsafe(`
+    DROP INDEX IF EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_empreiteiroContractId_key";
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_empreiteiroContractId_idx"
+      ON "empreiteiro_daily_measurements"("empreiteiroId", "workDate", "empreiteiroContractId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_daily_measurements_empreiteiroContractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_daily_measurements"
+          ADD CONSTRAINT "empreiteiro_daily_measurements_empreiteiroContractId_fkey"
+          FOREIGN KEY ("empreiteiroContractId") REFERENCES "empreiteiro_contracts"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
   `);
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroId_idx"
@@ -2015,7 +2409,77 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
     ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "confirmedBy" TEXT;
   `);
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "contractId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_contractId_idx"
+      ON "empreiteiro_daily_measurements"("contractId");
+  `);
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiro_daily_measurements" m
+      SET "contractId" = e."contractId"
+      FROM "empreiteiros" e
+      WHERE m."empreiteiroId" = e.id
+        AND m."contractId" IS NULL
+        AND e."contractId" IS NOT NULL;
+    `);
+  } catch {
+    // ignora se coluna/tabela ainda não existirem
+  }
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_daily_measurements_contractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_daily_measurements"
+          ADD CONSTRAINT "empreiteiro_daily_measurements_contractId_fkey"
+          FOREIGN KEY ("contractId") REFERENCES "contracts"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "teamPhoto" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'SUBMITTED';
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "approvedBy" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "approvedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "returnedBy" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "returnedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "correctionNote" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "executedAmount" DECIMAL(15,2);
+  `);
+  // Migra baixas antigas: valor da parcela que foi liberada pela medição → executado.
+  await prisma.$executeRawUnsafe(`
+    UPDATE "empreiteiro_daily_measurements" m
+    SET "executedAmount" = i.amount
+    FROM "empreiteiro_contract_installments" i
+    WHERE i."measurementId" = m.id
+      AND UPPER(COALESCE(m.status, '')) = 'APPROVED'
+      AND m."executedAmount" IS NULL
+      AND i.amount IS NOT NULL;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_status_idx"
+      ON "empreiteiro_daily_measurements"("status");
   `);
   await prisma.$executeRawUnsafe(`
     DO $$

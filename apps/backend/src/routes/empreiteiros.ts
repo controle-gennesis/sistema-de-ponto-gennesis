@@ -68,6 +68,36 @@ router.post(
 );
 
 router.get('/', (req, res, next) => controller.getAll(req as any, res as any, next));
+router.get('/linkable-users', (req, res, next) =>
+  controller.listLinkableUsers(req as any, res as any, next)
+);
+router.get('/daily-measurements/pending', (req, res, next) =>
+  controller.listPendingDailyMeasurements(req as any, res as any, next)
+);
+router.post('/:id/contracts', (req, res, next) =>
+  controller.addContract(req as any, res as any, next)
+);
+router.patch('/:id/contracts/:linkId', (req, res, next) =>
+  controller.updateContract(req as any, res as any, next)
+);
+router.patch('/:id/contracts/:linkId/team', (req, res, next) =>
+  controller.updateContractTeam(req as any, res as any, next)
+);
+router.post('/:id/contracts/:linkId/end', (req, res, next) =>
+  controller.endContract(req as any, res as any, next)
+);
+router.delete('/:id/contracts/:linkId', (req, res, next) =>
+  controller.deleteContract(req as any, res as any, next)
+);
+router.patch('/:id/contracts/:linkId/installments/:installmentId', (req, res, next) =>
+  controller.updateInstallment(req as any, res as any, next)
+);
+router.post('/:id/contracts/:linkId/addenda', (req, res, next) =>
+  controller.addAddendum(req as any, res as any, next)
+);
+router.delete('/:id/contracts/:linkId/addenda/:addendumId', (req, res, next) =>
+  controller.deleteAddendum(req as any, res as any, next)
+);
 router.get('/:id/daily-measurements', (req, res, next) =>
   controller.listDailyMeasurements(req as any, res as any, next)
 );
@@ -76,6 +106,15 @@ router.post('/:id/daily-measurements', (req, res, next) =>
 );
 router.patch('/:id/daily-measurements/:measurementId', (req, res, next) =>
   controller.updateDailyMeasurement(req as any, res as any, next)
+);
+router.post('/:id/daily-measurements/:measurementId/approve', (req, res, next) =>
+  controller.approveDailyMeasurement(req as any, res as any, next)
+);
+router.post('/:id/daily-measurements/:measurementId/execution', (req, res, next) =>
+  controller.registerDailyMeasurementExecution(req as any, res as any, next)
+);
+router.post('/:id/daily-measurements/:measurementId/return', (req, res, next) =>
+  controller.returnDailyMeasurement(req as any, res as any, next)
 );
 router.delete('/:id/daily-measurements/:measurementId', (req, res, next) =>
   controller.deleteDailyMeasurement(req as any, res as any, next)

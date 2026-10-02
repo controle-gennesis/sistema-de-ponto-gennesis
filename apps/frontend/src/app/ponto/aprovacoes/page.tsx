@@ -41,6 +41,7 @@ import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
 import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
 import { RmApprovalsSection } from './_components/RmApprovalsSection';
+import { MedicaoApprovalsSection } from './_components/MedicaoApprovalsSection';
 import {
   AprovacoesTabsNav,
   type AprovacaoTabId,
@@ -303,6 +304,8 @@ function AprovacoesPage() {
     canApproveOc,
     canApproveFuel,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
+    isLinkedEmpreiteiro,
   } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
   const searchParams = useSearchParams();
@@ -313,7 +316,8 @@ function AprovacoesPage() {
     tabFromUrl === 'fd' ||
     tabFromUrl === 'fuel' ||
     tabFromUrl === 'rm' ||
-    tabFromUrl === 'oc'
+    tabFromUrl === 'oc' ||
+    tabFromUrl === 'medicao'
       ? tabFromUrl
       : 'dp';
   const [activeTab, setActiveTab] = useState<AprovacaoTabId>(initialTab);
@@ -326,7 +330,8 @@ function AprovacoesPage() {
       tabFromUrl === 'fd' ||
       tabFromUrl === 'fuel' ||
       tabFromUrl === 'rm' ||
-      tabFromUrl === 'oc'
+      tabFromUrl === 'oc' ||
+      tabFromUrl === 'medicao'
     ) {
       setActiveTab(tabFromUrl);
     }
@@ -619,8 +624,15 @@ function AprovacoesPage() {
         count: approvalCounts.oc,
       });
     }
+    if (canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro) {
+      tabs.push({
+        id: 'medicao',
+        label: 'Medições de entrega',
+        count: approvalCounts.medicao,
+      });
+    }
     return tabs;
-  }, [canApproveDp, canApproveFd, canApproveEspelhoNf, canApproveFuel, canApproveMaterialRequests, canApproveOc, approvalCounts]);
+  }, [canApproveDp, canApproveFd, canApproveEspelhoNf, canApproveFuel, canApproveMaterialRequests, canApproveOc, canApproveEmpreiteiroDaily, isLinkedEmpreiteiro, approvalCounts]);
 
   useEffect(() => {
     if (approvalTabs.length === 0) return;
@@ -1309,6 +1321,10 @@ function AprovacoesPage() {
           {canApproveMaterialRequests && activeTab === 'rm' && <RmApprovalsSection />}
 
           {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
+
+          {canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro && activeTab === 'medicao' && (
+            <MedicaoApprovalsSection />
+          )}
 
           <Modal
             isOpen={!!detailRequest}

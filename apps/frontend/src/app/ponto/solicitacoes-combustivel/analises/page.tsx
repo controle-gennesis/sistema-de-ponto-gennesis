@@ -264,8 +264,13 @@ function WeeklyQuotaPanel({
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {visible.map((g) => {
-                const remaining = g.remainingReais;
-                const over = remaining != null && remaining < 0;
+                const remainingRaw = g.remainingReais;
+                // Só marca estouro a partir de 1 centavo (evita -R$ 0,00 / -R$ 0,01 por cupom).
+                const over = remainingRaw != null && remainingRaw <= -0.01;
+                const remaining =
+                  remainingRaw != null && remainingRaw > -0.01 && remainingRaw < 0
+                    ? 0
+                    : remainingRaw;
                 const usedPct =
                   !g.unlimited && g.weeklyBudgetReais && g.weeklyBudgetReais > 0
                     ? (g.usedReais / g.weeklyBudgetReais) * 100

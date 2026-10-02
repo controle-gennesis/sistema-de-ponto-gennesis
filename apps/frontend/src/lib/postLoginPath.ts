@@ -14,7 +14,10 @@ export function isEmpreiteiroAllowedPath(pathname?: string | null): boolean {
 
 export function postLoginPath(user?: {
   empreiteiro?: { id?: string | null } | null;
+  employee?: { id?: string | null } | null;
 } | null): string {
   if (user?.empreiteiro?.id) return EMPREITEIROS_PATH;
+  // Login de empreiteiro só com acesso (ainda sem cadastro vinculado)
+  if (user && !user.employee) return EMPREITEIROS_PATH;
   return '/ponto/home';
 }

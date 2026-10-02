@@ -44,6 +44,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
     canAccessCollaborationTools,
     isLinkedEmpreiteiro,
   } = usePermissions();
@@ -84,7 +85,8 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canApproveEspelhoNf ||
     canApproveFuel ||
     canApproveOc ||
-    canApproveMaterialRequests;
+    canApproveMaterialRequests ||
+    canApproveEmpreiteiroDaily;
 
   const accessible = useMemo(() => {
     if (isLinkedEmpreiteiro) {

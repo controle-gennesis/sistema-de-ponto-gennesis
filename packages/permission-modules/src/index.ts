@@ -409,6 +409,13 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     group: 'Aprovações',
   },
   {
+    key: pathToModuleKey('/ponto/controle/aprovar-medicoes-empreita'),
+    name: 'Aprovar medições de entrega',
+    href: '/ponto/controle/aprovar-medicoes-empreita',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
     key: pathToModuleKey('/ponto/controle/aprovar-solicitacoes-restritas-dp'),
     name: 'Aprovar Solicitações Restritas',
     href: '/ponto/controle/aprovar-solicitacoes-restritas-dp',

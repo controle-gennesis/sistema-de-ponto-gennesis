@@ -1200,6 +1200,7 @@ model CostCenter {
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
   restrictedDpApprovalUsers UserRestrictedDpApprovalCostCenter[]
   dpRequestViewUsers        UserDpRequestViewCostCenter[]
+  empreiteiroContracts      EmpreiteiroContract[]
 
   @@index([code])
   @@index([isActive])
@@ -1431,6 +1432,8 @@ model Contract {
   fuelGasStations           FuelGasStationContract[]
   obras                     Obra[]
   empreiteiros              Empreiteiro[]
+  empreiteiroContracts      EmpreiteiroContract[]
+  empreiteiroDailyMeasurements EmpreiteiroDailyMeasurement[]
 
   @@index([costCenterId])
   @@index([number])
@@ -2369,7 +2372,8 @@ model Empreiteiro {
   cpf          String?
   phone        String
   specialty    String
-  contractId   String
+  /// Obra/contrato do sistema (preenchido ao vincular no contrato de serviço).
+  contractId   String?
   isActive     Boolean   @default(true)
   contactName  String?
   email        String?
@@ -2388,10 +2392,12 @@ model Empreiteiro {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   teamMembers EmpreiteiroTeamMember[]
   dailyMeasurements EmpreiteiroDailyMeasurement[]
+  /// Histórico de contratos/obras em que a empreita trabalhou (N vínculos).
+  contracts EmpreiteiroContract[]
 
   @@unique([document])
   @@unique([cpf])
@@ -2402,49 +2408,175 @@ model Empreiteiro {
   @@map("empreiteiros")
 }
 
-/// Pessoa da equipe de um empreiteiro (herda o contrato do cadastro).
-model EmpreiteiroTeamMember {
-  id            String   @id @default(cuid())
+/// Contrato de serviço da empreita (combinado com a turma: serviço, valor, prazo).
+model EmpreiteiroContract {
+  id            String    @id @default(cuid())
   empreiteiroId String
+  /// Nome do serviço combinado (ex.: "Elétrica 2º pavimento").
   name          String
-  role          String
-  phone         String?
-  document      String?
-  sortOrder     Int      @default(0)
-  photoUrl      String?
-  photoKey      String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  description   String?
+  /// Valor planejado do serviço.
+  plannedValue  Decimal?  @db.Decimal(15, 2)
+  /// Local de execução (endereço / obra física).
+  location      String?
+  /// Opcional: obra/contrato do sistema só como referência.
+  contractId    String?
+  /// Opcional: centro de custo da obra.
+  costCenterId  String?
+  startDate     DateTime?
+  endDate       DateTime?
+  isActive      Boolean   @default(true)
+  /// NOT_STARTED | IN_PROGRESS | COMPLETED | CANCELLED | OVERDUE
+  status        String    @default("IN_PROGRESS")
+  note          String?
+  /// Anexos do contrato de serviço (DOCX/PDF etc.): [{ url, name, key? }]
+  files         Json      @default("[]")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  empreiteiro Empreiteiro @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
-  dailyWorkers EmpreiteiroDailyMeasurementWorker[]
+  empreiteiro       Empreiteiro                        @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+  contract          Contract?                          @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  costCenter        CostCenter?                        @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  dailyMeasurements EmpreiteiroDailyMeasurement[]
+  installments      EmpreiteiroContractInstallment[]
+  addenda           EmpreiteiroContractAddendum[]
+  teamMembers       EmpreiteiroTeamMember[]
 
   @@index([empreiteiroId])
+  @@index([contractId])
+  @@index([costCenterId])
+  @@index([isActive])
+  @@index([status])
+  @@map("empreiteiro_contracts")
+}
+
+/// Aditivo do contrato de serviço (histórico; valor vigente = planejado + soma).
+model EmpreiteiroContractAddendum {
+  id                    String   @id @default(cuid())
+  empreiteiroContractId String
+  /// Número sequencial do aditivo (1º, 2º…).
+  number                Int
+  reason                String
+  effectiveDate         DateTime @db.Date
+  /// Pode ser positivo ou negativo.
+  amount                Decimal  @db.Decimal(15, 2)
+  servicesAdded         String?
+  servicesRemoved       String?
+  /// Anexo do aditivo: [{ url, name, key? }]
+  files                 Json     @default("[]")
+  /// Nome/descrição de quem aprovou.
+  approvedByName        String?
+  createdBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  empreiteiroContract EmpreiteiroContract @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+
+  @@unique([empreiteiroContractId, number])
+  @@index([empreiteiroContractId])
+  @@index([effectiveDate])
+  @@map("empreiteiro_contract_addenda")
+}
+
+/// Parcela do cronograma de pagamento do contrato de serviço.
+model EmpreiteiroContractInstallment {
+  id                    String    @id @default(cuid())
+  empreiteiroContractId String
+  /// Número da parcela (1, 2, 3…).
+  number                Int
+  amount                Decimal   @db.Decimal(15, 2)
+  dueDate               DateTime? @db.Date
+  /// PENDING | RELEASED | PAID
+  status                String    @default("PENDING")
+  releasedAt            DateTime?
+  releasedBy            String?
+  paidAt                DateTime?
+  paidBy                String?
+  /// Medição que liberou esta parcela (aprovação).
+  measurementId         String?
+  note                  String?
+  /// Comprovante(s) de pagamento: [{ url, name, key? }]
+  proofFiles            Json      @default("[]")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  empreiteiroContract EmpreiteiroContract          @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+  measurement         EmpreiteiroDailyMeasurement? @relation(fields: [measurementId], references: [id], onDelete: SetNull)
+
+  @@unique([empreiteiroContractId, number])
+  @@index([empreiteiroContractId])
+  @@index([status])
+  @@index([measurementId])
+  @@map("empreiteiro_contract_installments")
+}
+
+/// Pessoa da equipe de um contrato de serviço (turma daquele serviço).
+model EmpreiteiroTeamMember {
+  id                    String   @id @default(cuid())
+  empreiteiroId         String
+  /// Contrato de serviço desta turma (obrigatório para novos; legado pode ser nulo até migrar).
+  empreiteiroContractId String?
+  name                  String
+  role                  String
+  phone                 String?
+  document              String?
+  sortOrder             Int      @default(0)
+  photoUrl              String?
+  photoKey              String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  empreiteiro         Empreiteiro          @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+  empreiteiroContract EmpreiteiroContract? @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+  dailyWorkers        EmpreiteiroDailyMeasurementWorker[]
+
+  @@index([empreiteiroId])
+  @@index([empreiteiroContractId])
   @@index([name])
   @@map("empreiteiro_team_members")
 }
 
 /// Relatório do que a turma produziu no dia (não mistura com notas de pagamento).
 model EmpreiteiroDailyMeasurement {
-  id            String   @id @default(cuid())
-  empreiteiroId String
-  workDate      DateTime @db.Date
-  description   String
-  confirmedBy   String?
-  quantity      Decimal? @db.Decimal(12, 2)
-  unit          String?
-  photos        Json     @default("[]")
-  teamPhoto     Json?
-  createdBy     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                    String    @id @default(cuid())
+  empreiteiroId         String
+  /// Contrato de serviço desta entrega.
+  empreiteiroContractId String?
+  /// Legado: contrato do sistema (mantido para migração).
+  contractId            String?
+  /// Data da entrega.
+  workDate              DateTime  @db.Date
+  description           String
+  confirmedBy           String?
+  quantity              Decimal?  @db.Decimal(12, 2)
+  unit                  String?
+  photos                Json      @default("[]")
+  teamPhoto             Json?
+  /// SUBMITTED | APPROVED | CORRECTION
+  status                String    @default("SUBMITTED")
+  /// Valor da entrega reconhecido na baixa do gestor (independente do pagamento).
+  executedAmount        Decimal?  @db.Decimal(15, 2)
+  approvedBy            String?
+  approvedAt            DateTime?
+  returnedBy            String?
+  returnedAt            DateTime?
+  correctionNote        String?
+  createdBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  empreiteiro Empreiteiro                         @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
-  workers     EmpreiteiroDailyMeasurementWorker[]
+  empreiteiro         Empreiteiro                         @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+  empreiteiroContract EmpreiteiroContract?                @relation(fields: [empreiteiroContractId], references: [id], onDelete: SetNull)
+  contract            Contract?                           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  workers             EmpreiteiroDailyMeasurementWorker[]
+  releasedInstallments EmpreiteiroContractInstallment[]
 
-  @@unique([empreiteiroId, workDate])
+  /// Várias entregas por data/contrato são permitidas.
   @@index([empreiteiroId])
+  @@index([empreiteiroContractId])
+  @@index([contractId])
   @@index([workDate])
+  @@index([status])
   @@map("empreiteiro_daily_measurements")
 }
 

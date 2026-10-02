@@ -22,6 +22,7 @@ import { formatPhoneBR } from '@/lib/phone';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { VehicleReturnPhotoField } from '@/components/ui/VehicleReturnPhotoField';
 
 const FIELD_LABEL_CLS = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5';
 const FIELD_GRID_CLS = 'grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5';
@@ -176,9 +177,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     'MÉTRICA'
   ];
 
-  // Buscar centros de custo da API
-  const { costCentersList, costCenters: costCentersData } = useCostCenters();
-  const costCenters = costCentersList;
+  // Buscar centros de custo da API (objetos com id — não a lista só de nomes)
+  const { costCentersList, costCenters } = useCostCenters();
 
   // Lista de bancos
   const banks = [
@@ -294,15 +294,19 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   // Estado para controlar a etapa atual do formulário
   const [currentStep, setCurrentStep] = useState(1);
   const [personKind, setPersonKind] = useState<'FUNCIONARIO' | 'EMPREITEIRO'>('FUNCIONARIO');
+  const [profilePhoto, setProfilePhoto] = useState('');
   const [empData, setEmpData] = useState({
     companyName: '',
     tradeName: '',
     cnpj: '',
     specialty: '',
-    contractId: '',
+    costCenterId: '',
     city: '',
     state: '',
     pixKey: '',
+    bank: '',
+    agency: '',
+    account: '',
   });
 
   const companyOptions = useMemo(() => stringsToSelectOptions(companies), [companies]);
@@ -316,10 +320,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
   const isEmpreiteiro = personKind === 'EMPREITEIRO';
   const steps = isEmpreiteiro
-    ? [
-        { id: 1, title: 'Acesso', icon: User },
-        { id: 2, title: 'Empreita', icon: HardHat },
-      ]
+    ? [{ id: 1, title: 'Acesso', icon: User }]
     : [
         { id: 1, title: 'Dados Pessoais', icon: User },
         { id: 2, title: 'Dados Profissionais', icon: Briefcase },
@@ -329,20 +330,16 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       ];
 
   const queryClient = useQueryClient();
-  const { data: contractsData } = useQuery({
-    queryKey: ['contracts-empreiteiro-signup'],
-    queryFn: async () => {
-      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
-      return res.data;
-    },
-    enabled: isEmpreiteiro,
-  });
-  const contratoSelectOptions = useMemo(() => {
-    const rows = ((contractsData?.data || []) as Array<{ id: string; name: string }>).filter(
-      (c) => c.id && c.name
+  const costCenterSelectOptions = useMemo(() => {
+    return labeledToSelectOptions(
+      costCenters
+        .filter((cc) => Boolean(cc.id) && Boolean(cc.name || cc.code || cc.label))
+        .map((cc) => ({
+          value: String(cc.id),
+          label: String(cc.name || cc.code || cc.label || ''),
+        }))
     );
-    return labeledToSelectOptions(rows.map((c) => ({ value: c.id, label: c.name })));
-  }, [contractsData]);
+  }, [costCenters]);
   const specialtySelectOptions = useMemo(
     () =>
       labeledToSelectOptions(
@@ -414,22 +411,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       if (personKind === 'EMPREITEIRO') {
         const response = await api.post('/users', {
           kind: 'EMPREITEIRO',
+          accessOnly: true,
           name: data.name,
           email: data.email,
           cpf: data.cpf.replace(/\D/g, ''),
           password: data.password,
+          phone: data.phone.replace(/\D/g, ''),
           role: 'EMPLOYEE',
-          empreiteiroData: {
-            name: empData.companyName.trim(),
-            tradeName: empData.tradeName.trim() || null,
-            cnpj: empData.cnpj.replace(/\D/g, ''),
-            phone: data.phone.replace(/\D/g, ''),
-            specialty: empData.specialty,
-            contractId: empData.contractId,
-            city: empData.city.trim() || null,
-            state: empData.state || null,
-            pixKey: empData.pixKey.trim() || null,
-          },
+          profilePhoto,
         });
         return response.data;
       }
@@ -502,7 +491,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
       toast.success(
         personKind === 'EMPREITEIRO'
-          ? 'Empreita criada com login. Ele entra com e-mail ou CPF e a senha temporária.'
+          ? 'Acesso criado. Agora em Empreitas cadastre a empreita e vincule este login.'
           : 'Funcionário criado com sucesso!'
       );
       onClose();
@@ -583,6 +572,9 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         if (formData.phone.replace(/\D/g, '').length < 10) {
           newErrors.phone = 'Telefone é obrigatório';
         }
+        if (!profilePhoto.startsWith('data:image/')) {
+          newErrors.profilePhoto = 'Foto do perfil é obrigatória';
+        }
       } else if (!formData.birthDate.trim()) {
         newErrors.birthDate = 'Data de nascimento é obrigatória';
       } else {
@@ -596,7 +588,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         }
       }
     } else if (isEmpreiteiro && step === 2) {
-      if (!empData.contractId.trim()) newErrors.contractId = 'Contrato é obrigatório';
+      if (!empData.costCenterId.trim()) newErrors.costCenterId = 'Centro de custo é obrigatório';
       if (!empData.companyName.trim()) newErrors.companyName = 'Nome / razão social é obrigatório';
       if (empData.cnpj.replace(/\D/g, '').length !== 14) newErrors.cnpj = 'CNPJ deve ter 14 dígitos';
       if (!empData.specialty.trim()) newErrors.specialty = 'Especialidade é obrigatória';
@@ -944,8 +936,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     }
 
     if (isEmpreiteiro) {
-      if (!validateStep(1) || !validateStep(2)) {
-        toast.error('Preencha os campos obrigatórios da empreita');
+      if (!validateStep(1)) {
+        toast.error('Preencha os dados de acesso do empreiteiro');
         return;
       }
       setIsSubmitting(true);
@@ -1177,7 +1169,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-6 dark:border-gray-700">
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {isEmpreiteiro ? 'Cadastrar empreita' : 'Cadastrar Novo Funcionário'}
+              {isEmpreiteiro ? 'Criar acesso de empreiteiro' : 'Cadastrar Novo Funcionário'}
             </h3>
           </div>
           <button
@@ -1291,6 +1283,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   onClick={() => {
                     setPersonKind('EMPREITEIRO');
                     setCurrentStep(1);
+                    setProfilePhoto('');
                   }}
                   className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
                     isEmpreiteiro
@@ -1300,11 +1293,17 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 >
                   <span className="flex items-center gap-2 font-semibold">
                     <HardHat className="h-4 w-4" />
-                    Empreita
+                    Empreiteiro
                   </span>
-                  <span className="mt-1 block text-xs opacity-80">Login só da página de empreitas</span>
+                  <span className="mt-1 block text-xs opacity-80">Só o login; dados em Empreitas</span>
                 </button>
               </div>
+              {isEmpreiteiro ? (
+                <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Cria só o acesso. Depois, em <strong>Empreitas</strong>, cadastre a empreita e
+                  vincule este login para ele ver o cadastro ao entrar.
+                </p>
+              ) : null}
             </div>
             <div className={FIELD_GRID_CLS}>
               <div>
@@ -1491,6 +1490,29 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 </div>
                 {errors.confirmPassword && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.confirmPassword}</p>}
               </div>
+
+              {isEmpreiteiro ? (
+                <div className="sm:col-span-2">
+                  <label className={FIELD_LABEL_CLS}>Foto do perfil *</label>
+                  <VehicleReturnPhotoField
+                    value={profilePhoto}
+                    onChange={(value) => {
+                      setProfilePhoto(value);
+                      if (errors.profilePhoto) {
+                        setErrors((prev) => ({ ...prev, profilePhoto: '' }));
+                      }
+                    }}
+                    emptyLabel="Adicionar foto da pessoa"
+                    photoAlt="Foto do perfil do empreiteiro"
+                  />
+                  <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    Essa foto aparece no card da empreita quando o login for vinculado.
+                  </p>
+                  {errors.profilePhoto && (
+                    <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.profilePhoto}</p>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
           )}
@@ -1498,20 +1520,23 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {isEmpreiteiro && currentStep === 2 && (
           <div className="space-y-6">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Dados da empresa. Depois ele entra com e-mail ou CPF e só vê a página de empreitas.
+              Dados da empresa (também dá para cadastrar depois em Empreitas). Depois ele entra com e-mail ou CPF e só vê essa página.
             </p>
             <div className={FIELD_GRID_CLS}>
               <div className="sm:col-span-2">
-                <label className={FIELD_LABEL_CLS}>Contrato *</label>
+                <label className={FIELD_LABEL_CLS}>Centro de custo *</label>
                 <StringSingleSelectDropdown
-                  value={empData.contractId}
-                  onChange={(value) => setEmpData((prev) => ({ ...prev, contractId: value }))}
-                  options={contratoSelectOptions}
-                  placeholder="Selecione o contrato"
-                  emptyOptionLabel="Selecione o contrato"
+                  value={empData.costCenterId}
+                  onChange={(value) => setEmpData((prev) => ({ ...prev, costCenterId: value }))}
+                  options={costCenterSelectOptions}
+                  placeholder="Selecione o centro de custo"
+                  emptyOptionLabel="Selecione o centro de custo"
+                  searchPlaceholder="Pesquisar centro de custo..."
                   matchTriggerWidth
                 />
-                {errors.contractId && <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.contractId}</p>}
+                {errors.costCenterId && (
+                  <p className="mt-1 text-xs text-red-500 dark:text-red-400">{errors.costCenterId}</p>
+                )}
               </div>
               <div>
                 <label className={FIELD_LABEL_CLS}>Nome / razão social *</label>
@@ -1579,12 +1604,53 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 />
               </div>
               <div className="sm:col-span-2">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Dados bancários
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Conta para pagamento desta empreita
+                </p>
+              </div>
+              <div>
+                <label className={FIELD_LABEL_CLS}>Banco</label>
+                <StringSingleSelectDropdown
+                  value={empData.bank}
+                  onChange={(value) => setEmpData((prev) => ({ ...prev, bank: value }))}
+                  options={bankOptions}
+                  placeholder="Selecione o banco"
+                  emptyOptionLabel="Selecione o banco"
+                  searchPlaceholder="Pesquisar banco..."
+                  matchTriggerWidth
+                />
+              </div>
+              <div>
+                <label className={FIELD_LABEL_CLS}>Agência</label>
+                <input
+                  type="text"
+                  value={empData.agency}
+                  onChange={(e) => setEmpData((prev) => ({ ...prev, agency: e.target.value }))}
+                  className={fieldInputCls()}
+                  placeholder="1234"
+                />
+              </div>
+              <div>
+                <label className={FIELD_LABEL_CLS}>Conta</label>
+                <input
+                  type="text"
+                  value={empData.account}
+                  onChange={(e) => setEmpData((prev) => ({ ...prev, account: e.target.value }))}
+                  className={fieldInputCls()}
+                  placeholder="12345-6"
+                />
+              </div>
+              <div>
                 <label className={FIELD_LABEL_CLS}>PIX</label>
                 <input
                   type="text"
                   value={empData.pixKey}
                   onChange={(e) => setEmpData((prev) => ({ ...prev, pixKey: e.target.value }))}
                   className={fieldInputCls()}
+                  placeholder="Chave PIX"
                 />
               </div>
             </div>
@@ -2233,7 +2299,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   ) : (
                     <>
                       <Save className="h-4 w-4" />
-                      <span>{isEmpreiteiro ? 'Criar empreita' : 'Criar Funcionário'}</span>
+                      <span>{isEmpreiteiro ? 'Criar acesso' : 'Criar Funcionário'}</span>
                     </>
                   )}
                 </button>

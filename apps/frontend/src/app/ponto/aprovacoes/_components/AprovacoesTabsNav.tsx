@@ -3,7 +3,7 @@
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 
-export type AprovacaoTabId = 'dp' | 'espelho' | 'fd' | 'fuel' | 'rm' | 'oc';
+export type AprovacaoTabId = 'dp' | 'espelho' | 'fd' | 'fuel' | 'rm' | 'oc' | 'medicao';
 
 export type AprovacaoTabDef = {
   id: AprovacaoTabId;

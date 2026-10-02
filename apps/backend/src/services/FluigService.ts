@@ -20,11 +20,16 @@ interface DatasetCacheEntry {
   data: FluigDatasetValues;
   fetchedAt: number;
   refreshing: boolean;
+  /** true quando a última resposta veio sem linhas (negative cache). */
+  empty: boolean;
 }
 
-// Cache: dados frescos por 8 min, utilizáveis por 25 min (stale-while-revalidate)
+// Cache: dados com linhas ficam frescos 8 min / utilizáveis 25 min (SWR).
+// Resposta vazia também é cacheada (TTL curto) para não martelar o Fluig em loop.
 const CACHE_FRESH_TTL_MS = 8 * 60 * 1000;
 const CACHE_STALE_TTL_MS = 25 * 60 * 1000;
+const CACHE_EMPTY_TTL_MS = 3 * 60 * 1000;
+const CACHE_ERROR_TTL_MS = 90 * 1000;
 
 /**
  * Temporário: não buscar datasets BI/aprovação no Fluig (código permanece).
@@ -116,6 +121,9 @@ export class FluigService {
 
     this.token = { key: accessToken, secret: accessTokenSecret };
   }
+
+  /** Deduplica chamadas simultâneas ao mesmo dataset (evita storm no Fluig). */
+  private inFlight = new Map<string, Promise<FluigDatasetValues>>();
 
   private getAuthHeaders(url: string, method: string, useOAuth?: boolean): Record<string, string> {
     const hasOAuth = !!(process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN);
@@ -246,6 +254,119 @@ export class FluigService {
     });
   }
 
+  private storeDatasetCache(
+    cacheKey: string,
+    data: FluigDatasetValues,
+    empty: boolean
+  ): void {
+    this.datasetCache.set(cacheKey, {
+      data,
+      fetchedAt: Date.now(),
+      refreshing: false,
+      empty,
+    });
+  }
+
+  private refreshDatasetInBackground(
+    datasetId: string,
+    cacheKey: string,
+    options?: {
+      fields?: string[];
+      constraints?: Array<{
+        _field: string;
+        _initialValue?: string;
+        _finalValue?: string;
+        _type?: number;
+        _likeSearch?: boolean;
+      }>;
+      order?: string[];
+    }
+  ): void {
+    const cached = this.datasetCache.get(cacheKey);
+    if (!cached || cached.refreshing) return;
+    cached.refreshing = true;
+    this.fetchDatasetDirect(datasetId, options)
+      .then((data) => {
+        const empty = this.isEmptyDatasetPayload(data);
+        if (empty && !cached.empty) {
+          // Mantém dados anteriores bons; só marca fim do refresh.
+          cached.refreshing = false;
+          console.warn(
+            `⚠️  Fluig refresh BG retornou vazio (${datasetId}); mantendo cache anterior`
+          );
+          return;
+        }
+        this.storeDatasetCache(cacheKey, data, empty);
+        const rowCount = data.content?.values?.length ?? 0;
+        console.log(
+          empty
+            ? `⚠️  Fluig cache BG vazio: ${datasetId} (TTL ${CACHE_EMPTY_TTL_MS / 1000}s)`
+            : `✅ Fluig cache atualizado em BG: ${datasetId} (${rowCount} rows)`
+        );
+      })
+      .catch((err) => {
+        cached.refreshing = false;
+        console.warn(
+          `⚠️  Fluig cache BG refresh falhou (${datasetId}):`,
+          (err as Error).message
+        );
+      });
+  }
+
+  private fetchDatasetDeduped(
+    datasetId: string,
+    cacheKey: string,
+    options?: {
+      fields?: string[];
+      constraints?: Array<{
+        _field: string;
+        _initialValue?: string;
+        _finalValue?: string;
+        _type?: number;
+        _likeSearch?: boolean;
+      }>;
+      order?: string[];
+    }
+  ): Promise<FluigDatasetValues> {
+    const existing = this.inFlight.get(cacheKey);
+    if (existing) return existing;
+
+    const promise = this.fetchDatasetDirect(datasetId, options)
+      .then((data) => {
+        const empty = this.isEmptyDatasetPayload(data);
+        this.storeDatasetCache(cacheKey, data, empty);
+        const rowCount = data.content?.values?.length ?? 0;
+        if (empty) {
+          console.warn(
+            `⚠️  Fluig dataset ${datasetId} retornou 0 registros — cache negativo ${CACHE_EMPTY_TTL_MS / 1000}s`
+          );
+        } else {
+          console.log(`✅ Fluig dataset ${datasetId}: ${rowCount} registro(s) em cache`);
+        }
+        return data;
+      })
+      .catch((err) => {
+        // Negative cache curto em erro: evita retry storm quando o Fluig cai.
+        const emptyPayload: FluigDatasetValues = {
+          content: { values: [], columns: [] },
+          message: (err as Error)?.message || 'Erro ao consultar Fluig',
+        };
+        this.storeDatasetCache(cacheKey, emptyPayload, true);
+        // Ajusta fetchedAt para TTL de erro (mais curto que empty normal).
+        const entry = this.datasetCache.get(cacheKey);
+        if (entry) {
+          entry.fetchedAt = Date.now() - (CACHE_EMPTY_TTL_MS - CACHE_ERROR_TTL_MS);
+        }
+        throw err;
+      })
+      .finally(() => {
+        this.inFlight.delete(cacheKey);
+      });
+
+    this.inFlight.set(cacheKey, promise);
+    return promise;
+  }
+
   async getDatasetData(
     datasetId: string,
     options?: {
@@ -269,45 +390,21 @@ export class FluigService {
 
     if (cached) {
       const age = Date.now() - cached.fetchedAt;
-      const emptyCached = this.isEmptyDatasetPayload(cached.data);
+      const ttl = cached.empty ? CACHE_EMPTY_TTL_MS : CACHE_STALE_TTL_MS;
 
-      // Resposta vazia no cache costuma ser falha transitória do Fluig — não servir por minutos.
-      if (emptyCached) {
-        this.datasetCache.delete(cacheKey);
-      } else if (age <= CACHE_STALE_TTL_MS) {
-        // Retorna do cache imediatamente
-        if (age > CACHE_FRESH_TTL_MS && !cached.refreshing) {
-          // Cache ficou stale: dispara refresh em background sem bloquear a resposta
-          cached.refreshing = true;
-          this.fetchDatasetDirect(datasetId, options)
-            .then((data) => {
-              if (this.isEmptyDatasetPayload(data)) {
-                cached.refreshing = false;
-                console.warn(`⚠️  Fluig refresh BG retornou vazio (${datasetId}); mantendo cache anterior`);
-                return;
-              }
-              this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
-              console.log(`✅ Fluig cache atualizado em BG: ${datasetId} (${data.content?.values?.length ?? 0} rows)`);
-            })
-            .catch((err) => {
-              cached.refreshing = false;
-              console.warn(`⚠️  Fluig cache BG refresh falhou (${datasetId}):`, (err as Error).message);
-            });
+      if (age <= ttl) {
+        // Empty: só serve o negative cache; sem SWR (não martela o Fluig).
+        if (!cached.empty && age > CACHE_FRESH_TTL_MS) {
+          this.refreshDatasetInBackground(datasetId, cacheKey, options);
         }
         return cached.data;
       }
     }
 
-    // Cache vazio ou expirado: busca síncrona
-    const data = await this.fetchDatasetDirect(datasetId, options);
-    const rowCount = data?.content?.values?.length ?? 0;
-    if (this.isEmptyDatasetPayload(data)) {
-      console.warn(`⚠️  Fluig dataset ${datasetId} retornou 0 registros — não cacheando`);
-      return data;
-    }
-    this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
-    console.log(`✅ Fluig dataset ${datasetId}: ${rowCount} registro(s) em cache`);
-    return data;
+    const inFlight = this.inFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    return this.fetchDatasetDeduped(datasetId, cacheKey, options);
   }
 
   /** Pré-aquece o cache dos datasets informados (executar após subir o servidor). */
@@ -330,12 +427,12 @@ export class FluigService {
   }
 
   /**
-   * Inicia refresh periódico dos datasets para manter o cache sempre quente.
-   * Retorna o NodeJS.Timeout para que o chamador possa cancelar se necessário.
+   * Refresh periódico só para datasets já em cache com dados.
+   * Datasets vazios usam o TTL negativo e não são reconsultados a cada tick.
    */
   startPeriodicRefresh(
     datasetIds: string[],
-    intervalMs = 8 * 60 * 1000
+    intervalMs = 15 * 60 * 1000
   ): ReturnType<typeof setInterval> {
     const active = datasetIds.filter((id) => !isFluigDatasetFetchDisabled(id));
     if (active.length === 0) {
@@ -346,23 +443,12 @@ export class FluigService {
       for (const id of active) {
         const cacheKey = this.datasetCacheKey(id);
         const entry = this.datasetCache.get(cacheKey);
-        if (entry?.refreshing) continue;
-
-        if (entry) entry.refreshing = true;
-        this.fetchDatasetDirect(id)
-          .then((data) => {
-            if (!Array.isArray(data?.content?.values) || data.content.values.length === 0) {
-              if (entry) entry.refreshing = false;
-              console.warn(`⚠️  Fluig refresh periódico ${id} retornou vazio; mantendo cache anterior`);
-              return;
-            }
-            this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
-            console.log(`✅ Fluig refresh periódico: ${id} (${data.content?.values?.length ?? 0} rows)`);
-          })
-          .catch((err) => {
-            if (entry) entry.refreshing = false;
-            console.warn(`⚠️  Fluig refresh periódico ${id} falhou:`, (err as Error).message);
-          });
+        if (!entry) continue;
+        if (entry.empty) continue;
+        if (entry.refreshing) continue;
+        const age = Date.now() - entry.fetchedAt;
+        if (age < CACHE_FRESH_TTL_MS) continue;
+        this.refreshDatasetInBackground(id, cacheKey);
       }
     }, intervalMs);
   }
