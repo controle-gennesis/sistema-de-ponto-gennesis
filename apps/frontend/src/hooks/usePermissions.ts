@@ -751,7 +751,8 @@ export function useRoutePermission(route: string) {
       canApproveEspelhoNf ||
       canApproveFuel ||
       canApproveOc ||
-      canApproveMaterialRequests,
+      canApproveMaterialRequests ||
+      can(pk('/ponto/controle/aprovar-medicoes-empreita')),
     '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || can(pk('/ponto/aniversariantes')),
     '/ponto/seguranca-do-trabalho': isAdministrator || can(pk('/ponto/seguranca-do-trabalho')),

@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Building2,
+  Camera,
   ClipboardList,
-  Clock3,
   FileText,
   HardHat,
   Link2Off,
@@ -52,10 +52,8 @@ import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { VehicleReturnPhotoField } from '@/components/ui/VehicleReturnPhotoField';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
-import { EmpreiteiroDailyMeasurements } from './EmpreiteiroDailyMeasurements';
-import { EmpreiteiroPendingQueue } from './EmpreiteiroPendingQueue';
+import { EmpreiteiroDailyMeasurements, ContractFinanceStats } from './EmpreiteiroDailyMeasurements';
 
 type DocumentKind = 'CPF' | 'CNPJ';
 
@@ -345,18 +343,6 @@ function formatDateBr(value?: string | null): string {
   return formatDateBrLib(value, '—');
 }
 
-function DetailField({ label, value }: { label: string; value?: React.ReactNode }) {
-  const empty = value === undefined || value === null || value === '';
-  return (
-    <div>
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {label}
-      </p>
-      <div className="text-sm text-gray-900 dark:text-gray-100">{empty ? '—' : value}</div>
-    </div>
-  );
-}
-
 type TeamMemberForm = {
   name: string;
   role: string;
@@ -430,6 +416,76 @@ const inputClass =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
+function TeamMemberPhotoField({
+  value,
+  onChange,
+  alt,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  alt: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Não foi possível ler a foto'));
+        reader.readAsDataURL(file);
+      });
+      onChange(dataUrl);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="relative h-14 w-14 shrink-0">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={loading}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          void handleFile(file);
+        }}
+      />
+      <button
+        type="button"
+        disabled={loading}
+        onClick={() => inputRef.current?.click()}
+        className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-red-50 text-red-600 ring-1 ring-black/5 transition hover:bg-red-100 disabled:opacity-60 dark:bg-red-950/50 dark:text-red-300"
+        aria-label={value ? 'Trocar foto' : 'Adicionar foto'}
+      >
+        {value ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value} alt={alt} className="h-full w-full object-cover" />
+        ) : (
+          <Camera className="h-5 w-5" />
+        )}
+      </button>
+      {value ? (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="absolute -right-1 -top-1 rounded-full bg-gray-900 p-0.5 text-white shadow dark:bg-gray-100 dark:text-gray-900"
+          aria-label="Remover foto"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function EmpreiteirosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -440,7 +496,7 @@ export default function EmpreiteirosPage() {
   const [showForm, setShowForm] = useState(false);
   const [viewingItem, setViewingItem] = useState<EmpreiteiroRow | null>(null);
   const [pageSection, setPageSection] = useState<
-    'cadastro' | 'medicao' | 'pendentes' | 'detalhe'
+    'cadastro' | 'medicao' | 'detalhe'
   >('cadastro');
   const [medicaoEmpreitaId, setMedicaoEmpreitaId] = useState<string | null>(null);
   const [medicaoContractFilterId, setMedicaoContractFilterId] = useState<string | null>(null);
@@ -588,6 +644,8 @@ export default function EmpreiteirosPage() {
     Record<string, TeamMemberForm[]>
   >({});
   const [savingTeamLinkId, setSavingTeamLinkId] = useState<string | null>(null);
+  const [openTeamLinkIds, setOpenTeamLinkIds] = useState<Record<string, boolean>>({});
+  const [openParcelLinkIds, setOpenParcelLinkIds] = useState<Record<string, boolean>>({});
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
   const [empSkipAutoDetail, setEmpSkipAutoDetail] = useState(false);
 
@@ -600,16 +658,6 @@ export default function EmpreiteirosPage() {
       return res.data;
     },
   });
-
-  const { data: pendingRows } = useQuery({
-    queryKey: ['empreiteiro-daily-measurements-pending'],
-    queryFn: async () => {
-      const res = await api.get('/empreiteiros/daily-measurements/pending');
-      return (res.data?.data || []) as unknown[];
-    },
-    enabled: canApproveDaily,
-  });
-  const pendingCount = pendingRows?.length ?? 0;
 
   const { data: linkableUsersData } = useQuery({
     queryKey: ['empreiteiros-linkable-users', editingItem?.id || 'new', showForm],
@@ -1609,7 +1657,6 @@ export default function EmpreiteirosPage() {
     items.find((item) => item.id === medicaoEmpreitaId) ||
     (isOwnEmpreiteiroAccount ? ownEmpreitaItem : null);
   const showMedicaoPage = pageSection === 'medicao' && Boolean(medicaoTargetItem);
-  const showPendentesPage = pageSection === 'pendentes' && canApproveDaily;
   const showDetailPage = pageSection === 'detalhe' && Boolean(viewingItem);
 
   const openMedicaoPage = (item?: EmpreiteiroRow | null, contractId?: string | null) => {
@@ -1635,11 +1682,6 @@ export default function EmpreiteirosPage() {
       ) || null
     : null;
 
-  const openPendentesPage = () => {
-    setPageSection('pendentes');
-    setViewingItem(null);
-  };
-
   const {
     rowActionMenu,
     rowForActionMenu,
@@ -1655,21 +1697,31 @@ export default function EmpreiteirosPage() {
     const draft = contractTeamDraftById[link.id] ?? teamDraftFromMembers(link.team);
     const savedTeam = link.team || [];
     const saving = savingTeamLinkId === link.id;
-    const title = isOwnEmpreiteiroAccount ? 'Equipe deste serviço' : 'Equipe do serviço';
+    const teamCount = Math.max(savedTeam.length, draft.length);
+    const teamOpen = Boolean(openTeamLinkIds[link.id]);
     return (
       <div
-        className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700"
+        className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{title}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Pessoal só deste contrato — outro serviço pode ter outra turma
-            </p>
-          </div>
-          {canEditTeamOnDetail ? (
+        <button
+          type="button"
+          onClick={() =>
+            setOpenTeamLinkIds((prev) => ({ ...prev, [link.id]: !prev[link.id] }))
+          }
+          className="inline-flex items-center gap-1.5 rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+        >
+          <Users className="h-3.5 w-3.5" />
+          {teamOpen ? 'Ocultar equipe' : 'Ver equipe do serviço'}
+          <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-gray-900 dark:text-gray-300">
+            {teamCount}
+          </span>
+        </button>
+        {teamOpen ? (
+        <>
+        {canEditTeamOnDetail ? (
+          <div className="mb-2 mt-3 flex justify-end">
             <button
               type="button"
               onClick={() => addContractTeamMember(link.id)}
@@ -1678,110 +1730,110 @@ export default function EmpreiteirosPage() {
               <Plus className="h-4 w-4" />
               Adicionar pessoa
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         {canEditTeamOnDetail ? (
           <div className="space-y-3">
             {draft.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              <p className="rounded-xl border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
                 Nenhuma pessoa neste contrato ainda.
               </p>
             ) : (
               draft.map((member, index) => (
                 <div
                   key={`${link.id}-team-${index}`}
-                  className="space-y-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40"
+                  className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/40"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       Pessoa {index + 1}
                     </span>
                     <button
                       type="button"
                       onClick={() => removeContractTeamMember(link.id, index)}
-                      className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                       aria-label={`Remover pessoa ${index + 1}`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className={labelClass}>Nome *</label>
-                      <input
-                        type="text"
-                        value={member.name}
-                        onChange={(e) =>
-                          patchContractTeamMember(link.id, index, { name: e.target.value })
-                        }
-                        placeholder="Nome completo"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Função *</label>
-                      <StringSingleSelectDropdown
-                        value={member.role}
-                        onChange={(value) =>
-                          patchContractTeamMember(link.id, index, { role: value })
-                        }
-                        options={teamRoleSelectOptions}
-                        placeholder="Selecione a função"
-                        emptyOptionLabel="Selecione a função"
-                        matchTriggerWidth
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Telefone</label>
-                      <input
-                        type="text"
-                        value={member.phone}
-                        onChange={(e) =>
-                          patchContractTeamMember(link.id, index, {
-                            phone: maskPhoneInput(e.target.value),
-                          })
-                        }
-                        placeholder="(00) 90000-0000"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>CPF</label>
-                      <input
-                        type="text"
-                        value={member.document}
-                        onChange={(e) =>
-                          patchContractTeamMember(link.id, index, {
-                            document: formatCpfInput(e.target.value),
-                          })
-                        }
-                        placeholder="000.000.000-00"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className={labelClass}>Foto</label>
-                      <VehicleReturnPhotoField
-                        value={member.photo}
-                        onChange={(value) =>
-                          patchContractTeamMember(link.id, index, { photo: value })
-                        }
-                        emptyLabel="Adicionar foto"
-                        photoAlt={`Foto de ${member.name || `pessoa ${index + 1}`}`}
-                      />
+                  <div className="flex items-start gap-3">
+                    <TeamMemberPhotoField
+                      value={member.photo}
+                      onChange={(value) =>
+                        patchContractTeamMember(link.id, index, { photo: value })
+                      }
+                      alt={`Foto de ${member.name || `pessoa ${index + 1}`}`}
+                    />
+                    <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={labelClass}>Nome *</label>
+                        <input
+                          type="text"
+                          value={member.name}
+                          onChange={(e) =>
+                            patchContractTeamMember(link.id, index, { name: e.target.value })
+                          }
+                          placeholder="Nome completo"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Função *</label>
+                        <StringSingleSelectDropdown
+                          value={member.role}
+                          onChange={(value) =>
+                            patchContractTeamMember(link.id, index, { role: value })
+                          }
+                          options={teamRoleSelectOptions}
+                          placeholder="Selecione a função"
+                          emptyOptionLabel="Selecione a função"
+                          matchTriggerWidth
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Telefone</label>
+                        <input
+                          type="text"
+                          value={member.phone}
+                          onChange={(e) =>
+                            patchContractTeamMember(link.id, index, {
+                              phone: maskPhoneInput(e.target.value),
+                            })
+                          }
+                          placeholder="(00) 90000-0000"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>CPF</label>
+                        <input
+                          type="text"
+                          value={member.document}
+                          onChange={(e) =>
+                            patchContractTeamMember(link.id, index, {
+                              document: formatCpfInput(e.target.value),
+                            })
+                          }
+                          placeholder="000.000.000-00"
+                          className={inputClass}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               ))
             )}
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void saveContractTeam(link.id)}
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {saving ? 'Salvando...' : 'Salvar equipe deste serviço'}
-            </button>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void saveContractTeam(link.id)}
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {saving ? 'Salvando...' : 'Salvar equipe'}
+              </button>
+            </div>
           </div>
         ) : savedTeam.length === 0 ? (
           <p className="rounded-lg border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
@@ -1827,6 +1879,8 @@ export default function EmpreiteirosPage() {
             ))}
           </div>
         )}
+        </>
+        ) : null}
       </div>
     );
   };
@@ -1847,7 +1901,7 @@ export default function EmpreiteirosPage() {
         <div className="space-y-6">
           <div className="relative flex flex-col items-center gap-4 text-center">
             <div className="min-w-0 w-full">
-              {showMedicaoPage || showPendentesPage || showDetailPage ? (
+              {showMedicaoPage || showDetailPage ? (
                 <div className="mb-2 flex w-full justify-start">
                   <button
                     type="button"
@@ -1874,18 +1928,14 @@ export default function EmpreiteirosPage() {
                 </div>
               ) : null}
               <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
-                {showPendentesPage
-                  ? 'Pendentes de aprovação'
-                  : showMedicaoPage
+                {showMedicaoPage
                     ? 'Medições de entrega'
                     : showDetailPage
                       ? viewingItem?.name || 'Empreita'
                       : 'Empreitas'}
               </h1>
               <p className="mx-auto mt-1.5 max-w-xl text-sm text-gray-600 dark:text-gray-400">
-                {showPendentesPage
-                  ? 'Entregas enviadas pelas empreitas aguardando sua revisão'
-                  : showMedicaoPage
+                {showMedicaoPage
                     ? medicaoFilterContract
                       ? `${medicaoTargetItem?.name || 'Empreita'} · ${medicaoFilterContract.contratoNome}`
                       : medicaoTargetItem?.name
@@ -1903,25 +1953,9 @@ export default function EmpreiteirosPage() {
               </p>
             </div>
             {!showMedicaoPage &&
-            !showPendentesPage &&
             !showDetailPage &&
-            (canApproveDaily || canCreate || items.length > 0) ? (
+            (canCreate || items.length > 0 || (isOwnEmpreiteiroAccount && ownEmpreitaItem)) ? (
               <div className="flex flex-wrap justify-center gap-2 sm:absolute sm:right-0 sm:top-0 sm:justify-end">
-                {canApproveDaily ? (
-                  <button
-                    type="button"
-                    onClick={openPendentesPage}
-                    className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-4 text-sm font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/70"
-                  >
-                    <Clock3 className="h-4 w-4" />
-                    Pendentes de aprovação
-                    {pendingCount > 0 ? (
-                      <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-sky-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
-                        {pendingCount}
-                      </span>
-                    ) : null}
-                  </button>
-                ) : null}
                 {canCreate ? (
                   <button
                     type="button"
@@ -1960,32 +1994,7 @@ export default function EmpreiteirosPage() {
             ) : null}
           </div>
 
-          {showPendentesPage ? (
-            <Card className={cadastroListClasses.card}>
-              <CardHeader className={cadastroListClasses.cardHeader}>
-                <div className={cadastroListClasses.cardHeaderRow}>
-                  <div className={cadastroListClasses.cardHeaderIconRow}>
-                    <div className="rounded-lg bg-sky-100 p-2 sm:p-3 dark:bg-sky-900/30">
-                      <Clock3 className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        Fila de aprovação
-                      </h3>
-                      <p className="truncate text-sm text-gray-600 dark:text-gray-400">
-                        {pendingCount === 0
-                          ? 'Nenhuma entrega pendente'
-                          : `${pendingCount} aguardando revisão`}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className={cadastroListClasses.cardContent}>
-                <EmpreiteiroPendingQueue onPreviewPhoto={openPreviewPhoto} />
-              </CardContent>
-            </Card>
-          ) : showMedicaoPage && medicaoTargetItem ? (
+          {showMedicaoPage && medicaoTargetItem ? (
             <Card className={cadastroListClasses.card}>
               <CardHeader className={cadastroListClasses.cardHeader}>
                 <div className={cadastroListClasses.cardHeaderRow}>
@@ -2155,6 +2164,15 @@ export default function EmpreiteirosPage() {
                     it.team?.length ||
                     0;
                   const photo = resolveApiMediaUrl(it.photoUrl);
+                  const cityUf = [it.city, it.state].filter(Boolean).join(' / ');
+                  const extraFields = [
+                    it.email ? { label: 'E-mail', value: it.email } : null,
+                    cityUf ? { label: 'Cidade / UF', value: cityUf } : null,
+                    it.pixKey ? { label: 'PIX', value: it.pixKey } : null,
+                    it.bank ? { label: 'Banco', value: it.bank } : null,
+                    it.agency ? { label: 'Agência', value: it.agency } : null,
+                    it.account ? { label: 'Conta', value: it.account } : null,
+                  ].filter((field): field is { label: string; value: string } => Boolean(field));
                   return (
                     <article
                       key={it.id}
@@ -2207,19 +2225,17 @@ export default function EmpreiteirosPage() {
                                   {it.specialty}
                                 </span>
                               ) : null}
-                              {!isLinkedEmpreiteiro ? (
-                                <span
-                                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                    it.userId
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                      : 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-                                  }`}
-                                >
-                                  {it.userId
-                                    ? it.userName || it.contactName || 'Login vinculado'
-                                    : 'Sem login'}
-                                </span>
-                              ) : null}
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                                  it.userId
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                    : 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                                }`}
+                              >
+                                {it.userId
+                                  ? it.userName || it.contactName || 'Login vinculado'
+                                  : it.contactName || 'Sem login'}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -2241,6 +2257,20 @@ export default function EmpreiteirosPage() {
                               {teamSize > 0 ? `${teamSize} na equipe` : 'Sem equipe'}
                             </span>
                           </div>
+                          {extraFields.length > 0 ? (
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-1">
+                              {extraFields.map((field) => (
+                                <div key={field.label} className="min-w-0">
+                                  <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                                    {field.label}
+                                  </p>
+                                  <p className="truncate text-xs text-gray-700 dark:text-gray-300">
+                                    {field.value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </button>
 
@@ -2972,9 +3002,7 @@ export default function EmpreiteirosPage() {
                         Nenhum contrato de serviço. Use “Adicionar serviço” para cadastrar.
                       </p>
                     ) : null}
-                    {(viewingItem.contracts || []).map((link, linkIndex, allLinks) => {
-                      const firstActiveId = allLinks.find((c) => c.isActive !== false)?.id;
-                      const isCurrent = link.id === firstActiveId;
+                    {(viewingItem.contracts || []).map((link) => {
                       const statusMeta = contractStatusMeta(link.status);
                       const contractValue =
                         link.currentValue != null && Number.isFinite(link.currentValue)
@@ -3011,22 +3039,13 @@ export default function EmpreiteirosPage() {
                         0
                       );
                       return (
-                        <div
+                        <article
                           key={link.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => openMedicaoPage(viewingItem, link.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              openMedicaoPage(viewingItem, link.id);
-                            }
-                          }}
-                          className="w-full cursor-pointer rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-left transition hover:border-red-300 hover:bg-red-50/40 dark:border-gray-600 dark:bg-gray-900/50 dark:hover:border-red-800 dark:hover:bg-red-950/20"
+                          className="rounded-2xl border border-gray-200/90 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/55 sm:p-5"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
                                 {link.contratoNome || link.name || 'Contrato de serviço'}
                               </p>
                               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -3044,11 +3063,6 @@ export default function EmpreiteirosPage() {
                               onClick={(e) => e.stopPropagation()}
                               onKeyDown={(e) => e.stopPropagation()}
                             >
-                              {isCurrent ? (
-                                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800 dark:bg-violet-950/50 dark:text-violet-300">
-                                  Atual
-                                </span>
-                              ) : null}
                               <span
                                 className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
                               >
@@ -3393,41 +3407,31 @@ export default function EmpreiteirosPage() {
                             </div>
                           ) : null}
 
-                          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            {[
-                              {
-                                label: 'Contrato',
-                                value: formatMoneyBr(contractValue) || '—',
-                              },
-                              {
-                                label: 'Executado',
-                                value: executedPct != null ? `${executedPct}%` : '—',
-                              },
-                              {
-                                label: 'Pago',
-                                value: formatMoneyBr(paidTotal) || 'R$ 0,00',
-                              },
-                              {
-                                label: 'Saldo',
-                                value: formatMoneyBr(saldoValue) || '—',
-                              },
-                            ].map((item) => (
-                              <div
-                                key={item.label}
-                                className="rounded-lg border border-gray-200 bg-white px-2.5 py-2 dark:border-gray-600 dark:bg-gray-800/70"
-                              >
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                  {item.label}
-                                </p>
-                                <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                                  {item.value}
-                                </p>
-                              </div>
-                            ))}
+                          <div className="mt-4">
+                            <ContractFinanceStats
+                              items={[
+                                {
+                                  label: 'Contrato',
+                                  value: formatMoneyBr(contractValue) || '—',
+                                },
+                                {
+                                  label: 'Executado',
+                                  value: executedPct != null ? `${executedPct}%` : '—',
+                                },
+                                {
+                                  label: 'Pago',
+                                  value: formatMoneyBr(paidTotal) || 'R$ 0,00',
+                                },
+                                {
+                                  label: 'Saldo',
+                                  value: formatMoneyBr(saldoValue) || '—',
+                                },
+                              ]}
+                            />
                           </div>
 
-                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                            <span>
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
                               {measurementLabel}
                               {(link.teamCount ?? link.team?.length ?? 0) > 0
                                 ? ` · ${link.teamCount ?? link.team?.length} na equipe`
@@ -3441,23 +3445,26 @@ export default function EmpreiteirosPage() {
                               (link.addendaCount || 0) > 0
                                 ? ` · original ${formatMoneyBr(link.plannedValue) || '—'}`
                                 : ''}
-                            </span>
-                            <span className="font-semibold text-red-700 dark:text-red-300">
-                              Ver medições →
-                            </span>
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => openMedicaoPage(viewingItem, link.id)}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                            >
+                              <ClipboardList className="h-3.5 w-3.5" />
+                              Ver medições
+                            </button>
                           </div>
 
-                          {renderContractTeamSection(link)}
-
                           {!isOwnEmpreiteiroAccount ? (
-                          <>
                           <div
-                            className="mt-2 space-y-1.5"
+                            className="mt-4 space-y-4 border-t border-gray-100 pt-4 dark:border-gray-800"
                             onClick={(e) => e.stopPropagation()}
                             onKeyDown={(e) => e.stopPropagation()}
                           >
+                          <div className="space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                 Aditivos
                               </p>
                               {canManageCadastro ? (
@@ -3479,16 +3486,17 @@ export default function EmpreiteirosPage() {
                                     setAddendumCreateParcel(true);
                                     setAddingAddendumForId(link.id);
                                   }}
-                                  className="text-[11px] font-semibold text-red-700 hover:underline disabled:opacity-50 dark:text-red-300"
+                                  className="inline-flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                                 >
-                                  {addingAddendumForId === link.id
-                                    ? 'Cancelar'
-                                    : '+ Adicionar aditivo'}
+                                  <Plus className="h-3.5 w-3.5" />
+                                  {addingAddendumForId === link.id ? 'Cancelar' : 'Adicionar aditivo'}
                                 </button>
                               ) : null}
                             </div>
                             {(link.addenda || []).length === 0 ? (
-                              <p className="text-[11px] text-gray-400">Nenhum aditivo</p>
+                              <p className="rounded-xl border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                                Nenhum aditivo neste contrato.
+                              </p>
                             ) : (
                               <div className="space-y-1">
                                 {(link.addenda || []).map((ad) => {
@@ -3703,53 +3711,56 @@ export default function EmpreiteirosPage() {
                             ) : null}
                           </div>
                           {(link.installments || []).length > 0 ? (
-                            <div
-                              className="mt-2 space-y-1"
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                 Parcelas
+                                <span className="ml-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                  {(link.installments || []).length}
+                                </span>
                               </p>
-                              <div className="space-y-1">
-                                {(link.installments || []).map((parcel) => {
+                              <div className="space-y-2">
+                                {(openParcelLinkIds[link.id]
+                                  ? link.installments || []
+                                  : (link.installments || []).slice(0, 2)
+                                ).map((parcel) => {
                                   const meta = installmentStatusMeta(parcel.status);
+                                  const statusKey = String(parcel.status || '').toUpperCase();
                                   return (
                                     <div
                                       key={parcel.id}
-                                      className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800/80"
+                                      className="flex flex-wrap items-center gap-3 rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50"
                                     >
-                                      <span className="font-semibold text-gray-800 dark:text-gray-100">
+                                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-xs font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
                                         {parcel.number}ª
                                       </span>
-                                      <span className="text-gray-600 dark:text-gray-300">
-                                        {formatMoneyBr(parcel.amount) || '—'}
-                                      </span>
-                                      {parcel.dueDate ? (
-                                        <span className="text-gray-400">
-                                          venc. {formatDateBr(parcel.dueDate)}
-                                        </span>
-                                      ) : null}
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                          {formatMoneyBr(parcel.amount) || '—'}
+                                        </p>
+                                        {parcel.dueDate ? (
+                                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                            Vence em {formatDateBr(parcel.dueDate)}
+                                          </p>
+                                        ) : null}
+                                      </div>
                                       <span
-                                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}
+                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}
                                       >
                                         {meta.label}
                                       </span>
-                                      {canManageCadastro &&
-                                      String(parcel.status).toUpperCase() === 'PENDING' ? (
+                                      {canManageCadastro && statusKey === 'PENDING' ? (
                                         <button
                                           type="button"
                                           disabled={savingContractLink}
                                           onClick={() =>
                                             void handleReleaseInstallment(link.id, parcel.id)
                                           }
-                                          className="ml-auto text-[11px] font-semibold text-amber-700 hover:underline disabled:opacity-50 dark:text-amber-300"
+                                          className="ml-auto inline-flex items-center rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70"
                                         >
                                           Liberar pagamento
                                         </button>
                                       ) : null}
-                                      {canManageCadastro &&
-                                      String(parcel.status).toUpperCase() === 'RELEASED' ? (
+                                      {canManageCadastro && statusKey === 'RELEASED' ? (
                                         <>
                                           <input
                                             type="file"
@@ -3777,13 +3788,13 @@ export default function EmpreiteirosPage() {
                                                 )
                                                 ?.click()
                                             }
-                                            className="ml-auto text-[11px] font-semibold text-emerald-700 hover:underline disabled:opacity-50 dark:text-emerald-300"
+                                            className="ml-auto inline-flex items-center rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/70"
                                           >
                                             Anexar comprovante
                                           </button>
                                         </>
                                       ) : null}
-                                      {String(parcel.status).toUpperCase() === 'PAID' &&
+                                      {statusKey === 'PAID' &&
                                       (parcel.proofFiles || []).length > 0 ? (
                                         <a
                                           href={
@@ -3792,7 +3803,7 @@ export default function EmpreiteirosPage() {
                                           }
                                           target="_blank"
                                           rel="noreferrer"
-                                          className="ml-auto text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                                          className="ml-auto inline-flex items-center rounded-xl bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/70"
                                         >
                                           Ver comprovante
                                         </a>
@@ -3800,14 +3811,29 @@ export default function EmpreiteirosPage() {
                                     </div>
                                   );
                                 })}
+                                {(link.installments || []).length > 2 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOpenParcelLinkIds((prev) => ({
+                                        ...prev,
+                                        [link.id]: !prev[link.id],
+                                      }))
+                                    }
+                                    className="inline-flex items-center rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                                  >
+                                    {openParcelLinkIds[link.id]
+                                      ? 'Mostrar menos'
+                                      : `Ver mais ${(link.installments || []).length - 2} parcelas`}
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
                           ) : null}
-                          <div
-                            className="mt-2 space-y-1.5"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                          >
+                          <div className="space-y-2">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              Contrato
+                            </p>
                             <input
                               type="file"
                               accept=".pdf,.doc,.docx,image/*,application/pdf"
@@ -3825,14 +3851,15 @@ export default function EmpreiteirosPage() {
                               return (
                                 <div
                                   key={`${file.url}-${fileIndex}`}
-                                  className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 dark:border-gray-600 dark:bg-gray-800/80"
+                                  className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50"
                                 >
-                                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+                                  <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
                                   <a
                                     href={href}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="min-w-0 flex-1 truncate text-xs text-red-700 hover:underline dark:text-red-300"
+                                    className="min-w-0 flex-1 truncate text-sm text-gray-800 hover:text-red-700 dark:text-gray-100 dark:hover:text-red-300"
+                                    title={file.name || 'contrato'}
                                   >
                                     {file.name || 'contrato'}
                                   </a>
@@ -3864,56 +3891,26 @@ export default function EmpreiteirosPage() {
                                     .getElementById(`empreiteiro-service-file-${link.id}`)
                                     ?.click()
                                 }
-                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-600 hover:text-red-700 disabled:opacity-50 dark:text-gray-300 dark:hover:text-red-300"
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                               >
-                                <Paperclip className="h-3 w-3" />
+                                <Paperclip className="h-3.5 w-3.5" />
                                 {(link.files || []).length > 0
                                   ? 'Anexar outro'
                                   : 'Anexar contrato'}
                               </button>
                             ) : (link.files || []).length === 0 ? (
-                              <p className="text-[11px] text-gray-400">Sem anexo do contrato</p>
+                              <p className="rounded-xl border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                                Nenhum contrato anexado.
+                              </p>
                             ) : null}
                           </div>
-                          </>
+                          </div>
                           ) : null}
-                        </div>
+                          {renderContractTeamSection(link)}
+                        </article>
                       );
                     })}
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <DetailField label="Especialidade" value={viewingItem.specialty} />
-                  <DetailField
-                    label="CPF"
-                    value={
-                      empreiteiroCpfDigits(viewingItem)
-                        ? formatCpfInput(empreiteiroCpfDigits(viewingItem))
-                        : undefined
-                    }
-                  />
-                  <DetailField
-                    label="CNPJ"
-                    value={
-                      empreiteiroCnpjDigits(viewingItem)
-                        ? maskCnpjInput(empreiteiroCnpjDigits(viewingItem))
-                        : undefined
-                    }
-                  />
-                  <DetailField label="Telefone" value={formatPhoneDisplay(viewingItem.phone)} />
-                  <DetailField label="Responsável" value={viewingItem.contactName} />
-                  <DetailField label="E-mail" value={viewingItem.email} />
-                  <DetailField
-                    label="Cidade / UF"
-                    value={
-                      [viewingItem.city, viewingItem.state].filter(Boolean).join(' / ') || undefined
-                    }
-                  />
-                  <DetailField label="PIX" value={viewingItem.pixKey} />
-                  <DetailField label="Banco" value={viewingItem.bank} />
-                  <DetailField label="Agência" value={viewingItem.agency} />
-                  <DetailField label="Conta" value={viewingItem.account} />
                 </div>
 
               <div className="flex flex-wrap justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">

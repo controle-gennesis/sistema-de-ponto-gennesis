@@ -32,6 +32,8 @@ type PendingItem = DailyMeasurement & {
   };
 };
 
+export type PendingMeasurementItem = PendingItem;
+
 function formatDateBr(ymd: string) {
   const match = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return ymd;
@@ -48,6 +50,39 @@ function formatWeekdayBr(ymd: string) {
 function isImageFile(file: { url: string; name?: string }) {
   const source = `${file.name || ''} ${file.url || ''}`.toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(source) || source.includes('data:image/');
+}
+
+function formatMoney(value?: number | null) {
+  if (value == null || !Number.isFinite(Number(value))) return '';
+  return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function phaseHeadline(
+  phase: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL',
+  count: number,
+  loading: boolean,
+) {
+  if (loading) return 'Carregando medições…';
+  if (phase === 'APPROVED') {
+    return count === 0
+      ? 'Nenhuma medição aprovada'
+      : count === 1
+        ? '1 medição aprovada'
+        : `${count} medições aprovadas`;
+  }
+  if (phase === 'REJECTED') {
+    return count === 0
+      ? 'Nenhuma medição devolvida'
+      : count === 1
+        ? '1 medição devolvida'
+        : `${count} medições devolvidas`;
+  }
+  if (phase === 'ALL') {
+    return count === 0 ? 'Nenhuma medição' : count === 1 ? '1 medição' : `${count} medições`;
+  }
+  return count === 0
+    ? 'Nenhuma entrega aguardando aprovação'
+    : `${count} entrega${count === 1 ? '' : 's'} aguardando aprovação`;
 }
 
 function mapsUrl(lat: number, lng: number) {
@@ -98,8 +133,14 @@ function PhotoThumb({
 
 export function EmpreiteiroPendingQueue({
   onPreviewPhoto,
+  items: itemsProp,
+  isLoading: loadingProp,
+  phase = 'PENDING',
 }: {
   onPreviewPhoto: (url?: string | null, alt?: string) => void;
+  items?: PendingItem[];
+  isLoading?: boolean;
+  phase?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
 }) {
   const queryClient = useQueryClient();
   const [returnId, setReturnId] = useState<{
@@ -110,15 +151,17 @@ export function EmpreiteiroPendingQueue({
   const [approveTarget, setApproveTarget] = useState<PendingItem | null>(null);
   const [approveAmount, setApproveAmount] = useState('');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading: queryLoading } = useQuery({
     queryKey: ['empreiteiro-daily-measurements-pending'],
     queryFn: async () => {
       const res = await api.get('/empreiteiros/daily-measurements/pending');
       return (res.data?.data || []) as PendingItem[];
     },
+    enabled: itemsProp == null,
   });
 
-  const items = data ?? [];
+  const items = itemsProp ?? data ?? [];
+  const isLoading = loadingProp ?? (itemsProp == null && queryLoading);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['empreiteiro-daily-measurements-pending'] });
@@ -183,15 +226,13 @@ export function EmpreiteiroPendingQueue({
     <div className="space-y-5">
       <div>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          {isLoading
-            ? 'Carregando pendentes…'
-            : items.length === 0
-              ? 'Nenhuma entrega aguardando aprovação'
-              : `${items.length} entrega${items.length === 1 ? '' : 's'} aguardando aprovação`}
+          {phaseHeadline(phase, items.length, isLoading)}
         </p>
-        <p className="mt-0.5 text-xs text-gray-500">
-          Ao aprovar, informe o valor da baixa — ele vai para a próxima parcela do contrato.
-        </p>
+        {phase === 'PENDING' || phase === 'ALL' ? (
+          <p className="mt-0.5 text-xs text-gray-500">
+            Ao aprovar, informe o valor da baixa — ele vai para a próxima parcela do contrato.
+          </p>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -208,9 +249,19 @@ export function EmpreiteiroPendingQueue({
           <div className="mb-3 rounded-2xl bg-emerald-50 p-3 dark:bg-emerald-950/40">
             <ShieldCheck className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Fila limpa</p>
+          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+            {phase === 'APPROVED'
+              ? 'Nenhuma aprovada'
+              : phase === 'REJECTED'
+                ? 'Nenhuma devolvida'
+                : phase === 'ALL'
+                  ? 'Nenhuma medição'
+                  : 'Fila limpa'}
+          </p>
           <p className="mt-1 max-w-sm text-xs text-gray-500 dark:text-gray-400">
-            Quando a empreita enviar uma entrega, ela aparece aqui para você revisar.
+            {phase === 'PENDING'
+              ? 'Quando a empreita enviar uma entrega, ela aparece aqui para você revisar.'
+              : 'Nada neste filtro.'}
           </p>
         </div>
       ) : (
@@ -219,31 +270,42 @@ export function EmpreiteiroPendingQueue({
             const weekday = formatWeekdayBr(item.workDate);
             const servicePhotos = (item.photos || []).filter((photo) => isImageFile(photo));
             const teamPhoto = item.teamPhoto as TeamGeoPhoto | null;
+            const status = String(item.status || 'SUBMITTED').toUpperCase();
+            const isPending = status !== 'APPROVED' && status !== 'CORRECTION';
+            const executedLabel = formatMoney(item.executedAmount);
             return (
               <article
                 key={item.id}
-                className="overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/50"
+                className="overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/55"
               >
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
-                  <div className="flex shrink-0 items-start gap-3 sm:w-28 sm:flex-col sm:items-center sm:text-center">
-                    <div className="rounded-2xl bg-red-600 px-3 py-2.5 text-center text-white shadow-sm sm:w-full">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-red-100">
+                  <div className="flex shrink-0 items-center gap-3 sm:w-28 sm:flex-col sm:items-stretch">
+                    <div className="rounded-2xl bg-red-50 px-3 py-2.5 text-center dark:bg-red-950/40 sm:w-full">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-red-700/80 dark:text-red-300/80">
                         {weekday || 'Dia'}
                       </p>
-                      <p className="text-sm font-bold leading-tight">
+                      <p className="text-sm font-bold leading-tight text-red-800 dark:text-red-200">
                         {formatDateBr(item.workDate)}
                       </p>
                     </div>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-900 dark:bg-sky-950/50 dark:text-sky-300">
+                    <span
+                      className={`inline-flex items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                        status === 'APPROVED'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                          : status === 'CORRECTION'
+                            ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-300'
+                      }`}
+                    >
                       <Clock3 className="h-3.5 w-3.5" />
-                      Enviado
+                      {status === 'APPROVED' ? 'Aprovada' : status === 'CORRECTION' ? 'Devolvida' : 'Enviado'}
                     </span>
                   </div>
 
                   <div className="min-w-0 flex-1 space-y-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">
                           {item.empreiteiro.name}
                           {item.contratoNome || item.empreiteiro.contratoNome
                             ? ` · ${item.contratoNome || item.empreiteiro.contratoNome}`
@@ -252,6 +314,17 @@ export function EmpreiteiroPendingQueue({
                         <h4 className="mt-1 text-base font-semibold leading-snug text-gray-900 dark:text-gray-50">
                           {item.description}
                         </h4>
+                        {status === 'APPROVED' && executedLabel ? (
+                          <p className="mt-1 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                            Baixa {executedLabel}
+                            {item.approvedBy ? ` · aprovado por ${item.approvedBy}` : ''}
+                          </p>
+                        ) : null}
+                        {status === 'CORRECTION' && item.correctionNote ? (
+                          <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                            {item.correctionNote}
+                          </p>
+                        ) : null}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {item.confirmedBy ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
@@ -282,7 +355,8 @@ export function EmpreiteiroPendingQueue({
                           ) : null}
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                      {isPending ? (
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
                         <button
                           type="button"
                           disabled={approveMutation.isPending}
@@ -290,7 +364,7 @@ export function EmpreiteiroPendingQueue({
                             setApproveTarget(item);
                             setApproveAmount('');
                           }}
-                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                         >
                           <ShieldCheck className="h-3.5 w-3.5" />
                           Aprovar
@@ -305,51 +379,50 @@ export function EmpreiteiroPendingQueue({
                             });
                             setReturnNote('');
                           }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
                           Devolver
                         </button>
                       </div>
+                      ) : null}
                     </div>
 
                     {(teamPhoto || servicePhotos.length > 0) && (
-                      <div className="space-y-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-950/40">
-                        <div className="flex flex-wrap gap-2">
-                          {teamPhoto ? (
-                            <PhotoThumb
-                              url={teamPhoto.url}
-                              alt="Foto da equipe"
-                              badge="Equipe"
-                              onClick={() => onPreviewPhoto(teamPhoto.url, 'Foto da equipe')}
-                              caption={
-                                teamPhoto.address ||
-                                `${Number(teamPhoto.latitude).toFixed(5)}, ${Number(teamPhoto.longitude).toFixed(5)}`
-                              }
-                              mapHref={mapsUrl(
-                                Number(teamPhoto.latitude),
-                                Number(teamPhoto.longitude)
-                              )}
-                            />
-                          ) : null}
-                          {servicePhotos.slice(0, 4).map((photo, index) => (
-                            <PhotoThumb
-                              key={`${photo.url}-${index}`}
-                              url={photo.url}
-                              alt={photo.name || 'Foto do serviço'}
-                              badge={index === 0 ? 'Serviço' : undefined}
-                              onClick={() =>
-                                onPreviewPhoto(photo.url, photo.name || 'Foto do serviço')
-                              }
-                            />
-                          ))}
-                          {servicePhotos.length > 4 ? (
-                            <span className="inline-flex h-24 w-16 items-center justify-center rounded-xl border border-dashed border-gray-300 text-xs font-semibold text-gray-500 dark:border-gray-600">
-                              +{servicePhotos.length - 4}
-                              <ImageIcon className="ml-0.5 h-3.5 w-3.5" />
-                            </span>
-                          ) : null}
-                        </div>
+                      <div className="flex flex-wrap gap-2">
+                        {teamPhoto ? (
+                          <PhotoThumb
+                            url={teamPhoto.url}
+                            alt="Foto da equipe"
+                            badge="Equipe"
+                            onClick={() => onPreviewPhoto(teamPhoto.url, 'Foto da equipe')}
+                            caption={
+                              teamPhoto.address ||
+                              `${Number(teamPhoto.latitude).toFixed(5)}, ${Number(teamPhoto.longitude).toFixed(5)}`
+                            }
+                            mapHref={mapsUrl(
+                              Number(teamPhoto.latitude),
+                              Number(teamPhoto.longitude)
+                            )}
+                          />
+                        ) : null}
+                        {servicePhotos.slice(0, 4).map((photo, index) => (
+                          <PhotoThumb
+                            key={`${photo.url}-${index}`}
+                            url={photo.url}
+                            alt={photo.name || 'Foto do serviço'}
+                            badge={index === 0 ? 'Serviço' : undefined}
+                            onClick={() =>
+                              onPreviewPhoto(photo.url, photo.name || 'Foto do serviço')
+                            }
+                          />
+                        ))}
+                        {servicePhotos.length > 4 ? (
+                          <span className="inline-flex h-24 w-16 items-center justify-center rounded-xl border border-dashed border-gray-300 text-xs font-semibold text-gray-500 dark:border-gray-600">
+                            +{servicePhotos.length - 4}
+                            <ImageIcon className="ml-0.5 h-3.5 w-3.5" />
+                          </span>
+                        ) : null}
                       </div>
                     )}
                   </div>

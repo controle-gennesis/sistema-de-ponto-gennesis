@@ -721,11 +721,6 @@ type ContractLinkRow = {
   }>;
 };
 
-function startOfTodaySp(): Date {
-  const ymd = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-  return new Date(`${ymd}T00:00:00.000Z`);
-}
-
 function normalizeContractLinkStatus(raw: unknown): EmpreiteiroContractStatus {
   const value = str(raw).toUpperCase().replace(/[\s-]+/g, '_');
   if (value === 'NOT_STARTED' || value === 'NAO_INICIADO' || value === 'NÃO_INICIADO') {
@@ -742,7 +737,7 @@ function normalizeContractLinkStatus(raw: unknown): EmpreiteiroContractStatus {
   return 'IN_PROGRESS';
 }
 
-/** Status efetivo: respeita concluído/cancelado; atraso e não iniciado saem das datas. */
+/** Status efetivo: respeita concluído/cancelado; atraso e não iniciado saem do dia civil. */
 function resolveContractLinkStatus(row: {
   status?: string | null;
   isActive?: boolean;
@@ -752,19 +747,13 @@ function resolveContractLinkStatus(row: {
   const stored = normalizeContractLinkStatus(row.status);
   if (stored === 'COMPLETED' || stored === 'CANCELLED') return stored;
 
-  const today = startOfTodaySp();
-  const start = row.startDate ? new Date(row.startDate) : null;
-  const end = row.endDate ? new Date(row.endDate) : null;
+  const todayYmd = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const startYmd = row.startDate ? formatWorkDate(new Date(row.startDate)) : '';
+  const endYmd = row.endDate ? formatWorkDate(new Date(row.endDate)) : '';
 
-  if (end && !Number.isNaN(end.getTime()) && end < today) {
-    return 'OVERDUE';
-  }
-  if (start && !Number.isNaN(start.getTime()) && start > today) {
-    return 'NOT_STARTED';
-  }
-  if (stored === 'OVERDUE' || stored === 'NOT_STARTED') {
-    return 'IN_PROGRESS';
-  }
+  if (endYmd && endYmd < todayYmd) return 'OVERDUE';
+  if (startYmd && startYmd > todayYmd) return 'NOT_STARTED';
+  if (stored === 'OVERDUE' || stored === 'NOT_STARTED') return 'IN_PROGRESS';
   if (row.isActive === false) return 'COMPLETED';
   return stored;
 }
@@ -821,7 +810,12 @@ function serializeContractLink(
   row: ContractLinkRow,
   measurementStats: ContractMeasurementStats | number = { count: 0, executedAmount: 0 }
 ) {
-  const status = resolveContractLinkStatus(row);
+  const measurementCount =
+    typeof measurementStats === 'number' ? measurementStats : measurementStats.count;
+  const executedAmountTotal =
+    typeof measurementStats === 'number' ? 0 : measurementStats.executedAmount;
+  let status = resolveContractLinkStatus(row);
+  if (status === 'NOT_STARTED' && measurementCount > 0) status = 'IN_PROGRESS';
   const serviceName = str(row.name) || row.contract?.name || 'Contrato de serviço';
   const centroCustoNome =
     row.costCenter?.name || row.contract?.costCenter?.name || '';
@@ -830,10 +824,6 @@ function serializeContractLink(
   const baseValue = row.plannedValue != null ? Number(row.plannedValue) : 0;
   const addendaTotal = addenda.reduce((sum, a) => sum + a.amount, 0);
   const currentValue = Number((baseValue + addendaTotal).toFixed(2));
-  const measurementCount =
-    typeof measurementStats === 'number' ? measurementStats : measurementStats.count;
-  const executedAmountTotal =
-    typeof measurementStats === 'number' ? 0 : measurementStats.executedAmount;
   return {
     id: row.id,
     empreiteiroId: row.empreiteiroId,
@@ -2612,12 +2602,21 @@ export class EmpreiteiroController {
     }
   }
 
-  /** Fila global: entregas enviadas aguardando aprovação do fiscal. */
+  /** Fila global do fiscal. Sem phase (ou PENDING) devolve só o que aguarda aprovação. */
   async listPendingDailyMeasurements(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await assertCanApproveDailyMeasurement(req);
+      const phase = str(req.query.phase).toUpperCase();
+      const statusWhere =
+        phase === 'APPROVED'
+          ? { status: 'APPROVED' as const }
+          : phase === 'REJECTED' || phase === 'CORRECTION'
+            ? { status: 'CORRECTION' as const }
+            : phase === 'ALL'
+              ? {}
+              : { status: 'SUBMITTED' as const };
       const items = await prisma.empreiteiroDailyMeasurement.findMany({
-        where: { status: 'SUBMITTED' },
+        where: statusWhere,
         include: {
           ...dailyMeasurementInclude,
           empreiteiro: {
@@ -2629,12 +2628,26 @@ export class EmpreiteiroController {
             },
           },
         },
-        orderBy: [{ workDate: 'asc' }, { createdAt: 'asc' }],
+        orderBy:
+          phase === 'ALL' || phase === 'APPROVED' || phase === 'REJECTED' || phase === 'CORRECTION'
+            ? [{ workDate: 'desc' as const }, { updatedAt: 'desc' as const }]
+            : [{ workDate: 'asc' as const }, { createdAt: 'asc' as const }],
       });
+      const approverIds = [
+        ...new Set(items.map((row) => row.approvedBy).filter((id): id is string => Boolean(id))),
+      ];
+      const approvers = approverIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: approverIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const approverNameById = new Map(approvers.map((user) => [user.id, user.name]));
       res.json({
         success: true,
         data: items.map((row) => ({
           ...serializeDailyMeasurement(row),
+          approvedBy: row.approvedBy ? approverNameById.get(row.approvedBy) || null : null,
           empreiteiro: {
             id: row.empreiteiro.id,
             name: row.empreiteiro.name,

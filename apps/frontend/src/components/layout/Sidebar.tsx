@@ -291,6 +291,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
     isDepartmentFinanceiro,
     isDepartmentContabil,
@@ -567,7 +568,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         canApproveEspelhoNf ||
         canApproveOc ||
         canApproveFuel ||
-        canApproveMaterialRequests;
+        canApproveMaterialRequests ||
+        canApproveEmpreiteiroDaily;
       if (aprovacoesVisible) return 0;
       return approvalCounts.rm;
     }
@@ -757,7 +759,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               canApproveEspelhoNf ||
               canApproveOc ||
               canApproveFuel ||
-              canApproveMaterialRequests,
+              canApproveMaterialRequests ||
+              canApproveEmpreiteiroDaily,
           },
           {
             name: 'Solicitações Internas',

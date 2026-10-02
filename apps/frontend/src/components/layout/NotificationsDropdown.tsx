@@ -12,6 +12,7 @@ import {
   FileCheck,
   FileText,
   Fuel,
+  HardHat,
   MessageCircle,
   Package,
   PackageCheck,
@@ -55,6 +56,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
     canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
   const { counts, isLoading: approvalsLoading } = useApprovalNotificationCounts();
@@ -231,6 +233,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: ShoppingCart,
       });
     }
+    if (canApproveEmpreiteiroDaily && counts.medicao > 0) {
+      list.push({
+        id: 'medicao',
+        title: 'Medições de entrega',
+        description: 'Aguardando aprovação',
+        count: counts.medicao,
+        href: '/ponto/aprovacoes?tab=medicao',
+        Icon: HardHat,
+      });
+    }
     if (canSeeFdAprovadas && fdNotificationCounts.pendingPurchase > 0) {
       list.push({
         id: 'fd-compras',
@@ -392,6 +404,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
     canSeeFdAprovadas,
     canSeeFuroEstoque,
     canAccessRecebimentoEntregasRoutePage,

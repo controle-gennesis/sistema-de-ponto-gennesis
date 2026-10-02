@@ -14,6 +14,7 @@ export type ApprovalNotificationCounts = {
   fuel: number;
   oc: number;
   rm: number;
+  medicao: number;
   total: number;
 };
 
@@ -24,6 +25,7 @@ const emptyCounts: ApprovalNotificationCounts = {
   fuel: 0,
   oc: 0,
   rm: 0,
+  medicao: 0,
   total: 0,
 };
 
@@ -36,6 +38,7 @@ export function useApprovalNotificationCounts() {
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
   } = usePermissions();
 
   const canFetch =
@@ -44,7 +47,8 @@ export function useApprovalNotificationCounts() {
     canApproveEspelhoNf ||
     canApproveFuel ||
     canApproveOc ||
-    canApproveMaterialRequests;
+    canApproveMaterialRequests ||
+    canApproveEmpreiteiroDaily;
   const enabled = !isLoading && canFetch;
 
   const mainQuery = useQuery({
@@ -86,6 +90,19 @@ export function useApprovalNotificationCounts() {
     staleTime: 15_000,
   });
 
+  const medicaoQuery = useQuery({
+    queryKey: ['empreiteiro-daily-measurements-pending', 'count'],
+    enabled: enabled && canApproveEmpreiteiroDaily,
+    queryFn: async () => {
+      const res = await api.get('/empreiteiros/daily-measurements/pending');
+      const rows = res.data?.data;
+      return Array.isArray(rows) ? rows.length : 0;
+    },
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
+
   const counts = useMemo((): ApprovalNotificationCounts => {
     const base = mainQuery.data;
     const espelho = canApproveEspelhoNf ? (espelhoQuery.data ?? 0) : 0;
@@ -94,24 +111,30 @@ export function useApprovalNotificationCounts() {
     const fuel = canApproveFuel ? (base?.fuel ?? 0) : 0;
     const oc = canApproveOc ? (base?.oc ?? 0) : 0;
     const rm = canApproveMaterialRequests ? (base?.rm ?? 0) : 0;
-    const total = dp + espelho + fd + fuel + oc + rm;
-    return { dp, espelho, fd, fuel, oc, rm, total };
+    const medicao = canApproveEmpreiteiroDaily ? (medicaoQuery.data ?? 0) : 0;
+    const total = dp + espelho + fd + fuel + oc + rm + medicao;
+    return { dp, espelho, fd, fuel, oc, rm, medicao, total };
   }, [
     mainQuery.data,
     espelhoQuery.data,
+    medicaoQuery.data,
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
   ]);
 
   return {
     counts: enabled ? counts : emptyCounts,
-    isLoading: mainQuery.isLoading || (canApproveEspelhoNf && espelhoQuery.isLoading),
+    isLoading:
+      mainQuery.isLoading ||
+      (canApproveEspelhoNf && espelhoQuery.isLoading) ||
+      (canApproveEmpreiteiroDaily && medicaoQuery.isLoading),
     refetch: async () => {
-      await Promise.all([mainQuery.refetch(), espelhoQuery.refetch()]);
+      await Promise.all([mainQuery.refetch(), espelhoQuery.refetch(), medicaoQuery.refetch()]);
     },
   };
 }

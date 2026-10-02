@@ -76,6 +76,49 @@ function formatMoneyCompact(value?: number | null) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+const FINANCE_STAT_TONE = {
+  Contrato: {
+    box: 'bg-violet-50 dark:bg-violet-950/40',
+    label: 'text-violet-700 dark:text-violet-300',
+    value: 'text-violet-950 dark:text-violet-50',
+  },
+  Executado: {
+    box: 'bg-sky-50 dark:bg-sky-950/40',
+    label: 'text-sky-700 dark:text-sky-300',
+    value: 'text-sky-950 dark:text-sky-50',
+  },
+  Pago: {
+    box: 'bg-emerald-50 dark:bg-emerald-950/40',
+    label: 'text-emerald-700 dark:text-emerald-300',
+    value: 'text-emerald-950 dark:text-emerald-50',
+  },
+  Saldo: {
+    box: 'bg-amber-50 dark:bg-amber-950/35',
+    label: 'text-amber-800 dark:text-amber-200',
+    value: 'text-amber-950 dark:text-amber-50',
+  },
+} as const;
+
+export function ContractFinanceStats({
+  items,
+}: {
+  items: Array<{ label: keyof typeof FINANCE_STAT_TONE; value: string }>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {items.map((item) => {
+        const tone = FINANCE_STAT_TONE[item.label];
+        return (
+          <div key={item.label} className={`rounded-xl px-3 py-2.5 ${tone.box}`}>
+            <p className={`text-[11px] font-medium ${tone.label}`}>{item.label}</p>
+            <p className={`mt-0.5 text-sm font-semibold tabular-nums ${tone.value}`}>{item.value}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function contractFinanceSummary(
   contract: DailyMeasurementContractOption | null,
   /** Soma ao vivo das baixas das entregas já carregadas (prioriza sobre o total do cadastro). */
@@ -758,41 +801,30 @@ export function EmpreiteiroDailyMeasurements({
         if (!finance || !financeContract) return null;
         if (!filterContractId && contracts.length > 1) return null;
         return (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
-              {
-                label: 'Contrato',
-                value: formatMoneyCompact(finance.contractValue),
-              },
-              {
-                label: 'Executado',
-                value:
-                  finance.executedPct != null ? `${finance.executedPct}%` : '—',
-              },
-              {
-                label: 'Pago',
-                value: formatMoneyCompact(finance.paid),
-              },
-              {
-                label: 'Saldo',
-                value: formatMoneyCompact(finance.saldo),
-              },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-900/50"
-              >
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {item.label}
-                </p>
-                <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                  {item.value}
-                </p>
-              </div>
-            ))}
-            <p className="col-span-2 text-[11px] text-gray-500 dark:text-gray-400 sm:col-span-4">
-              Ao aprovar, informe o valor da baixa — ele vai para a próxima parcela (libera e
-              atualiza o valor). Comprovante de pagamento é o passo seguinte.
+          <div className="space-y-2">
+            <ContractFinanceStats
+                items={[
+                  {
+                    label: 'Contrato',
+                    value: formatMoneyCompact(finance.contractValue),
+                  },
+                  {
+                    label: 'Executado',
+                    value: finance.executedPct != null ? `${finance.executedPct}%` : '—',
+                  },
+                  {
+                    label: 'Pago',
+                    value: formatMoneyCompact(finance.paid),
+                  },
+                  {
+                    label: 'Saldo',
+                    value: formatMoneyCompact(finance.saldo),
+                  },
+                ]}
+              />
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Ao aprovar, informe o valor da baixa — ele vai para a próxima parcela. O comprovante
+              de pagamento é o passo seguinte.
             </p>
           </div>
         );
@@ -1049,19 +1081,19 @@ export function EmpreiteiroDailyMeasurements({
           {groupedItems.map((group) => (
             <section key={group.key} className="space-y-3">
               {!filterContractId ? (
-                <div className="space-y-2 border-b border-gray-200 pb-3 text-center dark:border-gray-700">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="inline-flex max-w-full items-center justify-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      <Building2 className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" />
+                    <p className="inline-flex max-w-full items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      <Building2 className="h-4 w-4 shrink-0 text-gray-400" />
                       <span className="truncate">{group.label}</span>
                     </p>
                     {group.centroCustoNome ? (
                       <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        Centro: {group.centroCustoNome}
+                        {group.centroCustoNome}
                       </p>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                       {group.items.length} entrega
                       {group.items.length === 1 ? '' : 's'}
@@ -1070,7 +1102,7 @@ export function EmpreiteiroDailyMeasurements({
                       <button
                         type="button"
                         onClick={() => selectContractFilter(group.contractId)}
-                        className="rounded-lg px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
+                        className="rounded-xl bg-red-50 px-3 py-1.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
                       >
                         Só este contrato
                       </button>
@@ -1093,15 +1125,15 @@ export function EmpreiteiroDailyMeasurements({
                   return (
                     <article
                       key={item.id}
-                      className="overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm transition hover:border-red-200 dark:border-gray-700 dark:bg-gray-900/50 dark:hover:border-red-900/50"
+                      className="overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/55"
                     >
                       <div className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
-                        <div className="flex shrink-0 items-start gap-3 sm:w-28 sm:flex-col sm:items-center sm:text-center">
-                          <div className="rounded-2xl bg-red-600 px-3 py-2.5 text-center text-white shadow-sm sm:w-full">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-red-100">
+                        <div className="flex shrink-0 items-center gap-3 sm:w-28 sm:flex-col sm:items-stretch">
+                          <div className="rounded-2xl bg-red-50 px-3 py-2.5 text-center dark:bg-red-950/40 sm:w-full">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-red-700/80 dark:text-red-300/80">
                               {weekday || 'Dia'}
                             </p>
-                            <p className="text-sm font-bold leading-tight">
+                            <p className="text-sm font-bold leading-tight text-red-800 dark:text-red-200">
                               {formatDateBr(item.workDate)}
                             </p>
                           </div>
