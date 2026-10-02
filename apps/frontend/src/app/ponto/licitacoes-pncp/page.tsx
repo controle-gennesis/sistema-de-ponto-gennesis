@@ -6,9 +6,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   ClipboardList,
@@ -1540,22 +1537,9 @@ function LicitacoesPncpPageContent() {
                           onClick={cycleValorSort}
                           title={valorSortLabel}
                           aria-label={valorSortLabel}
-                          className="inline-flex items-center justify-end gap-1 rounded-md px-1 py-0.5 font-semibold uppercase tracking-wide text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                          className="cursor-pointer bg-transparent p-0 font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400"
                         >
                           Valor estimado
-                          {valorSortDir === 'desc' ? (
-                            <ArrowDown
-                              className="h-3.5 w-3.5 text-red-600 dark:text-red-400"
-                              aria-hidden
-                            />
-                          ) : valorSortDir === 'asc' ? (
-                            <ArrowUp
-                              className="h-3.5 w-3.5 text-red-600 dark:text-red-400"
-                              aria-hidden
-                            />
-                          ) : (
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" aria-hidden />
-                          )}
                         </button>
                       </th>
                       <th scope="col" className={cadastroListClasses.thCenter}>
