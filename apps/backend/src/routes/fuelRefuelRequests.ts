@@ -52,6 +52,9 @@ router.get(
   requireFuelApproverAccess,
   (req, res, next) => fuelRefuelRequestController.listManagerApprovals(req, res, next),
 );
+router.get('/contract-resumo', (req, res, next) =>
+  fuelRefuelRequestController.listContractResumo(req, res, next),
+);
 router.get('/', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.list(req, res, next),
 );

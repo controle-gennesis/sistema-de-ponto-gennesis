@@ -743,8 +743,8 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
   const { data: usedRows = [], isLoading: loadingUsed } = useQuery({
     queryKey: ['fuel-refuel-requests', 'contract-abastecimento-used', contractId, data.weekStart, data.weekEnd],
     queryFn: async () => {
-      const res = await api.get('/fuel-refuel-requests', {
-        params: { status: 'APPROVED,AWAITING_REFUEL,COMPLETED' },
+      const res = await api.get('/fuel-refuel-requests/contract-resumo', {
+        params: { contractId },
       });
       return (res.data?.data || []) as AbastecimentoUsedRequest[];
     },

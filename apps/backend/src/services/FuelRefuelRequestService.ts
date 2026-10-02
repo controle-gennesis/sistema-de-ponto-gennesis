@@ -266,6 +266,28 @@ export class FuelRefuelRequestService {
     return row;
   }
 
+  /** Resumo no contrato: liberações que entram na cota (Liberado na aba Contratos). */
+  async listForContractResumo(contractId: string) {
+    const id = contractId.trim();
+    if (!id) return [];
+    const rows = await prisma.fuelRefuelRequest.findMany({
+      where: {
+        contractId: id,
+        status: {
+          in: [
+            FuelRefuelRequestStatus.APPROVED,
+            FuelRefuelRequestStatus.AWAITING_REFUEL,
+            FuelRefuelRequestStatus.COMPLETED,
+          ],
+        },
+      },
+      include: fuelRefuelInclude,
+      orderBy: [{ suppliesApprovedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 500,
+    });
+    return presentFuelRowsPhotos(rows);
+  }
+
   async listForSupplies(params: {
     search?: string;
     status?: FuelRefuelRequestStatus;

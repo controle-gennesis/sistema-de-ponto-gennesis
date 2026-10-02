@@ -169,3 +169,20 @@ export async function loadPdfDualLogoStrip(maxHMm = 16): Promise<PdfLogoStrip | 
     hMm: composed.heightPx * mmPerPx,
   };
 }
+
+/** Só a logo Gennesis para PDF (mm). */
+export async function loadPdfGennesisLogoStrip(maxHMm = 16): Promise<PdfLogoStrip | null> {
+  const maxHPx = Math.round((maxHMm * 96) / 25.4);
+  const gennesis = await loadGennesisLogo(maxHPx);
+  if (!gennesis) return null;
+  const composed = composeHorizontal([gennesis]);
+  gennesis.bitmap.close();
+  if (!composed) return null;
+  const dataUrl = composed.canvas.toDataURL('image/png');
+  const mmPerPx = 25.4 / 96;
+  return {
+    dataUrl,
+    wMm: composed.widthPx * mmPerPx,
+    hMm: composed.heightPx * mmPerPx,
+  };
+}

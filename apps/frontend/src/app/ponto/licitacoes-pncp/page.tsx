@@ -1,14 +1,19 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   ClipboardList,
   Clock,
+  Download,
   DownloadCloud,
   ExternalLink,
   Filter,
@@ -38,6 +43,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { Loading } from '@/components/ui/Loading';
+import { TableCheckbox } from '@/components/ui/Checkbox';
 import {
   cadastroListClasses,
   RowActionMenuCell,
@@ -47,11 +53,14 @@ import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useRightClickPanScroll } from '@/hooks/useRightClickPanScroll';
 import api from '@/lib/api';
+import { exportBrandedPdfTable } from '@/lib/exportBrandedPdfTable';
 import {
   maskCurrencyInputBrOrEmpty,
   parseCurrencyInputBr,
 } from '@/lib/maskCurrencyBr';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+type ValorSortDir = 'none' | 'asc' | 'desc';
 
 type PncpUfProgress = {
   uf: string;
@@ -419,6 +428,77 @@ function formatCurrency(value: number | null): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function pncpRowKey(row: PncpItem, idx = 0): string {
+  return (
+    row.numeroControlePNCP ||
+    `${row.processo || 'p'}-${row.sequencialCompra || idx}`
+  );
+}
+
+function pncpStatusLabel(row: PncpItem): string {
+  if (row.enviadoAnalise) return 'Enviada';
+  if (row.rejeitadoAnalise) return 'Rejeitada';
+  if (isPncpVencida(row)) return 'Vencida';
+  return 'Disponível';
+}
+
+function formatPncpPdfDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+async function exportPncpSelectionPdf(rows: PncpItem[]) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const totalValor = rows.reduce((sum, row) => {
+    const v = row.valorEstimado;
+    return sum + (v != null && Number.isFinite(v) ? v : 0);
+  }, 0);
+
+  await exportBrandedPdfTable({
+    title: 'Licitações PNCP',
+    subtitle: `${rows.length} selecionada${rows.length === 1 ? '' : 's'} · Valor estimado ${formatCurrency(totalValor)}`,
+    filename: `licitacoes-pncp-${stamp}.pdf`,
+    footerLabel: 'Licitações PNCP',
+    logoMode: 'gennesis',
+    columns: [
+      { key: 'orgao', label: 'ÓRGÃO', width: 38, tone: 'bold' },
+      { key: 'uf', label: 'UF', width: 10 },
+      { key: 'modalidade', label: 'MODALIDADE', width: 28 },
+      { key: 'objeto', label: 'OBJETO', width: 74 },
+      { key: 'processo', label: 'PROCESSO', width: 30, tone: 'muted' },
+      { key: 'abertura', label: 'ABERTURA', width: 22 },
+      { key: 'encerramento', label: 'ENCERRAMENTO', width: 26 },
+      { key: 'valor', label: 'VALOR ESTIMADO', width: 28 },
+      { key: 'link', label: 'LINK', width: 18, tone: 'link' },
+    ],
+    rows: rows.map((row) => {
+      const href =
+        buildPncpEditalUrl(row.numeroControlePNCP) ||
+        (row.linkPncp?.trim() ? row.linkPncp.trim() : null);
+      return {
+        orgao: [row.orgao, row.municipio].filter(Boolean).join(' · ') || '—',
+        uf: row.uf || '—',
+        modalidade: row.srp
+          ? `${row.modalidade || '—'} (SRP)`
+          : row.modalidade || '—',
+        objeto: (row.objeto || '—').replace(/\s+/g, ' ').trim(),
+        processo: row.processo || row.numeroControlePNCP || '—',
+        abertura: formatPncpPdfDate(row.dataAberturaProposta),
+        encerramento: formatPncpPdfDate(row.dataEncerramentoProposta),
+        valor: formatCurrency(row.valorEstimado),
+        link: href ? 'Abrir' : '—',
+        ...(href ? { linkHref: href } : {}),
+      };
+    }),
+  });
+}
+
 /** Id PNCP `CNPJ-1-SEQ/ANO` → https://pncp.gov.br/app/editais/{CNPJ}/{ANO}/{SEQ} */
 function buildPncpEditalUrl(numeroControlePNCP: string | null | undefined): string | null {
   const m = String(numeroControlePNCP || '')
@@ -493,6 +573,9 @@ function LicitacoesPncpPageContent() {
   const [syncFullResync, setSyncFullResync] = useState(false);
   const [syncSelectedUfs, setSyncSelectedUfs] = useState<string[]>(() => [...BRASIL_UFS]);
   const [syncStopRequested, setSyncStopRequested] = useState(false);
+  const [valorSortDir, setValorSortDir] = useState<ValorSortDir>('none');
+  const [selectedByKey, setSelectedByKey] = useState<Record<string, PncpItem>>({});
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [applied, setApplied] = useState({
     ufs: ['DF'] as string[],
     modalidadeCodigos: [] as string[],
@@ -736,7 +819,12 @@ function LicitacoesPncpPageContent() {
   const query = useQuery({
     queryKey: [
       'pncp-contratacoes',
-      { ...applied, q: hasSearch ? searchTerm : '' },
+      {
+        ...applied,
+        q: hasSearch ? searchTerm : '',
+        sortBy: valorSortDir === 'none' ? null : 'valorEstimado',
+        sortDir: valorSortDir === 'none' ? null : valorSortDir,
+      },
     ],
     queryFn: async () => {
       const res = await api.get('/pncp/contratacoes', {
@@ -758,6 +846,9 @@ function LicitacoesPncpPageContent() {
           ...(applied.valorMax != null ? { valorMax: applied.valorMax } : {}),
           statusAnalise: applied.statusAnalise,
           ...(hasSearch ? { q: searchTerm } : {}),
+          ...(valorSortDir !== 'none'
+            ? { sortBy: 'valorEstimado', sortDir: valorSortDir }
+            : {}),
         },
         timeout: 30_000,
       });
@@ -790,7 +881,15 @@ function LicitacoesPncpPageContent() {
       void queryClient.invalidateQueries({ queryKey: ['licitacoes-planilha-regiao'] });
       void queryClient.invalidateQueries({ queryKey: ['licitacoes-planilha-regioes'] });
       queryClient.setQueryData(
-        ['pncp-contratacoes', { ...applied, q: hasSearch ? searchTerm : '' }],
+        [
+          'pncp-contratacoes',
+          {
+            ...applied,
+            q: hasSearch ? searchTerm : '',
+            sortBy: valorSortDir === 'none' ? null : 'valorEstimado',
+            sortDir: valorSortDir === 'none' ? null : valorSortDir,
+          },
+        ],
         (prev: PncpListResult | undefined) => {
           if (!prev) return prev;
           return {
@@ -852,7 +951,15 @@ function LicitacoesPncpPageContent() {
       toast.success('Licitação rejeitada.');
       void queryClient.invalidateQueries({ queryKey: ['pncp-contratacoes'] });
       queryClient.setQueryData(
-        ['pncp-contratacoes', { ...applied, q: hasSearch ? searchTerm : '' }],
+        [
+          'pncp-contratacoes',
+          {
+            ...applied,
+            q: hasSearch ? searchTerm : '',
+            sortBy: valorSortDir === 'none' ? null : 'valorEstimado',
+            sortDir: valorSortDir === 'none' ? null : valorSortDir,
+          },
+        ],
         (prev: PncpListResult | undefined) => {
           if (!prev) return prev;
           return {
@@ -920,12 +1027,89 @@ function LicitacoesPncpPageContent() {
     () =>
       items.map((row, idx) => ({
         ...row,
-        id:
-          row.numeroControlePNCP ||
-          `${row.processo || 'p'}-${row.sequencialCompra || idx}`,
+        id: pncpRowKey(row, idx),
       })),
     [items]
   );
+
+  const pageKeys = useMemo(
+    () => items.map((row, idx) => pncpRowKey(row, idx)),
+    [items]
+  );
+  const allPageSelected =
+    pageKeys.length > 0 && pageKeys.every((key) => Boolean(selectedByKey[key]));
+  const somePageSelected = pageKeys.some((key) => Boolean(selectedByKey[key]));
+  const selectedRows = useMemo(() => Object.values(selectedByKey), [selectedByKey]);
+  const selectedCount = selectedRows.length;
+  const selectedValorTotal = useMemo(
+    () =>
+      selectedRows.reduce((sum, row) => {
+        const v = row.valorEstimado;
+        return sum + (v != null && Number.isFinite(v) ? v : 0);
+      }, 0),
+    [selectedRows]
+  );
+
+  const cycleValorSort = () => {
+    setValorSortDir((prev) => {
+      if (prev === 'none') return 'desc';
+      if (prev === 'desc') return 'asc';
+      return 'none';
+    });
+    setApplied((prev) => ({ ...prev, pagina: 1 }));
+  };
+
+  const toggleSelectOne = (key: string, row: PncpItem) => {
+    setSelectedByKey((prev) => {
+      const next = { ...prev };
+      if (next[key]) delete next[key];
+      else next[key] = row;
+      return next;
+    });
+  };
+
+  const toggleSelectAllPage = () => {
+    setSelectedByKey((prev) => {
+      const next = { ...prev };
+      if (allPageSelected) {
+        for (const key of pageKeys) delete next[key];
+      } else {
+        items.forEach((row, idx) => {
+          next[pncpRowKey(row, idx)] = row;
+        });
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedByKey({});
+
+  const handleExportSelection = async () => {
+    if (selectedRows.length === 0) {
+      toast.error('Selecione ao menos uma licitação.');
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      await exportPncpSelectionPdf(selectedRows);
+      toast.success(
+        selectedRows.length === 1
+          ? 'PDF gerado com 1 licitação.'
+          : `PDF gerado com ${selectedRows.length} licitações.`
+      );
+    } catch {
+      toast.error('Não foi possível gerar o PDF.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const valorSortLabel =
+    valorSortDir === 'desc'
+      ? 'Ordenado: maior → menor valor'
+      : valorSortDir === 'asc'
+        ? 'Ordenado: menor → maior valor'
+        : 'Ordenar por valor estimado';
   const {
     rowActionMenu,
     rowForActionMenu,
@@ -1321,6 +1505,14 @@ function LicitacoesPncpPageContent() {
                 <table className="w-full min-w-[84rem] text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
+                      <th scope="col" className={`${cadastroListClasses.thCenter} w-12`}>
+                        <TableCheckbox
+                          checked={allPageSelected}
+                          indeterminate={!allPageSelected && somePageSelected}
+                          onChange={() => toggleSelectAllPage()}
+                          ariaLabel="Selecionar todas desta página"
+                        />
+                      </th>
                       <th scope="col" className={cadastroListClasses.th}>
                         Órgão
                       </th>
@@ -1343,7 +1535,28 @@ function LicitacoesPncpPageContent() {
                         Encerramento
                       </th>
                       <th scope="col" className={cadastroListClasses.thNumeric}>
-                        Valor estimado
+                        <button
+                          type="button"
+                          onClick={cycleValorSort}
+                          title={valorSortLabel}
+                          aria-label={valorSortLabel}
+                          className="inline-flex items-center justify-end gap-1 rounded-md px-1 py-0.5 font-semibold uppercase tracking-wide text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                        >
+                          Valor estimado
+                          {valorSortDir === 'desc' ? (
+                            <ArrowDown
+                              className="h-3.5 w-3.5 text-red-600 dark:text-red-400"
+                              aria-hidden
+                            />
+                          ) : valorSortDir === 'asc' ? (
+                            <ArrowUp
+                              className="h-3.5 w-3.5 text-red-600 dark:text-red-400"
+                              aria-hidden
+                            />
+                          ) : (
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" aria-hidden />
+                          )}
+                        </button>
                       </th>
                       <th scope="col" className={cadastroListClasses.thCenter}>
                         Status
@@ -1358,11 +1571,17 @@ function LicitacoesPncpPageContent() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                     {items.map((row, idx) => {
-                      const key =
-                        row.numeroControlePNCP ||
-                        `${row.processo || 'p'}-${row.sequencialCompra || idx}`;
+                      const key = pncpRowKey(row, idx);
+                      const checked = Boolean(selectedByKey[key]);
                       return (
                         <tr key={key} className={getListTableRowClassName(false)}>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <TableCheckbox
+                              checked={checked}
+                              onChange={() => toggleSelectOne(key, row)}
+                              ariaLabel={`Selecionar ${row.orgao || row.processo || 'licitação'}`}
+                            />
+                          </td>
                           <td className={cadastroListClasses.td}>
                             <div className="min-w-[12rem] max-w-[18rem]">
                               <div className="font-medium text-gray-900 dark:text-gray-100">
@@ -2270,6 +2489,59 @@ function LicitacoesPncpPageContent() {
           </div>
         </div>
       ) : null}
+
+      {typeof document !== 'undefined' &&
+        selectedCount > 0 &&
+        createPortal(
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-none fixed bottom-4 z-50 flex justify-center px-3 left-0 right-0 lg:left-20"
+          >
+            <div className="pointer-events-auto flex max-w-[min(960px,calc(100vw-1.5rem))] flex-wrap items-center gap-3 rounded-lg border border-gray-200/90 bg-white px-4 py-2.5 shadow-[0_2px_8px_rgba(15,23,42,0.08),0_8px_24px_rgba(15,23,42,0.1)] dark:border-gray-600 dark:bg-gray-900 dark:shadow-[0_2px_8px_rgba(0,0,0,0.35),0_8px_24px_rgba(0,0,0,0.45)]">
+              <div className="min-w-0 flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-50">
+                  {selectedCount === 1
+                    ? '1 selecionada'
+                    : `${selectedCount} selecionadas`}
+                </span>
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  Valor estimado{' '}
+                  <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">
+                    {formatCurrency(selectedValorTotal)}
+                  </span>
+                </span>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleExportSelection()}
+                  disabled={exportingPdf}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={exportingPdf ? 'Gerando PDF…' : `Exportar PDF (${selectedCount})`}
+                  aria-label={`Exportar PDF de ${selectedCount} selecionadas`}
+                >
+                  {exportingPdf ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  ) : (
+                    <Download className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  disabled={exportingPdf}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                  title="Limpar seleção"
+                  aria-label="Limpar seleção"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

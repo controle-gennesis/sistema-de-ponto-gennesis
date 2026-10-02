@@ -1,5 +1,9 @@
 import jsPDF from 'jspdf';
-import { EXPORT_COMPANY, loadPdfDualLogoStrip } from '@/lib/exportBrandingLogos';
+import {
+  EXPORT_COMPANY,
+  loadPdfDualLogoStrip,
+  loadPdfGennesisLogoStrip,
+} from '@/lib/exportBrandingLogos';
 
 const BRAND_RED: [number, number, number] = [185, 28, 28];
 const HEADER_BG: [number, number, number] = [248, 249, 250];
@@ -11,6 +15,7 @@ const TEXT_MUTED: [number, number, number] = [75, 85, 99];
 const TEXT_GREEN: [number, number, number] = [22, 101, 52];
 const TEXT_AMBER: [number, number, number] = [146, 64, 14];
 const TEXT_RED: [number, number, number] = [153, 27, 27];
+const TEXT_LINK: [number, number, number] = [185, 28, 28];
 
 const MARGIN = 12;
 const FOOTER_RESERVE = 12;
@@ -19,7 +24,7 @@ export type BrandedPdfColumn = {
   key: string;
   label: string;
   width: number;
-  tone?: 'status' | 'muted' | 'bold';
+  tone?: 'status' | 'muted' | 'bold' | 'link';
 };
 
 export type ExportBrandedPdfOptions = {
@@ -29,6 +34,8 @@ export type ExportBrandedPdfOptions = {
   columns: BrandedPdfColumn[];
   rows: Record<string, string>[];
   footerLabel?: string;
+  /** `dual` = Gennesis + Engpac (padrão). `gennesis` = só Gennesis. */
+  logoMode?: 'dual' | 'gennesis';
 };
 
 function statusColor(value: string): [number, number, number] {
@@ -137,23 +144,31 @@ function drawRow(
   let x = MARGIN;
   for (const col of columns) {
     const raw = values[col.key] || '—';
+    const href = String(values[`${col.key}Href`] || '').trim();
     const lines = doc.splitTextToSize(raw, col.width - 3) as string[];
     let ly = y + 4.2;
     for (const line of lines) {
       if (col.tone === 'status') {
         doc.setTextColor(...statusColor(raw));
         doc.setFont('helvetica', 'bold');
+        doc.text(line, x + 1.5, ly);
+      } else if (col.tone === 'link' && href) {
+        doc.setTextColor(...TEXT_LINK);
+        doc.setFont('helvetica', 'bold');
+        doc.textWithLink(line, x + 1.5, ly, { url: href });
       } else if (col.tone === 'muted') {
         doc.setTextColor(...TEXT_MUTED);
         doc.setFont('helvetica', 'normal');
+        doc.text(line, x + 1.5, ly);
       } else if (col.tone === 'bold') {
         doc.setTextColor(...TEXT_BLACK);
         doc.setFont('helvetica', 'bold');
+        doc.text(line, x + 1.5, ly);
       } else {
         doc.setTextColor(...TEXT_BLACK);
         doc.setFont('helvetica', 'normal');
+        doc.text(line, x + 1.5, ly);
       }
-      doc.text(line, x + 1.5, ly);
       ly += 3.4;
     }
     x += col.width;
@@ -177,13 +192,16 @@ function drawFooter(doc: jsPDF, footerLabel: string) {
 }
 
 export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): Promise<void> {
-  const { title, subtitle, filename, columns, rows, footerLabel } = options;
+  const { title, subtitle, filename, columns, rows, footerLabel, logoMode = 'dual' } = options;
   if (!rows.length) throw new Error('Nenhum registro para exportar');
 
   const generatedAt = new Date();
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
-  const logo = await loadPdfDualLogoStrip(16);
+  const logo =
+    logoMode === 'gennesis'
+      ? await loadPdfGennesisLogoStrip(16)
+      : await loadPdfDualLogoStrip(16);
 
   let y = drawHeader(doc, pageWidth, logo, title, generatedAt, rows.length);
 

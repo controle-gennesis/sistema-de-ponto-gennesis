@@ -166,6 +166,11 @@ export class PncpController {
           : statusAnaliseRaw === 'all'
             ? 'all'
             : null;
+      const sortByRaw = String(req.query.sortBy || '').trim();
+      const sortDirRaw = String(req.query.sortDir || '').trim().toLowerCase();
+      const sortBy = sortByRaw === 'valorEstimado' ? 'valorEstimado' : null;
+      const sortDir =
+        sortDirRaw === 'asc' || sortDirRaw === 'desc' ? (sortDirRaw as 'asc' | 'desc') : null;
 
       if (!dataInicial || !dataFinal) {
         throw createError('Informe dataInicial e dataFinal.', 400);
@@ -183,6 +188,8 @@ export class PncpController {
         valorMin: valorMin != null && Number.isFinite(valorMin) ? valorMin : null,
         valorMax: valorMax != null && Number.isFinite(valorMax) ? valorMax : null,
         statusAnalise,
+        sortBy,
+        sortDir,
       });
 
       res.json({ success: true, data: result });
