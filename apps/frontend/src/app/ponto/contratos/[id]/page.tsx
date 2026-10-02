@@ -143,6 +143,7 @@ import {
   type ContratoResumoGastoTeto,
   type ContratoResumoAlerta,
   type ContratoResumoPessoa,
+  type ContratoResumoAbastecimento,
 } from '@/components/contract/ContratoFaturamentoCharts';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
@@ -1644,6 +1645,25 @@ export default function ContractDetailPage() {
     staleTime: 30_000,
   });
 
+  const { data: fuelQuotaBalance, isLoading: loadingFuelQuotaBalance } = useQuery({
+    queryKey: ['fuel-quota-balance', contractId],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/quota-balance', {
+        params: { contractId },
+      });
+      return res.data?.data as {
+        weeklyBudgetReais: number | null;
+        usedReais: number;
+        remainingReais: number | null;
+        unlimited: boolean;
+        weekStart?: string;
+        weekEnd?: string;
+      };
+    },
+    enabled: !!contractId && canAccessCombustivelModulo,
+    staleTime: 30_000,
+  });
+
   const orcamentosCount = Array.isArray(orcamentosListaData?.orcamentos)
     ? orcamentosListaData.orcamentos.length
     : 0;
@@ -2722,6 +2742,40 @@ export default function ContractDetailPage() {
     }
     return { total, count };
   }, [combustivelListaData, contractId, periodFrom, periodTo]);
+
+  const resumoAbastecimentoCota = useMemo((): ContratoResumoAbastecimento | null => {
+    if (!canAccessCombustivelModulo) return null;
+    if (loadingFuelQuotaBalance && !fuelQuotaBalance) {
+      return {
+        contractId,
+        weeklyBudgetReais: null,
+        usedReais: 0,
+        remainingReais: null,
+        unlimited: true,
+        loading: true,
+      };
+    }
+    if (!fuelQuotaBalance) {
+      return {
+        contractId,
+        weeklyBudgetReais: null,
+        usedReais: 0,
+        remainingReais: null,
+        unlimited: true,
+        loading: false,
+      };
+    }
+    return {
+      contractId,
+      weeklyBudgetReais: fuelQuotaBalance.weeklyBudgetReais,
+      usedReais: Number(fuelQuotaBalance.usedReais) || 0,
+      remainingReais: fuelQuotaBalance.remainingReais,
+      unlimited: Boolean(fuelQuotaBalance.unlimited),
+      weekStart: fuelQuotaBalance.weekStart,
+      weekEnd: fuelQuotaBalance.weekEnd,
+      loading: loadingFuelQuotaBalance,
+    };
+  }, [canAccessCombustivelModulo, contractId, fuelQuotaBalance, loadingFuelQuotaBalance]);
 
   const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
     const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
@@ -4554,6 +4608,7 @@ export default function ContractDetailPage() {
             people={contratoPeople}
             peopleLoading={loadingContratoPeople}
             peopleError={contratoPeopleError}
+            abastecimento={resumoAbastecimentoCota}
           />
                           </div>
                 ) : null}

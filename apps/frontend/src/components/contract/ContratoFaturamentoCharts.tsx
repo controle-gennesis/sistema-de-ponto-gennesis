@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -17,12 +17,15 @@ import {
   YAxis,
 } from 'recharts';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
 import { formatCpfInput } from '@/lib/cpf';
+import api from '@/lib/api';
 
 export type ContratoFaturamentoInsightPoint = {
   label: string;
@@ -575,6 +578,375 @@ export type ContratoResumoKpi = {
   tone?: 'default' | 'brand';
 };
 
+/** Cota semanal de abastecimento do contrato (API quota-balance). */
+export type ContratoResumoAbastecimento = {
+  contractId?: string;
+  weeklyBudgetReais: number | null;
+  usedReais: number;
+  remainingReais: number | null;
+  unlimited: boolean;
+  weekStart?: string;
+  weekEnd?: string;
+  loading?: boolean;
+};
+
+type AbastecimentoUsedRequest = {
+  id: string;
+  displayNumber: number;
+  status: string;
+  requestedAt?: string | null;
+  suppliesApprovedAt?: string | null;
+  driverName?: string | null;
+  vehiclePlate?: string | null;
+  litersRefueled?: string | number | null;
+  pricePerLiter?: string | number | null;
+  releasedAmountReais?: number | null;
+  contract?: { id: string; name?: string; number?: string } | null;
+};
+
+const ABSTECIMENTO_USED_STATUSES = new Set(['APPROVED', 'AWAITING_REFUEL', 'COMPLETED']);
+
+function formatAbastecimentoWeekLabel(isoStart?: string, isoEnd?: string) {
+  if (!isoStart || !isoEnd) return 'esta semana';
+  const start = new Date(isoStart);
+  const end = new Date(new Date(isoEnd).getTime() - 1);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'esta semana';
+  const fmt = (d: Date) =>
+    d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return `${fmt(start)} a ${fmt(end)}`;
+}
+
+/** Arco semicircular segmentado (ticks radiais), no estilo gauge de dashboard. */
+function SegmentedSemiGauge({
+  percent,
+  centerLabel,
+  hint,
+  over = false,
+  ariaLabel,
+}: {
+  percent: number;
+  centerLabel: string;
+  hint: string;
+  over?: boolean;
+  ariaLabel: string;
+}) {
+  const { isDark } = useTheme();
+  const segments = 44;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const filledCount = Math.round((clamped / 100) * segments);
+  const cx = 100;
+  const cy = 108;
+  const outerR = 86;
+  const innerR = 58;
+  const startAngle = Math.PI;
+  const endAngle = 0;
+  const track = isDark ? '#374151' : '#e5e7eb';
+  const activeBase = over ? '#f43f5e' : '#22c55e';
+  const activeHi = over ? '#fb7185' : '#4ade80';
+  const labelFill = isDark ? '#f9fafb' : '#111827';
+  const hintFill = isDark ? '#9ca3af' : '#6b7280';
+
+  return (
+    <div className="mx-auto w-full max-w-[240px]">
+      <svg
+        viewBox="0 0 200 132"
+        className="h-auto w-full"
+        role="img"
+        aria-label={ariaLabel}
+      >
+        {Array.from({ length: segments }, (_, i) => {
+          const t = segments === 1 ? 0 : i / (segments - 1);
+          const angle = startAngle + t * (endAngle - startAngle);
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const x1 = cx + cos * innerR;
+          const y1 = cy - sin * innerR;
+          const x2 = cx + cos * outerR;
+          const y2 = cy - sin * outerR;
+          const active = i < filledCount;
+          const fillT = filledCount <= 1 ? 1 : i / Math.max(1, filledCount - 1);
+          const stroke = active
+            ? fillT < 0.55
+              ? activeBase
+              : activeHi
+            : track;
+          return (
+            <line
+              key={i}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke={stroke}
+              strokeWidth={3.2}
+              strokeLinecap="round"
+            />
+          );
+        })}
+        <text
+          x="100"
+          y="88"
+          textAnchor="middle"
+          fill={labelFill}
+          style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.03em' }}
+        >
+          {centerLabel}
+        </text>
+        <text
+          x="100"
+          y="108"
+          textAnchor="middle"
+          fill={hintFill}
+          style={{ fontSize: 10, fontWeight: 500 }}
+        >
+          {hint}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+function abastecimentoSpendOfRow(row: AbastecimentoUsedRequest): number {
+  if (row.status === 'COMPLETED') {
+    const liters = Number(row.litersRefueled);
+    const ppl = Number(row.pricePerLiter);
+    if (Number.isFinite(liters) && Number.isFinite(ppl) && liters > 0 && ppl > 0) {
+      return liters * ppl;
+    }
+  }
+  const released = Number(row.releasedAmountReais);
+  return Number.isFinite(released) && released > 0 ? released : 0;
+}
+
+function abastecimentoQuotaAnchorMs(row: AbastecimentoUsedRequest): number | null {
+  const raw = row.suppliesApprovedAt || row.requestedAt;
+  if (!raw) return null;
+  const t = new Date(raw).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento }) {
+  const [usedOpen, setUsedOpen] = useState(false);
+  const weekLabel = formatAbastecimentoWeekLabel(data.weekStart, data.weekEnd);
+  const used = Number.isFinite(data.usedReais) ? data.usedReais : 0;
+  const budget =
+    data.weeklyBudgetReais != null && Number.isFinite(data.weeklyBudgetReais)
+      ? data.weeklyBudgetReais
+      : null;
+  const remaining =
+    data.remainingReais != null && Number.isFinite(data.remainingReais)
+      ? data.remainingReais
+      : null;
+  const over = remaining != null && remaining < 0;
+  const usedPct =
+    !data.unlimited && budget != null && budget > 0 ? (used / budget) * 100 : 0;
+  const barPct = Math.max(0, Math.min(100, usedPct));
+  const contractId = data.contractId?.trim() || '';
+
+  const { data: usedRows = [], isLoading: loadingUsed } = useQuery({
+    queryKey: ['fuel-refuel-requests', 'contract-abastecimento-used', contractId, data.weekStart, data.weekEnd],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests', {
+        params: { status: 'APPROVED,AWAITING_REFUEL,COMPLETED' },
+      });
+      return (res.data?.data || []) as AbastecimentoUsedRequest[];
+    },
+    enabled: usedOpen && Boolean(contractId),
+    staleTime: 15_000,
+  });
+
+  const weekRequests = useMemo(() => {
+    if (!contractId) return [];
+    const weekStartMs = data.weekStart ? new Date(data.weekStart).getTime() : null;
+    const weekEndMs = data.weekEnd ? new Date(data.weekEnd).getTime() : null;
+    return usedRows
+      .filter((row) => ABSTECIMENTO_USED_STATUSES.has(row.status))
+      .filter((row) => row.contract?.id === contractId)
+      .filter((row) => {
+        if (weekStartMs == null || weekEndMs == null || Number.isNaN(weekStartMs) || Number.isNaN(weekEndMs)) {
+          return true;
+        }
+        const anchor = abastecimentoQuotaAnchorMs(row);
+        if (anchor == null) return false;
+        return anchor >= weekStartMs && anchor < weekEndMs;
+      })
+      .map((row) => ({ row, total: abastecimentoSpendOfRow(row) }))
+      .sort((a, b) => {
+        const da = abastecimentoQuotaAnchorMs(a.row) ?? 0;
+        const db = abastecimentoQuotaAnchorMs(b.row) ?? 0;
+        return db - da;
+      });
+  }, [usedRows, contractId, data.weekStart, data.weekEnd]);
+
+  const openUsedSolicitacoes = () => {
+    if (!contractId) return;
+    setUsedOpen(true);
+  };
+
+  const usedBlockClass =
+    'rounded-xl bg-gray-50 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:bg-gray-800/60 dark:hover:bg-gray-800';
+
+  return (
+    <>
+      <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+        <CardHeading
+          title="Abastecimento"
+          subtitle={
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Cota semanal · {weekLabel}
+            </p>
+          }
+        />
+        <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
+          {data.loading ? (
+            <div className="flex flex-1 items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
+              <div className="flex flex-1 flex-col justify-center">
+                {data.unlimited ? (
+                  <SegmentedSemiGauge
+                    percent={0}
+                    centerLabel={formatCurrency(used)}
+                    hint="Sem limite de cota"
+                    ariaLabel={`Usado na semana: ${formatCurrency(used)}. Sem limite configurado.`}
+                  />
+                ) : (
+                  <SegmentedSemiGauge
+                    percent={barPct}
+                    centerLabel={`${Math.round(usedPct)}%`}
+                    hint={
+                      over
+                        ? 'Cota estourada'
+                        : usedPct >= 80
+                          ? 'Próximo do limite'
+                          : `de ${formatCurrency(budget ?? 0)}`
+                    }
+                    over={over}
+                    ariaLabel={`${Math.round(usedPct)}% da cota usado`}
+                  />
+                )}
+              </div>
+              <div className="mt-auto grid grid-cols-2 gap-2.5">
+                {data.unlimited ? (
+                  <div className="rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/60">
+                    <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Cota</p>
+                    <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                      Livre
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    className={`rounded-xl px-3 py-2.5 ${
+                      over
+                        ? 'bg-rose-50/90 dark:bg-rose-900/25'
+                        : 'bg-emerald-50/80 dark:bg-emerald-900/20'
+                    }`}
+                  >
+                    <p
+                      className={`text-[11px] font-medium ${
+                        over
+                          ? 'text-rose-700 dark:text-rose-300'
+                          : 'text-emerald-700 dark:text-emerald-300'
+                      }`}
+                    >
+                      Disponível
+                    </p>
+                    <p
+                      className={`mt-0.5 truncate text-sm font-semibold tabular-nums ${
+                        over
+                          ? 'text-rose-900 dark:text-rose-100'
+                          : 'text-emerald-900 dark:text-emerald-100'
+                      }`}
+                    >
+                      {formatCurrency(remaining ?? 0)}
+                    </p>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className={usedBlockClass}
+                  onClick={openUsedSolicitacoes}
+                  title="Ver solicitações usadas na semana"
+                >
+                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
+                  <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                    {formatCurrency(used)}
+                  </p>
+                </button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Modal
+        isOpen={usedOpen}
+        onClose={() => setUsedOpen(false)}
+        title="Usado na semana"
+        size="lg"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Solicitações que entram na cota ({weekLabel}).
+          </p>
+          {loadingUsed ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
+            </div>
+          ) : weekRequests.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-500">Nenhuma solicitação encontrada.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+              {weekRequests.map(({ row, total }) => {
+                const whenMs = abastecimentoQuotaAnchorMs(row);
+                const whenLabel =
+                  whenMs != null
+                    ? new Date(whenMs).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                      })
+                    : '—';
+                const liters = Number(row.litersRefueled);
+                return (
+                  <li
+                    key={row.id}
+                    className="flex items-start justify-between gap-3 px-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        #{row.displayNumber}
+                        <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                          {whenLabel}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {[row.driverName, row.vehiclePlate].filter(Boolean).join(' · ') || '—'}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right text-sm tabular-nums">
+                      <p className="font-semibold text-gray-800 dark:text-gray-200">
+                        {formatCurrency(total)}
+                      </p>
+                      {Number.isFinite(liters) && liters > 0 ? (
+                        <p className="text-xs text-gray-400">
+                          {liters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L
+                        </p>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
   const theme = useChartTheme();
   const uid = React.useId().replace(/:/g, '');
@@ -761,22 +1133,17 @@ function PessoasContratoCard({
                   >
                     {personInitials(person.name)}
                       </span>
-                  <div className="min-w-0 flex-[1.2]">
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                       {person.name}
                     </p>
                     <p className="mt-0.5 truncate text-xs tabular-nums text-gray-500 dark:text-gray-400">
                       {cpfLabel}
                     </p>
-                    </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-gray-700 dark:text-gray-200">
-                      {person.email || '—'}
-                    </p>
-                      </div>
+                  </div>
                   <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
                     Liberado
-                      </span>
+                  </span>
                   </li>
                 );
               })}
@@ -893,6 +1260,7 @@ export function ContratoFaturamentoCharts({
   people = [],
   peopleLoading = false,
   peopleError = false,
+  abastecimento,
 }: {
   faturamentoInsight: ContratoFaturamentoInsight;
   progressoTitle: string;
@@ -904,7 +1272,10 @@ export function ContratoFaturamentoCharts({
   people?: ContratoResumoPessoa[];
   peopleLoading?: boolean;
   peopleError?: boolean;
+  abastecimento?: ContratoResumoAbastecimento | null;
 }) {
+  const showAbastecimento = Boolean(abastecimento);
+
   return (
     <div className="space-y-4">
       {resumoKpis.length > 0 ? (
@@ -925,10 +1296,17 @@ export function ContratoFaturamentoCharts({
         <OsTotaisDashboardCard totais={osTotais} />
       </div>
 
-      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[1fr_2fr]">
+      <div
+        className={`grid grid-cols-1 items-stretch gap-4 ${
+          showAbastecimento ? 'lg:grid-cols-3' : 'lg:grid-cols-[1fr_2fr]'
+        }`}
+      >
         <MetaVsRealidadeCard data={metaVsReal} />
+        {showAbastecimento && abastecimento ? (
+          <AbastecimentoQuotaCard data={abastecimento} />
+        ) : null}
         <PessoasContratoCard people={people} loading={peopleLoading} error={peopleError} />
-        </div>
+      </div>
     </div>
   );
 }
