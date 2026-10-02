@@ -41,7 +41,9 @@ import {
   ZoomIn,
   ZoomOut,
   Lock,
-  Unlock
+  Unlock,
+  Columns3,
+  LayoutGrid,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -62,6 +64,7 @@ import {
   formatCurrencyInput,
   formToApiPayload,
   formatCurrencyDisplay,
+  parseCurrencyToNumber,
   FD_STATUS_LABELS,
   purchaseStatusLabel,
   type FichaDemandaApprovalFormState,
@@ -2980,6 +2983,8 @@ interface SessaoOrcamentoPersist {
   coresLinhaPorKey?: Record<string, string>;
   /** Cor de fundo da célula (chave `${rowKey}|${colId}` → hex). */
   coresCelulaPorKey?: Record<string, string>;
+  /** Colunas ocultas na aba Orçamento (ids de `ORC_COLUNAS_MONTAGEM_TOGGLE`). */
+  colunasOcultasMontagem?: string[];
   /**
    * Override manual de MO/MAT unitário.
    * `null` = valor apagado (força 0); número = valor digitado; ausente = cálculo automático.
@@ -3033,6 +3038,39 @@ const ORC_CORES_PINTURA: { hex: string; label: string }[] = [
   { hex: '#fed7aa', label: 'Laranja' },
   { hex: '#e5e7eb', label: 'Cinza' },
 ];
+
+/** Colunas opcionais da grade Orçamento (sel/item/descrição ficam sempre visíveis). */
+const ORC_COLUNAS_MONTAGEM_TOGGLE: { id: string; label: string }[] = [
+  { id: 'codigo', label: 'Código' },
+  { id: 'banco', label: 'Banco' },
+  { id: 'und', label: 'Unidade' },
+  { id: 'qtd', label: 'Quantidade' },
+  { id: 'mo', label: 'Mão de obra' },
+  { id: 'mat', label: 'Material' },
+  { id: 'pu', label: 'Valor unitário sem BDI' },
+  { id: 'puBdi', label: 'Valor unitário com BDI' },
+  { id: 'subMo', label: 'Sub mão de obra' },
+  { id: 'subMat', label: 'Sub material' },
+  { id: 'total', label: 'Valor total sem BDI' },
+  { id: 'totalBdi', label: 'Valor total com BDI' },
+  { id: 'peso', label: 'Peso' },
+  { id: 'obs', label: 'Observação' },
+];
+
+const ORC_COLUNAS_MONTAGEM_TOGGLE_IDS = new Set(ORC_COLUNAS_MONTAGEM_TOGGLE.map((c) => c.id));
+
+function parseColunasOcultasMontagem(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    const id = String(v ?? '').trim();
+    if (!ORC_COLUNAS_MONTAGEM_TOGGLE_IDS.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
 
 function chaveCelulaOrc(rowKey: string, colId: string): string {
   return `${rowKey}|${colId}`;
@@ -3091,8 +3129,8 @@ function estiloFundoPinturaOrc(
 }
 
 function formatarMoedaCampoOrc(valor: number): string {
-  if (!(valor > 0)) return '';
-  return truncarMoeda2(valor).toLocaleString('pt-BR', {
+  const n = Number.isFinite(valor) ? Math.max(0, valor) : 0;
+  return truncarMoeda2(n).toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -3141,6 +3179,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     observacoesPorItem: {},
     coresLinhaPorKey: {},
     coresCelulaPorKey: {},
+    colunasOcultasMontagem: [],
     moMatManualPorItem: {},
     fichaDemandaObservacoes: {},
     insumosAnaliticoManuais: {},
@@ -3262,6 +3301,9 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
       observacoesPorItem: parseObservacoesPorItem(p.observacoesPorItem),
       coresLinhaPorKey: parseCoresMap((p as { coresLinhaPorKey?: unknown }).coresLinhaPorKey),
       coresCelulaPorKey: parseCoresMap((p as { coresCelulaPorKey?: unknown }).coresCelulaPorKey),
+      colunasOcultasMontagem: parseColunasOcultasMontagem(
+        (p as { colunasOcultasMontagem?: unknown }).colunasOcultasMontagem
+      ),
       moMatManualPorItem: parseMoMatManualPorItem(
         (p as { moMatManualPorItem?: unknown }).moMatManualPorItem
       ),
@@ -3628,6 +3670,7 @@ function parseOrcamentoDetailRaw(d: {
           observacoesPorItem: parseObservacoesPorItem(so.observacoesPorItem),
           coresLinhaPorKey: parseCoresMap(so.coresLinhaPorKey),
           coresCelulaPorKey: parseCoresMap(so.coresCelulaPorKey),
+          colunasOcultasMontagem: parseColunasOcultasMontagem(so.colunasOcultasMontagem),
           moMatManualPorItem: parseMoMatManualPorItem(so.moMatManualPorItem),
           fichaDemandaObservacoes: parseObservacoesPorItem(so.fichaDemandaObservacoes),
           insumosAnaliticoManuais: parseInsumosAnaliticoManuais(so.insumosAnaliticoManuais),
@@ -5790,6 +5833,18 @@ export function OrcamentoPageView({
   const [observacoesPorItem, setObservacoesPorItem] = useState<Record<string, string>>({});
   const [coresLinhaPorKey, setCoresLinhaPorKey] = useState<Record<string, string>>({});
   const [coresCelulaPorKey, setCoresCelulaPorKey] = useState<Record<string, string>>({});
+  const [colunasOcultasMontagem, setColunasOcultasMontagem] = useState<string[]>([]);
+  const [menuColunasMontagem, setMenuColunasMontagem] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [menuAcoesGrade, setMenuAcoesGrade] = useState<{
+    top: number;
+    left: number;
+    /** Offset X da setinha (centro do botão relativo ao painel). */
+    arrowLeft: number;
+  } | null>(null);
+  const btnAcoesGradeRef = useRef<HTMLButtonElement>(null);
   const [moMatManualPorItem, setMoMatManualPorItem] = useState<
     Record<string, { mo?: number | null; mat?: number | null }>
   >({});
@@ -6409,6 +6464,7 @@ export function OrcamentoPageView({
       setObservacoesPorItem({});
       setCoresLinhaPorKey({});
       setCoresCelulaPorKey({});
+      setColunasOcultasMontagem([]);
       setMoMatManualPorItem({});
       setCronograma(cronogramaVazio());
       setServicosPadraoContrato([]);
@@ -6436,6 +6492,7 @@ export function OrcamentoPageView({
       setObservacoesPorItem(parseObservacoesPorItem(s.observacoesPorItem));
       setCoresLinhaPorKey(parseCoresMap(s.coresLinhaPorKey));
       setCoresCelulaPorKey(parseCoresMap(s.coresCelulaPorKey));
+      setColunasOcultasMontagem(parseColunasOcultasMontagem(s.colunasOcultasMontagem));
       setMoMatManualPorItem(parseMoMatManualPorItem(s.moMatManualPorItem));
       setFichaDemandaObservacoes(parseObservacoesPorItem(s.fichaDemandaObservacoes));
       setInsumosAnaliticoManuais(parseInsumosAnaliticoManuais(s.insumosAnaliticoManuais));
@@ -6655,6 +6712,7 @@ export function OrcamentoPageView({
       observacoesPorItem,
       coresLinhaPorKey,
       coresCelulaPorKey,
+      colunasOcultasMontagem,
       moMatManualPorItem,
       fichaDemandaObservacoes,
       insumosAnaliticoManuais,
@@ -6692,6 +6750,7 @@ export function OrcamentoPageView({
     observacoesPorItem,
     coresLinhaPorKey,
     coresCelulaPorKey,
+    colunasOcultasMontagem,
     moMatManualPorItem,
     fichaDemandaObservacoes,
     insumosAnaliticoManuais,
@@ -9103,6 +9162,7 @@ export function OrcamentoPageView({
       unidadeComposicao?: string;
     }[] = [];
     const ocultosSet = new Set(itensOcultosNoOrcamento);
+    const bdiPctLinha = parsePercentualMeta(meta.bdiPercentual);
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
         const itemKey = `${bloco.key}|${i.chave}`;
@@ -9112,13 +9172,8 @@ export function OrcamentoPageView({
         const precoComp = Number(composicao?.precoUnitario);
         const preco =
           precoItem > 0 ? precoItem : precoComp > 0 ? precoComp : 0;
-        const precoComBdiItem = Number(i.precoUnitarioComBdi);
-        const precoComBdi =
-          precoComBdiItem > 0
-            ? precoComBdiItem
-            : preco > 0
-              ? preco * (1 + parsePercentualMeta(meta.bdiPercentual))
-              : 0;
+        // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
+        const precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao);
         const moMatManual = moMatManualPorItem[itemKey];
@@ -9181,19 +9236,14 @@ export function OrcamentoPageView({
         let totalComBdiItem: number;
         if (temTotaisImportados) {
           const semImp = Number(i.totalSemBdiImportado);
-          const comImp = Number(i.totalComBdiImportado);
           totalItem =
             Number.isFinite(semImp) && semImp !== 0
               ? aplicarModoArredondamento(semImp * fatorQtd, modoArred)
               : aplicarModoArredondamento(preco * qtd, modoArred);
-          totalComBdiItem =
-            Number.isFinite(comImp) && comImp !== 0
-              ? aplicarModoArredondamento(comImp * fatorQtd, modoArred)
-              : aplicarModoArredondamento((precoComBdi > 0 ? precoComBdi : preco) * qtd, modoArred);
         } else {
           totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
-          totalComBdiItem = aplicarModoArredondamento((precoComBdi > 0 ? precoComBdi : preco) * qtd, modoArred);
         }
+        totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
         const precisaDecodeDesc =
           typeof i.descricao === 'string' && i.descricao.includes('&');
         const precisaDecodeAnalitico =
@@ -9369,17 +9419,23 @@ export function OrcamentoPageView({
     const porKey = new Map(itensCalculados.map(r => [r.key, r]));
     let total = 0;
     let totalComBdi = 0;
+    let maoDeObra = 0;
+    let material = 0;
     for (const key of itensSelecionadosMontagem) {
       if (!isChaveComposicaoMontagem(key)) continue;
       const row = porKey.get(key);
       if (!row) continue;
       total += row.total ?? 0;
       totalComBdi += row.totalComBdi ?? 0;
+      maoDeObra += row.subMaoDeObra ?? 0;
+      material += row.subMaterial ?? 0;
     }
     return {
       nSelecionados: itensSelecionadosMontagem.size,
       total,
-      totalComBdi
+      totalComBdi,
+      maoDeObra,
+      material,
     };
   }, [itensSelecionadosMontagem, itensCalculados]);
 
@@ -10410,18 +10466,14 @@ export function OrcamentoPageView({
     const descontoPct = parsePercentualMeta(meta.descontoPercentual);
     const bdiPctMeta = parsePercentualMeta(meta.bdiPercentual);
 
-    // Fonte da verdade: soma das linhas da montagem (custo direto / total com BDI),
-    // igual às linhas vermelhas e à coluna Total — não usa totaisOrcafascio.
+    // Fonte da verdade: soma das linhas da montagem (custo direto) + % da meta.
     const totalBase = total;
     const valorDesconto = totalBase * descontoPct;
     const totalComDesconto = totalBase - valorDesconto;
-    const totalComDescontoEBdi =
-      descontoPct === 0 && totalGeralComBdi > 0
-        ? totalGeralComBdi
-        : totalComDesconto * (1 + bdiPctMeta);
+    // BDI sempre pela % atual da meta (colunas da grade já recalculam do mesmo jeito).
+    const totalComDescontoEBdi = totalComDesconto * (1 + bdiPctMeta);
     const valorBdi = Math.max(0, totalComDescontoEBdi - totalComDesconto);
-    const bdiPct =
-      totalComDesconto > 0 && valorBdi > 0 ? valorBdi / totalComDesconto : bdiPctMeta;
+    const bdiPct = bdiPctMeta;
 
     const reajustes = (meta.reajustes ?? []).map((r, idx) => ({
       idx,
@@ -10452,7 +10504,7 @@ export function OrcamentoPageView({
       reajustesAplicados,
       valorFinal
     };
-  }, [meta.bdiPercentual, meta.descontoPercentual, meta.reajustes, total, totalGeralComBdi]);
+  }, [meta.bdiPercentual, meta.descontoPercentual, meta.reajustes, total]);
 
   /** Rodapé da Ficha de demanda: totais por MA/MO/LO e painel de faturamento vs orçamento. */
   const resumoRodapeFichaDemanda = useMemo(() => {
@@ -11201,7 +11253,7 @@ export function OrcamentoPageView({
       };
     };
 
-    const empty = () => Array.from({ length: 14 }, () => '') as OrcamentoExcelRow['values'];
+    const empty = () => Array.from({ length: 16 }, () => '') as OrcamentoExcelRow['values'];
     const rows: OrcamentoExcelRow[] = [];
     const servicoNumero = new Map<string, number>();
     let nextMain = 0;
@@ -11234,9 +11286,11 @@ export function OrcamentoPageView({
         values[7] = truncarMoeda2(resumo.mat);
         values[8] = truncarMoeda2(resumo.custoDir);
         values[9] = truncarMoeda2(resumo.totalComBdi);
-        values[10] = truncarMoeda2(resumo.custoDir);
-        values[11] = truncarMoeda2(resumo.totalComBdi);
-        values[12] = resumo.pesoPct;
+        values[10] = truncarMoeda2(resumo.mo);
+        values[11] = truncarMoeda2(resumo.mat);
+        values[12] = truncarMoeda2(resumo.custoDir);
+        values[13] = truncarMoeda2(resumo.totalComBdi);
+        values[14] = resumo.pesoPct;
         rows.push({ kind: 'titulo', values });
       }
 
@@ -11248,9 +11302,11 @@ export function OrcamentoPageView({
       subValues[7] = truncarMoeda2(resumoSub.mat);
       subValues[8] = truncarMoeda2(resumoSub.custoDir);
       subValues[9] = truncarMoeda2(resumoSub.totalComBdi);
-      subValues[10] = truncarMoeda2(resumoSub.custoDir);
-      subValues[11] = truncarMoeda2(resumoSub.totalComBdi);
-      subValues[12] = resumoSub.pesoPct;
+      subValues[10] = truncarMoeda2(resumoSub.mo);
+      subValues[11] = truncarMoeda2(resumoSub.mat);
+      subValues[12] = truncarMoeda2(resumoSub.custoDir);
+      subValues[13] = truncarMoeda2(resumoSub.totalComBdi);
+      subValues[14] = resumoSub.pesoPct;
       rows.push({ kind: 'subtitulo', values: subValues });
 
       rowsDoBloco.forEach((row, itemIdx) => {
@@ -11272,6 +11328,8 @@ export function OrcamentoPageView({
             truncarMoeda2(row.materialUnitario),
             truncarMoeda2(row.precoUnitario),
             truncarMoeda2(row.precoUnitarioComBdi),
+            truncarMoeda2(row.subMaoDeObra),
+            truncarMoeda2(row.subMaterial),
             truncarMoeda2(row.total),
             truncarMoeda2(row.totalComBdi),
             totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
@@ -11282,6 +11340,10 @@ export function OrcamentoPageView({
     }
 
     const rf = resumoFinanceiro;
+    const descontoLabel = `DESCONTO (${(rf.descontoPct * 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}%)`;
     const bdiLabel = `BDI (${(rf.bdiPct * 100).toLocaleString('pt-BR', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -11289,14 +11351,18 @@ export function OrcamentoPageView({
     const pushRodape = (rotulo: string, semBdi: number | '', comBdi: number | '') => {
       const values = empty();
       values[3] = rotulo;
-      values[10] = semBdi === '' ? '\u00A0' : truncarMoeda2(semBdi);
-      values[11] = comBdi === '' ? '\u00A0' : truncarMoeda2(comBdi);
+      values[12] = semBdi === '' ? '\u00A0' : truncarMoeda2(semBdi);
+      values[13] = comBdi === '' ? '\u00A0' : truncarMoeda2(comBdi);
       rows.push({ kind: 'total', values });
     };
     rows.push({ kind: 'blank', values: empty() });
-    pushRodape('ORÇAMENTO', rf.totalComDesconto, '');
+    pushRodape('ORÇAMENTO', rf.totalBase, '');
+    if (rf.descontoPct > 0) {
+      pushRodape(descontoLabel, rf.valorDesconto, '');
+      pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto, '');
+    }
     pushRodape(bdiLabel, rf.valorBdi, '');
-    pushRodape('TOTAL', '', rf.totalComDescontoEBdi);
+    pushRodape('TOTAL GERAL', '', rf.totalComDescontoEBdi);
 
     return {
       name: 'Orçamento',
@@ -11313,6 +11379,8 @@ export function OrcamentoPageView({
         { header: 'MATERIAL', width: 16, format: 'currency' },
         { header: 'VALOR UNITÁRIO\nSEM BDI', width: 16, format: 'currency' },
         { header: 'VALOR UNITÁRIO\nCOM BDI', width: 16, format: 'currency' },
+        { header: 'SUB MÃO DE OBRA', width: 16, format: 'currency' },
+        { header: 'SUB MATERIAL', width: 16, format: 'currency' },
         { header: 'VALOR TOTAL\nSEM BDI', width: 18, format: 'currency' },
         { header: 'VALOR TOTAL\nCOM BDI', width: 18, format: 'currency' },
         { header: 'PESO', width: 10, format: 'percent' },
@@ -14244,13 +14312,22 @@ export function OrcamentoPageView({
                       className={gradeTableViewportCls}
                       style={gradeZoomStyle}
                     >
+                      {colunasOcultasMontagem.length > 0 && (
+                        <style>{colunasOcultasMontagem
+                          .map(
+                            (id) =>
+                              `[data-orc-montagem-table] [data-orc-col="${id}"]{display:none!important}`
+                          )
+                          .join('')}</style>
+                      )}
                       <table
-                        className={`min-w-[1840px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}${gradeTravada ? ' pointer-events-none select-none' : ''}`}
+                        data-orc-montagem-table
+                        className={`min-w-[2140px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}${gradeTravada ? ' pointer-events-none select-none' : ''}`}
                         aria-disabled={gradeTravada || undefined}
                       >
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr className={gradeTableRowTrCls}>
-                            <th className={`${GRADE_TH_STICKY} w-12 min-w-[3rem] px-2 py-2.5 text-center`}>
+                            <th data-orc-col="sel" className={`${GRADE_TH_STICKY} w-12 min-w-[3rem] px-2 py-2.5 text-center`}>
                               <div className="flex justify-center">
                                 <TableCheckbox
                                   checked={todosItensMontagemSelecionados}
@@ -14267,22 +14344,24 @@ export function OrcamentoPageView({
                                 />
                               </div>
                             </th>
-                            <th className={`${GRADE_TH_STICKY} w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>
+                            <th data-orc-col="item" className={`${GRADE_TH_STICKY} w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>
                               Item
                             </th>
-                            <th className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Código</th>
-                            <th className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Banco</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Unidade</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MÃO DE OBRA</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MATERIAL</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário sem BDI</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário com BDI</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total sem BDI</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
-                            <th className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
-                            <th className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
+                            <th data-orc-col="codigo" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Código</th>
+                            <th data-orc-col="banco" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Banco</th>
+                            <th data-orc-col="descricao" className={`${GRADE_TH_STICKY} min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
+                            <th data-orc-col="und" className={`${GRADE_TH_STICKY} min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Unidade</th>
+                            <th data-orc-col="qtd" className={`${GRADE_TH_STICKY} min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
+                            <th data-orc-col="mo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MÃO DE OBRA</th>
+                            <th data-orc-col="mat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MATERIAL</th>
+                            <th data-orc-col="pu" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário sem BDI</th>
+                            <th data-orc-col="puBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário com BDI</th>
+                            <th data-orc-col="subMo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub mão de obra</th>
+                            <th data-orc-col="subMat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub material</th>
+                            <th data-orc-col="total" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total sem BDI</th>
+                            <th data-orc-col="totalBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
+                            <th data-orc-col="peso" className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
+                            <th data-orc-col="obs" className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -14437,6 +14516,12 @@ export function OrcamentoPageView({
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
+                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                                <MoedaCelula valor={resumoTitulo.mo} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              </td>
+                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                                <MoedaCelula valor={resumoTitulo.mat} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              </td>
                               <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
@@ -14531,6 +14616,12 @@ export function OrcamentoPageView({
                               </td>
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              </td>
+                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                                <MoedaCelula valor={resumoSubtitulo.mo} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              </td>
+                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                                <MoedaCelula valor={resumoSubtitulo.mat} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
                               <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
@@ -14673,30 +14764,19 @@ export function OrcamentoPageView({
                                             committedValue={formatarMoedaCampoOrc(row.maoDeObraUnitario)}
                                             commitOnChange={false}
                                             disabled={gradeTravada}
-                                            displayAfterCommit={raw => {
-                                              const t = String(raw ?? '').trim();
-                                              if (!t) return '';
-                                              const n = parseMedicaoBlurNumber(raw);
-                                              if (n === null) {
-                                                return formatarMoedaCampoOrc(parsePreco(raw));
-                                              }
-                                              return formatarMoedaCampoOrc(Math.max(0, n));
-                                            }}
+                                            mask={currencyDigitsToFormatted}
+                                            displayAfterCommit={raw =>
+                                              formatarMoedaCampoOrc(parseCurrencyToNumber(raw))
+                                            }
                                             onCommit={raw => {
-                                              const t = String(raw ?? '').trim();
-                                              if (!t) {
-                                                setMoMatManualCampo(row.key, 'mo', null);
-                                                return;
-                                              }
-                                              const n = parseMedicaoBlurNumber(raw);
-                                              if (n === null) {
-                                                setMoMatManualCampo(row.key, 'mo', Math.max(0, parsePreco(raw)));
-                                                return;
-                                              }
-                                              setMoMatManualCampo(row.key, 'mo', Math.max(0, n));
+                                              setMoMatManualCampo(
+                                                row.key,
+                                                'mo',
+                                                Math.max(0, parseCurrencyToNumber(raw))
+                                              );
                                             }}
-                                            inputMode="decimal"
-                                            placeholder="—"
+                                            inputMode="numeric"
+                                            placeholder="0,00"
                                             title={
                                               gradeTravada
                                                 ? 'Orçamento travado — não é possível editar'
@@ -14720,30 +14800,19 @@ export function OrcamentoPageView({
                                             committedValue={formatarMoedaCampoOrc(row.materialUnitario)}
                                             commitOnChange={false}
                                             disabled={gradeTravada}
-                                            displayAfterCommit={raw => {
-                                              const t = String(raw ?? '').trim();
-                                              if (!t) return '';
-                                              const n = parseMedicaoBlurNumber(raw);
-                                              if (n === null) {
-                                                return formatarMoedaCampoOrc(parsePreco(raw));
-                                              }
-                                              return formatarMoedaCampoOrc(Math.max(0, n));
-                                            }}
+                                            mask={currencyDigitsToFormatted}
+                                            displayAfterCommit={raw =>
+                                              formatarMoedaCampoOrc(parseCurrencyToNumber(raw))
+                                            }
                                             onCommit={raw => {
-                                              const t = String(raw ?? '').trim();
-                                              if (!t) {
-                                                setMoMatManualCampo(row.key, 'mat', null);
-                                                return;
-                                              }
-                                              const n = parseMedicaoBlurNumber(raw);
-                                              if (n === null) {
-                                                setMoMatManualCampo(row.key, 'mat', Math.max(0, parsePreco(raw)));
-                                                return;
-                                              }
-                                              setMoMatManualCampo(row.key, 'mat', Math.max(0, n));
+                                              setMoMatManualCampo(
+                                                row.key,
+                                                'mat',
+                                                Math.max(0, parseCurrencyToNumber(raw))
+                                              );
                                             }}
-                                            inputMode="decimal"
-                                            placeholder="—"
+                                            inputMode="numeric"
+                                            placeholder="0,00"
                                             title={
                                               gradeTravada
                                                 ? 'Orçamento travado — não é possível editar'
@@ -14758,6 +14827,12 @@ export function OrcamentoPageView({
                                       </td>
                                       <td data-orc-col="puBdi" style={estiloFundoPinturaOrc(row.key, 'puBdi', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.precoUnitarioComBdi} className="text-sm" />
+                                      </td>
+                                      <td data-orc-col="subMo" style={estiloFundoPinturaOrc(row.key, 'subMo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                        <MoedaCelula valor={row.subMaoDeObra} className="text-sm" />
+                                      </td>
+                                      <td data-orc-col="subMat" style={estiloFundoPinturaOrc(row.key, 'subMat', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                        <MoedaCelula valor={row.subMaterial} className="text-sm" />
                                       </td>
                                       <td data-orc-col="total" style={estiloFundoPinturaOrc(row.key, 'total', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.total} className="text-sm font-semibold" valorClassName="font-semibold" />
@@ -14870,14 +14945,13 @@ export function OrcamentoPageView({
                                     type="button"
                                     title="Remover cor da linha"
                                     aria-label="Remover cor da linha"
-                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-gray-200 px-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-black/10 bg-white text-gray-500 shadow-sm hover:scale-105 hover:text-gray-800 dark:border-white/15 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
                                     onClick={() => {
                                       pintarLinhaOrcamento(menuCtxMontagem.rowKey, null);
                                       setMenuCtxMontagem(null);
                                     }}
                                   >
-                                    <X className="h-3 w-3" aria-hidden />
-                                    Limpar
+                                    <X className="h-3.5 w-3.5" aria-hidden />
                                   </button>
                                 </div>
                               </div>
@@ -14910,7 +14984,7 @@ export function OrcamentoPageView({
                                     type="button"
                                     title="Remover cor da célula"
                                     aria-label="Remover cor da célula"
-                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-gray-200 px-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-black/10 bg-white text-gray-500 shadow-sm hover:scale-105 hover:text-gray-800 dark:border-white/15 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
                                     onClick={() => {
                                       pintarCelulaOrcamento(
                                         menuCtxMontagem.rowKey,
@@ -14920,8 +14994,7 @@ export function OrcamentoPageView({
                                       setMenuCtxMontagem(null);
                                     }}
                                   >
-                                    <X className="h-3 w-3" aria-hidden />
-                                    Limpar
+                                    <X className="h-3.5 w-3.5" aria-hidden />
                                   </button>
                                 </div>
                               </div>
@@ -14986,9 +15059,32 @@ export function OrcamentoPageView({
                       Orçamento
                     </p>
                     <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
-                      {formatarBRLExport(resumoFinanceiro.totalComDesconto)}
+                      {formatarBRLExport(resumoFinanceiro.totalBase)}
                     </p>
                   </div>
+                  {resumoFinanceiro.descontoPct > 0 && (
+                    <>
+                      <div className="shrink-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          {`Desconto (${(resumoFinanceiro.descontoPct * 100).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })}%)`}
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(resumoFinanceiro.valorDesconto)}
+                        </p>
+                      </div>
+                      <div className="shrink-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Total com desconto
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(resumoFinanceiro.totalComDesconto)}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       {`BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', {
@@ -15002,7 +15098,7 @@ export function OrcamentoPageView({
                   </div>
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Total
+                      Total geral
                     </p>
                     <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
@@ -15064,141 +15160,65 @@ export function OrcamentoPageView({
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <button
-                    type="button"
-                    onClick={() =>
-                      setOrcamentoGradeZoom((z) =>
-                        Math.max(ORC_GRADE_ZOOM_MIN, Math.round((z - ORC_GRADE_ZOOM_STEP) * 100) / 100)
-                      )
-                    }
-                    disabled={
-                      !gradeZoomAtivo || orcamentoGradeZoom <= ORC_GRADE_ZOOM_MIN + 0.001
-                    }
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                    title={
-                      gradeZoomAtivo
-                        ? `Diminuir zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
-                        : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
-                    }
-                    aria-label="Diminuir zoom da tabela"
-                  >
-                    <ZoomOut className="h-4 w-4 shrink-0" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOrcamentoGradeZoom((z) =>
-                        Math.min(ORC_GRADE_ZOOM_MAX, Math.round((z + ORC_GRADE_ZOOM_STEP) * 100) / 100)
-                      )
-                    }
-                    disabled={
-                      !gradeZoomAtivo || orcamentoGradeZoom >= ORC_GRADE_ZOOM_MAX - 0.001
-                    }
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                    title={
-                      gradeZoomAtivo
-                        ? `Aumentar zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
-                        : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
-                    }
-                    aria-label="Aumentar zoom da tabela"
-                  >
-                    <ZoomIn className="h-4 w-4 shrink-0" aria-hidden />
-                  </button>
-                  {!fichaDemandaOnly && (
-                    <button
-                      type="button"
-                      onClick={alternarGradeTravada}
-                      className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
-                        gradeTravada
-                          ? 'border-amber-500 bg-amber-50 text-amber-800 hover:bg-amber-100 active:bg-amber-200 dark:border-amber-500/70 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600'
-                      }`}
-                      title={
-                        gradeTravada
-                          ? 'Destravar orçamento e memória de cálculo'
-                          : 'Travar orçamento e memória de cálculo'
-                      }
-                      aria-label={
-                        gradeTravada
-                          ? 'Destravar orçamento e memória de cálculo'
-                          : 'Travar orçamento e memória de cálculo'
-                      }
-                      aria-pressed={gradeTravada}
-                    >
-                      {gradeTravada ? (
-                        <Lock className="h-4 w-4 shrink-0" aria-hidden />
-                      ) : (
-                        <Unlock className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
-                    </button>
-                  )}
-                  {!fichaDemandaOnly && (
-                    <button
+                    ref={btnAcoesGradeRef}
                     type="button"
                     onClick={() => {
-                      setAparenciaDraft({
-                        ...APARENCIA_ORCAMENTO_PADRAO,
-                        ...(meta.aparencia ?? {})
+                      if (menuAcoesGrade) {
+                        setMenuAcoesGrade(null);
+                        return;
+                      }
+                      setMenuColunasMontagem(null);
+                      const r = btnAcoesGradeRef.current?.getBoundingClientRect();
+                      if (!r) return;
+                      // 4×44 + 3×gap(4) + 2×padding(=gap)
+                      const gap = 4;
+                      const pad = gap;
+                      const panelW = 4 * 44 + 3 * gap + 2 * pad;
+                      const margin = 16;
+                      // Balão alinhado à direita do botão (cresce pra esquerda, com margem).
+                      const left = Math.max(
+                        margin,
+                        Math.min(r.right - panelW, window.innerWidth - panelW - margin)
+                      );
+                      const arrowLeft = Math.min(
+                        panelW - 12,
+                        Math.max(12, r.left + r.width / 2 - left)
+                      );
+                      setMenuAcoesGrade({
+                        top: r.top - 10,
+                        left,
+                        arrowLeft,
                       });
-                      setModalAparenciaAberto(true);
                     }}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                    title="Editar características do orçamento"
-                    aria-label="Editar características do orçamento"
+                    title="Ações da grade"
+                    aria-label="Ações da grade"
+                    aria-expanded={!!menuAcoesGrade}
                   >
-                    <Palette className="h-4 w-4 shrink-0" aria-hidden />
-                  </button>
-                  )}
-                  {!fichaDemandaOnly && orcamentoVeioOrcafascio && (
-                    <button
-                      type="button"
-                      onClick={() => void atualizarOrcamentoOrcafascio()}
-                      disabled={isAtualizandoOrcafascio || !orcamentoAtivoId || gradeTravada}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                      title={
-                        gradeTravada
-                          ? 'Destrave o orçamento para atualizar do Orçafascio'
-                          : 'Atualizar composições do Orçafascio (inclui novas e remove as que saíram de lá)'
-                      }
-                      aria-label="Atualizar do Orçafascio"
-                    >
-                      {isAtualizandoOrcafascio ? (
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={exportarOrcamentoCompleto}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                    title="Exportar Orçamento"
-                    aria-label="Exportar Orçamento"
-                  >
-                    <Download className="h-4 w-4 shrink-0" aria-hidden />
+                    <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
                   {analiticoDisponivel && !fichaDemandaOnly && (
-                  <button
-                    type="button"
-                    onClick={() => void abrirEnvioFichaDemandaAprovacao()}
-                    disabled={
-                      fdAprovacaoPreparando || fdAprovacaoEnviando || !podeEnviarFdAprovacao
-                    }
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-600 bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 hover:border-red-700 active:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:active:bg-red-700 dark:focus-visible:ring-offset-gray-900"
-                    title={
-                      statusAprovacaoAtivo === 'aguardando_aprovacao' ||
-                      statusAprovacaoAtivo === 'aprovado'
-                        ? 'Orçamento já enviado ou aprovado'
-                        : 'Enviar para aprovação'
-                    }
-                    aria-label="Enviar para aprovação"
-                  >
-                    {fdAprovacaoPreparando ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                    ) : (
-                      <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => void abrirEnvioFichaDemandaAprovacao()}
+                      disabled={
+                        fdAprovacaoPreparando || fdAprovacaoEnviando || !podeEnviarFdAprovacao
+                      }
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-600 bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 hover:border-red-700 active:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:active:bg-red-700 dark:focus-visible:ring-offset-gray-900"
+                      title={
+                        statusAprovacaoAtivo === 'aguardando_aprovacao' ||
+                        statusAprovacaoAtivo === 'aprovado'
+                          ? 'Orçamento já enviado ou aprovado'
+                          : 'Enviar para aprovação'
+                      }
+                      aria-label="Enviar para aprovação"
+                    >
+                      {fdAprovacaoPreparando ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      ) : (
+                        <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                    </button>
                   )}
                 </div>
               </div>
@@ -16720,6 +16740,257 @@ export function OrcamentoPageView({
         </div>
       </Modal>
 
+      {menuAcoesGrade && (
+        <ActionMenuOverlay
+          open
+          onClose={() => setMenuAcoesGrade(null)}
+          top={menuAcoesGrade.top}
+          left={menuAcoesGrade.left}
+          placement="above"
+          panelOverflow="visible"
+          panelClassName="rounded-lg !shadow-none"
+          panelStyle={{ width: 196, padding: 4 }}
+        >
+          {/* Setinha do balão apontando para o botão */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-full"
+            style={{ left: menuAcoesGrade.arrowLeft, transform: 'translateX(-50%)' }}
+          >
+            <span
+              style={{
+                display: 'block',
+                width: 0,
+                height: 0,
+                borderLeft: '7px solid transparent',
+                borderRight: '7px solid transparent',
+                borderTop: `8px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+              }}
+            />
+            <span
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: 0,
+                display: 'block',
+                width: 0,
+                height: 0,
+                transform: 'translateX(-50%) translateY(-1px)',
+                borderLeft: '6px solid transparent',
+                borderRight: '6px solid transparent',
+                borderTop: `7px solid ${isDark ? '#1f2937' : '#ffffff'}`,
+              }}
+            />
+          </span>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 44px)',
+              gridAutoRows: 44,
+              gap: 4,
+            }}
+          >
+            {orcamentoViewTab === 'montagem' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  const r = btnAcoesGradeRef.current?.getBoundingClientRect();
+                  if (!r) return;
+                  const panelW = 288; // w-72
+                  const margin = 24;
+                  // Alinha à direita do botão e cresce pra esquerda (evita colar na borda).
+                  const preferredLeft = r.right - panelW;
+                  setMenuColunasMontagem({
+                    top: r.top - 8,
+                    left: Math.max(
+                      margin,
+                      Math.min(preferredLeft, window.innerWidth - panelW - margin)
+                    ),
+                  });
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                title="Escolher colunas visíveis"
+                aria-label="Escolher colunas visíveis"
+              >
+                <Columns3 className="h-5 w-5 shrink-0" aria-hidden />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                setOrcamentoGradeZoom((z) =>
+                  Math.max(ORC_GRADE_ZOOM_MIN, Math.round((z - ORC_GRADE_ZOOM_STEP) * 100) / 100)
+                )
+              }
+              disabled={!gradeZoomAtivo || orcamentoGradeZoom <= ORC_GRADE_ZOOM_MIN + 0.001}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-35 dark:text-gray-200 dark:hover:bg-gray-700"
+              title={
+                gradeZoomAtivo
+                  ? `Diminuir zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
+                  : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
+              }
+              aria-label="Diminuir zoom da tabela"
+            >
+              <ZoomOut className="h-5 w-5 shrink-0" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setOrcamentoGradeZoom((z) =>
+                  Math.min(ORC_GRADE_ZOOM_MAX, Math.round((z + ORC_GRADE_ZOOM_STEP) * 100) / 100)
+                )
+              }
+              disabled={!gradeZoomAtivo || orcamentoGradeZoom >= ORC_GRADE_ZOOM_MAX - 0.001}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-35 dark:text-gray-200 dark:hover:bg-gray-700"
+              title={
+                gradeZoomAtivo
+                  ? `Aumentar zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
+                  : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
+              }
+              aria-label="Aumentar zoom da tabela"
+            >
+              <ZoomIn className="h-5 w-5 shrink-0" aria-hidden />
+            </button>
+            {!fichaDemandaOnly && (
+              <button
+                type="button"
+                onClick={alternarGradeTravada}
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                  gradeTravada
+                    ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                title={
+                  gradeTravada
+                    ? 'Destravar orçamento e memória de cálculo'
+                    : 'Travar orçamento e memória de cálculo'
+                }
+                aria-label={
+                  gradeTravada
+                    ? 'Destravar orçamento e memória de cálculo'
+                    : 'Travar orçamento e memória de cálculo'
+                }
+                aria-pressed={gradeTravada}
+              >
+                {gradeTravada ? (
+                  <Lock className="h-5 w-5 shrink-0" aria-hidden />
+                ) : (
+                  <Unlock className="h-5 w-5 shrink-0" aria-hidden />
+                )}
+              </button>
+            )}
+            {!fichaDemandaOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  setAparenciaDraft({
+                    ...APARENCIA_ORCAMENTO_PADRAO,
+                    ...(meta.aparencia ?? {}),
+                  });
+                  setModalAparenciaAberto(true);
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                title="Editar características do orçamento"
+                aria-label="Editar características do orçamento"
+              >
+                <Palette className="h-5 w-5 shrink-0" aria-hidden />
+              </button>
+            )}
+            {!fichaDemandaOnly && orcamentoVeioOrcafascio && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  void atualizarOrcamentoOrcafascio();
+                }}
+                disabled={isAtualizandoOrcafascio || !orcamentoAtivoId || gradeTravada}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-35 dark:text-gray-200 dark:hover:bg-gray-700"
+                title={
+                  gradeTravada
+                    ? 'Destrave o orçamento para atualizar do Orçafascio'
+                    : 'Atualizar composições do Orçafascio (inclui novas e remove as que saíram de lá)'
+                }
+                aria-label="Atualizar do Orçafascio"
+              >
+                {isAtualizandoOrcafascio ? (
+                  <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="h-5 w-5 shrink-0" aria-hidden />
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuAcoesGrade(null);
+                exportarOrcamentoCompleto();
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+              title="Exportar Orçamento"
+              aria-label="Exportar Orçamento"
+            >
+              <Download className="h-5 w-5 shrink-0" aria-hidden />
+            </button>
+          </div>
+        </ActionMenuOverlay>
+      )}
+
+      {menuColunasMontagem && (
+        <ActionMenuOverlay
+          open
+          onClose={() => setMenuColunasMontagem(null)}
+          top={menuColunasMontagem.top}
+          left={menuColunasMontagem.left}
+          placement="above"
+          panelOverflow="hidden"
+          panelClassName="flex w-72 flex-col py-2"
+          maxHeight={Math.min(420, typeof window !== 'undefined' ? window.innerHeight - 96 : 420)}
+        >
+          <div className="shrink-0 px-3 pb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Colunas visíveis
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Item e descrição ficam sempre visíveis.
+            </p>
+          </div>
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-2">
+            {ORC_COLUNAS_MONTAGEM_TOGGLE.map((col) => {
+              const visivel = !colunasOcultasMontagem.includes(col.id);
+              return (
+                <div
+                  key={col.id}
+                  className="rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                >
+                  <Checkbox
+                    checked={visivel}
+                    onChange={(checked) => {
+                      setColunasOcultasMontagem((prev) => {
+                        if (checked) return prev.filter((id) => id !== col.id);
+                        if (prev.includes(col.id)) return prev;
+                        return [...prev, col.id];
+                      });
+                    }}
+                    label={col.label}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="shrink-0 border-t border-gray-100 px-2 pt-2 dark:border-gray-700">
+            <button
+              type="button"
+              className="w-full rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/50"
+              onClick={() => setColunasOcultasMontagem([])}
+            >
+              Mostrar todas
+            </button>
+          </div>
+        </ActionMenuOverlay>
+      )}
+
       {typeof document !== 'undefined' &&
         orcamentoViewTab === 'montagem' &&
         !gradeTravada &&
@@ -16738,6 +17009,18 @@ export function OrcamentoPageView({
                     : `${resumoSelecaoMontagem.nSelecionados} selecionados`}
                 </span>
                 <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm text-gray-600 dark:text-gray-300">
+                  <span>
+                    Mão de obra{' '}
+                    <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">
+                      {formatarBRLExport(resumoSelecaoMontagem.maoDeObra)}
+                    </span>
+                  </span>
+                  <span>
+                    Material{' '}
+                    <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">
+                      {formatarBRLExport(resumoSelecaoMontagem.material)}
+                    </span>
+                  </span>
                   <span>
                     Sem BDI{' '}
                     <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">
