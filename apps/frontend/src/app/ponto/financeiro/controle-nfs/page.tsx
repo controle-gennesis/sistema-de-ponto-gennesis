@@ -16,18 +16,12 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { ControleNfsTabNav } from './ControleNfsTabNav';
 import { ControleNfsTable } from './ControleNfsTable';
-import { ControleNfsCardsFilterPanel } from './ControleNfsCardsFilterPanel';
 import { ControleNfsCardDetalheModal } from './ControleNfsCardDetalheModal';
 import { ControleNfsTotalsCard } from './ControleNfsTotalsCard';
 import { CONTROLE_NFS_CARD_METRICS, type ControleNfsCardMetricKey } from './controleNfsCardMetrics';
 import { CONTROLE_NFS_TABS } from './controleNfsTabs';
 import {
-  buildControleNfsTotalsQueryParams,
-  createDefaultControleNfsCardsFilter
-} from './controleNfsCardsFilter';
-import {
   CONTROLE_NFS_SPREADSHEET_URL,
-  type ControleNfsCardsFilterState,
   type ControleNfsSheetData,
   type ControleNfsTotalsSummary
 } from './controleNfsTypes';
@@ -37,9 +31,6 @@ function ControleNfsPageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredCount, setFilteredCount] = useState(0);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [cardsFilter, setCardsFilter] = useState<ControleNfsCardsFilterState>(
-    createDefaultControleNfsCardsFilter
-  );
   const [cardDetalheMetric, setCardDetalheMetric] = useState<ControleNfsCardMetricKey | null>(
     null
   );
@@ -79,12 +70,12 @@ function ControleNfsPageContent() {
     isLoading: isTotalsLoading,
     isFetching: isTotalsFetching
   } = useQuery({
-    queryKey: ['controle-nfs', 'totals-summary', cardsFilter, refreshNonce],
+    queryKey: ['controle-nfs', 'totals-summary', refreshNonce],
     queryFn: async () => {
       const response = await api.get<{ success: boolean; data: ControleNfsTotalsSummary }>(
         '/controle-nfs/summary/totals',
         {
-          params: buildControleNfsTotalsQueryParams(cardsFilter, refreshNonce > 0)
+          params: refreshNonce > 0 ? { refresh: 1 } : undefined
         }
       );
       return response.data.data;
@@ -93,7 +84,6 @@ function ControleNfsPageContent() {
   });
 
   const cardTotals = totalsSummary;
-  const cardsDisabled = cardsFilter.tabKeys.length === 0;
 
   const handleRefresh = () => {
     setRefreshNonce((value) => value + 1);
@@ -159,17 +149,6 @@ function ControleNfsPageContent() {
           </div>
         </div>
 
-        <ControleNfsCardsFilterPanel
-          filter={cardsFilter}
-          onFilterChange={setCardsFilter}
-        />
-
-        {cardsFilter.tabKeys.length === 0 ? (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-            Selecione ao menos um contrato no filtro dos cards para exibir os totais.
-          </p>
-        ) : null}
-
         <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {CONTROLE_NFS_CARD_METRICS.map((metric) => (
             <ControleNfsTotalsCard
@@ -177,7 +156,6 @@ function ControleNfsPageContent() {
               metric={metric}
               summary={cardTotals}
               isLoading={isTotalsLoading}
-              disabled={cardsDisabled}
               onOpenDetalhe={() => setCardDetalheMetric(metric.key)}
             />
           ))}

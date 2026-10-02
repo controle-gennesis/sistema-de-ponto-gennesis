@@ -21,6 +21,7 @@ import {
 } from '@/components/oc/OcFluxTabsNav';
 import { OcGlobalSearch } from '@/components/oc/OcGlobalSearch';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
+import { OcTotvsUserLinkButton } from '@/components/oc/OcTotvsUserLinkButton';
 
 export default function OrdemDeCompraPage() {
   const router = useRouter();
@@ -85,6 +86,9 @@ export default function OrdemDeCompraPage() {
             <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
               Acompanhe aprovações, pagamentos e o fluxo completo das OCs em um só lugar.
             </p>
+            <div className="mt-4 flex justify-center">
+              <OcTotvsUserLinkButton />
+            </div>
           </div>
 
           <OcGlobalSearch

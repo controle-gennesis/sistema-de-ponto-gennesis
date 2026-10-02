@@ -32,21 +32,6 @@ export type ControleNfsTabTotals = {
   hasContaVinculadaColumn?: boolean;
 };
 
-export type ControleNfsCardsDateFilter = {
-  emissaoDateFrom?: string;
-  emissaoDateTo?: string;
-  recebimentoDateFrom?: string;
-  recebimentoDateTo?: string;
-};
-
-export type ControleNfsCardsFilterState = {
-  tabKeys: string[];
-  emissaoDateFrom: string;
-  emissaoDateTo: string;
-  recebimentoDateFrom: string;
-  recebimentoDateTo: string;
-};
-
 export type ControleNfsFilterOptions = {
   yearsEmissao: number[];
   yearsRecebimento: number[];

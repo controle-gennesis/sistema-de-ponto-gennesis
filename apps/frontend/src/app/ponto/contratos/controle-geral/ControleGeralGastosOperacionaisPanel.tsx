@@ -7,6 +7,8 @@ import api from '@/lib/api';
 import {
   AlertCircle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Download,
   ExternalLink,
@@ -30,6 +32,11 @@ import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { ResizableTh } from './ColumnResizeHandle';
+import {
+  useControleGeralColumnWidths,
+  type ControleGeralColumnWidth
+} from './useControleGeralColumnWidths';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   aggregateGastosDetailRows,
@@ -39,6 +46,8 @@ import {
   gastosNaturezaTotalContribution,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
   createControleGeralDefaultPeriodFilters,
+  getCurrentCalendarMonthPeriodBounds,
+  parseGastosPeriodYmd,
   filterGastosDetailRows,
   filterGastosDetailRowsByPolo,
   filterRowsByAllowedContracts,
@@ -161,6 +170,51 @@ export type GastosOperacionaisRow = {
   tetoOrcamentario?: number;
 };
 
+function formatMonthNavigatorLabel(periodFrom: string): string {
+  const parsed = parseGastosPeriodYmd(periodFrom) ?? new Date();
+  return parsed.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+
+function shiftCalendarMonthPeriod(periodFrom: string, delta: -1 | 1): { from: string; to: string } {
+  const parsed = parseGastosPeriodYmd(periodFrom) ?? new Date();
+  const target = new Date(parsed.getFullYear(), parsed.getMonth() + delta, 1);
+  return getCurrentCalendarMonthPeriodBounds(target);
+}
+
+function MonthPeriodNavigator({
+  periodFrom,
+  onShift
+}: {
+  periodFrom: string;
+  onShift: (delta: -1 | 1) => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-full border border-gray-200 bg-white p-0.5 shadow-sm dark:border-gray-600 dark:bg-gray-800">
+      <button
+        type="button"
+        onClick={() => onShift(-1)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+        aria-label="Mês anterior"
+        title="Mês anterior"
+      >
+        <ChevronLeft className="h-4 w-4" aria-hidden />
+      </button>
+      <span className="min-w-[9.25rem] px-1 text-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+        {formatMonthNavigatorLabel(periodFrom)}
+      </span>
+      <button
+        type="button"
+        onClick={() => onShift(1)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+        aria-label="Próximo mês"
+        title="Próximo mês"
+      >
+        <ChevronRight className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 const MONTH_OPTIONS = [
   { value: 1, label: 'Janeiro' },
   { value: 2, label: 'Fevereiro' },
@@ -183,6 +237,8 @@ type ControleGeralGastosOperacionaisPanelProps = {
   /** Catálogo bruto de naturezas vindas do TOTVS RM (mapeadas ou não). */
   totvsNaturezaCatalog?: readonly GastosTotvsNaturezaCatalogRow[];
   isLoading: boolean;
+  /** Gastos ainda estão sendo buscados; o cache não deve parecer definitivo. */
+  isDataRefreshing?: boolean;
   fetchedAt?: string;
   isError?: boolean;
   errorMessage?: string;
@@ -259,6 +315,23 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function ValueLoadingMark() {
+  return (
+    <span
+      className="inline-flex items-center justify-center text-gray-400 dark:text-gray-500"
+      role="status"
+      aria-label="Carregando"
+      title="Carregando"
+    >
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+    </span>
+  );
+}
+
+function renderPendingValue(pending: boolean, value: React.ReactNode) {
+  return pending ? <ValueLoadingMark /> : value;
 }
 
 function renderNfsAmountOrError(
@@ -513,27 +586,27 @@ function summarizeGastosPanelRows(rows: readonly GastosOperacionaisRow[]): Gasto
 
 /** Evita quebra do sinal negativo em valores monetários longos (ex.: -R$ 1.554.904,49). */
 const amountCurrencyCellClassName =
-  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
+  'px-2.5 py-2 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
 const amountCurrencyTotalCellClassName =
-  'px-3 py-2.5 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+  'px-2.5 py-2 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
 const amountGrandTotalCellClassName =
-  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+  'px-2.5 py-2.5 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
 const amountPercentCellClassName =
-  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-medium';
+  'px-2 py-2 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-medium';
 const amountPercentTotalCellClassName =
-  'px-3 py-2.5 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-semibold';
+  'px-2 py-2 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-semibold';
 const amountCurrencyThClassName =
-  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[9.25rem]';
+  'px-2.5 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[9.25rem]';
 const amountPercentThClassName =
-  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[4.75rem]';
+  'px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[4.75rem]';
 const dataCenterThClassName =
-  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap';
+  'px-1.5 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 const dataCenterCellClassName =
-  'px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap';
+  'px-1.5 py-2 text-center text-sm tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap';
 const contractThClassName =
-  'px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400';
+  'px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 const contractCellClassName =
-  'px-3 py-3 text-left font-medium text-gray-900 dark:text-gray-100';
+  'overflow-hidden px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100';
 
 function FinancialTotalsTableRow({
   title,
@@ -542,7 +615,10 @@ function FinancialTotalsTableRow({
   showNfsMetrics,
   showTetoOrcamentario,
   tableLabelColSpan,
-  variant = 'locality'
+  variant = 'locality',
+  nfsValuesPending = false,
+  tetoValuesPending = false,
+  gastosValuesPending = false
 }: {
   title: string;
   contractCount: number;
@@ -551,6 +627,9 @@ function FinancialTotalsTableRow({
   showTetoOrcamentario: boolean;
   tableLabelColSpan: number;
   variant?: 'locality' | 'grand';
+  nfsValuesPending?: boolean;
+  tetoValuesPending?: boolean;
+  gastosValuesPending?: boolean;
 }) {
   const isGrand = variant === 'grand';
   const rowClassName = isGrand
@@ -572,17 +651,17 @@ function FinancialTotalsTableRow({
       </td>
       {showNfsMetrics ? (
         <td className={`${currencyCellClassName} text-green-600 dark:text-green-400`}>
-          {formatCurrency(summary.faturamento)}
+          {renderPendingValue(nfsValuesPending, formatCurrency(summary.faturamento))}
         </td>
       ) : null}
       {showNfsMetrics ? (
         <td className={`${currencyCellClassName} text-blue-600 dark:text-blue-400`}>
-          {formatCurrency(summary.liquido)}
+          {renderPendingValue(nfsValuesPending, formatCurrency(summary.liquido))}
         </td>
       ) : null}
       {showNfsMetrics ? (
         <td className={`${currencyCellClassName} text-sky-600 dark:text-sky-400`}>
-          {formatCurrency(summary.recebido)}
+          {renderPendingValue(nfsValuesPending, formatCurrency(summary.recebido))}
         </td>
       ) : null}
       {showTetoOrcamentario ? (
@@ -592,11 +671,14 @@ function FinancialTotalsTableRow({
             summary.tetoOrcamentario
           )}`}
         >
-          {summary.tetoOrcamentario > 0 ? formatCurrency(summary.tetoOrcamentario) : '—'}
+          {renderPendingValue(
+            tetoValuesPending,
+            summary.tetoOrcamentario > 0 ? formatCurrency(summary.tetoOrcamentario) : '—'
+          )}
         </td>
       ) : null}
       <td className={`${currencyCellClassName} text-red-600 dark:text-red-400`}>
-        {formatCurrency(summary.gastos)}
+        {renderPendingValue(gastosValuesPending, formatCurrency(summary.gastos))}
       </td>
       {showTetoOrcamentario ? (
         <td
@@ -605,12 +687,18 @@ function FinancialTotalsTableRow({
             summary.gastos
           )}`}
         >
-          {formatTetoMinusGasto(summary.tetoOrcamentario, summary.gastos)}
+          {renderPendingValue(
+            tetoValuesPending || gastosValuesPending,
+            formatTetoMinusGasto(summary.tetoOrcamentario, summary.gastos)
+          )}
         </td>
       ) : null}
       {showNfsMetrics ? (
         <td className={`${currencyCellClassName} ${lucroLiquidoClassName(summary.lucroLiquido)}`}>
-          {formatCurrency(summary.lucroLiquido)}
+          {renderPendingValue(
+            nfsValuesPending || gastosValuesPending,
+            formatCurrency(summary.lucroLiquido)
+          )}
         </td>
       ) : null}
       {showTetoOrcamentario ? (
@@ -620,7 +708,10 @@ function FinancialTotalsTableRow({
             summary.gastos
           )}`}
         >
-          {formatGastoSobreTetoPercent(summary.tetoOrcamentario, summary.gastos)}
+          {renderPendingValue(
+            tetoValuesPending || gastosValuesPending,
+            formatGastoSobreTetoPercent(summary.tetoOrcamentario, summary.gastos)
+          )}
         </td>
       ) : null}
       {showNfsMetrics ? (
@@ -630,7 +721,10 @@ function FinancialTotalsTableRow({
             summary.faturamento
           )}`}
         >
-          {formatGastoFaturamentoPercent(summary.gastos, summary.faturamento)}
+          {renderPendingValue(
+            nfsValuesPending || gastosValuesPending,
+            formatGastoFaturamentoPercent(summary.gastos, summary.faturamento)
+          )}
         </td>
       ) : null}
       {showNfsMetrics ? (
@@ -640,12 +734,18 @@ function FinancialTotalsTableRow({
             summary.recebido
           )}`}
         >
-          {formatGastoRecebidoPercent(summary.gastos, summary.recebido)}
+          {renderPendingValue(
+            nfsValuesPending || gastosValuesPending,
+            formatGastoRecebidoPercent(summary.gastos, summary.recebido)
+          )}
         </td>
       ) : null}
       {showNfsMetrics ? (
         <td className={`${currencyCellClassName} text-indigo-600 dark:text-indigo-400`}>
-          {summary.contaVinculada == null ? '—' : formatCurrency(summary.contaVinculada)}
+          {renderPendingValue(
+            nfsValuesPending,
+            summary.contaVinculada == null ? '—' : formatCurrency(summary.contaVinculada)
+          )}
         </td>
       ) : null}
     </tr>
@@ -659,15 +759,18 @@ function formatAnoApuracao(anoMin: number, anoMax: number) {
 }
 
 const filterLabelClassName =
-  'mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 
 const filterFieldLabelClassName =
-  'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300';
+  'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400';
 
-const localitySelectWrapperClassName = 'mx-auto flex w-full min-w-[9.5rem] max-w-[12rem] justify-center';
+const filterPeriodCardClassName =
+  'rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40';
+
+const localitySelectWrapperClassName = 'mx-auto flex w-full min-w-0 max-w-full justify-center';
 
 const localitySelectTriggerClassName =
-  'flex w-full items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent px-1.5 py-1 text-center text-sm font-medium text-gray-800 outline-none transition-colors hover:bg-gray-100 focus:bg-gray-100 focus:ring-0 dark:text-gray-100 dark:hover:bg-gray-700/60 dark:focus:bg-gray-700/60';
+  'flex w-full min-w-0 items-center justify-center rounded-md border-0 bg-transparent px-0.5 py-0.5 text-center text-sm font-medium text-gray-800 outline-none transition-colors hover:bg-gray-100 focus:bg-gray-100 focus:ring-0 dark:text-gray-100 dark:hover:bg-gray-700/60 dark:focus:bg-gray-700/60 [&_span]:block [&_span]:min-w-0 [&_span]:truncate';
 
 const FILTER_DROPDOWN_LIST_MAX_HEIGHT = 320;
 
@@ -714,6 +817,7 @@ export function ControleGeralGastosOperacionaisPanel({
   naturezaDetailRows = EMPTY_NATUREZA_DETAIL_ROWS,
   totvsNaturezaCatalog = EMPTY_TOTVS_NATUREZA_CATALOG,
   isLoading,
+  isDataRefreshing = false,
   fetchedAt,
   isError = false,
   errorMessage,
@@ -764,6 +868,50 @@ export function ControleGeralGastosOperacionaisPanel({
     gastoRatioColumnCount +
     tetoOrcamentarioColumnCount;
   const tableLabelColSpan = tableColumnCount - tableAmountColumnCount;
+  const resizableColumns = useMemo((): ControleGeralColumnWidth[] => {
+    const columns: ControleGeralColumnWidth[] = [];
+    if (enableRowExclusion) columns.push({ key: 'select', defaultWidth: 56, minWidth: 48 });
+    columns.push(
+      { key: 'mes', defaultWidth: 92, minWidth: 72 },
+      { key: 'ano', defaultWidth: 68, minWidth: 56 }
+    );
+    if (!hideLocalityColumn) {
+      columns.push({ key: 'localidade', defaultWidth: 118, minWidth: 84 });
+    }
+    columns.push({ key: 'contrato', defaultWidth: 260, minWidth: 140 });
+    if (showFaturamentoColumn) {
+      columns.push(
+        { key: 'faturamento', defaultWidth: 156, minWidth: 110 },
+        { key: 'liquido', defaultWidth: 140, minWidth: 110 },
+        { key: 'recebido', defaultWidth: 140, minWidth: 110 }
+      );
+    }
+    if (showTetoOrcamentarioColumn) {
+      columns.push({ key: 'teto', defaultWidth: 168, minWidth: 120 });
+    }
+    columns.push({ key: 'gastos', defaultWidth: 150, minWidth: 110 });
+    if (showTetoOrcamentarioColumn) {
+      columns.push({ key: 'saldo-gastar', defaultWidth: 156, minWidth: 120 });
+    }
+    if (showFaturamentoColumn) columns.push({ key: 'lucro', defaultWidth: 150, minWidth: 110 });
+    if (showTetoOrcamentarioColumn) {
+      columns.push({ key: 'gasto-teto', defaultWidth: 130, minWidth: 96 });
+    }
+    if (showFaturamentoColumn) {
+      columns.push(
+        { key: 'gasto-fat', defaultWidth: 130, minWidth: 96 },
+        { key: 'gasto-rec', defaultWidth: 130, minWidth: 96 },
+        { key: 'saldo-cv', defaultWidth: 156, minWidth: 110 }
+      );
+    }
+    return columns;
+  }, [enableRowExclusion, hideLocalityColumn, showFaturamentoColumn, showTetoOrcamentarioColumn]);
+  const { widths: columnWidths, totalWidth: tableWidth, setColumnWidth } =
+    useControleGeralColumnWidths('controle-geral:gastos-column-widths:v2', resizableColumns);
+  const columnMinWidth = useCallback(
+    (key: string) => resizableColumns.find((column) => column.key === key)?.minWidth ?? 60,
+    [resizableColumns]
+  );
   const [filters, setFilters] = useState<GastosOperacionaisFilters>(() =>
     showFaturamentoColumn
       ? createControleGeralDefaultPeriodFilters()
@@ -1021,7 +1169,7 @@ export function ControleGeralGastosOperacionaisPanel({
     placeholderData: (previousData) => previousData
   });
 
-  const { data: tetoOrcamentarioEntries = [] } = useQuery({
+  const { data: tetoOrcamentarioEntries = [], isFetching: fetchingTetoOrcamentario } = useQuery({
     enabled: showTetoOrcamentarioColumn,
     queryKey: ['controle-geral-teto-orcamentario', dataRefreshNonce],
     queryFn: async () => {
@@ -1048,6 +1196,10 @@ export function ControleGeralGastosOperacionaisPanel({
   );
 
   const isPanelLoading = isLoading;
+  const gastosValuesPending = isDataRefreshing;
+  const nfsValuesPending = showFaturamentoColumn && (loadingFaturamento || fetchingFaturamento);
+  const tetoValuesPending = showTetoOrcamentarioColumn && fetchingTetoOrcamentario;
+  const anyValuesPending = gastosValuesPending || nfsValuesPending || tetoValuesPending;
 
   const visibleLocalityItems = useMemo(
     () => resolveVisibleLocalityItems(visibleLocalities, localitiesCatalog),
@@ -1197,7 +1349,6 @@ export function ControleGeralGastosOperacionaisPanel({
         );
     const aggregated = aggregateGastosDetailRows(filtered);
     return mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities, {
-      databaseContracts: contractsForDetailLookup,
       spreadsheetContracts: allSpreadsheetContracts,
       excludedContractKeys: enableRowExclusion ? Array.from(excludedContracts) : [],
       resolveExcludedLabel: (key) =>
@@ -1213,7 +1364,6 @@ export function ControleGeralGastosOperacionaisPanel({
     inferredLocalityOverrides,
     readOnlyPoloColumn,
     visibleLocalities,
-    contractsForDetailLookup,
     allSpreadsheetContracts,
     enableRowExclusion,
     excludedContracts,
@@ -1707,10 +1857,36 @@ export function ControleGeralGastosOperacionaisPanel({
     });
   };
 
+  const handleEmissaoMonthShift = (delta: -1 | 1) => {
+    setFilters((prev) => {
+      const { from, to } = shiftCalendarMonthPeriod(
+        prev.emissaoPeriodFrom || prev.emissaoPeriodTo,
+        delta
+      );
+      return {
+        ...prev,
+        emissaoPeriodFrom: from,
+        emissaoPeriodTo: to,
+        periodFrom: from,
+        periodTo: to
+      };
+    });
+  };
+
+  const handleRecebimentoMonthShift = (delta: -1 | 1) => {
+    setFilters((prev) => {
+      const { from, to } = shiftCalendarMonthPeriod(
+        prev.recebimentoPeriodFrom || prev.recebimentoPeriodTo,
+        delta
+      );
+      return { ...prev, recebimentoPeriodFrom: from, recebimentoPeriodTo: to };
+    });
+  };
+
   const dualNfsPeriodFilters = showFaturamentoColumn;
 
   const gastosFiltersFields = (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {!hideContractFilter || !hideLocalityFilter ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {!hideContractFilter ? (
@@ -1774,11 +1950,17 @@ export function ControleGeralGastosOperacionaisPanel({
 
       {dualNfsPeriodFilters ? (
         <>
-          <div>
-            <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-              Período emissão
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className={filterPeriodCardClassName}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Período de emissão
+              </p>
+              <MonthPeriodNavigator
+                periodFrom={filters.emissaoPeriodFrom || filters.emissaoPeriodTo}
+                onShift={handleEmissaoMonthShift}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className={filterFieldLabelClassName}>Data inicial</label>
                 <DatePickerField
@@ -1802,11 +1984,17 @@ export function ControleGeralGastosOperacionaisPanel({
             </div>
           </div>
 
-          <div>
-            <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-              Período recebimento
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className={filterPeriodCardClassName}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Período de recebimento
+              </p>
+              <MonthPeriodNavigator
+                periodFrom={filters.recebimentoPeriodFrom || filters.recebimentoPeriodTo}
+                onShift={handleRecebimentoMonthShift}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className={filterFieldLabelClassName}>Data inicial</label>
                 <DatePickerField
@@ -1831,7 +2019,7 @@ export function ControleGeralGastosOperacionaisPanel({
           </div>
         </>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className={`${filterPeriodCardClassName} grid grid-cols-1 gap-3 sm:grid-cols-2`}>
           <div>
             <label className={filterFieldLabelClassName}>Data inicial</label>
             <DatePickerField
@@ -2194,7 +2382,7 @@ export function ControleGeralGastosOperacionaisPanel({
                 <button
                   type="button"
                   onClick={() => void handleExportPdf()}
-                  disabled={isPanelLoading || exportingPdf || !canExportPdf}
+                  disabled={isPanelLoading || anyValuesPending || exportingPdf || !canExportPdf}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                   aria-label={exportingPdf ? 'Gerando PDF' : 'Exportar PDF'}
                   title={exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
@@ -2228,7 +2416,7 @@ export function ControleGeralGastosOperacionaisPanel({
       </CardHeader>
 
       <CardContent className={cadastroListClasses.cardContent}>
-        {showFaturamentoColumn && nfsLoadErrorCount > 0 ? (
+        {showFaturamentoColumn && !nfsValuesPending && nfsLoadErrorCount > 0 ? (
           <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -2345,58 +2533,184 @@ export function ControleGeralGastosOperacionaisPanel({
                   </p>
                 ) : null}
 
+                {anyValuesPending ? (
+                  <p className="mb-3 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    Carregando valores. Eles aparecem quando todas as informações estiverem prontas.
+                  </p>
+                ) : null}
+
                 <div className="table-scroll">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                  <table
+                    className="text-sm table-fixed [&_td]:!min-w-0 [&_th]:!min-w-0"
+                    style={{ width: tableWidth, minWidth: tableWidth }}
+                  >
+                    <colgroup>
+                      {resizableColumns.map((column) => (
+                        <col
+                          key={column.key}
+                          style={{ width: columnWidths[column.key] ?? column.defaultWidth }}
+                        />
+                      ))}
+                    </colgroup>
+                    <thead className="border-b border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-900/50">
                       <tr>
                         {enableRowExclusion ? (
-                          <th className="w-10 px-3 py-3 text-center">
+                          <ResizableTh
+                            className="px-2 py-2.5 text-center"
+                            width={columnWidths.select}
+                            minWidth={columnMinWidth('select')}
+                            onWidthChange={(width) => setColumnWidth('select', width)}
+                          >
                             <RowSelectCheckbox
                               checked={allVisibleSelected}
                               indeterminate={someVisibleSelected && !allVisibleSelected}
                               onChange={toggleSelectAllVisible}
                               ariaLabel="Selecionar todos os contratos visíveis"
                             />
-                          </th>
+                          </ResizableTh>
                         ) : null}
-                        <th className={dataCenterThClassName}>Mês de apuração</th>
-                        <th className={dataCenterThClassName}>Ano de apuração</th>
+                        <ResizableTh
+                          className={dataCenterThClassName}
+                          width={columnWidths.mes}
+                          minWidth={columnMinWidth('mes')}
+                          onWidthChange={(width) => setColumnWidth('mes', width)}
+                        >
+                          <span title="Mês de apuração">Mês</span>
+                        </ResizableTh>
+                        <ResizableTh
+                          className={dataCenterThClassName}
+                          width={columnWidths.ano}
+                          minWidth={columnMinWidth('ano')}
+                          onWidthChange={(width) => setColumnWidth('ano', width)}
+                        >
+                          <span title="Ano de apuração">Ano</span>
+                        </ResizableTh>
                         {!hideLocalityColumn ? (
-                          <th className={dataCenterThClassName}>
-                            {readOnlyPoloColumn ? 'Polo' : 'Localidade'}
-                          </th>
+                          <ResizableTh
+                            className={dataCenterThClassName}
+                            width={columnWidths.localidade}
+                            minWidth={columnMinWidth('localidade')}
+                            onWidthChange={(width) => setColumnWidth('localidade', width)}
+                          >
+                            {readOnlyPoloColumn ? 'Polo' : 'Local'}
+                          </ResizableTh>
                         ) : null}
-                        <th className={contractThClassName}>Contrato</th>
+                        <ResizableTh
+                          className={contractThClassName}
+                          width={columnWidths.contrato}
+                          minWidth={columnMinWidth('contrato')}
+                          onWidthChange={(width) => setColumnWidth('contrato', width)}
+                        >
+                          Contrato
+                        </ResizableTh>
                         {showFaturamentoColumn ? (
-                          <th className={amountCurrencyThClassName}>Faturamento</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths.faturamento}
+                            minWidth={columnMinWidth('faturamento')}
+                            onWidthChange={(width) => setColumnWidth('faturamento', width)}
+                          >
+                            Faturamento
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountCurrencyThClassName}>Líquido</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths.liquido}
+                            minWidth={columnMinWidth('liquido')}
+                            onWidthChange={(width) => setColumnWidth('liquido', width)}
+                          >
+                            Líquido
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountCurrencyThClassName}>Recebido</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths.recebido}
+                            minWidth={columnMinWidth('recebido')}
+                            onWidthChange={(width) => setColumnWidth('recebido', width)}
+                          >
+                            Recebido
+                          </ResizableTh>
                         ) : null}
                         {showTetoOrcamentarioColumn ? (
-                          <th className={amountCurrencyThClassName}>Teto orçamentário</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths.teto}
+                            minWidth={columnMinWidth('teto')}
+                            onWidthChange={(width) => setColumnWidth('teto', width)}
+                          >
+                            Teto orçamentário
+                          </ResizableTh>
                         ) : null}
-                        <th className={amountCurrencyThClassName}>{totalColumnLabel}</th>
+                        <ResizableTh
+                          className={amountCurrencyThClassName}
+                          width={columnWidths.gastos}
+                          minWidth={columnMinWidth('gastos')}
+                          onWidthChange={(width) => setColumnWidth('gastos', width)}
+                        >
+                          {totalColumnLabel}
+                        </ResizableTh>
                         {showTetoOrcamentarioColumn ? (
-                          <th className={amountCurrencyThClassName}>Saldo a gastar</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths['saldo-gastar']}
+                            minWidth={columnMinWidth('saldo-gastar')}
+                            onWidthChange={(width) => setColumnWidth('saldo-gastar', width)}
+                          >
+                            Saldo a gastar
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountCurrencyThClassName}>Lucro líquido</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths.lucro}
+                            minWidth={columnMinWidth('lucro')}
+                            onWidthChange={(width) => setColumnWidth('lucro', width)}
+                          >
+                            Lucro líquido
+                          </ResizableTh>
                         ) : null}
                         {showTetoOrcamentarioColumn ? (
-                          <th className={amountPercentThClassName}>GASTO / TETO (%)</th>
+                          <ResizableTh
+                            className={amountPercentThClassName}
+                            width={columnWidths['gasto-teto']}
+                            minWidth={columnMinWidth('gasto-teto')}
+                            onWidthChange={(width) => setColumnWidth('gasto-teto', width)}
+                          >
+                            GASTO / TETO (%)
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountPercentThClassName}>GASTO / FAT (%)</th>
+                          <ResizableTh
+                            className={amountPercentThClassName}
+                            width={columnWidths['gasto-fat']}
+                            minWidth={columnMinWidth('gasto-fat')}
+                            onWidthChange={(width) => setColumnWidth('gasto-fat', width)}
+                          >
+                            GASTO / FAT (%)
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountPercentThClassName}>GASTO / REC (%)</th>
+                          <ResizableTh
+                            className={amountPercentThClassName}
+                            width={columnWidths['gasto-rec']}
+                            minWidth={columnMinWidth('gasto-rec')}
+                            onWidthChange={(width) => setColumnWidth('gasto-rec', width)}
+                          >
+                            GASTO / REC (%)
+                          </ResizableTh>
                         ) : null}
                         {showFaturamentoColumn ? (
-                          <th className={amountCurrencyThClassName}>SALDO TOTAL - CV</th>
+                          <ResizableTh
+                            className={amountCurrencyThClassName}
+                            width={columnWidths['saldo-cv']}
+                            minWidth={columnMinWidth('saldo-cv')}
+                            onWidthChange={(width) => setColumnWidth('saldo-cv', width)}
+                          >
+                            SALDO TOTAL - CV
+                          </ResizableTh>
                         ) : null}
                       </tr>
                     </thead>
@@ -2424,7 +2738,7 @@ export function ControleGeralGastosOperacionaisPanel({
                               }`}
                             >
                               {enableRowExclusion ? (
-                                <td className="px-3 py-3 text-center">
+                                <td className="px-2 py-2 text-center">
                                   <div
                                     onClick={(event) => event.stopPropagation()}
                                     onKeyDown={(event) => event.stopPropagation()}
@@ -2438,10 +2752,10 @@ export function ControleGeralGastosOperacionaisPanel({
                                 </td>
                               ) : null}
                               <td className={dataCenterCellClassName}>
-                                {buildMesesLabel(row)}
+                                {renderPendingValue(gastosValuesPending, buildMesesLabel(row))}
                               </td>
                               <td className={dataCenterCellClassName}>
-                                {buildAnoLabel(row)}
+                                {renderPendingValue(gastosValuesPending, buildAnoLabel(row))}
                               </td>
                               {!hideLocalityColumn ? (
                                 <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
@@ -2512,28 +2826,37 @@ export function ControleGeralGastosOperacionaisPanel({
                               </td>
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
-                                  {renderNfsAmountOrError(
-                                    row.faturamentoAcumulado,
-                                    row.nfsLoadError,
-                                    onRetry
+                                  {renderPendingValue(
+                                    nfsValuesPending,
+                                    renderNfsAmountOrError(
+                                      row.faturamentoAcumulado,
+                                      row.nfsLoadError,
+                                      onRetry
+                                    )
                                   )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-blue-600 dark:text-blue-400`}>
-                                  {renderNfsAmountOrError(
-                                    row.liquidoAcumulado,
-                                    row.nfsLoadError,
-                                    onRetry
+                                  {renderPendingValue(
+                                    nfsValuesPending,
+                                    renderNfsAmountOrError(
+                                      row.liquidoAcumulado,
+                                      row.nfsLoadError,
+                                      onRetry
+                                    )
                                   )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-sky-600 dark:text-sky-400`}>
-                                  {renderNfsAmountOrError(
-                                    row.recebidoAcumulado,
-                                    row.nfsLoadError,
-                                    onRetry
+                                  {renderPendingValue(
+                                    nfsValuesPending,
+                                    renderNfsAmountOrError(
+                                      row.recebidoAcumulado,
+                                      row.nfsLoadError,
+                                      onRetry
+                                    )
                                   )}
                                 </td>
                               ) : null}
@@ -2544,6 +2867,9 @@ export function ControleGeralGastosOperacionaisPanel({
                                     row.tetoOrcamentario ?? 0
                                   )}`}
                                 >
+                                  {tetoValuesPending ? (
+                                    <ValueLoadingMark />
+                                  ) : (
                                   <button
                                     type="button"
                                     title="Cadastrar / editar teto orçamentário"
@@ -2566,23 +2892,26 @@ export function ControleGeralGastosOperacionaisPanel({
                                       ? formatCurrency(row.tetoOrcamentario ?? 0)
                                       : '—'}
                                   </button>
+                                  )}
                                 </td>
                               ) : null}
                               <td
                                 className={`${amountCurrencyCellClassName} ${gastosNaturezaModalValueClassName(row.totalAcumulado)} ${
-                                  enableNaturezaBreakdown
+                                  enableNaturezaBreakdown && !gastosValuesPending
                                     ? 'cursor-pointer rounded-md hover:bg-blue-50/70 hover:underline dark:hover:bg-blue-950/30'
                                     : ''
                                 }`}
-                                role={enableNaturezaBreakdown ? 'button' : undefined}
-                                tabIndex={enableNaturezaBreakdown ? 0 : undefined}
+                                role={enableNaturezaBreakdown && !gastosValuesPending ? 'button' : undefined}
+                                tabIndex={enableNaturezaBreakdown && !gastosValuesPending ? 0 : undefined}
                                 title={
-                                  enableNaturezaBreakdown
+                                  gastosValuesPending
+                                    ? 'Carregando'
+                                    : enableNaturezaBreakdown
                                     ? 'Clique para ver naturezas e valores'
                                     : undefined
                                 }
                                 onClick={
-                                  enableNaturezaBreakdown
+                                  enableNaturezaBreakdown && !gastosValuesPending
                                     ? (event) => {
                                         event.stopPropagation();
                                         openNaturezaModal(row);
@@ -2590,7 +2919,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                     : undefined
                                 }
                                 onKeyDown={
-                                  enableNaturezaBreakdown
+                                  enableNaturezaBreakdown && !gastosValuesPending
                                     ? (event) => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                           event.preventDefault();
@@ -2601,7 +2930,10 @@ export function ControleGeralGastosOperacionaisPanel({
                                     : undefined
                                 }
                               >
-                                {formatCurrency(row.totalAcumulado)}
+                                {renderPendingValue(
+                                  gastosValuesPending,
+                                  formatCurrency(row.totalAcumulado)
+                                )}
                               </td>
                               {showTetoOrcamentarioColumn ? (
                                 <td
@@ -2610,7 +2942,10 @@ export function ControleGeralGastosOperacionaisPanel({
                                     row.totalAcumulado
                                   )}`}
                                 >
-                                  {formatTetoMinusGasto(row.tetoOrcamentario ?? 0, row.totalAcumulado)}
+                                  {renderPendingValue(
+                                    tetoValuesPending || gastosValuesPending,
+                                    formatTetoMinusGasto(row.tetoOrcamentario ?? 0, row.totalAcumulado)
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
@@ -2626,14 +2961,17 @@ export function ControleGeralGastosOperacionaisPanel({
                                         )
                                   }`}
                                 >
-                                  {row.nfsLoadError
-                                    ? renderNfsAmountOrError(undefined, row.nfsLoadError, onRetry)
-                                    : formatCurrency(
-                                        calcLucroLiquido(
-                                          row.recebidoAcumulado ?? 0,
-                                          row.totalAcumulado
+                                  {renderPendingValue(
+                                    nfsValuesPending || gastosValuesPending,
+                                    row.nfsLoadError
+                                      ? renderNfsAmountOrError(undefined, row.nfsLoadError, onRetry)
+                                      : formatCurrency(
+                                          calcLucroLiquido(
+                                            row.recebidoAcumulado ?? 0,
+                                            row.totalAcumulado
+                                          )
                                         )
-                                      )}
+                                  )}
                                 </td>
                               ) : null}
                               {showTetoOrcamentarioColumn ? (
@@ -2643,9 +2981,12 @@ export function ControleGeralGastosOperacionaisPanel({
                                     row.totalAcumulado
                                   )}`}
                                 >
-                                  {formatGastoSobreTetoPercent(
-                                    row.tetoOrcamentario ?? 0,
-                                    row.totalAcumulado
+                                  {renderPendingValue(
+                                    tetoValuesPending || gastosValuesPending,
+                                    formatGastoSobreTetoPercent(
+                                      row.tetoOrcamentario ?? 0,
+                                      row.totalAcumulado
+                                    )
                                   )}
                                 </td>
                               ) : null}
@@ -2660,12 +3001,15 @@ export function ControleGeralGastosOperacionaisPanel({
                                         )
                                   }`}
                                 >
-                                  {row.nfsLoadError
-                                    ? '—'
-                                    : formatGastoFaturamentoPercent(
-                                        row.totalAcumulado,
-                                        row.faturamentoAcumulado ?? 0
-                                      )}
+                                  {renderPendingValue(
+                                    nfsValuesPending || gastosValuesPending,
+                                    row.nfsLoadError
+                                      ? '—'
+                                      : formatGastoFaturamentoPercent(
+                                          row.totalAcumulado,
+                                          row.faturamentoAcumulado ?? 0
+                                        )
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
@@ -2679,12 +3023,15 @@ export function ControleGeralGastosOperacionaisPanel({
                                         )
                                   }`}
                                 >
-                                  {row.nfsLoadError
-                                    ? '—'
-                                    : formatGastoRecebidoPercent(
-                                        row.totalAcumulado,
-                                        row.recebidoAcumulado ?? 0
-                                      )}
+                                  {renderPendingValue(
+                                    nfsValuesPending || gastosValuesPending,
+                                    row.nfsLoadError
+                                      ? '—'
+                                      : formatGastoRecebidoPercent(
+                                          row.totalAcumulado,
+                                          row.recebidoAcumulado ?? 0
+                                        )
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
@@ -2694,9 +3041,12 @@ export function ControleGeralGastosOperacionaisPanel({
                                   onKeyDown={(event) => event.stopPropagation()}
                                   title="Soma da coluna Conta Vinculada na planilha de NF's"
                                 >
-                                  {row.contaVinculadaAcumulado == null
-                                    ? '—'
-                                    : formatCurrency(row.contaVinculadaAcumulado)}
+                                  {renderPendingValue(
+                                    nfsValuesPending,
+                                    row.contaVinculadaAcumulado == null
+                                      ? '—'
+                                      : formatCurrency(row.contaVinculadaAcumulado)
+                                  )}
                                 </td>
                               ) : null}
                             </tr>
@@ -2708,6 +3058,9 @@ export function ControleGeralGastosOperacionaisPanel({
                             showNfsMetrics={showFaturamentoColumn}
                             showTetoOrcamentario={showTetoOrcamentarioColumn}
                             tableLabelColSpan={tableLabelColSpan}
+                            nfsValuesPending={nfsValuesPending}
+                            tetoValuesPending={tetoValuesPending}
+                            gastosValuesPending={gastosValuesPending}
                           />
                         </React.Fragment>
                         );
@@ -2724,6 +3077,9 @@ export function ControleGeralGastosOperacionaisPanel({
                           showNfsMetrics={showFaturamentoColumn}
                           showTetoOrcamentario={showTetoOrcamentarioColumn}
                           tableLabelColSpan={tableLabelColSpan}
+                          nfsValuesPending={nfsValuesPending}
+                          tetoValuesPending={tetoValuesPending}
+                          gastosValuesPending={gastosValuesPending}
                           variant="grand"
                         />
                       ) : null}
@@ -2744,11 +3100,11 @@ export function ControleGeralGastosOperacionaisPanel({
       >
         <div className="space-y-4">
           {gastosFiltersFields}
-          <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button
               type="button"
               onClick={clearFilters}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               <RotateCcw className="h-4 w-4" />
               Limpar filtros
@@ -2756,9 +3112,9 @@ export function ControleGeralGastosOperacionaisPanel({
             <button
               type="button"
               onClick={() => setIsFiltersModalOpen(false)}
-              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+              className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
             >
-              Fechar
+              Concluir
             </button>
           </div>
         </div>
@@ -3102,7 +3458,7 @@ export function ControleGeralGastosOperacionaisPanel({
 
     {showPrevisaoGastosMensal ? (
       <ControleGeralPrevisaoGastosMensalPanel
-        isLoading={isPanelLoading}
+        isLoading={isPanelLoading || gastosValuesPending}
         isError={isError}
         errorMessage={errorMessage}
         onRetry={onRetry}

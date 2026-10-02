@@ -29,6 +29,8 @@ export type TotvsOcMovimentoPayload = {
   codLoc?: string | null;
   condicaoPagamento: string;
   tipoFrete: string;
+  /** Valor do frete (TMOV.VALORFRETE) — Fluig G3. */
+  valorFrete?: number | null;
   dataEmissao: Date;
   dataEntrega?: Date | null;
   observacao?: string | null;
@@ -41,6 +43,11 @@ export type TotvsOcSaveResult = {
   codColigada: number;
   numMovimento?: string | null;
   raw: unknown;
+};
+
+export type TotvsRmAuthOverride = {
+  user: string;
+  pass: string;
 };
 
 function pad2(n: number): string {
@@ -301,8 +308,7 @@ function formatSaveRecordBusinessError(result: string): string {
   if (/requisitante não foi encontrado|Erro ao criar uma instância no Servidor do Fluig/i.test(text)) {
     return (
       'O TOTVS aceitou incluir a OC nova, mas o Fluig não abriu o G3: o requisitante não foi encontrado ou está inativo. ' +
-      'Nenhuma OC existente foi alterada. O usuário da API no RM está mapeado no Fluig como admin. ' +
-      'Ative esse usuário no Fluig ou ajuste o mapeamento RM↔Fluig do requisitante.'
+      'Nenhuma OC existente foi alterada. Verifique o vínculo do seu usuário TOTVS no Fluig (usuário ativo).'
     );
   }
   if (/^erro\b/i.test(text)) return text.slice(0, 800);
@@ -310,15 +316,22 @@ function formatSaveRecordBusinessError(result: string): string {
 }
 
 export class TotvsRmMovimentoService {
-  isConfigured(): boolean {
+  private authOverride: TotvsRmAuthOverride | null = null;
+
+  isConfigured(override?: TotvsRmAuthOverride | null): boolean {
     const base = (process.env.TOTVS_RM_BASE_URL || '').trim();
+    if (!base) return false;
     const bearer = (process.env.TOTVS_RM_BEARER_TOKEN || '').trim();
-    const user = (process.env.TOTVS_RM_USER || process.env.TOTVS_RM_USERNAME || '').trim();
-    const pass = (process.env.TOTVS_RM_PASSWORD || '').trim();
-    return !!base && (!!bearer || (!!user && !!pass));
+    if (bearer) return true;
+    const user = (override?.user || process.env.TOTVS_RM_USER || process.env.TOTVS_RM_USERNAME || '').trim();
+    const pass = (override?.pass || process.env.TOTVS_RM_PASSWORD || '').trim();
+    return !!user && !!pass;
   }
 
   private credentials() {
+    if (this.authOverride?.user && this.authOverride.pass) {
+      return { user: this.authOverride.user.trim(), pass: this.authOverride.pass };
+    }
     return {
       user: (process.env.TOTVS_RM_USER || process.env.TOTVS_RM_USERNAME || '').trim(),
       pass: (process.env.TOTVS_RM_PASSWORD || '').trim(),
@@ -326,6 +339,10 @@ export class TotvsRmMovimentoService {
   }
 
   private authHeaders(): Record<string, string> {
+    if (this.authOverride?.user && this.authOverride.pass) {
+      const { user, pass } = this.credentials();
+      return { Authorization: `Basic ${Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')}` };
+    }
     const bearer = (process.env.TOTVS_RM_BEARER_TOKEN || '').trim();
     if (bearer) return { Authorization: `Bearer ${bearer}` };
     const { user, pass } = this.credentials();
@@ -534,6 +551,7 @@ export class TotvsRmMovimentoService {
     const coligada = totvsCodColigada();
     const filial = Number(input.filial) === 5 ? 5 : Number(TOTVS_OC_FILIAL) || 1;
     const localEstoque = (input.codLoc || this.defaultCodLoc()).trim();
+    const valorFrete = Number(input.valorFrete);
     const header: Record<string, unknown> = {
       CODCOLIGADA: coligada,
       IDMOV: -1,
@@ -546,6 +564,7 @@ export class TotvsRmMovimentoService {
       CODCCUSTO: input.centroCusto,
       CODCPG: input.condicaoPagamento,
       TIPOFRETE: input.tipoFrete || 'S',
+      VALORFRETE: Number.isFinite(valorFrete) && valorFrete > 0 ? valorFrete : 0,
       DATAEMISSAO: `${isoDate(input.dataEmissao)}T00:00:00`,
       TITMMOV: input.items.map((item) => {
         const unidade = toTotvsUnit(item.unidade);
@@ -574,6 +593,8 @@ export class TotvsRmMovimentoService {
     const coligada = totvsCodColigada();
     const localEstoque = (input.codLoc || this.defaultCodLoc()).trim();
     const filial = Number(input.filial) === 5 ? 5 : Number(TOTVS_OC_FILIAL) || 1;
+    const valorFreteRaw = Number(input.valorFrete);
+    const valorFrete = Number.isFinite(valorFreteRaw) && valorFreteRaw > 0 ? valorFreteRaw : 0;
     const tmov = [
       ['CODCOLIGADA', coligada],
       ['IDMOV', -1],
@@ -587,6 +608,7 @@ export class TotvsRmMovimentoService {
       localEstoque ? ['CODLOC', localEstoque] : null,
       ['CODCPG', input.condicaoPagamento],
       ['TIPOFRETE', input.tipoFrete || 'S'],
+      ['VALORFRETE', valorFrete],
       ['DATAEMISSAO', `${isoDate(input.dataEmissao)}T00:00:00`],
       input.observacao ? ['OBSERVACAO', input.observacao] : null,
       input.bancoAgPix ? ['CAMPOLIVRE1', input.bancoAgPix] : null,
@@ -782,57 +804,77 @@ export class TotvsRmMovimentoService {
     throw lastErr || new Error('TOTVS RM REST não criou o movimento 1.1.26');
   }
 
-  async saveOc1126(input: TotvsOcMovimentoPayload): Promise<TotvsOcSaveResult> {
-    if (!this.isConfigured()) {
+  async saveOc1126(
+    input: TotvsOcMovimentoPayload,
+    auth?: TotvsRmAuthOverride | null
+  ): Promise<TotvsOcSaveResult> {
+    // Inclusão de OC exige login/senha do usuário autenticado no Conecta.
+    // Nunca usa TOTVS_RM_USER / BEARER do servidor (evita subir OC com conta compartilhada).
+    const personalUser = String(auth?.user || '').trim();
+    const personalPass = auth?.pass != null ? String(auth.pass) : '';
+    if (!personalUser || !personalPass.trim()) {
       throw new Error(
-        'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN.'
+        'Vincule seu usuário TOTVS em Ordens de Compra (botão Vincular usuário Totvs) para enviar a OC via API.'
       );
     }
-    if (!input.items.length) {
-      throw new Error('A OC precisa de ao menos um item para enviar ao TOTVS');
+    if (!(process.env.TOTVS_RM_BASE_URL || '').trim()) {
+      throw new Error(
+        'Integração TOTVS RM sem URL. Defina TOTVS_RM_BASE_URL no servidor.'
+      );
     }
 
-    const fornecedorColigada = input.fornecedorColigada ?? (await this.resolveFornecedorColigada(input.fornecedorCodigo));
-    const filial = Number(input.filial) === 5 ? 5 : 1;
-    const items: TotvsOcMovimentoItem[] = [];
-    for (const item of input.items) {
-      const lookupKey =
-        item.produtoId && item.produtoId > 0 ? String(item.produtoId) : item.produtoCodigo;
-      const prd = await this.resolveProduto(lookupKey);
-      const idPrd = (item.produtoId && item.produtoId > 0 ? item.produtoId : prd.idPrd) || null;
-      if (!idPrd) {
-        throw new Error(
-          `Produto ${item.produtoCodigo} não foi encontrado no cadastro do TOTVS (IDPRD). Cadastre o identificador no Conecta.`
-        );
-      }
-      items.push({
-        ...item,
-        produtoCodigo: prd.codigo || item.produtoCodigo,
-        produtoId: idPrd,
-        unidade: toTotvsUnit(prd.unidade || item.unidade),
-      });
-    }
-    const codLoc = (input.codLoc || (await this.resolveCodLoc(filial, input.centroCustoNome)) || '').trim();
-    const resolved: TotvsOcMovimentoPayload = { ...input, fornecedorColigada, filial, items, codLoc };
-
-    console.warn(
-      `[TOTVS OC] inclusão 1.1.26 coligada=1 filial=${resolved.filial} loc=${resolved.codLoc || '-'} CODCFO=${resolved.fornecedorCodigo} COLCFO=${resolved.fornecedorColigada} CC=${resolved.centroCusto} CPG=${resolved.condicaoPagamento} itens=${resolved.items
-        .map((item) => `${item.produtoCodigo}:${item.produtoId || '-'}:${item.unidade || '-'}`)
-        .join(',')}`
-    );
-
-    const sentHint = `Enviado: coligada 1, filial ${resolved.filial}, local ${resolved.codLoc || '-'}, fornecedor ${resolved.fornecedorCodigo} (col. ${resolved.fornecedorColigada ?? 0}), CC ${resolved.centroCusto}, CPG ${resolved.condicaoPagamento}, itens ${resolved.items
-      .map((item) => `${item.produtoCodigo} (IDPRD ${item.produtoId})/${item.unidade || '-'}`)
-      .join(', ')}.`;
-
+    const prevAuth = this.authOverride;
+    this.authOverride = { user: personalUser, pass: personalPass };
     try {
-      return await this.saveViaSoap(resolved);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/não casou com a chave|não batem com o cadastro|Fluig/i.test(msg)) {
-        throw new Error(`${msg} ${sentHint}`);
+      if (!input.items.length) {
+        throw new Error('A OC precisa de ao menos um item para enviar ao TOTVS');
       }
-      throw err instanceof Error ? err : new Error(msg);
+
+      const fornecedorColigada =
+        input.fornecedorColigada ?? (await this.resolveFornecedorColigada(input.fornecedorCodigo));
+      const filial = Number(input.filial) === 5 ? 5 : 1;
+      const items: TotvsOcMovimentoItem[] = [];
+      for (const item of input.items) {
+        const lookupKey =
+          item.produtoId && item.produtoId > 0 ? String(item.produtoId) : item.produtoCodigo;
+        const prd = await this.resolveProduto(lookupKey);
+        const idPrd = (item.produtoId && item.produtoId > 0 ? item.produtoId : prd.idPrd) || null;
+        if (!idPrd) {
+          throw new Error(
+            `Produto ${item.produtoCodigo} não foi encontrado no cadastro do TOTVS (IDPRD). Cadastre o identificador no Conecta.`
+          );
+        }
+        items.push({
+          ...item,
+          produtoCodigo: prd.codigo || item.produtoCodigo,
+          produtoId: idPrd,
+          unidade: toTotvsUnit(prd.unidade || item.unidade),
+        });
+      }
+      const codLoc = (input.codLoc || (await this.resolveCodLoc(filial, input.centroCustoNome)) || '').trim();
+      const resolved: TotvsOcMovimentoPayload = { ...input, fornecedorColigada, filial, items, codLoc };
+
+      console.warn(
+        `[TOTVS OC] inclusão 1.1.26 user=${this.credentials().user} coligada=1 filial=${resolved.filial} loc=${resolved.codLoc || '-'} CODCFO=${resolved.fornecedorCodigo} COLCFO=${resolved.fornecedorColigada} CC=${resolved.centroCusto} CPG=${resolved.condicaoPagamento} itens=${resolved.items
+          .map((item) => `${item.produtoCodigo}:${item.produtoId || '-'}:${item.unidade || '-'}`)
+          .join(',')}`
+      );
+
+      const sentHint = `Enviado: coligada 1, filial ${resolved.filial}, local ${resolved.codLoc || '-'}, fornecedor ${resolved.fornecedorCodigo} (col. ${resolved.fornecedorColigada ?? 0}), CC ${resolved.centroCusto}, CPG ${resolved.condicaoPagamento}, itens ${resolved.items
+        .map((item) => `${item.produtoCodigo} (IDPRD ${item.produtoId})/${item.unidade || '-'}`)
+        .join(', ')}.`;
+
+      try {
+        return await this.saveViaSoap(resolved);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/não casou com a chave|não batem com o cadastro|Fluig/i.test(msg)) {
+          throw new Error(`${msg} ${sentHint}`);
+        }
+        throw err instanceof Error ? err : new Error(msg);
+      }
+    } finally {
+      this.authOverride = prevAuth;
     }
   }
 }

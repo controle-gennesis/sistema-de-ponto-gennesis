@@ -126,15 +126,17 @@ export function ExtratoFiltrosModal({
         type="button"
         className="absolute inset-0 cursor-default bg-black/50"
         aria-label="Fechar filtros"
-        onClick={onClose}
+        onPointerDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       />
 
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="extrato-filtros-title"
-        className="relative z-10 flex w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800"
-        style={{ maxHeight: 'calc(100vh - 2rem)' }}
+        className="relative z-10 flex w-full max-w-4xl flex-col overflow-clip rounded-lg bg-white shadow-xl dark:bg-gray-800"
+        style={{ maxHeight: 'calc(100vh - 2rem)', overflowAnchor: 'none' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700">
@@ -154,7 +156,7 @@ export function ExtratoFiltrosModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 [overflow-anchor:none]">
           <div className="space-y-4">
             <ExtratoFiltrosSalvosPanel
               filterDraft={draft}

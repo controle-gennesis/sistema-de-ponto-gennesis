@@ -1549,12 +1549,36 @@ function OcOrderMaterialsTable({
               colSpan={showActions ? 6 : 5}
               className="pt-3.5 pr-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400"
             >
-              Total
+              Itens
             </td>
-            <td className="pt-3.5 pl-2 text-right font-semibold tabular-nums text-red-700 dark:text-red-300 whitespace-nowrap">
+            <td className="pt-3.5 pl-2 text-right font-medium tabular-nums text-gray-900 dark:text-gray-100 whitespace-nowrap">
               {formatCurrency(totalOrder(order.items))}
             </td>
             {showActions ? <td className="w-[1%] pt-3.5 pl-2 pr-0" /> : null}
+          </tr>
+          <tr>
+            <td
+              colSpan={showActions ? 6 : 5}
+              className="pt-1.5 pr-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400"
+            >
+              Frete
+            </td>
+            <td className="pt-1.5 pl-2 text-right font-medium tabular-nums text-gray-900 dark:text-gray-100 whitespace-nowrap">
+              {formatCurrency(orderFreightValue(order))}
+            </td>
+            {showActions ? <td className="w-[1%] pt-1.5 pl-2 pr-0" /> : null}
+          </tr>
+          <tr>
+            <td
+              colSpan={showActions ? 6 : 5}
+              className="pt-2 pr-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400"
+            >
+              Total
+            </td>
+            <td className="pt-2 pl-2 text-right font-semibold tabular-nums text-red-700 dark:text-red-300 whitespace-nowrap">
+              {formatCurrency(orderGrandTotal(order))}
+            </td>
+            {showActions ? <td className="w-[1%] pt-2 pl-2 pr-0" /> : null}
           </tr>
         </tfoot>
       </table>
