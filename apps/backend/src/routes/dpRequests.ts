@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireAdministrator } from '../middleware/auth';
 import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DpRequestController } from '../controllers/DpRequestController';
@@ -29,6 +29,12 @@ router.put('/:id/requester-return', requireModuleAccess(myModule), controller.re
 router.get('/aprovacoes', requireDpApproverAccess, controller.getWaitingManagerApprovals.bind(controller));
 router.put('/:id/manager-approve', requireDpApproverAccess, controller.approveManager.bind(controller));
 router.put('/:id/manager-reject', requireDpApproverAccess, controller.rejectManager.bind(controller));
+/** Admin: cancelar solicitação mesmo após aprovação do gestor. */
+router.put(
+  '/:id/admin-cancel',
+  requireAdministrator,
+  controller.adminCancel.bind(controller)
+);
 
 // Fila DP (feedback/conclusão) — somente tipos do Departamento Pessoal
 router.get('/gerenciar', requireModuleAccess(manageModule), controller.getForApproval.bind(controller));

@@ -1,15 +1,31 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, Minus, Paperclip, Plus, Search, Trash2, Wallet, X } from 'lucide-react';
+import {
+  Building2,
+  Filter,
+  HardHat,
+  Loader2,
+  Minus,
+  Paperclip,
+  Plus,
+  Receipt,
+  Search,
+  Store,
+  Trash2,
+  Wallet,
+  X,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -40,6 +56,7 @@ import {
   parseCurrencyToNumber
 } from '@/lib/fichaDemandaApproval';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 
 type CaixinhaPurchase = {
   id: string;
@@ -219,20 +236,28 @@ function CurrencyStepperInput({
 export default function CaixinhaPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const contratoFiltro = (searchParams?.get('contrato') || '').trim();
+  const contratoFiltroUrl = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [search, setSearch] = useState('');
+  const [filterContractId, setFilterContractId] = useState(contratoFiltroUrl);
+  const [filterObraId, setFilterObraId] = useState('');
+  const [purchaseDateFrom, setPurchaseDateFrom] = useState('');
+  const [purchaseDateTo, setPurchaseDateTo] = useState('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CaixinhaPurchase | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm({}));
   const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [invoiceDragOver, setInvoiceDragOver] = useState(false);
   const [showCreateObra, setShowCreateObra] = useState(false);
   const [novaObraNome, setNovaObraNome] = useState('');
   const [showCreateCaixinha, setShowCreateCaixinha] = useState(false);
   const [novaCaixinhaNome, setNovaCaixinhaNome] = useState('');
   const [extraCaixinhas, setExtraCaixinhas] = useState<string[]>([]);
+
+  const hasActiveFilter = Boolean(
+    filterContractId || filterObraId || purchaseDateFrom || purchaseDateTo
+  );
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -251,12 +276,22 @@ export default function CaixinhaPageClient() {
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE', id: '' };
 
   const { data: rows = [], isLoading: loadingRows } = useQuery({
-    queryKey: ['caixinha-purchases', search, contratoFiltro],
+    queryKey: [
+      'caixinha-purchases',
+      search,
+      filterContractId,
+      filterObraId,
+      purchaseDateFrom,
+      purchaseDateTo,
+    ],
     queryFn: async () => {
       const res = await api.get<{ success: boolean; data: CaixinhaPurchase[] }>('/caixinha', {
         params: {
           search: search || undefined,
-          contractId: contratoFiltro || undefined
+          contractId: filterContractId || undefined,
+          obraId: filterObraId || undefined,
+          purchaseDateFrom: purchaseDateFrom || undefined,
+          purchaseDateTo: purchaseDateTo || undefined,
         }
       });
       return res.data?.data ?? [];
@@ -265,7 +300,6 @@ export default function CaixinhaPageClient() {
 
   const { data: options } = useQuery({
     queryKey: ['caixinha-options'],
-    enabled: formOpen,
     queryFn: async () => {
       const res = await api.get<{ success: boolean; data: CaixinhaOptions }>('/caixinha/options');
       return res.data?.data;
@@ -278,6 +312,17 @@ export default function CaixinhaPageClient() {
     queryFn: async () => {
       const res = await api.get('/obras', {
         params: { isActive: 'true', contratoId: form.contractId, limit: 500, page: 1 }
+      });
+      return ((res.data?.data || []) as ObraOption[]).filter((o) => o.id && o.name?.trim());
+    }
+  });
+
+  const { data: filterObras = [], isLoading: loadingFilterObras } = useQuery({
+    queryKey: ['caixinha-obras', 'filter', filterContractId],
+    enabled: Boolean(filterContractId),
+    queryFn: async () => {
+      const res = await api.get('/obras', {
+        params: { isActive: 'true', contratoId: filterContractId, limit: 500, page: 1 }
       });
       return ((res.data?.data || []) as ObraOption[]).filter((o) => o.id && o.name?.trim());
     }
@@ -311,6 +356,26 @@ export default function CaixinhaPageClient() {
     () => labeledToSelectOptions(obras.map((o) => ({ value: o.id, label: o.name }))),
     [obras]
   );
+
+  const filterObraOptions = useMemo(
+    () => labeledToSelectOptions(filterObras.map((o) => ({ value: o.id, label: o.name }))),
+    [filterObras]
+  );
+
+  const listStats = useMemo(() => {
+    const count = rows.length;
+    const totalAmount = rows.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
+    const avgAmount = count > 0 ? totalAmount / count : 0;
+    const suppliers = new Set(
+      rows.map((row) => String(row.storeName || '').trim()).filter(Boolean)
+    );
+    return {
+      count,
+      totalAmount,
+      avgAmount,
+      supplierCount: suppliers.size,
+    };
+  }, [rows]);
 
   const caixinhaOptions = useMemo(() => {
     const set = new Set<string>();
@@ -466,6 +531,7 @@ export default function CaixinhaPageClient() {
 
   const uploadPdf = async (file: File) => {
     setUploadingPdf(true);
+    setInvoiceDragOver(false);
     try {
       const data = new FormData();
       data.append('file', file);
@@ -484,8 +550,16 @@ export default function CaixinhaPageClient() {
       toast.error(ax?.response?.data?.message || ax?.response?.data?.error || 'Falha no upload');
     } finally {
       setUploadingPdf(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleInvoiceFileDrop = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setInvoiceDragOver(false);
+    if (uploadingPdf) return;
+    const file = event.dataTransfer.files?.[0];
+    if (file) void uploadPdf(file);
   };
 
   const canSave = Boolean(form.personUserId || form.personName.trim()) && Boolean(form.caixinha.trim());
@@ -505,6 +579,41 @@ export default function CaixinhaPageClient() {
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
               Registre e acompanhe os lançamentos da caixinha.
             </p>
+          </div>
+
+          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <FilterStatCard
+              label="Lançamentos"
+              count={listStats.count}
+              icon={Receipt}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              loading={loadingRows}
+            />
+            <FilterStatCard
+              label="Valor total"
+              count={formatBRL(listStats.totalAmount)}
+              icon={Wallet}
+              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+              iconColor="text-emerald-600 dark:text-emerald-400"
+              loading={loadingRows}
+            />
+            <FilterStatCard
+              label="Ticket médio"
+              count={formatBRL(listStats.avgAmount)}
+              icon={Building2}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+              loading={loadingRows}
+            />
+            <FilterStatCard
+              label="Fornecedores"
+              count={listStats.supplierCount}
+              icon={Store}
+              iconBg="bg-violet-100 dark:bg-violet-900/30"
+              iconColor="text-violet-600 dark:text-violet-400"
+              loading={loadingRows}
+            />
           </div>
 
           <Card className={cadastroListClasses.card}>
@@ -546,6 +655,22 @@ export default function CaixinhaPageClient() {
                   </div>
                   <button
                     type="button"
+                    onClick={() => setIsFiltersOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveFilter
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtros"
+                    title={hasActiveFilter ? 'Filtro ativo' : 'Filtros'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
                     onClick={openCreate}
                     className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
@@ -563,8 +688,8 @@ export default function CaixinhaPageClient() {
                   icon={Wallet}
                   title="Nenhum lançamento"
                   hint={
-                    search.trim()
-                      ? 'Tente ajustar a busca'
+                    search.trim() || hasActiveFilter
+                      ? 'Tente ajustar a busca ou os filtros'
                       : 'Clique em Novo Lançamento para abrir uma solicitação'
                   }
                 />
@@ -805,27 +930,27 @@ export default function CaixinhaPageClient() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   Anexos
                 </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  disabled={uploadingPdf}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void uploadPdf(file);
-                    e.target.value = '';
-                  }}
-                />
-                {uploadingPdf ? (
-                  <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Enviando anexo...
-                  </p>
-                ) : null}
                 <div>
                   <label className={GESTAO_OS_FORM_LABEL_CLS}>Nota fiscal</label>
                   {form.invoicePdfUrl ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40">
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!uploadingPdf) setInvoiceDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setInvoiceDragOver(false);
+                      }}
+                      onDrop={handleInvoiceFileDrop}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                        invoiceDragOver
+                          ? 'border-red-400 bg-red-50 dark:border-red-700 dark:bg-red-950/30'
+                          : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                      }`}
+                    >
                       <a
                         href={resolveApiMediaUrl(form.invoicePdfUrl)}
                         target="_blank"
@@ -836,14 +961,24 @@ export default function CaixinhaPageClient() {
                         {form.invoicePdfName || 'nota-fiscal'}
                       </a>
                       <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={uploadingPdf}
-                          onClick={() => fileInputRef.current?.click()}
-                          className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                        <label
+                          className={`rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
+                            uploadingPdf ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                          }`}
                         >
                           Trocar
-                        </button>
+                          <input
+                            type="file"
+                            accept="image/*,.pdf,application/pdf"
+                            className="hidden"
+                            disabled={uploadingPdf}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void uploadPdf(file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                         <button
                           type="button"
                           disabled={uploadingPdf}
@@ -856,15 +991,15 @@ export default function CaixinhaPageClient() {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      disabled={uploadingPdf}
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
-                    >
-                      <Plus className="h-4 w-4 shrink-0" />
-                      Adicionar nota fiscal
-                    </button>
+                    <FileDropZone
+                      label="Adicionar nota fiscal"
+                      hint="Clique ou arraste imagem/PDF"
+                      uploading={uploadingPdf}
+                      onFiles={(files) => {
+                        const file = files[0];
+                        if (file) void uploadPdf(file);
+                      }}
+                    />
                   )}
                 </div>
               </div>
@@ -987,6 +1122,106 @@ export default function CaixinhaPageClient() {
               Criar caixinha
             </button>
           </GestaoOsModalFooter>
+        </Modal>
+
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Caixinha"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Contrato
+              </label>
+              <StringSingleSelectDropdown
+                value={filterContractId}
+                onChange={(value) => {
+                  setFilterContractId(value);
+                  setFilterObraId('');
+                }}
+                options={contractOptions}
+                allowEmpty
+                emptyOptionLabel="Todos os contratos"
+                placeholder="Todos os contratos"
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 flex items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <HardHat className="h-3.5 w-3.5" />
+                Obra
+              </label>
+              <StringSingleSelectDropdown
+                value={filterObraId}
+                onChange={setFilterObraId}
+                options={filterObraOptions}
+                allowEmpty
+                emptyOptionLabel="Todas as obras"
+                placeholder={
+                  filterContractId
+                    ? loadingFilterObras
+                      ? 'Carregando obras…'
+                      : 'Todas as obras'
+                    : 'Selecione um contrato'
+                }
+                disabled={!filterContractId || loadingFilterObras}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                Período de compra
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    De
+                  </label>
+                  <DatePickerField
+                    value={purchaseDateFrom}
+                    onChange={setPurchaseDateFrom}
+                    noFocusRing
+                    aria-label="Data de compra de"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Até
+                  </label>
+                  <DatePickerField
+                    value={purchaseDateTo}
+                    onChange={setPurchaseDateTo}
+                    noFocusRing
+                    aria-label="Data de compra até"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              {hasActiveFilter ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setFilterContractId('');
+                    setFilterObraId('');
+                    setPurchaseDateFrom('');
+                    setPurchaseDateTo('');
+                  }}
+                >
+                  Limpar
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" onClick={() => setIsFiltersOpen(false)}>
+                Fechar
+              </Button>
+            </div>
+          </div>
         </Modal>
       </MainLayout>
     </ProtectedRoute>

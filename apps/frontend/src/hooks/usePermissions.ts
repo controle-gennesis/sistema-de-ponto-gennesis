@@ -204,10 +204,12 @@ export function usePermissions() {
     return items.filter((item) => fluigApproverNameKeySet.has(item.nameKey));
   };
 
+  /** Legado: quem tinha só a coluna Orçamento na aba Contratos (antes do módulo na matriz Acesso). */
   const hasOrcamentoViaAnyAllowedContract = Object.entries(contractModuleFlags).some(
     ([contractId, f]) =>
       f?.orcamento === true && allowedContractIdSet.has(contractId)
   );
+  const orcamentoModuleKey = pk('/ponto/orcamento');
   const hasOrdemServicoViaAnyAllowedContract = Object.values(contractModuleFlags).some(
     (f) => f?.ordemServico === true
   );
@@ -471,8 +473,12 @@ export function usePermissions() {
     can(pk('/ponto/controle/ver-valores-kanban'));
 
 
-  /** Lista de orçamentos: flag «Orçamento» em pelo menos um contrato (não exige Liberado nem módulo Contratos). */
-  const canAccessOrcamentoRoutePage = isElevatedUser || hasOrcamentoViaAnyAllowedContract;
+  /** Página Orçamentos: Ver na matriz Acesso (como Caixinha/FD); legado pela coluna antiga. */
+  const canAccessOrcamentoRoutePage =
+    isElevatedUser ||
+    can(orcamentoModuleKey) ||
+    canAccessModule(orcamentoModuleKey) ||
+    hasOrcamentoViaAnyAllowedContract;
 
   /**
    * Tela global «Ordem de Serviço»:
@@ -531,11 +537,8 @@ export function usePermissions() {
   const canAccessContractOrcamentoTab = (contractId: string) => {
     if (hideContractOrcamento) return false;
     if (isElevatedUser) return true;
-    // Orçamento operacional: Liberado + flag Orçamento (sem precisar abrir a ficha).
-    return (
-      allowedContractIdSet.has(contractId) &&
-      contractModuleFlags[contractId]?.orcamento === true
-    );
+    // Como Caixinha/FD: contratos visíveis = Liberado na aba Contratos.
+    return allowedContractIdSet.has(contractId);
   };
 
   const canAccessContractRelatoriosTab = (contractId: string) => {

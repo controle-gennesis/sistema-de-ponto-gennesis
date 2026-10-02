@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Paperclip, Plus } from 'lucide-react';
+import { Paperclip } from 'lucide-react';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
@@ -110,7 +111,6 @@ export function FichaDemandaDetailModal({
   footer,
 }: Props) {
   const queryClient = useQueryClient();
-  const ocInputRef = useRef<HTMLInputElement>(null);
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
 
   const anexos = useMemo(() => {
@@ -291,33 +291,16 @@ export function FichaDemandaDetailModal({
                 </div>
               )}
               {allowAddOrdemCompra ? (
-                <>
-                  <input
-                    ref={ocInputRef}
-                    type="file"
-                    className="hidden"
-                    disabled={uploadMutation.isPending}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = '';
-                      if (!file) return;
-                      uploadMutation.mutate({ file, kind: 'oc' });
-                    }}
-                  />
-                  <button
-                    type="button"
-                    disabled={uploadMutation.isPending}
-                    onClick={() => ocInputRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
-                  >
-                    {uploadingAnexoId === 'oc' ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Plus className="h-4 w-4 shrink-0" />
-                    )}
-                    {uploadingAnexoId === 'oc' ? 'Enviando ordem de compra...' : 'Adicionar ordem de compra'}
-                  </button>
-                </>
+                <FileDropZone
+                  label="Adicionar ordem de compra"
+                  hint="Clique ou arraste imagem/PDF"
+                  uploading={uploadingAnexoId === 'oc'}
+                  disabled={uploadMutation.isPending && uploadingAnexoId !== 'oc'}
+                  onFiles={(files) => {
+                    const file = files[0];
+                    if (file) uploadMutation.mutate({ file, kind: 'oc' });
+                  }}
+                />
               ) : null}
             </div>
           </div>

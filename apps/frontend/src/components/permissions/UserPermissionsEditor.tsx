@@ -45,7 +45,7 @@ import { isDfAdmLocalLabel } from '@/lib/dfAdmLocal';
 import { DEPARTMENTS_LIST } from '@/constants/payrollFilters';
 import api from '@/lib/api';
 
-/** Orçamento e relatórios fotográficos: só pela aba «Contratos», não pela matriz «Acesso». */
+/** Relatórios fotográficos e legado: só pela aba «Contratos», não pela matriz «Acesso». */
 const HIDDEN_FROM_ACCESS_MATRIX = new Set<string>([
   ...PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
   ...PERMISSION_MODULE_KEYS_OPEN_ACCESS,
@@ -53,6 +53,8 @@ const HIDDEN_FROM_ACCESS_MATRIX = new Set<string>([
   // não é controlada pela matriz de permissões.
   pathToModuleKey('/ponto'),
 ]);
+
+const ORCAMENTO_MODULE_KEY = pathToModuleKey('/ponto/orcamento');
 
 type PermissionItem = { module: string; action: string };
 
@@ -71,6 +73,15 @@ const emptyContractModuleFlags = (): ContractModuleFlags => ({
   producaoSemanal: false,
   reunioes: false,
 });
+
+/** Quem tinha a coluna Orçamento antiga passa a ter Ver em Orçamentos na matriz Acesso. */
+function migrateOrcamentoFlagToAccessModule(
+  selected: Set<string>,
+  flags: Record<string, ContractModuleFlags>
+) {
+  const hadFlag = Object.values(flags).some((f) => f?.orcamento === true);
+  if (hadFlag) selected.add(ORCAMENTO_MODULE_KEY);
+}
 
 type UserPermissionPayload = {
   user: {
@@ -405,6 +416,7 @@ function inferCategoryFromHref(href: string): string {
   if (
     [
       '/ponto/orcamento',
+      '/ponto/orcamentos',
       '/ponto/contratos',
       '/ponto/empreiteiros',
       '/ponto/contratos/relatorios',
@@ -913,10 +925,11 @@ export function UserPermissionsEditor({
     const nextViewCc = new Set(userPermissionData.dpRequestViewCostCenterIds ?? []);
     const rawFlags = userPermissionData.contractModuleFlags ?? {};
     const nextFlags: Record<string, ContractModuleFlags> = {};
-    // Liberados + contratos só com flag (ex.: Orçamento sem Liberado).
+    // Liberados + contratos só com flag (ex.: Relatórios sem Liberado em dados legados).
     for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(rawFlags)])) {
       nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
+    migrateOrcamentoFlagToAccessModule(next, nextFlags);
     const nextCadastroCrud = parseCadastroCrudFromPerms(perms);
     const nextSectors = pruneDpApprovalSectors(
       userPermissionData.dpApprovalContractSectors ?? {},
@@ -1530,7 +1543,7 @@ export function UserPermissionsEditor({
           delete next[contractId];
           return next;
         });
-        // Desmarcar Liberado não apaga flags (ex.: Orçamento sozinho).
+        // Desmarcar Liberado não apaga flags (dados legados / outras colunas).
       } else {
         n.add(contractId);
         // Liberado = escopo operacional. Módulo Contratos em Acesso abre a ficha sensível.
@@ -1544,7 +1557,7 @@ export function UserPermissionsEditor({
   };
 
   const setContractModuleFlag = (contractId: string, key: keyof ContractModuleFlags, value: boolean) => {
-    // Flags (incl. Orçamento) exigem Liberado — escopo operacional unificado.
+    // Flags por contrato exigem Liberado — escopo operacional unificado.
     if (value) {
       setSelectedContractIds((prev) => new Set(prev).add(contractId));
     }
@@ -1647,6 +1660,7 @@ export function UserPermissionsEditor({
     for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(rawFlags)])) {
       nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
+    migrateOrcamentoFlagToAccessModule(next, nextFlags);
     setSelectedSet(next);
     setContractActionsSet(nextContract);
     setEmployeeActionsSet(nextEmployee);
@@ -1681,6 +1695,7 @@ export function UserPermissionsEditor({
     DEPRECATED_CONTROLE_KEYS.forEach((k) => nextGeneral.delete(k));
     PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => nextGeneral.delete(k));
     PERMISSION_MODULE_KEYS_OPEN_ACCESS.forEach((k) => nextGeneral.delete(k));
+    migrateOrcamentoFlagToAccessModule(nextGeneral, source.contractModuleFlags ?? {});
     const nextContractActions = new Set<ContractAction>();
     const nextEmployeeActions = new Set<ContractAction>();
     for (const p of source.permissions || []) {
@@ -1867,7 +1882,7 @@ export function UserPermissionsEditor({
     }
   };
 
-  /** Aba Contratos sempre disponível — Orçamento pode ser marcado sem módulo Contratos. */
+  /** Aba Contratos sempre disponível — Liberado/flags operacionais sem exigir módulo Contratos. */
   const contractsTabAvailable = true;
 
   useEffect(() => {
@@ -2365,7 +2380,7 @@ export function UserPermissionsEditor({
             <CardContent>
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
               <p className="text-sm text-amber-800 dark:text-amber-200">
-                <strong>Liberado</strong> — aparece em Caixinha, Ficha de Demanda, OS, etc.
+                <strong>Liberado</strong> — aparece em Caixinha, Ficha de Demanda, Orçamentos, OS, etc.
                 {!selectedSet.has(CONTRACTS_MODULE_KEY) ? (
                   <>
                     {' '}
@@ -2375,8 +2390,8 @@ export function UserPermissionsEditor({
                 ) : (
                   <> Com <strong>Contratos</strong> em Acesso, também abre a ficha do contrato.</>
                 )}{' '}
-                <strong>Orçamento</strong> — além do Liberado, marca a coluna para usar a página
-                Orçamentos naquele contrato.
+                A página <strong>Orçamentos</strong> libera-se na aba Acesso; os contratos visíveis lá
+                são os marcados em Liberado.
               </p>
             </div>
             {contractsList.length === 0 ? (
@@ -2386,7 +2401,7 @@ export function UserPermissionsEditor({
             ) : (
               <div>
                 <div className="overflow-x-auto overscroll-x-contain">
-                  <table className="w-full min-w-[960px] text-sm">
+                  <table className="w-full min-w-[860px] text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
                         <th
@@ -2407,13 +2422,6 @@ export function UserPermissionsEditor({
                           title="Gestor do contrato: aprova requisições de materiais e OCs na fase gestor deste contrato. Solicitações internas usam a permissão Controle «Aprovar Solicitações Restritas»."
                         >
                           Gestor
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Acesso à aba Orçamento neste contrato"
-                        >
-                          Orçamento
                         </th>
                         <th
                           scope="col"
@@ -2527,15 +2535,6 @@ export function UserPermissionsEditor({
                                     }
                                   }}
                                   aria-label={`Gestor — ${c.name}`}
-                                />
-                              </div>
-                            </td>
-                            <td className="px-1 py-3.5 text-center align-middle">
-                              <div className="flex justify-center">
-                                <PermissionMatrixCheckbox
-                                  checked={flags.orcamento}
-                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'orcamento', next)}
-                                  aria-label={`Orçamento — ${c.name}`}
                                 />
                               </div>
                             </td>

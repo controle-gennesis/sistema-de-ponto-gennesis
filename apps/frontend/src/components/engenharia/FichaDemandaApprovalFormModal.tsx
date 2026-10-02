@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   adjustCurrency,
@@ -104,26 +105,29 @@ function CurrencyStepperInput({
 function SubSection({
   title,
   addLabel,
-  onAdd,
+  uploading,
+  disabled,
+  onFiles,
   children,
 }: {
   title: string;
   addLabel: string;
-  onAdd: () => void;
+  uploading?: boolean;
+  disabled?: boolean;
+  onFiles: (files: File[]) => void;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-3">
       <SectionTitle>{title}</SectionTitle>
       {children}
-      <button
-        type="button"
-        onClick={onAdd}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
-      >
-        <Plus className="h-4 w-4 shrink-0" />
-        {addLabel}
-      </button>
+      <FileDropZone
+        label={addLabel}
+        hint="Clique ou arraste imagem/PDF"
+        uploading={uploading}
+        disabled={disabled}
+        onFiles={onFiles}
+      />
     </div>
   );
 }
@@ -132,36 +136,75 @@ function AnexoObrigatorioSlot({
   label,
   anexo,
   disabled,
-  onAdd,
+  uploading,
+  onFiles,
   onRemove,
 }: {
   label: string;
   anexo?: FdAnexo;
   disabled?: boolean;
-  onAdd: () => void;
+  uploading?: boolean;
+  onFiles: (files: File[]) => void;
   onRemove: () => void;
 }) {
+  const [dragOver, setDragOver] = useState(false);
+  const blocked = disabled || uploading;
+
   return (
     <div>
       <FieldLabel required>{label}</FieldLabel>
       {anexo ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!blocked) setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+            if (blocked) return;
+            const file = e.dataTransfer.files?.[0];
+            if (file) onFiles([file]);
+          }}
+          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+            dragOver
+              ? 'border-red-400 bg-red-50 dark:border-red-700 dark:bg-red-950/30'
+              : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+          }`}
+        >
           <span className="flex min-w-0 items-center gap-2 truncate text-gray-800 dark:text-gray-200">
             <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
             {anexo.name}
           </span>
           <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={onAdd}
-              className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800"
+            <label
+              className={`rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
+                blocked ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+              }`}
             >
               Trocar
-            </button>
+              <input
+                type="file"
+                accept="image/*,.pdf,application/pdf"
+                className="hidden"
+                disabled={blocked}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onFiles([file]);
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <button
               type="button"
-              disabled={disabled}
+              disabled={blocked}
               onClick={onRemove}
               className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
               aria-label={`Remover ${label}`}
@@ -171,15 +214,13 @@ function AnexoObrigatorioSlot({
           </div>
         </div>
       ) : (
-        <button
-          type="button"
+        <FileDropZone
+          label={`Adicionar ${label.toLowerCase()}`}
+          hint="Clique ou arraste imagem/PDF"
+          uploading={uploading}
           disabled={disabled}
-          onClick={onAdd}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
-        >
-          <Plus className="h-4 w-4 shrink-0" />
-          Adicionar {label.toLowerCase()}
-        </button>
+          onFiles={onFiles}
+        />
       )}
     </div>
   );
@@ -213,8 +254,6 @@ export function FichaDemandaApprovalFormModal({
   const [showCreateObra, setShowCreateObra] = useState(false);
   const [novaObraNome, setNovaObraNome] = useState('');
   const [uploadingAnexo, setUploadingAnexo] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const anexoKindRef = useRef<FdAnexoKind>('outro');
 
   const closeForm = useCallback(() => {
     onClose();
@@ -362,7 +401,7 @@ export function FichaDemandaApprovalFormModal({
     onSave(form);
   };
 
-  const handleAnexoFile = async (file: File | null, kind: FdAnexoKind = anexoKindRef.current) => {
+  const handleAnexoFile = async (file: File | null, kind: FdAnexoKind) => {
     if (!file || uploadingAnexo || isSaving) return;
     setUploadingAnexo(true);
     try {
@@ -587,29 +626,14 @@ export function FichaDemandaApprovalFormModal({
 
             <div className="space-y-3">
               <SectionTitle>Anexos obrigatórios</SectionTitle>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                disabled={uploadingAnexo || isSaving}
-                onChange={(e) => {
-                  void handleAnexoFile(e.target.files?.[0] ?? null, anexoKindRef.current);
-                  e.target.value = '';
-                }}
-              />
-              {uploadingAnexo ? (
-                <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Enviando anexo...
-                </p>
-              ) : null}
               <AnexoObrigatorioSlot
                 label="Orçamento"
                 anexo={findAnexoByKind(form.anexos, 'orcamento')}
-                disabled={uploadingAnexo || isSaving}
-                onAdd={() => {
-                  anexoKindRef.current = 'orcamento';
-                  fileInputRef.current?.click();
+                disabled={isSaving}
+                uploading={uploadingAnexo}
+                onFiles={(files) => {
+                  const file = files[0];
+                  if (file) void handleAnexoFile(file, 'orcamento');
                 }}
                 onRemove={() =>
                   setForm((prev) => ({
@@ -621,10 +645,11 @@ export function FichaDemandaApprovalFormModal({
               <AnexoObrigatorioSlot
                 label="Ficha de demanda"
                 anexo={findAnexoByKind(form.anexos, 'fd')}
-                disabled={uploadingAnexo || isSaving}
-                onAdd={() => {
-                  anexoKindRef.current = 'fd';
-                  fileInputRef.current?.click();
+                disabled={isSaving}
+                uploading={uploadingAnexo}
+                onFiles={(files) => {
+                  const file = files[0];
+                  if (file) void handleAnexoFile(file, 'fd');
                 }}
                 onRemove={() =>
                   setForm((prev) => ({
@@ -637,11 +662,12 @@ export function FichaDemandaApprovalFormModal({
 
             <SubSection
               title="Demais anexos"
-              addLabel={uploadingAnexo ? 'Enviando anexo...' : 'Adicionar anexo'}
-              onAdd={() => {
-                if (uploadingAnexo || isSaving) return;
-                anexoKindRef.current = 'outro';
-                fileInputRef.current?.click();
+              addLabel="Adicionar anexo"
+              uploading={uploadingAnexo}
+              disabled={isSaving}
+              onFiles={(files) => {
+                const file = files[0];
+                if (file) void handleAnexoFile(file, 'outro');
               }}
             >
               {anexosDemais(form.anexos).length > 0 ? (

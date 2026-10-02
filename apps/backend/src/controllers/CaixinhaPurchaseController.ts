@@ -145,6 +145,14 @@ export class CaixinhaPurchaseController {
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
       const contractId =
         typeof req.query.contractId === 'string' ? req.query.contractId.trim() : '';
+      const obraId = typeof req.query.obraId === 'string' ? req.query.obraId.trim() : '';
+      const purchaseDateFromRaw =
+        typeof req.query.purchaseDateFrom === 'string' ? req.query.purchaseDateFrom.trim() : '';
+      const purchaseDateToRaw =
+        typeof req.query.purchaseDateTo === 'string' ? req.query.purchaseDateTo.trim() : '';
+      const purchaseDateFrom = purchaseDateFromRaw ? parseYmd(purchaseDateFromRaw) : null;
+      const purchaseDateTo = purchaseDateToRaw ? parseYmd(purchaseDateToRaw) : null;
+
       const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
       const where: Prisma.CaixinhaPurchaseWhereInput = { ...scope };
       const andParts: Prisma.CaixinhaPurchaseWhereInput[] = [];
@@ -164,6 +172,15 @@ export class CaixinhaPurchaseController {
       }
       if (contractId) {
         andParts.push({ contractId });
+      }
+      if (obraId) {
+        andParts.push({ obraId });
+      }
+      if (purchaseDateFrom || purchaseDateTo) {
+        const dateFilter: Prisma.DateTimeNullableFilter = {};
+        if (purchaseDateFrom) dateFilter.gte = purchaseDateFrom;
+        if (purchaseDateTo) dateFilter.lte = purchaseDateTo;
+        andParts.push({ purchaseDate: dateFilter });
       }
       if (andParts.length) where.AND = andParts;
 
