@@ -50,13 +50,20 @@ function osmEmbedUrl(lat: number, lng: number) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - delta}%2C${lat - delta}%2C${lng + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
-function dataUrlToFile(dataUrl: string, filename: string): File {
-  const [header, body] = dataUrl.split(',');
-  const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
-  const binary = atob(body || '');
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new File([bytes], filename, { type: mime });
+function canvasToJpegFile(canvas: HTMLCanvasElement, filename: string, quality = 0.82): Promise<File> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error('Não foi possível processar a foto'));
+          return;
+        }
+        resolve(new File([blob], filename, { type: 'image/jpeg' }));
+      },
+      'image/jpeg',
+      quality
+    );
+  });
 }
 
 function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
@@ -76,8 +83,10 @@ function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: n
   return lines.slice(0, 2);
 }
 
-async function stampPhoto(
-  dataUrl: string,
+/** Desenha o carimbo no próprio canvas (sem re-encode via dataURL). */
+function stampOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
   info: {
     title: string;
     capturedAt: Date;
@@ -85,22 +94,7 @@ async function stampPhoto(
     longitude: number;
     address?: string | null;
   }
-): Promise<string> {
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Não foi possível processar a foto'));
-    img.src = dataUrl;
-  });
-
-  const canvas = document.createElement('canvas');
-  canvas.width = image.naturalWidth || image.width;
-  canvas.height = image.naturalHeight || image.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Não foi possível processar a foto');
-
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
+) {
   const pad = Math.max(16, Math.round(canvas.width * 0.025));
   const lineHeight = Math.max(22, Math.round(canvas.width * 0.028));
   const titleSize = Math.max(20, Math.round(canvas.width * 0.032));
@@ -129,8 +123,22 @@ async function stampPhoto(
   lines.forEach((line, index) => {
     ctx.fillText(line, pad, canvas.height - barHeight + pad + titleSize + 10 + index * lineHeight);
   });
+}
 
-  return canvas.toDataURL('image/jpeg', 0.9);
+/** Limite para encode/upload mais rápidos em celular. */
+const MAX_PHOTO_EDGE = 1600;
+
+function drawVideoScaled(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D
+) {
+  const srcW = video.videoWidth;
+  const srcH = video.videoHeight;
+  const scale = Math.min(1, MAX_PHOTO_EDGE / Math.max(srcW, srcH));
+  canvas.width = Math.max(1, Math.round(srcW * scale));
+  canvas.height = Math.max(1, Math.round(srcH * scale));
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 }
 
 function getFreshPosition(): Promise<GeolocationPosition> {
@@ -141,15 +149,16 @@ function getFreshPosition(): Promise<GeolocationPosition> {
     }
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 0,
+      timeout: 6000,
+      // Aceita fix recente do watch — evita esperar GPS do zero a cada captura
+      maximumAge: 15000,
     });
   });
 }
 
 async function resolveAddress(lat: number, lon: number): Promise<string | null> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 4000);
+  const timer = window.setTimeout(() => controller.abort(), 2000);
   try {
     const response = await fetch(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=pt`,
@@ -258,7 +267,7 @@ export function TeamLivePhotoCapture({
     const strategies: MediaStreamConstraints[] = [
       {
         audio: false,
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
       },
       { audio: false, video: { facingMode: { ideal: 'environment' } } },
       { audio: false, video: true },
@@ -345,13 +354,13 @@ export function TeamLivePhotoCapture({
       }
     }, {
       enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
+      timeout: 12000,
+      maximumAge: 10000,
     });
     watchIdRef.current = navigator.geolocation.watchPosition(
       applyFix,
       () => undefined,
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
     );
   }, []);
 
@@ -386,18 +395,23 @@ export function TeamLivePhotoCapture({
 
     setCapturing(true);
     try {
+      // Preferir GPS já obtido no watch (botão só libera com fix). Evita nova espera de 6–12s.
       let position: GeoFix | null = null;
-      try {
-        const fresh = await getFreshPosition();
-        position = {
-          latitude: fresh.coords.latitude,
-          longitude: fresh.coords.longitude,
-          accuracy: Number.isFinite(fresh.coords.accuracy) ? fresh.coords.accuracy : null,
-          timestamp: Date.now(),
-        };
-      } catch {
-        const last = lastFixRef.current;
-        if (last && Date.now() - last.timestamp < 20000) position = last;
+      const last = lastFixRef.current;
+      if (last && Date.now() - last.timestamp < 25000) {
+        position = last;
+      } else {
+        try {
+          const fresh = await getFreshPosition();
+          position = {
+            latitude: fresh.coords.latitude,
+            longitude: fresh.coords.longitude,
+            accuracy: Number.isFinite(fresh.coords.accuracy) ? fresh.coords.accuracy : null,
+            timestamp: Date.now(),
+          };
+        } catch {
+          if (last && Date.now() - last.timestamp < 45000) position = last;
+        }
       }
       if (!position) {
         toast.error('Não deu para gravar a localização neste instante. Ative o GPS e tire de novo.');
@@ -405,30 +419,32 @@ export function TeamLivePhotoCapture({
       }
 
       const capturedAt = new Date();
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Não foi possível capturar a foto');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const raw = canvas.toDataURL('image/jpeg', 0.92);
+      drawVideoScaled(video, canvas, ctx);
+
+      // Não bloqueia o upload esperando reverse-geocode; usa o que já veio do watch.
       const resolvedAddress =
-        address && lastFixRef.current && Date.now() - lastFixRef.current.timestamp < 25000
+        address && lastFixRef.current && Date.now() - lastFixRef.current.timestamp < 45000
           ? address
-          : await resolveAddress(position.latitude, position.longitude);
-      const stamped = await stampPhoto(raw, {
+          : null;
+
+      stampOnCanvas(ctx, canvas, {
         title: stampTitle,
         capturedAt,
         latitude: position.latitude,
         longitude: position.longitude,
         address: resolvedAddress,
       });
+
       const fileName = `${fileNamePrefix}-${capturedAt.toISOString().replace(/[:.]/g, '-')}.jpg`;
-      const file = dataUrlToFile(stamped, fileName);
+      const file = await canvasToJpegFile(canvas, fileName, 0.82);
       const data = new FormData();
       data.append('file', file);
       const res = await api.post('/empreiteiros/upload-file', data);
       const uploaded = res.data?.data as { url?: string; name?: string; key?: string } | undefined;
       if (!uploaded?.url) throw new Error('Falha no upload');
+
       onChange({
         url: uploaded.url,
         name: uploaded.name || fileName,

@@ -100,7 +100,6 @@ import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
-import { fluigService } from './controllers/FluigController';
 import { orcafascioService } from './controllers/OrcafascioController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
@@ -700,23 +699,8 @@ try {
     console.log('═══════════════════════════════════════');
     console.log('');
 
-    // Pré-aquecer os datasets Fluig em background para carregamento instantâneo
-    if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
-      const FLUIG_WARM_DATASETS = [
-        'Processos_Workflow_Aprovacao_G3',
-        'Processos_Workflow_Aprovacao_G5',
-        'DataSet_G3FollowUp',
-        'DataSet_G4FollowUp',
-        'G5-Relatorio-DF-GO-TODOS-SETORES',
-        'G5-Relatorio-DF-GO-DP',
-        'G5-Relatorio-DF-GO-JURIDICO',
-      ];
-      // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
-      setTimeout(() => {
-        void fluigService.warmupDatasets(FLUIG_WARM_DATASETS);
-        fluigService.startPeriodicRefresh(FLUIG_WARM_DATASETS, 8 * 60 * 1000);
-      }, 10_000);
-    }
+    // Fluig: sem warmup/refresh periódico no boot — datasets só sob demanda
+    // (página/prefetch do usuário), para não sobrecarregar o Fluig.
 
     // Pré-aquecer lista de orçamentos Orçafascio (mesmo padrão SWR do Fluig)
     if (process.env.ORCAFASCIO_EMAIL && process.env.ORCAFASCIO_SECRET_TOKEN) {

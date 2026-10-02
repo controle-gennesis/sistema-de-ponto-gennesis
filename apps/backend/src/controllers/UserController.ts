@@ -8,9 +8,16 @@ import { releaseUserIdentity, buildReleasedIdentity } from '../lib/userIdentityR
 import { ensureDefaultEmployeeAccessPermissions } from '../lib/permissionRegistrySync';
 import { findUserIdsMatchingSearch } from '../lib/normalizeSearchText';
 import { ChatService } from '../services/ChatService';
+import { PhotoService } from '../services/PhotoService';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 
 const chatUploadService = new ChatService();
+const photoService = new PhotoService();
+
+function parseImageContentType(dataUrl: string): string {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,/.exec(dataUrl);
+  return match?.[1]?.trim() || 'image/jpeg';
+}
 const facePhotoSelect = {
   id: true,
   facePhotoUrl: true,
@@ -287,19 +294,107 @@ export class UserController {
         const cnpj = String(empreiteiroData?.cnpj || '').replace(/\D/g, '');
         const phone = String(empreiteiroData?.phone || req.body?.phone || '').replace(/\D/g, '');
         const specialty = typeof empreiteiroData?.specialty === 'string' ? empreiteiroData.specialty.trim() : '';
-        const contractId = typeof empreiteiroData?.contractId === 'string' ? empreiteiroData.contractId.trim() : '';
+        const costCenterId =
+          typeof empreiteiroData?.costCenterId === 'string' ? empreiteiroData.costCenterId.trim() : '';
+        let contractId =
+          typeof empreiteiroData?.contractId === 'string' ? empreiteiroData.contractId.trim() : '';
         const cpfDigits = String(cpf || '').replace(/\D/g, '');
         const emailNorm = String(email || '').trim().toLowerCase();
+        const accessOnly =
+          req.body?.accessOnly === true ||
+          !empreiteiroData ||
+          (!companyName && !cnpj && !specialty && !costCenterId && !contractId);
 
         if (!name?.trim()) throw createError('Nome é obrigatório', 400);
         if (!emailNorm || !emailNorm.includes('@')) throw createError('E-mail inválido', 400);
         if (cpfDigits.length !== 11) throw createError('CPF é obrigatório e deve ter 11 dígitos', 400);
         if (!password || String(password).length < 6) throw createError('Senha deve ter pelo menos 6 caracteres', 400);
+        if (phone && phone.length < 10) throw createError('Telefone inválido', 400);
+
+        // Só o login: a Gennesis completa e vincula a empreita em /ponto/empreiteiros.
+        if (accessOnly) {
+          const profilePhotoRaw =
+            typeof req.body?.profilePhoto === 'string' ? req.body.profilePhoto.trim() : '';
+          if (!profilePhotoRaw.startsWith('data:image/')) {
+            throw createError('Foto do perfil é obrigatória', 400);
+          }
+
+          const hashedPassword = await hashPassword(password);
+          const created = await prisma.$transaction(async (tx: any) => {
+            const user = await tx.user.create({
+              data: {
+                email: emailNorm,
+                password: hashedPassword,
+                name: String(name).trim(),
+                cpf: cpfDigits,
+                role: 'EMPLOYEE',
+              },
+            });
+            const uploaded = await photoService.uploadPhotoFromBase64(
+              profilePhotoRaw,
+              user.id,
+              parseImageContentType(profilePhotoRaw)
+            );
+            const withPhoto = await tx.user.update({
+              where: { id: user.id },
+              data: {
+                profilePhotoUrl: uploaded.url,
+                profilePhotoKey: uploaded.key,
+              },
+            });
+            await tx.userPermission.create({
+              data: {
+                userId: user.id,
+                module: pathToModuleKey('/ponto/empreiteiros'),
+                action: PERMISSION_ACCESS_ACTION,
+                allowed: true,
+              },
+            });
+            return withPhoto;
+          });
+
+          res.status(201).json({
+            success: true,
+            data: {
+              id: created.id,
+              email: created.email,
+              name: created.name,
+              cpf: created.cpf,
+              profilePhotoUrl: created.profilePhotoUrl,
+              empreiteiroId: null,
+              accessOnly: true,
+            },
+            message:
+              'Acesso de empreiteiro criado. Em Empreitas, cadastre a empreita e vincule este login.',
+          });
+          return;
+        }
+
         if (!companyName) throw createError('Nome / razão social é obrigatório', 400);
         if (cnpj.length !== 14) throw createError('CNPJ é obrigatório e deve ter 14 dígitos', 400);
         if (phone.length < 10) throw createError('Telefone é obrigatório', 400);
         if (!specialty) throw createError('Especialidade é obrigatória', 400);
-        if (!contractId) throw createError('Contrato é obrigatório', 400);
+
+        if (costCenterId) {
+          const cc = await prisma.costCenter.findUnique({
+            where: { id: costCenterId },
+            select: { id: true, name: true },
+          });
+          if (!cc) throw createError('Centro de custo não encontrado', 404);
+          const byCc = await prisma.contract.findFirst({
+            where: { costCenterId },
+            orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+            select: { id: true },
+          });
+          if (!byCc) {
+            throw createError(
+              `Nenhum contrato vinculado ao centro de custo ${cc.name || ''}`.trim(),
+              400
+            );
+          }
+          contractId = byCc.id;
+        }
+        if (!contractId) throw createError('Centro de custo é obrigatório', 400);
 
         const contrato = await prisma.contract.findUnique({ where: { id: contractId } });
         if (!contrato) throw createError('Contrato não encontrado', 404);

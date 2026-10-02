@@ -1901,7 +1901,7 @@ function SolicitacoesCombustivelPageContent() {
                                 Restante:{' '}
                                 <span
                                   className={
-                                    (quotaBalance.remainingReais ?? 0) < 0
+                                    (quotaBalance.remainingReais ?? 0) <= -0.01
                                       ? 'font-medium text-red-600 dark:text-red-400'
                                       : 'font-medium'
                                   }

@@ -355,6 +355,12 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
 
+  /** Aprovar/devolver medições de entrega de empreita (fila Pendentes). */
+  const canApproveEmpreiteiroDaily =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-medicoes-empreita'));
+
   const canApproveOcCompras =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
   const canApproveOcDiretoria =
@@ -609,6 +615,7 @@ export function usePermissions() {
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
+    canApproveEmpreiteiroDaily,
     canApproveOc,
     canApproveOcCompras,
     canApproveOcDiretoria,
