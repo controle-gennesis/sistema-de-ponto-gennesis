@@ -39,7 +39,9 @@ import {
   RefreshCw,
   Palette,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -2405,6 +2407,8 @@ type OrcamentoMeta = {
   fichaDemandaApprovalId?: string;
   /** Cores de título/subtítulo e fonte das tabelas do orçamento. */
   aparencia?: AparenciaOrcamento;
+  /** Trava edição da aba Orçamento e da Memória de cálculo. */
+  gradeTravada?: boolean;
 };
 
 export type AparenciaOrcamento = {
@@ -3110,6 +3114,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
               ? metaRaw.fichaDemandaApprovalId.trim()
               : undefined,
           aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
+          gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -3467,6 +3472,7 @@ function parseOrcamentoDetailRaw(d: {
             ? metaRaw.fichaDemandaApprovalId.trim()
             : undefined,
         aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
+        gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -5745,8 +5751,9 @@ export function OrcamentoPageView({
     if (cronogramaOnly) setOrcamentoViewTab('cronograma');
     if (fichaDemandaOnly) setOrcamentoViewTab('planilhaAnalitica');
   }, [cronogramaOnly, fichaDemandaOnly]);
-  const mostrarColunasCompraFichaDemanda = fichaDemandaOnly;
-  const colSpanFichaDemanda = mostrarColunasCompraFichaDemanda ? 19 : 11;
+  /** Colunas editáveis (qtd. compra, vl. real, etc.) — na aba Ficha de demanda e na página de FD aprovada. */
+  const mostrarColunasCompraFichaDemanda = true;
+  const colSpanFichaDemanda = mostrarColunasCompraFichaDemanda ? 18 : 11;
   /** Aba “atrasada”: pill/UI muda na hora; grades pesadas montam depois (evita travar a animação). */
   const deferredOrcamentoViewTab = useDeferredValue(orcamentoViewTab);
   const abaOrcamentoPesada =
@@ -5958,6 +5965,23 @@ export function OrcamentoPageView({
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
   const aparenciaOrcamento = meta.aparencia;
+  const gradeTravada = meta.gradeTravada === true;
+  const gradeTravadaRef = useRef(gradeTravada);
+  gradeTravadaRef.current = gradeTravada;
+
+  const alternarGradeTravada = useCallback(() => {
+    const next = !gradeTravadaRef.current;
+    if (typeof document !== 'undefined') {
+      const ae = document.activeElement;
+      if (ae instanceof HTMLElement) ae.blur();
+    }
+    setMenuCtxMontagem(null);
+    setItensSelecionadosMontagem(new Set());
+    setConfirmApagarSelecaoMontagem(false);
+    setMeta((m) => ({ ...m, gradeTravada: next ? true : undefined }));
+    if (next) toast.success('Orçamento e memória travados.');
+    else toast.success('Orçamento e memória liberados.');
+  }, []);
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
 
   const dataFimOrcamento = useMemo(
@@ -8145,6 +8169,7 @@ export function OrcamentoPageView({
   }, [orcamentoAtivoId, servicos]);
 
   const renomearTituloOrcamento = (servicoId: string, novoNomeRaw: string) => {
+    if (gradeTravadaRef.current) return;
     const nome = novoNomeRaw.trim();
     if (!nome) return;
     setServicos((prev) => {
@@ -8155,6 +8180,7 @@ export function OrcamentoPageView({
   };
 
   const renomearSubtituloOrcamento = (servicoId: string, subtituloId: string, novoNomeRaw: string) => {
+    if (gradeTravadaRef.current) return;
     const nome = novoNomeRaw.trim();
     if (!nome) return;
     setServicos((prev) => {
@@ -8445,6 +8471,7 @@ export function OrcamentoPageView({
 
   /** `itemKey` = `servicoId|subtituloId|chave` — remove a composição da lista do serviço (definitivo). */
   const removerItemComposicaoDoOrcamento = (itemKey: string) => {
+    if (gradeTravadaRef.current) return;
     const parts = itemKey.split('|');
     if (parts.length < 3) {
       toast.error('Não foi possível identificar o item.');
@@ -8457,6 +8484,10 @@ export function OrcamentoPageView({
   };
 
   const apagarItensSelecionadosMontagem = () => {
+    if (gradeTravadaRef.current) {
+      setConfirmApagarSelecaoMontagem(false);
+      return;
+    }
     const keys = Array.from(itensSelecionadosMontagem);
     if (keys.length === 0) {
       setConfirmApagarSelecaoMontagem(false);
@@ -8604,7 +8635,7 @@ export function OrcamentoPageView({
 
   useLayoutEffect(() => {
     const el = montagemOrcamentoTableRef.current;
-    if (!el) return;
+    if (!el || gradeTravada) return;
     const onContextMenuNative = (e: MouseEvent) => {
       const target = e.target;
       if (!(target instanceof Element)) return;
@@ -8632,7 +8663,7 @@ export function OrcamentoPageView({
     };
     el.addEventListener('contextmenu', onContextMenuNative, { capture: true });
     return () => el.removeEventListener('contextmenu', onContextMenuNative, { capture: true });
-  }, [subtitulosAdicionados.length, orcamentoViewTab]);
+  }, [subtitulosAdicionados.length, orcamentoViewTab, gradeTravada]);
 
   const todosSubtitulos = useMemo(() => {
     const list: { key: string; servicoNome: string; subtituloNome: string; itens: ItemServico[] }[] = [];
@@ -10410,6 +10441,7 @@ export function OrcamentoPageView({
   ]);
 
   const setQuantidadeItem = (itemKey: string, valor: number, formulaRaw?: string) => {
+    if (gradeTravadaRef.current) return;
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
     const formula = String(formulaRaw ?? '').trim();
     setFormulasQuantidadePorItem(prev => {
@@ -10474,6 +10506,7 @@ export function OrcamentoPageView({
   };
 
   const addLinhaMedicao = (itemKey: string, inserirAposIdx?: number) => {
+    if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const prevDim = dimensoesPorItem[itemKey];
     const atual = dimensoesComLinhasEfetivas(
@@ -10500,6 +10533,7 @@ export function OrcamentoPageView({
   };
 
   const addLinhaCabecalhoSecaoMedicao = (itemKey: string, inserirAposIdx?: number) => {
+    if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const prevDim = dimensoesPorItem[itemKey];
     const atual = dimensoesComLinhasEfetivas(
@@ -10540,6 +10574,7 @@ export function OrcamentoPageView({
     valor: number | string,
     opts?: { formulaRaw?: string }
   ) => {
+    if (gradeTravadaRef.current) return;
     startTransition(() => {
       setDimensoesPorItem(prev => {
         const base = prev[itemKey];
@@ -10640,6 +10675,7 @@ export function OrcamentoPageView({
     campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct',
     rotulo: string
   ) => {
+    if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const atual =
       dimensoesPorItem[itemKey] ||
@@ -10657,6 +10693,7 @@ export function OrcamentoPageView({
   };
 
   const updateObservacaoMedicao = (itemKey: string, observacao: string) => {
+    if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const atual =
       dimensoesPorItem[itemKey] ||
@@ -10718,6 +10755,7 @@ export function OrcamentoPageView({
   }, []);
 
   const commitObservacaoOrcamento = useCallback((lineKey: string, raw: string) => {
+    if (gradeTravadaRef.current) return;
     startTransition(() => {
       setObservacoesPorItem((prev) => {
         if ((prev[lineKey] ?? '') === raw) return prev;
@@ -10801,6 +10839,7 @@ export function OrcamentoPageView({
   };
 
   const removeLinhaMedicao = (itemKey: string, idx: number) => {
+    if (gradeTravadaRef.current) return;
     const prevDim = dimensoesPorItem[itemKey];
     const linhasBase = linhasMedicaoEfetivas(prevDim);
     if (!linhasBase.length) return;
@@ -10827,6 +10866,7 @@ export function OrcamentoPageView({
    * updateLinhaMedicao/removeLinhaMedicao, só que sobre `linhasContagem`.
    */
   const addLinhaContagem = (itemKey: string, inserirAposIdx?: number) => {
+    if (gradeTravadaRef.current) return;
     const atual = dimensoesPorItem[itemKey] || { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [] };
     const prev = atual.linhasContagem ?? [];
     const nova = { descricao: '', quantidade: 0 };
@@ -10845,6 +10885,7 @@ export function OrcamentoPageView({
     campo: 'descricao' | 'quantidade',
     valor: string | number
   ) => {
+    if (gradeTravadaRef.current) return;
     startTransition(() => {
       setDimensoesPorItem(prev => {
         const atual = prev[itemKey];
@@ -10862,6 +10903,7 @@ export function OrcamentoPageView({
   }, [syncQuantidadeOrcamentoDaMemoria]);
 
   const removeLinhaContagem = (itemKey: string, idx: number) => {
+    if (gradeTravadaRef.current) return;
     const atual = dimensoesPorItem[itemKey];
     if (!atual?.linhasContagem?.length) return;
     const novaLinhas = atual.linhasContagem.filter((_, i) => i !== idx);
@@ -11825,7 +11867,6 @@ export function OrcamentoPageView({
       'Fat.',
       'Q.orc',
       'Q.comp',
-      'Sobra',
       'CU orc',
       'CU real',
       'V.tot',
@@ -11835,7 +11876,7 @@ export function OrcamentoPageView({
       'Tipo',
       'Obs.'
     ];
-    const colW = [11, 10, 10, 32, 7, 9, 9, 9, 9, 9, 9, 11, 11, 11, 11, 11, 9, 8, 16];
+    const colW = [11, 10, 10, 32, 7, 9, 9, 9, 9, 9, 11, 11, 11, 11, 11, 9, 8, 16];
     const sumW = colW.reduce((a, b) => a + b, 0);
     const scale = (pageW - 2 * margin) / sumW;
     const cw = colW.map(w => w * scale);
@@ -11876,10 +11917,6 @@ export function OrcamentoPageView({
 
     for (const r of linhasFichaDemanda) {
       const ehComp = r.kind === 'composicao';
-      const qCompraOk =
-        !ehComp && r.quantidadeCompra !== undefined && Number.isFinite(r.quantidadeCompra);
-      const sobra =
-        qCompraOk ? r.quantidadeOrcamento - r.quantidadeCompra! : null;
       const levantStr = ehComp
         ? fmtN(r.quantidadeOrcamento)
         : r.levantamentoPct !== undefined && Number.isFinite(r.levantamentoPct)
@@ -11911,7 +11948,6 @@ export function OrcamentoPageView({
         fatStr,
         ehComp ? '—' : fmtN(r.quantidadeOrcamento),
         ehComp ? '—' : fmtN(r.quantidadeCompra),
-        ehComp ? '—' : sobra !== null ? fmtN(sobra) : '—',
         ehComp ? '—' : fmtBRL(r.custoUnitarioOrcamento),
         ehComp ? '—' : fmtBRL(r.custoUnitarioCompraReal),
         fmtBRL(r.valorTotalOrcamento),
@@ -12912,12 +12948,6 @@ export function OrcamentoPageView({
                                   Quantidade compra
                                 </GradeMoedaTh>
                                 <GradeMoedaTh
-                                  title={PLANILHA_ANALITICA_TOOLTIP.theadSobra}
-                                  className={GRADE_TH_STICKY}
-                                >
-                                  Sobra
-                                </GradeMoedaTh>
-                                <GradeMoedaTh
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadVlCompraReal}
                                   className={GRADE_TH_STICKY}
                                 >
@@ -12991,7 +13021,6 @@ export function OrcamentoPageView({
                                         <>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
-                                      <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <MoedaCelula valor={resumo.custoReal} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
@@ -13045,7 +13074,6 @@ export function OrcamentoPageView({
                                       </td>
                                       {mostrarColunasCompraFichaDemanda ? (
                                         <>
-                                      <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td
@@ -13200,10 +13228,6 @@ export function OrcamentoPageView({
                                         className="px-3 py-2.5 text-center text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
-                                        title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraComp}
-                                        className="px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
-                                      />
-                                      <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealComp}
                                         className={`px-2 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                       >
@@ -13281,8 +13305,6 @@ export function OrcamentoPageView({
                                   pctFatIn !== undefined && Number.isFinite(pctFatIn)
                                     ? classeValorTotalCondicional(pctFatIn)
                                     : '';
-                                const sobraInsumo =
-                                  qC !== undefined && Number.isFinite(qC) ? l.quantidadeReal - qC : null;
                                 const levantamentoCondIn =
                                   pctLevIn !== undefined && Number.isFinite(pctLevIn)
                                     ? classeLevantamentoCondicional(pctLevIn)
@@ -13612,18 +13634,6 @@ export function OrcamentoPageView({
                                       />
                                     </td>
                                     <td
-                                      title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraInsumo}
-                                      className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
-                                        sobraInsumo !== null && sobraInsumo < 0
-                                          ? 'font-semibold bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200'
-                                          : 'text-gray-700 dark:text-gray-300'
-                                      }`}
-                                    >
-                                      {sobraInsumo !== null ? (
-                                        <span>{sobraInsumo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
-                                      ) : '—'}
-                                    </td>
-                                    <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
                                       className={`p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                     >
@@ -13894,7 +13904,7 @@ export function OrcamentoPageView({
                               itemDescricao={row.item.descricao || ''}
                               unidadeMedida={unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade)}
                               quantidadeUn={row.quantidade}
-                              quantidadeUnReadOnly={false}
+                              quantidadeUnReadOnly={gradeTravada}
                               onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
                               modoContagemLista={meta.usarMemoriaCalculo === true}
                               onAddLinhaContagem={apos => addLinhaContagem(row.key, apos)}
@@ -13925,6 +13935,7 @@ export function OrcamentoPageView({
                               addLinhaCabecalhoSecaoMedicao={addLinhaCabecalhoSecaoMedicao}
                               removeLinhaMedicao={removeLinhaMedicao}
                               estiloTitulo={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}
+                              readOnly={gradeTravada}
                             />
                           </section>
                         ))}
@@ -13949,7 +13960,8 @@ export function OrcamentoPageView({
                     <button
                       type="button"
                       onClick={() => abrirModalNovoTituloViaMenu()}
-                      className="mt-6 inline-flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-red-900/15 transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+                      disabled={gradeTravada}
+                      className="mt-6 inline-flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-red-900/15 transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
                     >
                       <Plus className="h-4 w-4 shrink-0" aria-hidden />
                       Criar primeiro serviço
@@ -13965,7 +13977,11 @@ export function OrcamentoPageView({
                       className={gradeTableViewportCls}
                       style={gradeZoomStyle}
                     >
-                      <table className={`min-w-[1840px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}`}>
+                      <table
+                        className={`min-w-[1840px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}${gradeTravada ? ' select-none' : ''}`}
+                        {...(gradeTravada ? ({ inert: '' } as React.HTMLAttributes<HTMLTableElement>) : {})}
+                        aria-disabled={gradeTravada || undefined}
+                      >
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr className={gradeTableRowTrCls}>
                             <th className={`${GRADE_TH_STICKY} w-12 min-w-[3rem] px-2 py-2.5 text-center`}>
@@ -14382,7 +14398,7 @@ export function OrcamentoPageView({
                       </table>
                     </div>
 
-                    {menuCtxMontagem && (
+                    {menuCtxMontagem && !gradeTravada && (
                       <ActionMenuOverlay
                         open
                         onClose={() => setMenuCtxMontagem(null)}
@@ -14604,6 +14620,34 @@ export function OrcamentoPageView({
                   </button>
                   {!fichaDemandaOnly && (
                     <button
+                      type="button"
+                      onClick={alternarGradeTravada}
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
+                        gradeTravada
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 hover:bg-amber-100 active:bg-amber-200 dark:border-amber-500/70 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600'
+                      }`}
+                      title={
+                        gradeTravada
+                          ? 'Destravar orçamento e memória de cálculo'
+                          : 'Travar orçamento e memória de cálculo'
+                      }
+                      aria-label={
+                        gradeTravada
+                          ? 'Destravar orçamento e memória de cálculo'
+                          : 'Travar orçamento e memória de cálculo'
+                      }
+                      aria-pressed={gradeTravada}
+                    >
+                      {gradeTravada ? (
+                        <Lock className="h-4 w-4 shrink-0" aria-hidden />
+                      ) : (
+                        <Unlock className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                    </button>
+                  )}
+                  {!fichaDemandaOnly && (
+                    <button
                     type="button"
                     onClick={() => {
                       setAparenciaDraft({
@@ -14623,9 +14667,13 @@ export function OrcamentoPageView({
                     <button
                       type="button"
                       onClick={() => void atualizarOrcamentoOrcafascio()}
-                      disabled={isAtualizandoOrcafascio || !orcamentoAtivoId}
+                      disabled={isAtualizandoOrcafascio || !orcamentoAtivoId || gradeTravada}
                       className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                      title="Atualizar composições do Orçafascio (inclui novas e remove as que saíram de lá)"
+                      title={
+                        gradeTravada
+                          ? 'Destrave o orçamento para atualizar do Orçafascio'
+                          : 'Atualizar composições do Orçafascio (inclui novas e remove as que saíram de lá)'
+                      }
                       aria-label="Atualizar do Orçafascio"
                     >
                       {isAtualizandoOrcafascio ? (
@@ -16189,6 +16237,7 @@ export function OrcamentoPageView({
 
       {typeof document !== 'undefined' &&
         orcamentoViewTab === 'montagem' &&
+        !gradeTravada &&
         resumoSelecaoMontagem.nSelecionados > 0 &&
         createPortal(
           <div

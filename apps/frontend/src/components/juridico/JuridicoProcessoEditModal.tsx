@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
@@ -22,6 +22,8 @@ import api from '@/lib/api';
 import { JURIDICO_CONTRATOS, resolveContratoNome } from '@/data/juridico-contratos';
 import { parseBrDate } from '@/data/juridico-processos-dashboard';
 import type { JuridicoProcesso } from '@/data/juridico-processos-ativos';
+
+const ADVOGADO_OUTROS_VALUE = '__outros__';
 
 type Props = {
   isOpen: boolean;
@@ -293,6 +295,7 @@ export function JuridicoProcessoEditModal({
   onClose,
   onSaved,
 }: Props) {
+  const queryClient = useQueryClient();
   const isCreate = mode === 'create';
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -330,13 +333,22 @@ export function JuridicoProcessoEditModal({
     );
     const currentId = form.advogadoId.trim();
     const currentName = form.advogado.trim();
-    if (currentId && !options.some((o) => o.value === currentId)) {
+    if (
+      currentId &&
+      currentId !== ADVOGADO_OUTROS_VALUE &&
+      !options.some((o) => o.value === currentId)
+    ) {
       options.unshift({
         value: currentId,
         label: currentName || currentId,
         searchText: currentName || currentId,
       });
     }
+    options.unshift({
+      value: ADVOGADO_OUTROS_VALUE,
+      label: 'Outros',
+      searchText: 'Outros',
+    });
     return options;
   }, [advogados, form.advogado, form.advogadoId]);
 
@@ -399,6 +411,10 @@ export function JuridicoProcessoEditModal({
       for (const key of DATE_FIELDS) {
         payload[key] = dateFromPickerValue(form[key]);
       }
+      if (payload.advogadoId === ADVOGADO_OUTROS_VALUE) {
+        payload.advogadoId = '';
+        payload.advogado = 'Outros';
+      }
 
       const res = isCreate
         ? await api.post('/juridico-processos', payload)
@@ -409,6 +425,11 @@ export function JuridicoProcessoEditModal({
           (isCreate ? 'Processo cadastrado com sucesso.' : 'Processo atualizado com sucesso.'),
       );
       setDirty(false);
+      if (saved?.id) {
+        queryClient.setQueryData(['juridico-processos', saved.id], saved);
+        queryClient.setQueryData(['juridico-processos', saved.id, 'edit'], saved);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['juridico-processos'] });
       onSaved?.(saved);
       onClose();
     } catch (err) {
@@ -526,20 +547,32 @@ export function JuridicoProcessoEditModal({
             </Field>
             <Field label="Advogado">
               <SingleSelectSearchDropdown
-                value={form.advogadoId}
+                value={
+                  form.advogadoId.trim() ||
+                  (form.advogado.trim().toLowerCase() === 'outros' ? ADVOGADO_OUTROS_VALUE : '')
+                }
                 onChange={(id) => {
+                  if (!id || id === ADVOGADO_OUTROS_VALUE) {
+                    setForm((prev) => ({
+                      ...prev,
+                      advogadoId: ADVOGADO_OUTROS_VALUE,
+                      advogado: 'Outros',
+                    }));
+                    setDirty(true);
+                    return;
+                  }
                   const employee = advogados.find((e) => e.id === id) || employees.find((e) => e.id === id);
                   setForm((prev) => ({
                     ...prev,
                     advogadoId: id,
-                    advogado: employee?.name || (id ? prev.advogado : ''),
+                    advogado: employee?.name || prev.advogado,
                   }));
                   setDirty(true);
                 }}
                 options={advogadoOptions}
                 placeholder="Selecionar advogado"
                 searchPlaceholder="Pesquisar advogado..."
-                emptyOptionLabel="Sem advogado"
+                allowEmpty={false}
                 emptyOptionsMessage="Nenhum funcionário com cargo Advogado"
                 emptySearchMessage="Nenhum advogado corresponde à busca"
                 matchTriggerWidth

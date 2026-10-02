@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   Briefcase,
@@ -84,6 +84,7 @@ const addBtnCls =
 
 export default function ProcessoAtivoDetailPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const params = useParams<{ id: string }>();
   const id = params?.id;
   const [showEdit, setShowEdit] = useState(false);
@@ -253,17 +254,16 @@ export default function ProcessoAtivoDetailPage() {
                         label="Agravo de instrumento"
                         value={cellText(processo.agravoInstrumento)}
                       />
+                      <Field label="Status sentença" value={cellText(processo.statusSentenca)} />
                       <Field label="Período" value={cellText(processo.periodo)} />
                       <Field label="Início trabalhado" value={cellText(processo.periodoInicio)} />
                       <Field label="Fim trabalhado" value={cellText(processo.periodoFim)} />
                       <div className="sm:col-span-2 xl:col-span-3">
                         <Field label="Objeto" value={cellText(processo.objeto)} />
                       </div>
-                      {processo.objeto2 ? (
-                        <div className="sm:col-span-2 xl:col-span-3">
-                          <Field label="Objetos vinculados" value={cellText(processo.objeto2)} />
-                        </div>
-                      ) : null}
+                      <div className="sm:col-span-2 xl:col-span-3">
+                        <Field label="Objetos vinculados" value={cellText(processo.objeto2)} />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -277,7 +277,7 @@ export default function ProcessoAtivoDetailPage() {
                     />
                   </CardHeader>
                   <CardContent className={cadastroListClasses.cardContent}>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Field label="Data da abertura" value={cellText(processo.dataAbertura)} />
                       <Field label="Data da audiência" value={cellText(processo.dataAudiencia)} />
                       <Field label="Horário" value={cellText(processo.horario)} />
@@ -287,13 +287,37 @@ export default function ProcessoAtivoDetailPage() {
                         value={formatCurrencyBRL(processo.valorCausa)}
                       />
                       <Field
+                        label="Valor sentença"
+                        value={formatCurrencyBRL(processo.valorSentenca)}
+                      />
+                      <Field
                         label="Valor do acordo"
                         value={formatCurrencyBRL(processo.valorAcordo)}
                       />
                       <Field label="Valor pago" value={formatCurrencyBRL(processo.valorPago)} />
                       <Field
-                        label="Valor sentença"
-                        value={formatCurrencyBRL(processo.valorSentenca)}
+                        label="Valor da parcela"
+                        value={formatCurrencyBRL(processo.valorParcela)}
+                      />
+                      <Field label="Nº parcelas" value={cellText(processo.numParcelas)} />
+                      <Field label="Valor de RO" value={formatCurrencyBRL(processo.valorRO)} />
+                      <Field label="Valor de RR" value={formatCurrencyBRL(processo.valorRR)} />
+                      <Field
+                        label="Valor custas"
+                        value={formatCurrencyBRL(processo.valorCustas)}
+                      />
+                      <Field label="Custas" value={formatCurrencyBRL(processo.custas)} />
+                      <Field
+                        label="Previdência"
+                        value={formatCurrencyBRL(processo.previdencia)}
+                      />
+                      <Field
+                        label="Outros gastos / honorários"
+                        value={formatCurrencyBRL(processo.outrosGastos)}
+                      />
+                      <Field
+                        label="Valor pago sentenciado"
+                        value={formatCurrencyBRL(processo.valorPagoSentenciado)}
                       />
                     </div>
                   </CardContent>
@@ -420,7 +444,12 @@ export default function ProcessoAtivoDetailPage() {
           isOpen={showEdit}
           processoId={id || null}
           onClose={() => setShowEdit(false)}
-          onSaved={() => {
+          onSaved={(saved) => {
+            if (saved?.id) {
+              queryClient.setQueryData(['juridico-processos', saved.id], saved);
+              queryClient.setQueryData(['juridico-processos', saved.id, 'edit'], saved);
+            }
+            void queryClient.invalidateQueries({ queryKey: ['juridico-processos'] });
             void refetch();
           }}
         />

@@ -59,6 +59,8 @@ type Props = {
   addLinhaCabecalhoSecaoMedicao: (itemKey: string, inserirAposIdx?: number) => void;
   removeLinhaMedicao: (itemKey: string, idx: number) => void;
   estiloTitulo?: React.CSSProperties;
+  /** Bloqueia edição (orçamento/memorial travados). */
+  readOnly?: boolean;
 };
 
 /**
@@ -286,7 +288,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   addLinhaMedicao,
   addLinhaCabecalhoSecaoMedicao,
   removeLinhaMedicao,
-  estiloTitulo
+  estiloTitulo,
+  readOnly = false,
 }: Props) {
   const tipo = tipoUnidade;
   const linhasEfetivas = linhasMedicaoEfetivas(dim);
@@ -1055,62 +1058,69 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   );
 
 
+  const painelShell = (body: React.ReactNode) => (
+    <>
+      <div
+        className={`space-y-3${readOnly ? ' select-none' : ''}`}
+        {...(readOnly ? ({ inert: '' } as React.HTMLAttributes<HTMLDivElement>) : {})}
+        aria-disabled={readOnly || undefined}
+      >
+        {body}
+      </div>
+      {readOnly ? null : portalMenuCtxMedicao}
+    </>
+  );
+
   if (!linhasEfetivas?.length) {
     const colEmpty = contarColunasGrade();
     if (ehCargaEntulho) {
-      return (
-        <>
-        <div className="space-y-3">
-          {tabelaEnvoltorio(
-            <>
-              <thead>{renderCabecalhoServico(colEmpty)}</thead>
-              <tbody>
-                <tr className={gradeTableRowTrCls}>
-                  <td
-                    colSpan={colEmpty}
-                    className="border-b border-gray-200 bg-slate-50/60 px-6 py-8 text-center dark:border-gray-600 dark:bg-gray-900/50"
-                  >
-                    <div className="flex justify-center">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-                        <Info className="h-5 w-5" strokeWidth={2} aria-hidden />
-                      </span>
-                    </div>
-                    <p className="mx-auto mt-3 max-w-lg text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-200">
-                      A carga manual de entulho não é medida aqui: o volume vem dos demais serviços do mesmo bloco
-                      (demolições, remoções, escavações etc.).
-                    </p>
-                    <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                      Inclua primeiro, na aba <span className="font-medium text-gray-800 dark:text-gray-200">Orçamento</span>, as
-                      composições que geram entulho e preencha as medições delas. As linhas desta carga aparecem
-                      automaticamente quando houver volume calculado.
-                    </p>
-                  </td>
-                </tr>
-              </tbody>
-            </>
-          )}
-        </div>
-        {portalMenuCtxMedicao}
-        </>
-      );
-    }
-    return (
-      <>
-      <div className="space-y-3">
-        {tabelaEnvoltorio(
+      return painelShell(
+        tabelaEnvoltorio(
           <>
-            <thead>
-              {renderCabecalhoServico(colEmpty)}
-            </thead>
+            <thead>{renderCabecalhoServico(colEmpty)}</thead>
             <tbody>
               <tr className={gradeTableRowTrCls}>
                 <td
                   colSpan={colEmpty}
-                  className="border-b border-gray-200 bg-slate-50/40 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/40"
+                  className="border-b border-gray-200 bg-slate-50/60 px-6 py-8 text-center dark:border-gray-600 dark:bg-gray-900/50"
                 >
-                  <p className="mx-auto max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                    Nenhuma linha de medição. Inicie o cadastro das medidas conforme o tipo de serviço.
+                  <div className="flex justify-center">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                      <Info className="h-5 w-5" strokeWidth={2} aria-hidden />
+                    </span>
+                  </div>
+                  <p className="mx-auto mt-3 max-w-lg text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-200">
+                    A carga manual de entulho não é medida aqui: o volume vem dos demais serviços do mesmo bloco
+                    (demolições, remoções, escavações etc.).
                   </p>
+                  <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                    Inclua primeiro, na aba <span className="font-medium text-gray-800 dark:text-gray-200">Orçamento</span>, as
+                    composições que geram entulho e preencha as medições delas. As linhas desta carga aparecem
+                    automaticamente quando houver volume calculado.
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </>
+        )
+      );
+    }
+    return painelShell(
+      tabelaEnvoltorio(
+        <>
+          <thead>
+            {renderCabecalhoServico(colEmpty)}
+          </thead>
+          <tbody>
+            <tr className={gradeTableRowTrCls}>
+              <td
+                colSpan={colEmpty}
+                className="border-b border-gray-200 bg-slate-50/40 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/40"
+              >
+                <p className="mx-auto max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                  Nenhuma linha de medição. Inicie o cadastro das medidas conforme o tipo de serviço.
+                </p>
+                {!readOnly ? (
                   <button
                     type="button"
                     onClick={() => addLinhaMedicao(rowKey)}
@@ -1119,61 +1129,49 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
                     <Plus className="h-4 w-4" />
                     Iniciar medições
                   </button>
-                </td>
-              </tr>
-            </tbody>
-          </>
-        )}
-      </div>
-      {portalMenuCtxMedicao}
-      </>
+                ) : null}
+              </td>
+            </tr>
+          </tbody>
+        </>
+      )
     );
   }
 
   if (!ehCargaEntulho) {
     const lnHeaderRef = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
     const colCount = contarColunasGrade();
-    return (
-      <>
-      <div className="space-y-3">
-        {tabelaEnvoltorio(
-          <>
-            <thead>
-              {renderCabecalhoServico(colCount)}
-              {renderHeaderRow(lnHeaderRef)}
-            </thead>
-            <tbody>
-              {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
-              {renderLinhaTotalMedicao()}
-            </tbody>
-          </>
-        )}
-      </div>
-      {portalMenuCtxMedicao}
-      </>
+    return painelShell(
+      tabelaEnvoltorio(
+        <>
+          <thead>
+            {renderCabecalhoServico(colCount)}
+            {renderHeaderRow(lnHeaderRef)}
+          </thead>
+          <tbody>
+            {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
+            {renderLinhaTotalMedicao()}
+          </tbody>
+        </>
+      )
     );
   }
 
   /** Carga de entulho: uma tabela contínua (sem sub-blocos nem faixa duplicada por composição). */
   const lnHeaderCarga = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
   const colCountCarga = contarColunasGrade();
-  return (
-    <>
-      <div className="space-y-3">
-        {tabelaEnvoltorio(
-          <>
-            <thead>
-              {renderCabecalhoServico(colCountCarga)}
-              {renderHeaderRow(lnHeaderCarga)}
-            </thead>
-            <tbody>
-              {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
-              {renderLinhaTotalMedicao()}
-            </tbody>
-          </>
-        )}
-      </div>
-      {portalMenuCtxMedicao}
-    </>
+  return painelShell(
+    tabelaEnvoltorio(
+      <>
+        <thead>
+          {renderCabecalhoServico(colCountCarga)}
+          {renderHeaderRow(lnHeaderCarga)}
+        </thead>
+        <tbody>
+          {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
+          {renderLinhaTotalMedicao()}
+        </tbody>
+      </>
+    )
   );
 });

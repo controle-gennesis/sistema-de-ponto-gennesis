@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BarChart3,
   Briefcase,
@@ -245,6 +245,7 @@ function applyListAndSearchFilters(
 
 export default function ProcessosAtivosPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAdministrator, can } = usePermissions();
   const canSeeDashboard =
     isAdministrator || can(pathToModuleKey('/ponto/juridico/processos-ativos'));
@@ -845,7 +846,12 @@ export default function ProcessosAtivosPage() {
             setShowCreateProcesso(false);
             setEditProcessoId(null);
           }}
-          onSaved={() => {
+          onSaved={(saved) => {
+            if (saved?.id) {
+              queryClient.setQueryData(['juridico-processos', saved.id], saved);
+              queryClient.setQueryData(['juridico-processos', saved.id, 'edit'], saved);
+            }
+            void queryClient.invalidateQueries({ queryKey: ['juridico-processos'] });
             void refetch();
           }}
         />
