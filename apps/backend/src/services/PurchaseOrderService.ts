@@ -27,6 +27,7 @@ import {
   TOTVS_OC_PAYMENT_AVISTA,
 } from '../lib/ocTotvsRm';
 import { totvsRmMovimentoService } from './TotvsRmMovimentoService';
+import { userTotvsCredentialService } from './UserTotvsCredentialService';
 import { ensurePurchaseOrderTotvsFields } from '../lib/ensureProductionSchema';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
@@ -2311,21 +2312,35 @@ export class PurchaseOrderService {
       throw new Error('Informe o local de estoque da OC.');
     }
 
-    const saved = await totvsRmMovimentoService.saveOc1126({
-      fornecedorCodigo,
-      fornecedorCnpj: order.supplier?.cnpj,
-      filial,
-      centroCusto,
-      centroCustoNome: order.materialRequest?.costCenter?.name || null,
-      codLoc,
-      condicaoPagamento,
-      tipoFrete,
-      dataEmissao: order.orderDate,
-      dataEntrega: order.expectedDelivery,
-      observacao: order.notes,
-      bancoAgPix: bancoAgPix || null,
-      items,
-    });
+    const totvsCreds = await userTotvsCredentialService.getCredentialsForUser(userId);
+    if (!totvsCreds) {
+      throw new Error(
+        'Vincule o seu usuário TOTVS em Ordens de Compra (botão Vincular meu usuário Totvs). Cada pessoa usa apenas o próprio login; sem vínculo pessoal a OC não é enviada.'
+      );
+    }
+
+    const saved = await totvsRmMovimentoService.saveOc1126(
+      {
+        fornecedorCodigo,
+        fornecedorCnpj: order.supplier?.cnpj,
+        filial,
+        centroCusto,
+        centroCustoNome: order.materialRequest?.costCenter?.name || null,
+        codLoc,
+        condicaoPagamento,
+        tipoFrete,
+        valorFrete:
+          order.freightAmount != null && String(order.freightAmount).trim() !== ''
+            ? Number(order.freightAmount)
+            : 0,
+        dataEmissao: order.orderDate,
+        dataEntrega: order.expectedDelivery,
+        observacao: order.notes,
+        bancoAgPix: bancoAgPix || null,
+        items,
+      },
+      totvsCreds
+    );
 
     const sentData = {
       totvsIdMov: saved.idMov,

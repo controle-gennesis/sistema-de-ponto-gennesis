@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { FileText, BarChart3, Search, ExternalLink, X } from 'lucide-react';
+import { FileText, BarChart3, Search, ExternalLink, Loader2, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -23,6 +23,19 @@ import { CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES, CONTROLE_GERAL_EXTRA_CONTRACT
 import { useGastosOperacionaisTotvsQuery } from './useGastosOperacionaisTotvsQuery';
 
 const ITEMS_PER_PAGE = 20;
+
+function OverviewValueLoading() {
+  return (
+    <span
+      className="inline-flex items-center justify-center text-gray-400 dark:text-gray-500"
+      role="status"
+      aria-label="Carregando"
+      title="Carregando"
+    >
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+    </span>
+  );
+}
 
 interface ContractOverview {
   id: string;
@@ -77,7 +90,7 @@ export default function ControleGeralContratosPage() {
     router.push('/auth/login');
   };
 
-  const { data: overviewData, isLoading: loadingOverview } = useQuery({
+  const { data: overviewData, isLoading: loadingOverview, isFetching: fetchingOverview } = useQuery({
     queryKey: ['contracts-overview', 'controle-geral-v2'],
     queryFn: async () => {
       const res = await api.get('/contracts/overview', {
@@ -124,6 +137,7 @@ export default function ControleGeralContratosPage() {
   const {
     data: totvsGastosData,
     isLoading: loadingTotvsGastos,
+    isFetching: fetchingTotvsGastos,
     isError: totvsGastosError,
     error: totvsGastosErrorObj,
     refetch: refetchTotvsGastos
@@ -132,6 +146,7 @@ export default function ControleGeralContratosPage() {
   const {
     data: legacySheetData,
     isLoading: loadingLegacySheet,
+    isFetching: fetchingLegacySheet,
     isError: legacySheetError,
     error: legacySheetErrorObj
   } = useQuery({
@@ -170,6 +185,7 @@ export default function ControleGeralContratosPage() {
   );
 
   const loadingGastos = loadingLegacySheet || loadingTotvsGastos;
+  const refreshingGastos = fetchingLegacySheet || fetchingTotvsGastos;
   /** Só bloqueia o painel se as duas fontes falharem; aviso parcial vai na descrição. */
   const gastosError = Boolean(legacySheetError && totvsGastosError);
   const gastosFetchedAt = totvsGastosData?.fetchedAt ?? legacySheetData?.fetchedAt;
@@ -199,31 +215,12 @@ export default function ControleGeralContratosPage() {
     return 'Não foi possível carregar os gastos.';
   })();
   const gastosTotvsWarning = totvsGastosError
-    ? (() => {
-        const err = totvsGastosErrorObj as {
-          response?: { data?: { message?: string } };
-          message?: string;
-        } | null;
-        return (
-          err?.response?.data?.message ??
-          err?.message ??
-          'Falha ao carregar TOTVS — gastos a partir de 2025 podem ficar zerados.'
-        );
-      })()
+    ? 'A consulta ao TOTVS falhou. Os valores exibidos podem ser os últimos carregados.'
     : legacySheetError
-      ? (() => {
-          const err = legacySheetErrorObj as {
-            response?: { data?: { message?: string } };
-            message?: string;
-          } | null;
-          return (
-            err?.response?.data?.message ??
-            err?.message ??
-            'Falha ao carregar a planilha — gastos até 2024 podem ficar zerados.'
-          );
-        })()
+      ? 'A consulta da planilha falhou. Os valores exibidos podem ser os últimos carregados.'
       : undefined;
 
+  const overviewValuesPending = fetchingOverview && !loadingOverview;
   const rawList = (overviewData?.data ?? []) as ContractOverview[];
   const filterYear = overviewData?.filterYear ?? null;
 
@@ -296,6 +293,7 @@ export default function ControleGeralContratosPage() {
             detailRows={gastosDetailRows}
             naturezaDetailRows={gastosNaturezaDetailRows}
             isLoading={loadingGastos}
+            isDataRefreshing={refreshingGastos}
             fetchedAt={gastosFetchedAt}
             isError={gastosError}
             errorMessage={gastosErrorMessage}
@@ -310,7 +308,7 @@ export default function ControleGeralContratosPage() {
             panelTitle="Controle de Contratos"
             panelDescription={
               gastosTotvsWarning
-                ? `Dados parcialmente disponíveis (${gastosTotvsWarning})`
+                ? `Dados parcialmente disponíveis. ${gastosTotvsWarning}`
                 : 'Faturamento, recebimentos e gastos por contrato'
             }
             totalColumnLabel="Gastos"
@@ -349,6 +347,12 @@ export default function ControleGeralContratosPage() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">
                         Acompanhe faturamento e produção por contrato
                       </p>
+                      {overviewValuesPending ? (
+                        <p className="mt-1 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          Carregando valores…
+                        </p>
+                      ) : null}
                     </div>
                   </div>
 
@@ -451,26 +455,44 @@ export default function ControleGeralContratosPage() {
                                 {c.costCenter?.name || c.costCenter?.code || '-'}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-right font-medium text-green-600 dark:text-green-400">
-                                {formatCurrency(c.faturamentoAcumulado)}
+                                {overviewValuesPending ? (
+                                  <OverviewValueLoading />
+                                ) : (
+                                  formatCurrency(c.faturamentoAcumulado)
+                                )}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-right font-medium text-emerald-500/90 dark:text-emerald-400/90">
-                                {c.faturamentoAnualAplica === false ? (
+                                {overviewValuesPending ? (
+                                  <OverviewValueLoading />
+                                ) : c.faturamentoAnualAplica === false ? (
                                   <span className="text-gray-400 dark:text-gray-500">—</span>
                                 ) : (
                                   formatCurrency(c.faturamentoAnual)
                                 )}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-center">
-                                <span className="inline-flex items-center gap-1 text-gray-900 dark:text-gray-100">
-                                  <BarChart3 className="h-4 w-4 text-amber-500" />
-                                  {formatCurrency(c.totalProducaoSemanal)}
-                                </span>
+                                {overviewValuesPending ? (
+                                  <OverviewValueLoading />
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-gray-900 dark:text-gray-100">
+                                    <BarChart3 className="h-4 w-4 text-amber-500" />
+                                    {formatCurrency(c.totalProducaoSemanal)}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-right font-medium text-gray-900 dark:text-gray-100">
-                                {formatCurrency(c.valorOrcado)}
+                                {overviewValuesPending ? (
+                                  <OverviewValueLoading />
+                                ) : (
+                                  formatCurrency(c.valorOrcado)
+                                )}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-right font-medium text-amber-700 dark:text-amber-400">
-                                {formatCurrency(c.pendenteFaturamento)}
+                                {overviewValuesPending ? (
+                                  <OverviewValueLoading />
+                                ) : (
+                                  formatCurrency(c.pendenteFaturamento)
+                                )}
                               </td>
                               <td className="px-3 sm:px-6 py-4 text-right">
                                 <Link
@@ -492,23 +514,41 @@ export default function ControleGeralContratosPage() {
                               Total ({totalFiltered} {totalFiltered === 1 ? 'contrato' : 'contratos'})
                             </td>
                             <td className="px-3 sm:px-6 py-4 text-right text-green-600 dark:text-green-400">
-                              {formatCurrency(totals.faturamentoAcumulado)}
+                              {overviewValuesPending ? (
+                                <OverviewValueLoading />
+                              ) : (
+                                formatCurrency(totals.faturamentoAcumulado)
+                              )}
                             </td>
                             <td className="px-3 sm:px-6 py-4 text-right text-emerald-500/90 dark:text-emerald-400/90">
-                              {filterYear == null ? (
+                              {overviewValuesPending ? (
+                                <OverviewValueLoading />
+                              ) : filterYear == null ? (
                                 <span className="text-gray-400 dark:text-gray-500">—</span>
                               ) : (
                                 formatCurrency(totals.faturamentoAnual)
                               )}
                             </td>
                             <td className="px-3 sm:px-6 py-4 text-center text-gray-900 dark:text-gray-100">
-                              {formatCurrency(totals.totalProducaoSemanal)}
+                              {overviewValuesPending ? (
+                                <OverviewValueLoading />
+                              ) : (
+                                formatCurrency(totals.totalProducaoSemanal)
+                              )}
                             </td>
                             <td className="px-3 sm:px-6 py-4 text-right text-gray-900 dark:text-gray-100">
-                              {formatCurrency(totals.valorOrcado)}
+                              {overviewValuesPending ? (
+                                <OverviewValueLoading />
+                              ) : (
+                                formatCurrency(totals.valorOrcado)
+                              )}
                             </td>
                             <td className="px-3 sm:px-6 py-4 text-right text-amber-700 dark:text-amber-400">
-                              {formatCurrency(totals.pendenteFaturamento)}
+                              {overviewValuesPending ? (
+                                <OverviewValueLoading />
+                              ) : (
+                                formatCurrency(totals.pendenteFaturamento)
+                              )}
                             </td>
                             <td className="px-3 sm:px-6 py-4" />
                           </tr>

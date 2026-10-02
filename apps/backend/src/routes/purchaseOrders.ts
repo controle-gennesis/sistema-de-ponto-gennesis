@@ -40,6 +40,43 @@ const boletoUpload = multer({
 
 router.use(authenticate);
 
+router.get('/totvs-link', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    // Sempre o usuário autenticado — nunca aceita userId de outro na query/body.
+    const { userTotvsCredentialService } = await import('../services/UserTotvsCredentialService');
+    const data = await userTotvsCredentialService.getStatus(req.user.id);
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/totvs-link', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const totvsUser = typeof req.body?.totvsUser === 'string' ? req.body.totvsUser : '';
+    const totvsPassword = typeof req.body?.totvsPassword === 'string' ? req.body.totvsPassword : '';
+    const { userTotvsCredentialService } = await import('../services/UserTotvsCredentialService');
+    // Grava só no userId da sessão; ignora qualquer targetUserId enviado no body.
+    const data = await userTotvsCredentialService.link(req.user.id, totvsUser, totvsPassword);
+    res.json({ success: true, data, message: 'Usuário TOTVS vinculado' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/totvs-link', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const { userTotvsCredentialService } = await import('../services/UserTotvsCredentialService');
+    const data = await userTotvsCredentialService.unlink(req.user.id);
+    res.json({ success: true, data, message: 'Vínculo TOTVS removido' });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);

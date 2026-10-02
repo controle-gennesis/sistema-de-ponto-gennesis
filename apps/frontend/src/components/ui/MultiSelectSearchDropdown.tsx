@@ -186,35 +186,29 @@ function DropdownCheckbox({
   noFocusRing?: boolean;
   children?: React.ReactNode;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
-  }, [indeterminate]);
-
   const filled = checked || Boolean(indeterminate);
 
   return (
-    <label
+    <div
+      id={id}
+      role="checkbox"
+      aria-checked={indeterminate ? 'mixed' : checked}
+      aria-disabled={disabled || undefined}
       className={`group flex w-full min-h-[2.5rem] items-center gap-3 rounded-md px-2.5 py-2 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/55 ${
         disabled ? 'opacity-45 cursor-not-allowed hover:bg-transparent' : ''
       }`}
-      onPointerDown={(e) => {
+      onMouseDown={(e) => {
+        // Sem foco: um input/botão focado faz o browser rolar o modal
+        // (overflow:hidden) e o painel fica só com o fundo.
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
         if (!disabled) onToggle();
       }}
     >
-      <input
-        ref={ref}
-        id={id}
-        type="checkbox"
-        className="sr-only"
-        checked={checked}
-        disabled={disabled}
-        readOnly
-        tabIndex={-1}
-        aria-hidden
-      />
       <span
         className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors outline-none ${
           noFocusRing
@@ -241,7 +235,7 @@ function DropdownCheckbox({
       <span className="min-w-0 flex-1 break-words text-sm leading-snug text-gray-800 dark:text-gray-100">
         {children}
       </span>
-    </label>
+    </div>
   );
 }
 
@@ -411,9 +405,10 @@ function MenuPanel({
               onClick={(e) => {
                 e.stopPropagation();
                 setSearch('');
-                searchInputRef.current?.focus();
+                searchInputRef.current?.focus({ preventScroll: true });
               }}
               className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 outline-none transition-colors hover:bg-gray-200/80 hover:text-gray-600 focus:ring-0 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              onMouseDown={(e) => e.preventDefault()}
               aria-label="Limpar pesquisa"
             >
               <X className="h-4 w-4" />
@@ -452,7 +447,7 @@ function MenuPanel({
 
       <div
         ref={listRef as React.RefObject<HTMLDivElement>}
-        className="overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        className="overflow-y-auto overflow-x-hidden px-1.5 py-1 [overflow-anchor:none]"
         style={{ maxHeight: listMaxHeight }}
       >
         {options.length === 0 ? (
@@ -560,7 +555,7 @@ export function MultiSelectSearchDropdown({
   useEffect(() => {
     if (!open) return;
     if (!menuInline && !floatingPos) return;
-    const id = window.requestAnimationFrame(() => searchInputRef.current?.focus());
+    const id = window.requestAnimationFrame(() => searchInputRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(id);
   }, [open, menuInline, floatingPos]);
 
@@ -588,19 +583,18 @@ export function MultiSelectSearchDropdown({
       listScrollTopRef.current = 0;
       return;
     }
-    if (menuInline) return;
     listScrollTopRef.current = 0;
     if (listRef.current) listRef.current.scrollTop = 0;
-  }, [open, menuInline, search]);
+  }, [open, search]);
 
-  // Preserva a posição ao marcar/desmarcar (re-render do pai).
+  // Preserva a posição ao marcar/desmarcar (re-render do pai), inclusive no menu inline do modal.
   useLayoutEffect(() => {
-    if (!open || menuInline || !listRef.current) return;
+    if (!open || !listRef.current) return;
     listRef.current.scrollTop = listScrollTopRef.current;
-  }, [open, menuInline, selected]);
+  }, [open, selected]);
 
   useEffect(() => {
-    if (!open || menuInline) return;
+    if (!open) return;
     const list = listRef.current;
     if (!list) return;
     const onListScroll = () => {
@@ -608,7 +602,7 @@ export function MultiSelectSearchDropdown({
     };
     list.addEventListener('scroll', onListScroll, { passive: true });
     return () => list.removeEventListener('scroll', onListScroll);
-  }, [open, menuInline, floatingPos]);
+  }, [open, floatingPos]);
 
   useEffect(() => {
     if (disabled && open) {

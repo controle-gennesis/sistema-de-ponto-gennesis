@@ -584,8 +584,9 @@ function resolveDetailRowPolo(row: QueryGastosDetailRow): string {
 function buildPoloByContractMap(detailRows: QueryGastosDetailRow[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const row of detailRows) {
-    if (!map.has(row.contract)) {
-      map.set(row.contract, resolveDetailRowPolo(row));
+    const contract = resolveCanonicalGastosContractName(row.contract);
+    if (!map.has(contract)) {
+      map.set(contract, resolveDetailRowPolo(row));
     }
   }
   return map;
@@ -609,7 +610,9 @@ export function getGastosPoloFilterOptions(
     a.localeCompare(b, 'pt-BR')
   );
   const years = Array.from(new Set(detailRows.map((row) => row.year))).sort((a, b) => b - a);
-  const allContracts = Array.from(new Set(detailRows.map((row) => row.contract)));
+  const allContracts = Array.from(
+    new Set(detailRows.map((row) => resolveCanonicalGastosContractName(row.contract)))
+  );
   const contracts = sortContractNamesByCustomOrder(
     allContracts.filter((contract) => {
       if (!filters?.polos?.length) return true;
@@ -627,7 +630,9 @@ export function getGastosFilterOptions(
   visibleLocalities?: readonly string[]
 ): GastosOperacionaisFilterOptions {
   const years = Array.from(new Set(detailRows.map((row) => row.year))).sort((a, b) => b - a);
-  const allContracts = Array.from(new Set(detailRows.map((row) => row.contract)));
+  const allContracts = Array.from(
+    new Set(detailRows.map((row) => resolveCanonicalGastosContractName(row.contract)))
+  );
   const contracts = sortContractNamesByCustomOrder(
     allContracts.filter((contract) => {
       if (!isContractInVisibleLocalities(contract, visibleLocalities, localityOverrides)) {
@@ -650,7 +655,10 @@ export function filterGastosDetailRowsByPolo(
       return false;
     }
     if (!rowPaymentDateIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
-    if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
+    if (filters.contracts.length) {
+      const selected = new Set(filters.contracts.map((name) => getGastosContractAggregateKey(name)));
+      if (!selected.has(getGastosContractAggregateKey(row.contract))) return false;
+    }
     return true;
   });
 }
@@ -684,7 +692,10 @@ export function filterGastosDetailRows(
       return false;
     }
     if (!rowPaymentDateIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
-    if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
+    if (filters.contracts.length) {
+      const selected = new Set(filters.contracts.map((name) => getGastosContractAggregateKey(name)));
+      if (!selected.has(getGastosContractAggregateKey(row.contract))) return false;
+    }
     return true;
   });
 }
@@ -756,13 +767,9 @@ export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): G
 /**
  * Garante que contratos do catálogo (ex.: DF/GO - ADM LOCAL) apareçam na tabela
  * mesmo sem linhas na planilha de gastos — necessário para restaurar ocultos.
- * Também inclui contratos cadastrados no banco e chaves ocultas salvas localmente.
+ * Contratos criados no módulo de Contratos da Engenharia não entram aqui:
+ * só catálogo, planilha/TOTVS e chaves ocultas salvas localmente.
  */
-export type GastosMergeDatabaseContract = {
-  name: string;
-  costCenter?: { code?: string; name?: string } | null;
-};
-
 function mergeContractNameIntoRows(
   byKey: Map<string, GastosOperacionaisRow>,
   contract: string
@@ -808,7 +815,6 @@ export function mergeCatalogContractsIntoGastosRows(
   rows: GastosOperacionaisRow[],
   visibleLocalities?: readonly string[],
   options?: {
-    databaseContracts?: readonly GastosMergeDatabaseContract[];
     spreadsheetContracts?: readonly string[];
     excludedContractKeys?: readonly string[];
     resolveExcludedLabel?: (key: string) => string | undefined;
@@ -842,15 +848,6 @@ export function mergeCatalogContractsIntoGastosRows(
       options?.localitiesCatalog
     )) {
       namesToMerge.add(contract);
-    }
-
-    for (const entry of options?.databaseContracts ?? []) {
-      const name = entry.name?.trim();
-      if (!name) continue;
-      if (!shouldMergeContractForVisibleLocalities(name, visibleLocalities, localityOverrides, entry.costCenter)) {
-        continue;
-      }
-      namesToMerge.add(name);
     }
 
     for (const contract of options?.spreadsheetContracts ?? []) {

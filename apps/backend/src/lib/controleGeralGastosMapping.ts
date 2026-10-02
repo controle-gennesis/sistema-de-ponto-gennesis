@@ -20,7 +20,7 @@ export const NFS_TAB_GASTOS_COST_CENTERS: Record<string, readonly string[]> = {
   'seinfra-aparecida': ['SEINFRA - APARECIDA'],
   'senac-df': ['SENAC - DF'],
   ses: ['SES - LOTE 10', 'SES - LOTE 12', 'SES - LOTE 14', 'SES - LOTE 17'],
-  stm: ['STM - DF', 'STM'],
+  stm: ['STM - DF', 'STM', 'STM - SUPERIOR TRIBUNAL MILITAR'],
   'tjgo-manutencao': [
     'TJ MANUTENÇÃO CALDAS NOVAS - CORRETIVA',
     'TJ MANUTENÇÃO RIO VERDE - CORRETIVA',

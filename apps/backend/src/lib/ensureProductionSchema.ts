@@ -554,6 +554,46 @@ async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void>
   }
 }
 
+let userTotvsCredentialsTablePromise: Promise<void> | null = null;
+
+/** Credenciais TOTVS por usuário do Conecta (login/senha para POST de OC). */
+export async function ensureUserTotvsCredentialsTable(prisma: PrismaClient): Promise<void> {
+  if (!userTotvsCredentialsTablePromise) {
+    userTotvsCredentialsTablePromise = (async () => {
+      if (await tableExists(prisma, 'user_totvs_credentials')) return;
+      console.warn('[Schema] Tabela user_totvs_credentials ausente — criando.');
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "user_totvs_credentials" (
+          "id" TEXT NOT NULL,
+          "userId" TEXT NOT NULL,
+          "totvsUser" TEXT NOT NULL,
+          "totvsPasswordEnc" TEXT NOT NULL,
+          "linkedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "user_totvs_credentials_pkey" PRIMARY KEY ("id")
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "user_totvs_credentials_userId_key"
+        ON "user_totvs_credentials"("userId");
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$ BEGIN
+          ALTER TABLE "user_totvs_credentials"
+            ADD CONSTRAINT "user_totvs_credentials_userId_fkey"
+            FOREIGN KEY ("userId") REFERENCES "users"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+      `);
+    })().catch((err) => {
+      userTotvsCredentialsTablePromise = null;
+      throw err;
+    });
+  }
+  await userTotvsCredentialsTablePromise;
+}
+
 let purchaseOrderTotvsFieldsPromise: Promise<void> | null = null;
 
 export async function ensurePurchaseOrderTotvsFields(prisma: PrismaClient): Promise<void> {
@@ -1968,6 +2008,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);
+    await ensureUserTotvsCredentialsTable(prisma);
     await ensureConstructionMaterialTotvsIdPrd(prisma);
     await ensureStockLocationsTable(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);

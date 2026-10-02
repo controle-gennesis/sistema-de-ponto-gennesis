@@ -148,8 +148,23 @@ model User {
   gestaoOsTeamMemberships                   GestaoOsTeamMember[]                 @relation("GestaoOsTeamMemberUser")
   trainingCoursesCreated                    TrainingCourse[]                     @relation("TrainingCourseCreator")
   trainingEnrollments                       TrainingEnrollment[]                 @relation("TrainingEnrollmentUser")
+  totvsCredential                           UserTotvsCredential?
 
   @@map("users")
+}
+
+/// Login/senha TOTVS do usuário Conecta (senha criptografada) para POST de OC.
+model UserTotvsCredential {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  totvsUser        String
+  totvsPasswordEnc String
+  linkedAt         DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_totvs_credentials")
 }
 
 // Modelo de FuncionÃ¡rio

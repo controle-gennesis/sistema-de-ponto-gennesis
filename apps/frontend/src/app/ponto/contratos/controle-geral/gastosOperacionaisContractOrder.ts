@@ -209,8 +209,9 @@ const GASTOS_OPERACIONAIS_CONTRACT_ALIASES: Readonly<Record<string, string>> = {
   [normalizeContractOrderKey('SES GDF - LOTE 12')]: 'SES - LOTE 12',
   [normalizeContractOrderKey('SES GDF - LOTE 14')]: 'SES - LOTE 14',
   [normalizeContractOrderKey('SES GDF - LOTE 17')]: 'SES - LOTE 17',
-  // Cadastro/TOTVS usa "STM"; o catálogo usa "STM - DF".
+  // Cadastro/TOTVS usa "STM" ou o nome completo; o catálogo usa "STM - DF".
   [normalizeContractOrderKey('STM')]: 'STM - DF',
+  [normalizeContractOrderKey('STM - SUPERIOR TRIBUNAL MILITAR')]: 'STM - DF',
   // Cadastro usa o nome curto; o catálogo inclui o endereço.
   [normalizeContractOrderKey('CONFEA 508')]: 'CONFEA - 508 NORTE',
   [normalizeContractOrderKey('CONFEA 516')]: 'CONFEA - 516 NORTE'

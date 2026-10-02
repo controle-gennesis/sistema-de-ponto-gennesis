@@ -8,6 +8,7 @@ const GASTOS_OPERACIONAIS_CONTRACT_ALIASES: Readonly<Record<string, string>> = {
   [normalizeCostCenterKey('TJGO RETROFIT PARCEIROS - LOTE 5')]:
     'TJGO RETROFIT PARCEIROS - LOTES 5',
   [normalizeCostCenterKey('STM')]: 'STM - DF',
+  [normalizeCostCenterKey('STM - SUPERIOR TRIBUNAL MILITAR')]: 'STM - DF',
   [normalizeCostCenterKey('CONFEA 508')]: 'CONFEA - 508 NORTE',
   [normalizeCostCenterKey('CONFEA 516')]: 'CONFEA - 516 NORTE',
 };
