@@ -5354,6 +5354,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   inputMode,
   mask,
   commitOnChange = true,
+  disabled = false,
 }: {
   draftKey?: string;
   committedValue: string;
@@ -5366,6 +5367,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
   mask?: (raw: string) => string;
   commitOnChange?: boolean;
+  disabled?: boolean;
 }) {
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
@@ -5441,9 +5443,11 @@ const FdCampoLocal = memo(function FdCampoLocal({
       placeholder={placeholder}
       title={title}
       autoComplete="off"
+      disabled={disabled}
       className={className}
       value={local}
       onFocus={() => {
+        if (disabled) return;
         focusedRef.current = true;
         const edit = String(editOnFocusRef.current ?? '').trim();
         if (edit) {
@@ -5452,8 +5456,12 @@ const FdCampoLocal = memo(function FdCampoLocal({
           if (draftKey) fdCampoDrafts.set(draftKey, edit);
         }
       }}
-      onChange={(e) => applyValue(e.target.value, commitOnChange ? 'live' : 'local')}
+      onChange={(e) => {
+        if (disabled) return;
+        applyValue(e.target.value, commitOnChange ? 'live' : 'local');
+      }}
       onKeyDown={(e) => {
+        if (disabled) return;
         if (e.key !== 'Enter') return;
         e.preventDefault();
         e.stopPropagation();
@@ -5461,6 +5469,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onBlur={(e) => {
         focusedRef.current = false;
+        if (disabled) return;
         const raw = e.target.value;
         applyValue(raw, 'blur');
         const shown = displayAfterCommitRef.current?.(raw);
@@ -13892,7 +13901,10 @@ export function OrcamentoPageView({
                         onIrOrcamento={() => setOrcamentoViewTab('montagem')}
                       />
                     ) : (
-                      <div className="space-y-5 bg-transparent">
+                      <div
+                        className={`space-y-5 bg-transparent${gradeTravada ? ' pointer-events-none select-none' : ''}`}
+                        aria-disabled={gradeTravada || undefined}
+                      >
                         {itensMemoriaCalculoLista.map((row, rowIdx) => (
                           <section key={row.key} id={`memorial-medicoes-${row.key}`} className="scroll-mt-4 bg-transparent">
                             <OrcamentoMedicaoPainel
@@ -13978,8 +13990,7 @@ export function OrcamentoPageView({
                       style={gradeZoomStyle}
                     >
                       <table
-                        className={`min-w-[1840px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}${gradeTravada ? ' select-none' : ''}`}
-                        {...(gradeTravada ? ({ inert: '' } as React.HTMLAttributes<HTMLTableElement>) : {})}
+                        className={`min-w-[1840px] w-full border-separate border-spacing-0 text-sm ${gradeTableCls}${gradeTravada ? ' pointer-events-none select-none' : ''}`}
                         aria-disabled={gradeTravada || undefined}
                       >
                         <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -14141,7 +14152,12 @@ export function OrcamentoPageView({
                                       onCommit={(raw) =>
                                         renomearTituloOrcamento(servicoIdLista, raw)
                                       }
-                                      title="Clique para editar o título"
+                                      disabled={gradeTravada}
+                                      title={
+                                        gradeTravada
+                                          ? 'Orçamento travado — não é possível editar'
+                                          : 'Clique para editar o título'
+                                      }
                                       className="w-full min-w-0 cursor-text border-0 bg-transparent p-0 text-left text-xs font-bold uppercase tracking-wide text-white caret-white outline-none ring-0 placeholder:text-white/50 focus:ring-0"
                                     />
                                   </div>
@@ -14226,7 +14242,12 @@ export function OrcamentoPageView({
                                         const subId = bloco.key.split('|')[1] ?? '';
                                         if (subId) renomearSubtituloOrcamento(servicoIdLista, subId, raw);
                                       }}
-                                      title="Clique para editar o subtítulo"
+                                      disabled={gradeTravada}
+                                      title={
+                                        gradeTravada
+                                          ? 'Orçamento travado — não é possível editar'
+                                          : 'Clique para editar o subtítulo'
+                                      }
                                       className="w-full min-w-0 cursor-text border-0 bg-transparent p-0 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-800 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-200 dark:placeholder:text-gray-500 sm:text-xs"
                                     />
                                   </div>
@@ -14317,6 +14338,7 @@ export function OrcamentoPageView({
                                             }
                                             editValueOnFocus={formulasQuantidadePorItem[row.key]}
                                             commitOnChange={false}
+                                            disabled={gradeTravada}
                                             displayAfterCommit={raw => {
                                               const t = String(raw ?? '').trim();
                                               if (!t) return '';
@@ -14343,9 +14365,11 @@ export function OrcamentoPageView({
                                             inputMode="decimal"
                                             placeholder="0"
                                             title={
-                                              formulasQuantidadePorItem[row.key]
-                                                ? `Fórmula: ${formulasQuantidadePorItem[row.key]}`
-                                                : 'Quantidade do orçamento (editar aqui não altera a memória de cálculo)'
+                                              gradeTravada
+                                                ? 'Orçamento travado — não é possível editar'
+                                                : formulasQuantidadePorItem[row.key]
+                                                  ? `Fórmula: ${formulasQuantidadePorItem[row.key]}`
+                                                  : 'Quantidade do orçamento (editar aqui não altera a memória de cálculo)'
                                             }
                                             className={`${inputGradeCls} text-center tabular-nums`}
                                           />
@@ -14380,7 +14404,13 @@ export function OrcamentoPageView({
                                           draftKey={`orc-obs:${row.key}`}
                                           committedValue={observacoesPorItem[row.key] ?? ''}
                                           onCommit={(raw) => commitObservacaoOrcamento(row.key, raw)}
+                                          disabled={gradeTravada}
                                           placeholder="Adicionar observação..."
+                                          title={
+                                            gradeTravada
+                                              ? 'Orçamento travado — não é possível editar'
+                                              : undefined
+                                          }
                                           className={`${inputGradeCls} text-left`}
                                         />
                                       </td>

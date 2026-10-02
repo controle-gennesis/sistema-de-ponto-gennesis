@@ -352,6 +352,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       onCommit: (n: number, formulaRaw: string) => void,
       rowCtx?: FormulaRowCtx
     ) => {
+      if (readOnly) return;
       setDraftCalc((p) => ({ ...p, [draftKey]: raw }));
       calcCommittersRef.current[draftKey] = onCommit;
       if (rowCtx) calcRowCtxRef.current[draftKey] = rowCtx;
@@ -364,7 +365,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         startTransition(() => onCommit(n ?? 0, raw));
       }, MEMORIAL_COMMIT_MS);
     },
-    []
+    [readOnly]
   );
 
   const valorExibicaoCalc = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
@@ -496,6 +497,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const stickyHeaderTopStyle = { top: tituloItemRowH } as const;
 
   useEffect(() => {
+    if (!readOnly) return;
+    setMenuCtxMedicao(null);
+    const ae = typeof document !== 'undefined' ? document.activeElement : null;
+    if (ae instanceof HTMLElement) ae.blur();
+  }, [readOnly]);
+
+  useEffect(() => {
     if (!menuCtxMedicao) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -531,6 +539,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   const abrirMenuCtxMedicao = (e: React.MouseEvent, idx: number) => {
+    if (readOnly) return;
     if (e.type === 'click' && eventoSobreCampoEditavel(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -601,10 +610,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           committedValue={dim.observacao ?? ''}
           onCommit={raw => updateObservacaoMedicao?.(raw)}
           onLocalChange={setObsLocalDraft}
-          disabled={!updateObservacaoMedicao}
+          disabled={readOnly || !updateObservacaoMedicao}
           placeholder="Observação..."
           ariaLabel="Observação do item"
-          title="Observação"
+          title={readOnly ? 'Memória travada — não é possível editar' : 'Observação'}
           className={localValue =>
             `absolute inset-0 box-border h-full w-full min-w-0 border-0 bg-transparent px-2.5 py-2 text-left text-xs font-medium leading-snug shadow-none outline-none ring-0 transition-colors placeholder:font-normal placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:placeholder:text-slate-500 sm:px-3 ${
               localValue.trim()
@@ -671,7 +680,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             triggerClassName={`${selectGradeHeaderMemorialCls} !min-h-0 !h-full !py-0`}
             hideChevron
             value={valorAtual}
-            disabled={!updateRotuloColunaMedicao}
+            disabled={readOnly || !updateRotuloColunaMedicao}
             onChange={(value) => updateRotuloColunaMedicao?.(col, value)}
             options={lista}
             allowEmpty={false}
@@ -694,7 +703,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <MemorialCampoLocal
             committedValue={dim.rotulosColunas?.descricao ?? 'DESCRIÇÃO: '}
             onCommit={(raw) => updateRotuloColunaMedicao?.('descricao', raw)}
-            disabled={!updateRotuloColunaMedicao}
+            disabled={readOnly || !updateRotuloColunaMedicao}
             className={inputThDescricaoCls}
             ariaLabel="Rótulo da coluna Descrição"
           />
@@ -738,6 +747,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <MemorialCampoLocal
             committedValue={ln.descricao ?? 'DESCRIÇÃO: '}
             onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
+            disabled={readOnly}
             className={inputThDescricaoCls}
             ariaLabel="Descrição da linha de cabeçalho de seção"
           />
@@ -804,6 +814,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         <td
           className={`${tdRestBody} text-center ${highlight}`}
           onMouseDown={e => {
+            if (readOnly) return;
             if (onPickFormulaCell(e, idx, campo, campo)) return;
           }}
         >
@@ -812,8 +823,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             inputMode="decimal"
             placeholder={campo === 'N' ? '1' : '0'}
             value={valorExibicaoCalc(draftKey, formula, formatado)}
-            onFocus={() => focarCalc(draftKey, formula, formatado)}
-            onChange={e => handleCalcChange(draftKey, e.target.value, onCommit, rowCtx)}
+            disabled={readOnly}
+            onFocus={() => {
+              if (readOnly) return;
+              focarCalc(draftKey, formula, formatado);
+            }}
+            onChange={e => {
+              if (readOnly) return;
+              handleCalcChange(draftKey, e.target.value, onCommit, rowCtx);
+            }}
             onKeyDown={handleCalcKeyDown}
             onBlur={e =>
               handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, onCommit, rowCtx)
@@ -869,8 +887,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             inputMode="decimal"
             placeholder="0"
             value={valorExibicaoCalc(draftKey, formula, exibir)}
-            onFocus={() => focarCalc(draftKey, formula, exibir)}
-            onChange={e => handleCalcChange(draftKey, e.target.value, persistir, rowCtx)}
+            disabled={readOnly}
+            onFocus={() => {
+              if (readOnly) return;
+              focarCalc(draftKey, formula, exibir);
+            }}
+            onChange={e => {
+              if (readOnly) return;
+              handleCalcChange(draftKey, e.target.value, persistir, rowCtx);
+            }}
             onKeyDown={handleCalcKeyDown}
             onBlur={e =>
               handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, persistir, rowCtx)
@@ -905,6 +930,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <MemorialCampoLocal
             committedValue={ln.descricao || ''}
             onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
+            disabled={readOnly}
             placeholder="Ex: COBERTURA DAS CALDEIRAS"
             className={`${inputCls} !px-3 text-left sm:!px-3.5`}
           />
@@ -915,6 +941,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         <td
           className={`${tdRestBody} text-center ${empolHighlight}`}
           onMouseDown={e => {
+            if (readOnly) return;
             if (onPickFormulaCell(e, idx, 'empol', '%')) return;
           }}
         >
@@ -923,8 +950,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             inputMode="decimal"
             placeholder="1"
             value={valorExibicaoCalc(empolDraftKey, empolFormula, empolFormatado)}
-            onFocus={() => focarCalc(empolDraftKey, empolFormula, empolFormatado)}
-            onChange={e => handleCalcChange(empolDraftKey, e.target.value, empolOnCommit, rowCtx)}
+            disabled={readOnly}
+            onFocus={() => {
+              if (readOnly) return;
+              focarCalc(empolDraftKey, empolFormula, empolFormatado);
+            }}
+            onChange={e => {
+              if (readOnly) return;
+              handleCalcChange(empolDraftKey, e.target.value, empolOnCommit, rowCtx);
+            }}
             onKeyDown={handleCalcKeyDown}
             onBlur={e =>
               handleCalcBlur(
@@ -1061,9 +1095,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const painelShell = (body: React.ReactNode) => (
     <>
       <div
-        className={`space-y-3${readOnly ? ' select-none' : ''}`}
-        {...(readOnly ? ({ inert: '' } as React.HTMLAttributes<HTMLDivElement>) : {})}
+        className={`space-y-3${readOnly ? ' pointer-events-none select-none' : ''}`}
         aria-disabled={readOnly || undefined}
+        data-memorial-locked={readOnly ? 'true' : undefined}
       >
         {body}
       </div>
