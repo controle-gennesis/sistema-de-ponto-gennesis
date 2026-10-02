@@ -31,6 +31,7 @@ import {
   SECTOR_TABLE_HEADERS,
   type ParsedWorkflowRow,
 } from '@/lib/fluigWorkflowApproval';
+import { isFluigDatasetTemporarilyDisabled } from '@/lib/fluigDisabledDatasets';
 import { ApprovalStepCell } from '@/components/fluig/fluigWorkflowStepStatus';
 import { FluigWorkflowRequestDetailModal } from '@/components/fluig/FluigWorkflowRequestDetailModal';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -214,6 +215,7 @@ export function FluigWorkflowAprovacoesPage() {
         return res.data;
       },
       staleTime: 7 * 60 * 1000,
+      enabled: !isFluigDatasetTemporarilyDisabled(id),
     })),
   });
 

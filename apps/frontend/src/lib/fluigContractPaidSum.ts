@@ -3,8 +3,12 @@
  * alinhado às etapas usadas em FluigSolicitacoesPage.
  */
 
-export const FLUIG_CONTRACT_PAID_DATASETS = ['G5-Relatorio-DF-GO-TODOS-SETORES'] as const;
-// DataSet_G4FollowUp temporariamente fora — ver fluigDisabledDatasets.ts
+import { filterActiveFluigDatasets } from '@/lib/fluigDisabledDatasets';
+
+/** Lista canônica; com fetch desligado fica vazia (código de soma permanece). */
+export const FLUIG_CONTRACT_PAID_DATASETS = filterActiveFluigDatasets([
+  'G5-Relatorio-DF-GO-TODOS-SETORES',
+] as const);
 
 export type FluigContractPaidTarget = {
   name: string;

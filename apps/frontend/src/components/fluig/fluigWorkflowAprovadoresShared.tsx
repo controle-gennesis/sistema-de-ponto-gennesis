@@ -31,6 +31,7 @@ import {
   type WorkflowApproverRequestRef,
   type WorkflowSector,
 } from '@/lib/fluigWorkflowApproval';
+import { isFluigDatasetTemporarilyDisabled } from '@/lib/fluigDisabledDatasets';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ExpandableText } from '@/components/ui/ExpandableText';
@@ -184,7 +185,7 @@ export function useFluigWorkflowApprovalDatasets(options?: {
         return res.data;
       },
       staleTime: 7 * 60 * 1000,
-      enabled,
+      enabled: enabled && !isFluigDatasetTemporarilyDisabled(id),
     })),
   });
 

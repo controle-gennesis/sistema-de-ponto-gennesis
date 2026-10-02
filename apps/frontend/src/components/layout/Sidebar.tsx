@@ -107,17 +107,17 @@ import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { postLoginPath } from '@/lib/postLoginPath';
 import { filterActiveFluigDatasets } from '@/lib/fluigDisabledDatasets';
 
-const FLUIG_APPROVAL_DATASET_IDS = [
+const FLUIG_APPROVAL_DATASET_IDS = filterActiveFluigDatasets([
   'Processos_Workflow_Aprovacao_G3',
   'Processos_Workflow_Aprovacao_G5',
-];
+]);
 const FLUIG_PROCESSOS_DATASET_IDS = filterActiveFluigDatasets([
   'DataSet_G3FollowUp',
   'DataSet_G4FollowUp',
   'G5-Relatorio-DF-GO-TODOS-SETORES',
 ]);
-const FLUIG_DP_DATASET_IDS = ['G5-Relatorio-DF-GO-DP'];
-const FLUIG_JURIDICO_DATASET_IDS = ['G5-Relatorio-DF-GO-JURIDICO'];
+const FLUIG_DP_DATASET_IDS = filterActiveFluigDatasets(['G5-Relatorio-DF-GO-DP']);
+const FLUIG_JURIDICO_DATASET_IDS = filterActiveFluigDatasets(['G5-Relatorio-DF-GO-JURIDICO']);
 const FLUIG_PREFETCH_HREFS = new Set([
   '/ponto/fluig/aprovacoes-workflow',
   '/ponto/fluig/aprovadores',

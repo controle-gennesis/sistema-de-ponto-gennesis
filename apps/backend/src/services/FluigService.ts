@@ -26,6 +26,24 @@ interface DatasetCacheEntry {
 const CACHE_FRESH_TTL_MS = 8 * 60 * 1000;
 const CACHE_STALE_TTL_MS = 25 * 60 * 1000;
 
+/**
+ * Temporário: não buscar datasets BI/aprovação no Fluig (código permanece).
+ * Espelha `apps/frontend/src/lib/fluigDisabledDatasets.ts`.
+ * Para reativar: `false`.
+ */
+const FLUIG_DISABLE_ALL_DATASET_FETCHES = true;
+const FLUIG_FETCH_ALWAYS_ALLOWED = new Set<string>(['DS_DownloadDocumento']);
+
+function isFluigDatasetFetchDisabled(datasetId: string): boolean {
+  if (FLUIG_FETCH_ALWAYS_ALLOWED.has(datasetId)) return false;
+  return FLUIG_DISABLE_ALL_DATASET_FETCHES;
+}
+
+const EMPTY_FLUIG_DATASET: FluigDatasetValues = {
+  content: { columns: [], values: [] },
+  message: 'Dataset Fluig temporariamente desativado (fetch desligado).',
+};
+
 export interface FluigDatasetStructure {
   content?: {
     datasetId: string;
@@ -242,6 +260,10 @@ export class FluigService {
       order?: string[];
     }
   ): Promise<FluigDatasetValues> {
+    if (isFluigDatasetFetchDisabled(datasetId)) {
+      return EMPTY_FLUIG_DATASET;
+    }
+
     const cacheKey = this.datasetCacheKey(datasetId, options);
     const cached = this.datasetCache.get(cacheKey);
 
@@ -290,9 +312,14 @@ export class FluigService {
 
   /** Pré-aquece o cache dos datasets informados (executar após subir o servidor). */
   async warmupDatasets(datasetIds: string[]): Promise<void> {
-    console.log(`🔥 Fluig: pré-carregando ${datasetIds.length} dataset(s) em background...`);
+    const active = datasetIds.filter((id) => !isFluigDatasetFetchDisabled(id));
+    if (active.length === 0) {
+      console.log('⏸️  Fluig: warmup ignorado (fetch de datasets desativado).');
+      return;
+    }
+    console.log(`🔥 Fluig: pré-carregando ${active.length} dataset(s) em background...`);
     await Promise.allSettled(
-      datasetIds.map((id) =>
+      active.map((id) =>
         this.getDatasetData(id)
           .then(() => console.log(`✅ Fluig cache warm: ${id}`))
           .catch((err) =>
@@ -310,8 +337,13 @@ export class FluigService {
     datasetIds: string[],
     intervalMs = 8 * 60 * 1000
   ): ReturnType<typeof setInterval> {
+    const active = datasetIds.filter((id) => !isFluigDatasetFetchDisabled(id));
+    if (active.length === 0) {
+      console.log('⏸️  Fluig: refresh periódico ignorado (fetch de datasets desativado).');
+      return setInterval(() => {}, intervalMs);
+    }
     return setInterval(() => {
-      for (const id of datasetIds) {
+      for (const id of active) {
         const cacheKey = this.datasetCacheKey(id);
         const entry = this.datasetCache.get(cacheKey);
         if (entry?.refreshing) continue;

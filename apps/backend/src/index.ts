@@ -700,12 +700,14 @@ try {
     console.log('═══════════════════════════════════════');
     console.log('');
 
-    // Pré-aquecer os datasets Fluig em background para carregamento instantâneo
+    // Pré-aquecer os datasets Fluig em background para carregamento instantâneo.
+    // Com FLUIG_DISABLE_ALL_DATASET_FETCHES no FluigService, warmup/refresh viram no-op.
     if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
       const FLUIG_WARM_DATASETS = [
         'Processos_Workflow_Aprovacao_G3',
         'Processos_Workflow_Aprovacao_G5',
-        // DataSet_G3FollowUp / DataSet_G4FollowUp temporariamente desativados
+        'DataSet_G3FollowUp',
+        'DataSet_G4FollowUp',
         'G5-Relatorio-DF-GO-TODOS-SETORES',
         'G5-Relatorio-DF-GO-DP',
         'G5-Relatorio-DF-GO-JURIDICO',
