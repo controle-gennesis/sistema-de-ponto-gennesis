@@ -14562,38 +14562,46 @@ export function OrcamentoPageView({
                   />
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  {gradeZoomAtivo && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOrcamentoGradeZoom((z) =>
-                            Math.max(ORC_GRADE_ZOOM_MIN, Math.round((z - ORC_GRADE_ZOOM_STEP) * 100) / 100)
-                          )
-                        }
-                        disabled={orcamentoGradeZoom <= ORC_GRADE_ZOOM_MIN + 0.001}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                        title={`Diminuir zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`}
-                        aria-label="Diminuir zoom da tabela"
-                      >
-                        <ZoomOut className="h-4 w-4 shrink-0" aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOrcamentoGradeZoom((z) =>
-                            Math.min(ORC_GRADE_ZOOM_MAX, Math.round((z + ORC_GRADE_ZOOM_STEP) * 100) / 100)
-                          )
-                        }
-                        disabled={orcamentoGradeZoom >= ORC_GRADE_ZOOM_MAX - 0.001}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                        title={`Aumentar zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`}
-                        aria-label="Aumentar zoom da tabela"
-                      >
-                        <ZoomIn className="h-4 w-4 shrink-0" aria-hidden />
-                      </button>
-                    </>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOrcamentoGradeZoom((z) =>
+                        Math.max(ORC_GRADE_ZOOM_MIN, Math.round((z - ORC_GRADE_ZOOM_STEP) * 100) / 100)
+                      )
+                    }
+                    disabled={
+                      !gradeZoomAtivo || orcamentoGradeZoom <= ORC_GRADE_ZOOM_MIN + 0.001
+                    }
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                    title={
+                      gradeZoomAtivo
+                        ? `Diminuir zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
+                        : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
+                    }
+                    aria-label="Diminuir zoom da tabela"
+                  >
+                    <ZoomOut className="h-4 w-4 shrink-0" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOrcamentoGradeZoom((z) =>
+                        Math.min(ORC_GRADE_ZOOM_MAX, Math.round((z + ORC_GRADE_ZOOM_STEP) * 100) / 100)
+                      )
+                    }
+                    disabled={
+                      !gradeZoomAtivo || orcamentoGradeZoom >= ORC_GRADE_ZOOM_MAX - 0.001
+                    }
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                    title={
+                      gradeZoomAtivo
+                        ? `Aumentar zoom da tabela (${Math.round(orcamentoGradeZoom * 100)}%)`
+                        : 'Zoom disponível nas abas Orçamento, Analítico e Ficha de demanda'
+                    }
+                    aria-label="Aumentar zoom da tabela"
+                  >
+                    <ZoomIn className="h-4 w-4 shrink-0" aria-hidden />
+                  </button>
                   {!fichaDemandaOnly && (
                     <button
                     type="button"

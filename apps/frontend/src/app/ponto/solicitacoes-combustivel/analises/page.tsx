@@ -459,6 +459,7 @@ function buildInsights(rows: FuelRefuelRequest[]) {
     .slice(0, 8);
 
   const contractBars = topContracts.map((c) => ({
+    key: c.key,
     name: c.label.length > 18 ? `${c.label.slice(0, 16)}…` : c.label,
     fullName: c.label,
     gasto: Math.round(c.value * 100) / 100,
@@ -516,7 +517,7 @@ function buildInsights(rows: FuelRefuelRequest[]) {
 }
 
 type RankDrillDown = {
-  kind: 'driver' | 'plate';
+  kind: 'driver' | 'plate' | 'contract';
   key: string;
   label: string;
 };
@@ -582,7 +583,11 @@ function AnalisesCombustivelContent() {
         if (rankDrillDown.kind === 'driver') {
           return (r.driverName?.trim() || 'Sem condutor') === rankDrillDown.key;
         }
-        return (r.vehiclePlate?.trim().toUpperCase() || 'SEM PLACA') === rankDrillDown.key;
+        if (rankDrillDown.kind === 'plate') {
+          return (r.vehiclePlate?.trim().toUpperCase() || 'SEM PLACA') === rankDrillDown.key;
+        }
+        const cKey = r.contract?.id || r.costCenter || 'none';
+        return cKey === rankDrillDown.key;
       })
       .map((r) => {
         const liters = toNum(r.litersRefueled);
@@ -613,9 +618,11 @@ function AnalisesCombustivelContent() {
       title={
         rankDrillDown?.kind === 'driver'
           ? `Condutor: ${rankDrillDown.label}`
-          : rankDrillDown
+          : rankDrillDown?.kind === 'plate'
             ? `Veículo: ${rankDrillDown.label}`
-            : 'Solicitações'
+            : rankDrillDown?.kind === 'contract'
+              ? `Contrato: ${rankDrillDown.label}`
+              : 'Solicitações'
       }
       size="lg"
     >
@@ -635,7 +642,9 @@ function AnalisesCombustivelContent() {
               const searchHint =
                 rankDrillDown?.kind === 'plate'
                   ? row.vehiclePlate
-                  : row.driverName || String(row.displayNumber);
+                  : rankDrillDown?.kind === 'contract'
+                    ? shortContractName(row)
+                    : row.driverName || String(row.displayNumber);
               return (
                 <li key={row.id}>
                   <button
@@ -651,7 +660,9 @@ function AnalisesCombustivelContent() {
                         </span>
                       </p>
                       <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                        {shortContractName(row)}
+                        {rankDrillDown?.kind === 'contract'
+                          ? [row.driverName, row.vehiclePlate].filter(Boolean).join(' · ') || '—'
+                          : shortContractName(row)}
                         {rankDrillDown?.kind === 'driver' && row.vehiclePlate
                           ? ` · ${row.vehiclePlate}`
                           : null}
@@ -848,7 +859,7 @@ function AnalisesCombustivelContent() {
       <div className="grid w-full grid-cols-1 gap-6 xl:grid-cols-2">
         <ChartCard
           title="Gasto por contrato"
-          subtitle="Quais contratos mais consomem orçamento de combustível."
+          subtitle="Clique no contrato ou na barra para ver as solicitações."
           Icon={Wallet}
         >
           {insights.contractBars.length === 0 ? (
@@ -871,7 +882,33 @@ function AnalisesCombustivelContent() {
                     type="category"
                     dataKey="name"
                     width={110}
-                    tick={{ fill: theme.chartTick, fontSize: 11 }}
+                    tick={(tickProps) => {
+                      const { x, y, payload } = tickProps;
+                      const item = insights.contractBars.find((b) => b.name === payload.value);
+                      return (
+                        <text
+                          x={x}
+                          y={y}
+                          dy={4}
+                          textAnchor="end"
+                          fill={theme.chartTick}
+                          fontSize={11}
+                          className="cursor-pointer hover:underline"
+                          style={{ cursor: 'pointer' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!item) return;
+                            setRankDrillDown({
+                              kind: 'contract',
+                              key: item.key,
+                              label: item.fullName,
+                            });
+                          }}
+                        >
+                          {payload.value}
+                        </text>
+                      );
+                    }}
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
@@ -880,7 +917,26 @@ function AnalisesCombustivelContent() {
                       (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
                     }
                   />
-                  <Bar dataKey="gasto" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                  <Bar
+                    dataKey="gasto"
+                    radius={[0, 6, 6, 0]}
+                    maxBarSize={22}
+                    cursor="pointer"
+                    onClick={(data) => {
+                      const payload = data as {
+                        key?: string;
+                        fullName?: string;
+                        payload?: { key?: string; fullName?: string };
+                      };
+                      const row = payload.payload ?? payload;
+                      if (!row.key) return;
+                      setRankDrillDown({
+                        kind: 'contract',
+                        key: row.key,
+                        label: row.fullName || row.key,
+                      });
+                    }}
+                  >
                     {insights.contractBars.map((_, i) => (
                       <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
                     ))}
