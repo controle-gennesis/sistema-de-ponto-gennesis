@@ -171,10 +171,17 @@ function ProgressoGaugeCard({
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
       <CardHeading title={title} />
-      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
-        <div className="flex flex-1 flex-col justify-center">
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
+        {/* flex-1 + items-center: arco no meio do espaço entre título e blocos */}
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <div className="mx-auto w-full max-w-[220px]">
-            <svg viewBox="0 0 200 132" className="h-auto w-full" role="img" aria-label={`${title}: ${pctRounded}% faturado`}>
+            {/* viewBox apertado no visual do semicírculo (evita “peso” pra baixo) */}
+            <svg
+              viewBox="0 12 200 112"
+              className="h-auto w-full"
+              role="img"
+              aria-label={`${title}: ${pctRounded}% faturado`}
+            >
               <defs>
                 <pattern
                   id={`hatch-${uid}`}
@@ -189,7 +196,7 @@ function ProgressoGaugeCard({
               </defs>
               {/* Trilha sem caps — o padrão/hatch e o verde cobrem as pontas arredondadas */}
               <path
-                d="M 28 108 A 72 72 0 0 1 172 108"
+                d="M 28 100 A 72 72 0 0 1 172 100"
                 fill="none"
                 stroke={track}
                 strokeWidth="32"
@@ -198,7 +205,7 @@ function ProgressoGaugeCard({
               />
               {pendingLen > 0.4 ? (
                 <path
-                  d="M 28 108 A 72 72 0 0 1 172 108"
+                  d="M 28 100 A 72 72 0 0 1 172 100"
                   fill="none"
                   stroke={`url(#hatch-${uid})`}
                   strokeWidth="32"
@@ -210,7 +217,7 @@ function ProgressoGaugeCard({
               ) : null}
               {pct > 0.4 ? (
                 <path
-                  d="M 28 108 A 72 72 0 0 1 172 108"
+                  d="M 28 100 A 72 72 0 0 1 172 100"
                   fill="none"
                   stroke={billedColor}
                   strokeWidth="32"
@@ -222,27 +229,27 @@ function ProgressoGaugeCard({
               {/* Caps hachurados nas pontas quando o pendente cobre as extremidades
                   (alguns browsers não pintam pattern em strokeLinecap=round). */}
               {pct < 0.4 && pendingLen > 0.4 ? (
-                <circle cx="28" cy="108" r="16" fill={`url(#hatch-${uid})`} />
+                <circle cx="28" cy="100" r="16" fill={`url(#hatch-${uid})`} />
               ) : null}
               {pct + pendingLen > 99.6 && pendingLen > 0.4 ? (
-                <circle cx="172" cy="108" r="16" fill={`url(#hatch-${uid})`} />
+                <circle cx="172" cy="100" r="16" fill={`url(#hatch-${uid})`} />
               ) : null}
               <text
                 x="100"
-                y="88"
+                y="80"
                 textAnchor="middle"
                 fill={labelFill}
                 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}
               >
                 {pctRounded}%
               </text>
-              <text x="100" y="106" textAnchor="middle" fill={hintFill} style={{ fontSize: 10 }}>
+              <text x="100" y="98" textAnchor="middle" fill={hintFill} style={{ fontSize: 10 }}>
                 faturado
               </text>
             </svg>
           </div>
         </div>
-        <div className="mt-auto grid grid-cols-2 gap-2.5 pt-2">
+        <div className="grid shrink-0 grid-cols-2 gap-2.5">
           <div className="rounded-xl bg-emerald-50/80 px-3 py-2.5 dark:bg-emerald-900/20">
             <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">Faturado</p>
             <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
@@ -645,6 +652,7 @@ function SegmentedSemiGauge({
   const activeHi = over ? '#fb7185' : '#4ade80';
   const labelFill = isDark ? '#f9fafb' : '#111827';
   const hintFill = isDark ? '#9ca3af' : '#6b7280';
+  const segmentSpan = Math.max(1, segments - 1);
 
   return (
     <div className="mx-auto w-full max-w-[240px]">
@@ -655,7 +663,7 @@ function SegmentedSemiGauge({
         aria-label={ariaLabel}
       >
         {Array.from({ length: segments }, (_, i) => {
-          const t = segments === 1 ? 0 : i / (segments - 1);
+          const t = i / segmentSpan;
           const angle = startAngle + t * (endAngle - startAngle);
           const cos = Math.cos(angle);
           const sin = Math.sin(angle);

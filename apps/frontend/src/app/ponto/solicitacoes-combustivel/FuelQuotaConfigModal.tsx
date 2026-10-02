@@ -42,6 +42,24 @@ function parsePositiveOrNull(raw: string): number | null | undefined {
   return value;
 }
 
+function formatTanksAmount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const rounded = Math.round(value * 1000) / 1000;
+  return String(rounded);
+}
+
+function reaisFromTanksRaw(tanksRaw: string, tankPrice: number): string {
+  const tanks = parsePositiveOrNull(tanksRaw);
+  if (tanks == null || tanks === undefined || tankPrice <= 0) return '';
+  return formatCurrencyInputBrFromNumber(tanks * tankPrice);
+}
+
+function tanksFromReaisRaw(reaisRaw: string, tankPrice: number): string {
+  const reais = parseCurrencyInputBr(reaisRaw);
+  if (reais == null || reais <= 0 || tankPrice <= 0) return '';
+  return formatTanksAmount(reais / tankPrice);
+}
+
 function buildQuotaGroups(contracts: QuotaContract[]): QuotaGroup[] {
   const byId = new Map(contracts.map((c) => [c.id, c]));
   const resolveRoot = (id: string) => {
@@ -84,6 +102,7 @@ export function FuelQuotaConfigModal({
   const queryClient = useQueryClient();
   const [tankPriceInput, setTankPriceInput] = useState('');
   const [quotaInputs, setQuotaInputs] = useState<Record<string, string>>({});
+  const [reaisInputs, setReaisInputs] = useState<Record<string, string>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-quota-config'],
@@ -96,15 +115,51 @@ export function FuelQuotaConfigModal({
 
   useEffect(() => {
     if (!data) return;
-    setTankPriceInput(formatCurrencyInputBrFromNumber(data.tankPriceReais));
-    const next: Record<string, string> = {};
+    const price = Number(data.tankPriceReais) || 0;
+    setTankPriceInput(formatCurrencyInputBrFromNumber(price));
+    const nextTanks: Record<string, string> = {};
+    const nextReais: Record<string, string> = {};
     data.contracts.forEach((c) => {
-      next[c.id] = c.weeklyTankQuota == null ? '' : String(c.weeklyTankQuota);
+      const tanksRaw = c.weeklyTankQuota == null ? '' : String(c.weeklyTankQuota);
+      nextTanks[c.id] = tanksRaw;
+      nextReais[c.id] = reaisFromTanksRaw(tanksRaw, price);
     });
-    setQuotaInputs(next);
+    setQuotaInputs(nextTanks);
+    setReaisInputs(nextReais);
   }, [data]);
 
   const groups = useMemo(() => buildQuotaGroups(data?.contracts ?? []), [data?.contracts]);
+  const tankPriceNum = parseCurrencyInputBr(tankPriceInput) || 0;
+
+  const handleTankPriceInputChange = (raw: string) => {
+    const masked = maskCurrencyInputBrOrEmpty(raw);
+    setTankPriceInput(masked);
+    const price = parseCurrencyInputBr(masked) || 0;
+    setReaisInputs((prev) => {
+      const next: Record<string, string> = { ...prev };
+      Object.keys(quotaInputs).forEach((id) => {
+        next[id] = reaisFromTanksRaw(quotaInputs[id] ?? '', price);
+      });
+      return next;
+    });
+  };
+
+  const handleTanksChange = (contractId: string, raw: string) => {
+    setQuotaInputs((prev) => ({ ...prev, [contractId]: raw }));
+    setReaisInputs((prev) => ({
+      ...prev,
+      [contractId]: reaisFromTanksRaw(raw, tankPriceNum),
+    }));
+  };
+
+  const handleReaisChange = (contractId: string, raw: string) => {
+    const masked = maskCurrencyInputBrOrEmpty(raw);
+    setReaisInputs((prev) => ({ ...prev, [contractId]: masked }));
+    setQuotaInputs((prev) => ({
+      ...prev,
+      [contractId]: tanksFromReaisRaw(masked, tankPriceNum),
+    }));
+  };
 
   const tankPriceMutation = useMutation({
     mutationFn: async (value: number) => {
@@ -192,7 +247,6 @@ export function FuelQuotaConfigModal({
     });
   };
 
-  const tankPriceNum = parseCurrencyInputBr(tankPriceInput) || 0;
   const ownerOptions = labeledToSelectOptions(
     groups.map((g) => ({ value: g.owner.id, label: g.owner.name }))
   );
@@ -212,7 +266,7 @@ export function FuelQuotaConfigModal({
               type="text"
               inputMode="numeric"
               value={tankPriceInput}
-              onChange={(e) => setTankPriceInput(maskCurrencyInputBrOrEmpty(e.target.value))}
+              onChange={(e) => handleTankPriceInputChange(e.target.value)}
               placeholder="R$ 0,00"
               className="h-10 w-44 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
             />
@@ -224,11 +278,11 @@ export function FuelQuotaConfigModal({
 
         <div>
           <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-            Cota semanal por contrato (em tanques)
+            Cota semanal por contrato
           </p>
           <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            Deixe em branco pra não limitar. Em Agrupar com, junte contratos que compartilham o mesmo
-            saldo. O grupo aparece junto, com a cota só no contrato de cima.
+            Edite tanques ou o valor em R$ — o outro campo calcula sozinho. Deixe em branco pra não
+            limitar. Em Agrupar com, junte contratos que compartilham o mesmo saldo.
           </p>
           {isLoading ? (
             <div className="flex justify-center py-8">
@@ -245,11 +299,11 @@ export function FuelQuotaConfigModal({
                     <th className="w-56 px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
                       Agrupar com
                     </th>
-                    <th className="w-32 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
+                    <th className="w-28 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
                       Tanques/semana
                     </th>
-                    <th className="w-32 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
-                      Equivale a
+                    <th className="w-36 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
+                      Equivale a (R$)
                     </th>
                     <th className="w-16 px-3 py-2" />
                   </tr>
@@ -257,11 +311,12 @@ export function FuelQuotaConfigModal({
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {groups.map((group) => {
                     const isGrouped = group.members.length > 1;
-                    const ownerRaw = quotaInputs[group.owner.id] ?? '';
-                    const parsed = Number(ownerRaw.replace(',', '.'));
-                    const reaisPreview =
-                      ownerRaw.trim() && Number.isFinite(parsed) ? parsed * tankPriceNum : null;
+                    const ownerTanksRaw = quotaInputs[group.owner.id] ?? '';
+                    const ownerReaisRaw = reaisInputs[group.owner.id] ?? '';
                     const groupOptions = ownerOptions.filter((opt) => opt.value !== group.owner.id);
+                    const ownerReaisLabel =
+                      ownerReaisRaw.trim() ||
+                      (ownerTanksRaw.trim() ? '—' : 'Sem limite');
 
                     return (
                       <React.Fragment key={group.owner.id}>
@@ -299,24 +354,21 @@ export function FuelQuotaConfigModal({
                             <input
                               type="text"
                               inputMode="decimal"
-                              value={ownerRaw}
-                              onChange={(e) =>
-                                setQuotaInputs((prev) => ({
-                                  ...prev,
-                                  [group.owner.id]: e.target.value,
-                                }))
-                              }
+                              value={ownerTanksRaw}
+                              onChange={(e) => handleTanksChange(group.owner.id, e.target.value)}
                               placeholder="Sem limite"
                               className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-center text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                             />
                           </td>
-                          <td className="px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400">
-                            {reaisPreview != null
-                              ? reaisPreview.toLocaleString('pt-BR', {
-                                  style: 'currency',
-                                  currency: 'BRL',
-                                })
-                              : '—'}
+                          <td className="px-3 py-2">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={ownerReaisRaw}
+                              onChange={(e) => handleReaisChange(group.owner.id, e.target.value)}
+                              placeholder="Sem limite"
+                              className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-center text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            />
                           </td>
                           <td className="px-3 py-2 text-center">
                             <button
@@ -358,12 +410,7 @@ export function FuelQuotaConfigModal({
                                 usa esta cota
                               </td>
                               <td className="px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400">
-                                {reaisPreview != null
-                                  ? reaisPreview.toLocaleString('pt-BR', {
-                                      style: 'currency',
-                                      currency: 'BRL',
-                                    })
-                                  : '—'}
+                                {ownerReaisLabel}
                               </td>
                               <td className="px-3 py-2" />
                             </tr>
