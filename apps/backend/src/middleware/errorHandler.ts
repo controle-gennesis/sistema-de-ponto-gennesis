@@ -54,6 +54,28 @@ export const errorHandler = (
     err.message?.includes('Token inválido ou expirado')
   )) || err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError';
 
+  // Cliente fechou a conexão (reload/navegação/timeout) — não é falha da API
+  const errCode = (err as AppError & { code?: string }).code;
+  const errType = (err as AppError & { type?: string }).type;
+  const msgLower = String(err.message || '').toLowerCase();
+  const isClientAbort =
+    msgLower === 'aborted' ||
+    msgLower === 'request aborted' ||
+    msgLower.includes('socket hang up') ||
+    errType === 'request.aborted' ||
+    errCode === 'ECONNABORTED' ||
+    errCode === 'ECONNRESET' ||
+    errCode === 'EPIPE' ||
+    errCode === 'ERR_STREAM_PREMATURE_CLOSE' ||
+    Boolean((req as Request & { aborted?: boolean }).aborted);
+
+  if (isClientAbort) {
+    if (!res.headersSent) {
+      res.status(499).end();
+    }
+    return;
+  }
+
   if (isExpected401) {
     // Log apenas em modo debug para erros 401 esperados
     if (process.env.NODE_ENV === 'development') {

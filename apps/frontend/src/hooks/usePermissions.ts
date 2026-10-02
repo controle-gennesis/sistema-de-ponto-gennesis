@@ -680,6 +680,7 @@ export function useRoutePermission(route: string) {
     canAccessCollaborationTools,
     isLinkedEmpreiteiro,
     can,
+    canAccessModule,
     canAccessContract,
     dpApprovalContractIds,
     canApproveRestrictedDpRequests,

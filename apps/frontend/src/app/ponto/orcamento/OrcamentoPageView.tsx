@@ -2976,6 +2976,15 @@ interface SessaoOrcamentoPersist {
   planilhaTipoInsumo: Record<string, 'MO' | 'MA' | 'LO'>;
   /** Observação por composição na aba Orçamento (chave da linha). */
   observacoesPorItem?: Record<string, string>;
+  /** Cor de fundo da linha inteira (chave t:/s:/itemKey → hex). */
+  coresLinhaPorKey?: Record<string, string>;
+  /** Cor de fundo da célula (chave `${rowKey}|${colId}` → hex). */
+  coresCelulaPorKey?: Record<string, string>;
+  /**
+   * Override manual de MO/MAT unitário.
+   * `null` = valor apagado (força 0); número = valor digitado; ausente = cálculo automático.
+   */
+  moMatManualPorItem?: Record<string, { mo?: number | null; mat?: number | null }>;
   /** Observações da Ficha de demanda (chave da linha). */
   fichaDemandaObservacoes?: Record<string, string>;
   /** Insumos manuais adicionados na Ficha de demanda, por chave da composição pai. */
@@ -3016,6 +3025,110 @@ function parseFormulasQuantidadePorItem(
   return out;
 }
 
+const ORC_CORES_PINTURA: { hex: string; label: string }[] = [
+  { hex: '#fef08a', label: 'Amarelo' },
+  { hex: '#bbf7d0', label: 'Verde' },
+  { hex: '#bfdbfe', label: 'Azul' },
+  { hex: '#fbcfe8', label: 'Rosa' },
+  { hex: '#fed7aa', label: 'Laranja' },
+  { hex: '#e5e7eb', label: 'Cinza' },
+];
+
+function chaveCelulaOrc(rowKey: string, colId: string): string {
+  return `${rowKey}|${colId}`;
+}
+
+/** Pastéis do menu: no dark, mistura com o fundo da grade (mesmo espírito das faixas). */
+function corPinturaOrcExibida(hex: string, isDark: boolean): string {
+  if (!isDark) return hex;
+  return `color-mix(in srgb, ${hex} 26%, #111827)`;
+}
+
+/** Borda do checkbox — mesma família da cor, um pouco mais escura. */
+function corBordaCheckboxPinturaOrc(hex: string, isDark: boolean): string {
+  if (isDark) return `color-mix(in srgb, ${hex} 78%, #020617)`;
+  return `color-mix(in srgb, ${hex} 70%, #000000)`;
+}
+
+/** Divisórias de coluna na linha pintada — só um leve tingimento (não destacar). */
+function corBordaColunaPinturaOrc(hex: string, isDark: boolean): string {
+  if (isDark) return `color-mix(in srgb, ${hex} 18%, #374151)`;
+  return `color-mix(in srgb, ${hex} 22%, #e5e7eb)`;
+}
+
+function corCheckboxPinturaOrc(
+  rowKey: string,
+  coresLinha: Record<string, string>,
+  coresCelula: Record<string, string>,
+  isDark: boolean,
+  fallbackHex?: string
+): string | undefined {
+  const hex =
+    coresCelula[chaveCelulaOrc(rowKey, 'sel')] || coresLinha[rowKey] || fallbackHex;
+  return hex ? corBordaCheckboxPinturaOrc(hex, isDark) : undefined;
+}
+
+function estiloFundoPinturaOrc(
+  rowKey: string,
+  colId: string | null | undefined,
+  coresLinha: Record<string, string>,
+  coresCelula: Record<string, string>,
+  isDark = false
+): React.CSSProperties | undefined {
+  const cell =
+    colId && coresCelula[chaveCelulaOrc(rowKey, colId)]
+      ? coresCelula[chaveCelulaOrc(rowKey, colId)]
+      : undefined;
+  const row = coresLinha[rowKey];
+  const bg = cell || row;
+  if (!bg) return undefined;
+  const borda = corBordaColunaPinturaOrc(bg, isDark);
+  return {
+    backgroundColor: corPinturaOrcExibida(bg, isDark),
+    borderLeftColor: borda,
+    borderBottomColor: borda,
+  };
+}
+
+function formatarMoedaCampoOrc(valor: number): string {
+  if (!(valor > 0)) return '';
+  return truncarMoeda2(valor).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function parseCoresMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    // Título (t:) / subtítulo (s:) não são pintáveis — ignora chaves legadas.
+    const rowPart = k.split('|')[0] ?? k;
+    if (rowPart.startsWith('t:') || rowPart.startsWith('s:')) continue;
+    const hex = String(v ?? '').trim();
+    if (/^#[0-9a-fA-F]{3,8}$/.test(hex)) out[k] = hex;
+  }
+  return out;
+}
+
+function parseMoMatManualPorItem(
+  raw: unknown
+): Record<string, { mo?: number | null; mat?: number | null }> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, { mo?: number | null; mat?: number | null }> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object') continue;
+    const row = v as { mo?: unknown; mat?: unknown };
+    const entry: { mo?: number | null; mat?: number | null } = {};
+    if (row.mo === null) entry.mo = null;
+    else if (typeof row.mo === 'number' && Number.isFinite(row.mo)) entry.mo = row.mo;
+    if (row.mat === null) entry.mat = null;
+    else if (typeof row.mat === 'number' && Number.isFinite(row.mat)) entry.mat = row.mat;
+    if (entry.mo !== undefined || entry.mat !== undefined) out[k] = entry;
+  }
+  return out;
+}
+
 function sessaoVazia(): SessaoOrcamentoPersist {
   return {
     subtitulosNoOrcamento: [],
@@ -3026,6 +3139,9 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     planilhaValorUnitCompraReal: {},
     planilhaTipoInsumo: {},
     observacoesPorItem: {},
+    coresLinhaPorKey: {},
+    coresCelulaPorKey: {},
+    moMatManualPorItem: {},
     fichaDemandaObservacoes: {},
     insumosAnaliticoManuais: {},
     itensOcultosNoOrcamento: [],
@@ -3144,6 +3260,11 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           ? normalizarPlanilhaTipoInsumo(p.planilhaTipoInsumo as Record<string, unknown>)
           : {},
       observacoesPorItem: parseObservacoesPorItem(p.observacoesPorItem),
+      coresLinhaPorKey: parseCoresMap((p as { coresLinhaPorKey?: unknown }).coresLinhaPorKey),
+      coresCelulaPorKey: parseCoresMap((p as { coresCelulaPorKey?: unknown }).coresCelulaPorKey),
+      moMatManualPorItem: parseMoMatManualPorItem(
+        (p as { moMatManualPorItem?: unknown }).moMatManualPorItem
+      ),
       fichaDemandaObservacoes: parseObservacoesPorItem(p.fichaDemandaObservacoes),
       insumosAnaliticoManuais: parseInsumosAnaliticoManuais(p.insumosAnaliticoManuais),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
@@ -3505,6 +3626,9 @@ function parseOrcamentoDetailRaw(d: {
               ? normalizarPlanilhaTipoInsumo(so.planilhaTipoInsumo as Record<string, unknown>)
               : {},
           observacoesPorItem: parseObservacoesPorItem(so.observacoesPorItem),
+          coresLinhaPorKey: parseCoresMap(so.coresLinhaPorKey),
+          coresCelulaPorKey: parseCoresMap(so.coresCelulaPorKey),
+          moMatManualPorItem: parseMoMatManualPorItem(so.moMatManualPorItem),
           fichaDemandaObservacoes: parseObservacoesPorItem(so.fichaDemandaObservacoes),
           insumosAnaliticoManuais: parseInsumosAnaliticoManuais(so.insumosAnaliticoManuais),
           itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
@@ -5664,6 +5788,11 @@ export function OrcamentoPageView({
   const [orcamentoGradeZoom, setOrcamentoGradeZoom] = useState(1);
   const [aparenciaDraft, setAparenciaDraft] = useState<AparenciaOrcamento>(APARENCIA_ORCAMENTO_PADRAO);
   const [observacoesPorItem, setObservacoesPorItem] = useState<Record<string, string>>({});
+  const [coresLinhaPorKey, setCoresLinhaPorKey] = useState<Record<string, string>>({});
+  const [coresCelulaPorKey, setCoresCelulaPorKey] = useState<Record<string, string>>({});
+  const [moMatManualPorItem, setMoMatManualPorItem] = useState<
+    Record<string, { mo?: number | null; mat?: number | null }>
+  >({});
   const nomesOrcafascioSnapRef = useRef<{
     orcamentoId: string;
     titulos: Record<string, string>;
@@ -5786,9 +5915,30 @@ export function OrcamentoPageView({
   >(null);
   /** Menu botão direito — aba Orçamento (montagem): apagar título do serviço, subtítulo ou composição. */
   const [menuCtxMontagem, setMenuCtxMontagem] = useState<
-    | { kind: 'tituloServico'; left: number; top: number; servicoId: string }
-    | { kind: 'subtitulo'; left: number; top: number; blocoKey: string }
-    | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
+    | {
+        kind: 'tituloServico';
+        left: number;
+        top: number;
+        servicoId: string;
+        rowKey: string;
+        colId: string | null;
+      }
+    | {
+        kind: 'subtitulo';
+        left: number;
+        top: number;
+        blocoKey: string;
+        rowKey: string;
+        colId: string | null;
+      }
+    | {
+        kind: 'composicao';
+        left: number;
+        top: number;
+        composicaoKey: string;
+        rowKey: string;
+        colId: string | null;
+      }
     | null
   >(null);
   const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(() =>
@@ -6257,6 +6407,9 @@ export function OrcamentoPageView({
       setPlanilhaTipoInsumo({});
       setFichaDemandaObservacoes({});
       setObservacoesPorItem({});
+      setCoresLinhaPorKey({});
+      setCoresCelulaPorKey({});
+      setMoMatManualPorItem({});
       setCronograma(cronogramaVazio());
       setServicosPadraoContrato([]);
       setInsumosAnaliticoManuais({});
@@ -6281,6 +6434,9 @@ export function OrcamentoPageView({
       setPlanilhaValorUnitCompraReal(s.planilhaValorUnitCompraReal ?? {});
       setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
       setObservacoesPorItem(parseObservacoesPorItem(s.observacoesPorItem));
+      setCoresLinhaPorKey(parseCoresMap(s.coresLinhaPorKey));
+      setCoresCelulaPorKey(parseCoresMap(s.coresCelulaPorKey));
+      setMoMatManualPorItem(parseMoMatManualPorItem(s.moMatManualPorItem));
       setFichaDemandaObservacoes(parseObservacoesPorItem(s.fichaDemandaObservacoes));
       setInsumosAnaliticoManuais(parseInsumosAnaliticoManuais(s.insumosAnaliticoManuais));
       setCronograma(normalizarCronograma(s.cronograma));
@@ -6497,6 +6653,9 @@ export function OrcamentoPageView({
       planilhaValorUnitCompraReal,
       planilhaTipoInsumo,
       observacoesPorItem,
+      coresLinhaPorKey,
+      coresCelulaPorKey,
+      moMatManualPorItem,
       fichaDemandaObservacoes,
       insumosAnaliticoManuais,
       meta,
@@ -6531,6 +6690,9 @@ export function OrcamentoPageView({
     planilhaValorUnitCompraReal,
     planilhaTipoInsumo,
     observacoesPorItem,
+    coresLinhaPorKey,
+    coresCelulaPorKey,
+    moMatManualPorItem,
     fichaDemandaObservacoes,
     insumosAnaliticoManuais,
     meta,
@@ -8653,21 +8815,50 @@ export function OrcamentoPageView({
       e.preventDefault();
       e.stopPropagation();
       const kind = tr.getAttribute('data-orc-ctx-montagem');
-      const mw = 224;
-      const mh = 188;
+      const td = target.closest('td[data-orc-col]');
+      const colId = td?.getAttribute('data-orc-col') || null;
+      const mw = 280;
+      const mh = 420;
       let left = e.clientX;
       let top = e.clientY;
       left = Math.min(left, window.innerWidth - mw - 8);
       top = Math.min(top, window.innerHeight - mh - 8);
       if (kind === 'tituloServico') {
         const servicoId = tr.getAttribute('data-servico-id');
-        if (servicoId) setMenuCtxMontagem({ kind: 'tituloServico', left, top, servicoId });
+        if (servicoId) {
+          setMenuCtxMontagem({
+            kind: 'tituloServico',
+            left,
+            top,
+            servicoId,
+            rowKey: `t:${servicoId}`,
+            colId,
+          });
+        }
       } else if (kind === 'subtitulo') {
         const blocoKey = tr.getAttribute('data-bloco-key');
-        if (blocoKey) setMenuCtxMontagem({ kind: 'subtitulo', left, top, blocoKey });
+        if (blocoKey) {
+          setMenuCtxMontagem({
+            kind: 'subtitulo',
+            left,
+            top,
+            blocoKey,
+            rowKey: `s:${blocoKey}`,
+            colId,
+          });
+        }
       } else if (kind === 'composicao') {
         const composicaoKey = tr.getAttribute('data-item-key');
-        if (composicaoKey) setMenuCtxMontagem({ kind: 'composicao', left, top, composicaoKey });
+        if (composicaoKey) {
+          setMenuCtxMontagem({
+            kind: 'composicao',
+            left,
+            top,
+            composicaoKey,
+            rowKey: composicaoKey,
+            colId,
+          });
+        }
       }
     };
     el.addEventListener('contextmenu', onContextMenuNative, { capture: true });
@@ -8928,10 +9119,21 @@ export function OrcamentoPageView({
             : preco > 0
               ? preco * (1 + parsePercentualMeta(meta.bdiPercentual))
               : 0;
-        const { mo: maoDeObraUnitario, mat: materialUnitario } = moMatUnitarioDeItemOuComposicao(
-          i,
-          composicao
-        );
+        const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
+          moMatUnitarioDeItemOuComposicao(i, composicao);
+        const moMatManual = moMatManualPorItem[itemKey];
+        const maoDeObraUnitario =
+          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mo')
+            ? moMatManual.mo == null
+              ? 0
+              : Number(moMatManual.mo) || 0
+            : maoDeObraUnitarioAuto;
+        const materialUnitario =
+          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mat')
+            ? moMatManual.mat == null
+              ? 0
+              : Number(moMatManual.mat) || 0
+            : materialUnitarioAuto;
         const dim = dimensoesPorItemDeferred[itemKey];
         const tipoAuto = inferirTipoUnidadePorDimensao(dim?.linhas);
         const tipoDaComp = parseUnidadeComposicao(composicao?.unidade ?? i.unidade);
@@ -9052,6 +9254,7 @@ export function OrcamentoPageView({
     dimensoesPorItemDeferred,
     mapaComposicoes,
     itensOcultosNoOrcamento,
+    moMatManualPorItem,
   ]);
 
   const itensCalculadosPorBlocoNome = useMemo(() => {
@@ -10772,6 +10975,58 @@ export function OrcamentoPageView({
       });
     });
   }, []);
+
+  const pintarLinhaOrcamento = useCallback((rowKey: string, hex: string | null) => {
+    if (gradeTravadaRef.current) return;
+    // Título/subtítulo usam a aparência do orçamento — não pintam.
+    if (rowKey.startsWith('t:') || rowKey.startsWith('s:')) return;
+    setCoresLinhaPorKey((prev) => {
+      if (!hex) {
+        if (!(rowKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      }
+      if (prev[rowKey] === hex) return prev;
+      return { ...prev, [rowKey]: hex };
+    });
+  }, []);
+
+  const pintarCelulaOrcamento = useCallback(
+    (rowKey: string, colId: string, hex: string | null) => {
+      if (gradeTravadaRef.current) return;
+      if (rowKey.startsWith('t:') || rowKey.startsWith('s:')) return;
+      const key = chaveCelulaOrc(rowKey, colId);
+      setCoresCelulaPorKey((prev) => {
+        if (!hex) {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }
+        if (prev[key] === hex) return prev;
+        return { ...prev, [key]: hex };
+      });
+    },
+    []
+  );
+
+  const setMoMatManualCampo = useCallback(
+    (itemKey: string, campo: 'mo' | 'mat', valor: number | null) => {
+      if (gradeTravadaRef.current) return;
+      startTransition(() => {
+        setMoMatManualPorItem((prev) => {
+          const atual = prev[itemKey] ?? {};
+          if (Object.prototype.hasOwnProperty.call(atual, campo) && atual[campo] === valor) {
+            return prev;
+          }
+          const nextEntry = { ...atual, [campo]: valor };
+          return { ...prev, [itemKey]: nextEntry };
+        });
+      });
+    },
+    []
+  );
 
   const novoInsumoManualAnaliticoVazio = (parentKey: string): InsumoAnaliticoManual => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -14107,9 +14362,9 @@ export function OrcamentoPageView({
                                   style={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}
                               data-orc-ctx-montagem="tituloServico"
                               data-servico-id={bloco.key.split('|')[0] ?? ''}
-                              title="Clique com o botão direito para apagar este serviço do orçamento"
+                              title="Clique com o botão direito para opções da linha"
                             >
-                              <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                              <td data-orc-col="sel" className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
                                 <div className="flex justify-center">
                                   <TableCheckbox
                                     checked={checkboxTitulo.checked}
@@ -14117,13 +14372,18 @@ export function OrcamentoPageView({
                                     onChange={checked => alternarGrupoMontagem(chavesGrupoTitulo, checked)}
                                     onClick={e => e.stopPropagation()}
                                     ariaLabel={`Selecionar todas as composições de ${bloco.servicoNome}`}
+                                    idleBorderColor={corBordaCheckboxPinturaOrc(
+                                      aparenciaOrcamento?.tituloFundo ??
+                                        APARENCIA_ORCAMENTO_PADRAO.tituloFundo,
+                                      isDark
+                                    )}
                                   />
                                 </div>
                               </td>
-                              <td className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`} />
-                              <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
-                              <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
-                              <td className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderTitulo}`}>
+                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`} />
+                              <td data-orc-col="codigo" className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
+                              <td data-orc-col="banco" className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
+                              <td data-orc-col="descricao" className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderTitulo}`}>
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     type="button"
@@ -14163,30 +14423,30 @@ export function OrcamentoPageView({
                                   </div>
                                 </div>
                               </td>
-                              <td className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
-                              <td className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="und" className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
+                              <td data-orc-col="qtd" className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
+                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.mo} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.mat} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                              <td data-orc-col="totalBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}>
+                              <td data-orc-col="peso" className={`px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}>
                                 {resumoTitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                               </td>
-                              <td className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderTitulo}`} />
+                              <td data-orc-col="obs" className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderTitulo}`} />
                             </tr>
                             )}
                             <OrcListaAnimacaoGrupo aberto={!tituloRecolhido}>
@@ -14196,7 +14456,7 @@ export function OrcamentoPageView({
                               data-orc-ctx-montagem="subtitulo"
                               data-bloco-key={bloco.key}
                             >
-                              <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                              <td data-orc-col="sel" className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
                                 <div className="flex justify-center">
                                   <TableCheckbox
                                     checked={checkboxSubtitulo.checked}
@@ -14204,15 +14464,20 @@ export function OrcamentoPageView({
                                     onChange={checked => alternarGrupoMontagem(chavesGrupoSubtitulo, checked)}
                                     onClick={e => e.stopPropagation()}
                                     ariaLabel={`Selecionar composições de ${mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}`}
+                                    idleBorderColor={corBordaCheckboxPinturaOrc(
+                                      aparenciaOrcamento?.subtituloFundo ??
+                                        APARENCIA_ORCAMENTO_PADRAO.subtituloFundo,
+                                      isDark
+                                    )}
                                   />
                                 </div>
                               </td>
-                              <td className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200 ${borderSub}`}>
+                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200 ${borderSub}`}>
                                 {`${main}.${subIdx}`}
                               </td>
-                              <td className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
-                              <td className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
-                              <td className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderSub}`}>
+                              <td data-orc-col="codigo" className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
+                              <td data-orc-col="banco" className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
+                              <td data-orc-col="descricao" className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderSub}`}>
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     type="button"
@@ -14253,30 +14518,30 @@ export function OrcamentoPageView({
                                   </div>
                                 </div>
                               </td>
-                              <td className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
-                              <td className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="und" className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
+                              <td data-orc-col="qtd" className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
+                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.mo} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.mat} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                              <td data-orc-col="totalBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td className={`px-2 py-2.5 text-sm text-center align-middle text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap font-semibold ${borderSub}`}>
+                              <td data-orc-col="peso" className={`px-2 py-2.5 text-sm text-center align-middle text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap font-semibold ${borderSub}`}>
                                 {resumoSubtitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                               </td>
-                              <td className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderSub}`} />
+                              <td data-orc-col="obs" className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderSub}`} />
                             </tr>
                                   <OrcListaAnimacaoGrupo aberto={!tituloRecolhido && !subRecolhido}>
                                   {rowsDoBloco.map((row, itemIdx) => {
@@ -14289,10 +14554,24 @@ export function OrcamentoPageView({
                                     <React.Fragment key={row.key}>
                                     <tr
                                       className={`border-b border-gray-100/90 bg-white hover:bg-gray-50/90 dark:border-gray-700/90 dark:bg-gray-800 dark:hover:bg-gray-800/95 ${gradeTableRowTrCls}`}
+                                      style={
+                                        coresLinhaPorKey[row.key]
+                                          ? {
+                                              backgroundColor: corPinturaOrcExibida(
+                                                coresLinhaPorKey[row.key]!,
+                                                isDark
+                                              ),
+                                              borderBottomColor: corBordaColunaPinturaOrc(
+                                                coresLinhaPorKey[row.key]!,
+                                                isDark
+                                              ),
+                                            }
+                                          : undefined
+                                      }
                                       data-orc-ctx-montagem="composicao"
                                       data-item-key={row.key}
                                     >
-                                      <td className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
+                                      <td data-orc-col="sel" style={estiloFundoPinturaOrc(row.key, 'sel', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="w-12 min-w-[3rem] px-2 py-2.5 align-middle">
                                         <div className="flex justify-center">
                                           <TableCheckbox
                                             checked={itensSelecionadosMontagem.has(row.key)}
@@ -14306,18 +14585,24 @@ export function OrcamentoPageView({
                                             }}
                                             onClick={e => e.stopPropagation()}
                                             ariaLabel={`Selecionar composição ${row.item.descricao}`}
+                                            idleBorderColor={corCheckboxPinturaOrc(
+                                              row.key,
+                                              coresLinhaPorKey,
+                                              coresCelulaPorKey,
+                                              isDark
+                                            )}
                                           />
                                         </div>
                                       </td>
-                                      <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="item" style={estiloFundoPinturaOrc(row.key, 'item', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
                                         {`${main}.${subIdx}.${itemIdx + 1}`}
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
-                                      <td className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{nomeBancoParaExibicao(row.item.banco)}</td>
-                                      <td className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="codigo" style={estiloFundoPinturaOrc(row.key, 'codigo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
+                                      <td data-orc-col="banco" style={estiloFundoPinturaOrc(row.key, 'banco', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{nomeBancoParaExibicao(row.item.banco)}</td>
+                                      <td data-orc-col="descricao" style={estiloFundoPinturaOrc(row.key, 'descricao', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle border-l border-gray-200 dark:border-gray-700">
                                         <div className="whitespace-normal break-words">{row.item.descricao}</div>
                                       </td>
-                                      <td className="px-2 py-2.5 text-center align-middle border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="und" style={estiloFundoPinturaOrc(row.key, 'und', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-center align-middle border-l border-gray-200 dark:border-gray-700">
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                                           {unidadeComposicaoParaExibicao(
                                             row.unidadeComposicao,
@@ -14325,7 +14610,7 @@ export function OrcamentoPageView({
                                           )}
                                         </span>
                                       </td>
-                                      <td className="p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="qtd" style={estiloFundoPinturaOrc(row.key, 'qtd', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700">
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
                                             committedValue={
@@ -14374,28 +14659,118 @@ export function OrcamentoPageView({
                                             className={`${inputGradeCls} text-center tabular-nums`}
                                           />
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.maoDeObraUnitario} className="text-sm" />
+                                      <td
+                                        data-orc-col="mo"
+                                        style={estiloFundoPinturaOrc(row.key, 'mo', coresLinhaPorKey, coresCelulaPorKey, isDark)}
+                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex w-full items-baseline justify-between gap-1.5 px-0.5 tabular-nums text-sm">
+                                          <span className="shrink-0 opacity-80">R$</span>
+                                          <FdCampoLocal
+                                            draftKey={`orc-mo:${row.key}`}
+                                            committedValue={formatarMoedaCampoOrc(row.maoDeObraUnitario)}
+                                            commitOnChange={false}
+                                            disabled={gradeTravada}
+                                            displayAfterCommit={raw => {
+                                              const t = String(raw ?? '').trim();
+                                              if (!t) return '';
+                                              const n = parseMedicaoBlurNumber(raw);
+                                              if (n === null) {
+                                                return formatarMoedaCampoOrc(parsePreco(raw));
+                                              }
+                                              return formatarMoedaCampoOrc(Math.max(0, n));
+                                            }}
+                                            onCommit={raw => {
+                                              const t = String(raw ?? '').trim();
+                                              if (!t) {
+                                                setMoMatManualCampo(row.key, 'mo', null);
+                                                return;
+                                              }
+                                              const n = parseMedicaoBlurNumber(raw);
+                                              if (n === null) {
+                                                setMoMatManualCampo(row.key, 'mo', Math.max(0, parsePreco(raw)));
+                                                return;
+                                              }
+                                              setMoMatManualCampo(row.key, 'mo', Math.max(0, n));
+                                            }}
+                                            inputMode="decimal"
+                                            placeholder="—"
+                                            title={
+                                              gradeTravada
+                                                ? 'Orçamento travado — não é possível editar'
+                                                : 'Mão de obra unitária (apague para zerar)'
+                                            }
+                                            className="min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm tabular-nums text-gray-900 caret-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-100 dark:caret-gray-100 dark:placeholder:text-gray-500"
+                                          />
+                                        </div>
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.materialUnitario} className="text-sm" />
+                                      <td
+                                        data-orc-col="mat"
+                                        style={estiloFundoPinturaOrc(row.key, 'mat', coresLinhaPorKey, coresCelulaPorKey, isDark)}
+                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex w-full items-baseline justify-between gap-1.5 px-0.5 tabular-nums text-sm">
+                                          <span className="shrink-0 opacity-80">R$</span>
+                                          <FdCampoLocal
+                                            draftKey={`orc-mat:${row.key}`}
+                                            committedValue={formatarMoedaCampoOrc(row.materialUnitario)}
+                                            commitOnChange={false}
+                                            disabled={gradeTravada}
+                                            displayAfterCommit={raw => {
+                                              const t = String(raw ?? '').trim();
+                                              if (!t) return '';
+                                              const n = parseMedicaoBlurNumber(raw);
+                                              if (n === null) {
+                                                return formatarMoedaCampoOrc(parsePreco(raw));
+                                              }
+                                              return formatarMoedaCampoOrc(Math.max(0, n));
+                                            }}
+                                            onCommit={raw => {
+                                              const t = String(raw ?? '').trim();
+                                              if (!t) {
+                                                setMoMatManualCampo(row.key, 'mat', null);
+                                                return;
+                                              }
+                                              const n = parseMedicaoBlurNumber(raw);
+                                              if (n === null) {
+                                                setMoMatManualCampo(row.key, 'mat', Math.max(0, parsePreco(raw)));
+                                                return;
+                                              }
+                                              setMoMatManualCampo(row.key, 'mat', Math.max(0, n));
+                                            }}
+                                            inputMode="decimal"
+                                            placeholder="—"
+                                            title={
+                                              gradeTravada
+                                                ? 'Orçamento travado — não é possível editar'
+                                                : 'Material unitário (apague para zerar)'
+                                            }
+                                            className="min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm tabular-nums text-gray-900 caret-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-100 dark:caret-gray-100 dark:placeholder:text-gray-500"
+                                          />
+                                        </div>
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="pu" style={estiloFundoPinturaOrc(row.key, 'pu', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.precoUnitario} className="text-sm" />
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="puBdi" style={estiloFundoPinturaOrc(row.key, 'puBdi', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.precoUnitarioComBdi} className="text-sm" />
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="total" style={estiloFundoPinturaOrc(row.key, 'total', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.total} className="text-sm font-semibold" valorClassName="font-semibold" />
                                       </td>
-                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="totalBdi" style={estiloFundoPinturaOrc(row.key, 'totalBdi', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.totalComBdi} className="text-sm font-semibold" valorClassName="font-semibold" />
                                       </td>
-                                      <td className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
+                                      <td data-orc-col="peso" style={estiloFundoPinturaOrc(row.key, 'peso', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                       </td>
                                       <td
+                                        data-orc-col="obs"
+                                        style={estiloFundoPinturaOrc(row.key, 'obs', coresLinhaPorKey, coresCelulaPorKey, isDark)}
                                         className="min-w-[16rem] w-[16rem] border-l border-gray-200 p-0 dark:border-gray-700"
                                         onClick={(e) => e.stopPropagation()}
                                         onMouseDown={(e) => e.stopPropagation()}
@@ -14434,7 +14809,7 @@ export function OrcamentoPageView({
                         onClose={() => setMenuCtxMontagem(null)}
                         top={menuCtxMontagem.top}
                         left={menuCtxMontagem.left}
-                        panelClassName="w-56 py-1"
+                        panelClassName="w-64 py-1"
                       >
                             {menuCtxMontagem.kind === 'composicao' && (
                               <button
@@ -14471,10 +14846,90 @@ export function OrcamentoPageView({
                                 Adicionar subtítulo
                               </button>
                             )}
+                            {menuCtxMontagem.kind === 'composicao' && (
+                              <div className="border-t border-gray-100 px-3 py-2 dark:border-gray-700">
+                                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  Pintar linha
+                                </p>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {ORC_CORES_PINTURA.map((c) => (
+                                    <button
+                                      key={`linha-${c.hex}`}
+                                      type="button"
+                                      title={c.label}
+                                      aria-label={`Pintar linha ${c.label}`}
+                                      className="h-6 w-6 rounded-md border border-black/10 shadow-sm hover:scale-105 dark:border-white/15"
+                                      style={{ backgroundColor: corPinturaOrcExibida(c.hex, isDark) }}
+                                      onClick={() => {
+                                        pintarLinhaOrcamento(menuCtxMontagem.rowKey, c.hex);
+                                        setMenuCtxMontagem(null);
+                                      }}
+                                    />
+                                  ))}
+                                  <button
+                                    type="button"
+                                    title="Remover cor da linha"
+                                    aria-label="Remover cor da linha"
+                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-gray-200 px-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+                                    onClick={() => {
+                                      pintarLinhaOrcamento(menuCtxMontagem.rowKey, null);
+                                      setMenuCtxMontagem(null);
+                                    }}
+                                  >
+                                    <X className="h-3 w-3" aria-hidden />
+                                    Limpar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {menuCtxMontagem.kind === 'composicao' && menuCtxMontagem.colId && (
+                              <div className="border-t border-gray-100 px-3 py-2 dark:border-gray-700">
+                                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  Pintar célula
+                                </p>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {ORC_CORES_PINTURA.map((c) => (
+                                    <button
+                                      key={`cel-${c.hex}`}
+                                      type="button"
+                                      title={c.label}
+                                      aria-label={`Pintar célula ${c.label}`}
+                                      className="h-6 w-6 rounded-md border border-black/10 shadow-sm hover:scale-105 dark:border-white/15"
+                                      style={{ backgroundColor: corPinturaOrcExibida(c.hex, isDark) }}
+                                      onClick={() => {
+                                        pintarCelulaOrcamento(
+                                          menuCtxMontagem.rowKey,
+                                          menuCtxMontagem.colId!,
+                                          c.hex
+                                        );
+                                        setMenuCtxMontagem(null);
+                                      }}
+                                    />
+                                  ))}
+                                  <button
+                                    type="button"
+                                    title="Remover cor da célula"
+                                    aria-label="Remover cor da célula"
+                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-gray-200 px-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+                                    onClick={() => {
+                                      pintarCelulaOrcamento(
+                                        menuCtxMontagem.rowKey,
+                                        menuCtxMontagem.colId!,
+                                        null
+                                      );
+                                      setMenuCtxMontagem(null);
+                                    }}
+                                  >
+                                    <X className="h-3 w-3" aria-hidden />
+                                    Limpar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                             <button
                               type="button"
                               role="menuitem"
-                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                              className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
                               onClick={() => {
                                 if (menuCtxMontagem.kind === 'tituloServico') {
                                   if (

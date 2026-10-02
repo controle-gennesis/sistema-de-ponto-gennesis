@@ -156,6 +156,21 @@ const licitacaoExtraCtrl = new LicitacaoController();
 // impede o Node de encerrar o processo sozinho (comportamento padrão), deixando o app rodando
 // em estado corrompido. A integração padrão do Sentry já captura e sai do processo do jeito certo.
 process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason ?? '');
+  const code =
+    reason && typeof reason === 'object' && 'code' in reason
+      ? String((reason as { code?: unknown }).code ?? '')
+      : '';
+  // Cliente/abort de conexão — ruído esperado (reload, navegação, cancelamento)
+  if (
+    msg === 'aborted' ||
+    msg === 'request aborted' ||
+    code === 'ECONNRESET' ||
+    code === 'ECONNABORTED' ||
+    code === 'EPIPE'
+  ) {
+    return;
+  }
   console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
   Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)));
 });

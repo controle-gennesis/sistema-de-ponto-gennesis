@@ -19,6 +19,8 @@ export interface CheckboxIndicatorProps {
   className?: string;
   /** Quando true, renderiza como <button>; senão só o quadrado (uso dentro de <label>). */
   asButton?: boolean;
+  /** Borda do estado desmarcado (ex.: linha colorida na grade). */
+  idleBorderColor?: string;
 }
 
 /** Quadrado do checkbox — mesmo visual da página de login. */
@@ -29,6 +31,7 @@ export function CheckboxIndicator({
   disabled,
   className,
   asButton = false,
+  idleBorderColor,
 }: CheckboxIndicatorProps) {
   const active = checked || indeterminate;
   const box = (
@@ -37,8 +40,15 @@ export function CheckboxIndicator({
         'box-border flex size-5 shrink-0 items-center justify-center overflow-hidden rounded border-2 transition-colors duration-200',
         active
           ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
-          : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400',
+          : idleBorderColor
+            ? 'border-transparent bg-white/90 group-hover:border-red-500 dark:bg-gray-900/70 dark:group-hover:border-red-400'
+            : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400',
       )}
+      style={
+        !active && idleBorderColor
+          ? { borderColor: idleBorderColor, borderWidth: 2, borderStyle: 'solid' }
+          : undefined
+      }
     >
       {/* Espaço reservado sempre — evita salto de altura ao marcar */}
       <span className="flex size-3 items-center justify-center" aria-hidden>
@@ -93,6 +103,7 @@ export function TableCheckbox({
   ariaLabel,
   onClick,
   disabled = false,
+  idleBorderColor,
 }: {
   checked: boolean;
   indeterminate?: boolean;
@@ -100,6 +111,7 @@ export function TableCheckbox({
   ariaLabel?: string;
   onClick?: (e: React.MouseEvent<HTMLLabelElement>) => void;
   disabled?: boolean;
+  idleBorderColor?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -126,7 +138,12 @@ export function TableCheckbox({
         aria-label={ariaLabel}
         className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
       />
-      <CheckboxIndicator checked={checked} indeterminate={indeterminate} disabled={disabled} />
+      <CheckboxIndicator
+        checked={checked}
+        indeterminate={indeterminate}
+        disabled={disabled}
+        idleBorderColor={idleBorderColor}
+      />
     </label>
   );
 }
