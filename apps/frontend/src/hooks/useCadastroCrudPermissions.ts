@@ -10,10 +10,14 @@ import { usePermissions } from '@/hooks/usePermissions';
 
 export type CadastroCrudAction = (typeof PERMISSION_MODULE_CRUD_ACTIONS)[number];
 
+/** Postos: quem acessa a página edita todos os postos (inclui vínculos de contrato). */
+const FUEL_GAS_STATIONS_MODULE_KEY = pathToModuleKey('/ponto/regioes-postos-combustivel');
+
 /**
  * CRUD da matriz Ver/Criar/Editar/Excluir.
  * Cadastros legado: só `acesso` → libera tudo.
  * Relatórios de Contrato: só `acesso`/`ver` → visualizar; preencher exige Criar ou Editar.
+ * Postos de Combustível: qualquer acesso à página → CRUD completo.
  */
 export function useCadastroCrudPermissions(routeHref: string) {
   const { can, canAction, isElevatedUser, isLoading } = usePermissions();
@@ -45,6 +49,19 @@ export function useCadastroCrudPermissions(routeHref: string) {
   const hasAcesso = can(moduleKey);
   const hasGranular = PERMISSION_MODULE_CRUD_ACTIONS.some((a) => canAction(moduleKey, a));
   const isRelatoriosContrato = moduleKey === RELATORIOS_CONTRATO_MODULE_KEY;
+  const isFuelGasStations = moduleKey === FUEL_GAS_STATIONS_MODULE_KEY;
+
+  if (isFuelGasStations) {
+    const access = hasAcesso || hasGranular;
+    return {
+      moduleKey,
+      canView: access,
+      canCreate: access,
+      canEdit: access,
+      canDelete: access,
+      isLoading,
+    };
+  }
 
   if (!hasGranular) {
     return {

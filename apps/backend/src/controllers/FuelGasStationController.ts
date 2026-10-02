@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
-import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
+import { assertUserHasFuelGasStationsAccess } from '../lib/fuelGasStationsAccess';
 import {
   assertValidSatelliteCityCode,
   cityCodesForLookup,
@@ -83,7 +83,7 @@ async function replaceStationContracts(stationId: string, contractIds: string[])
 export class FuelGasStationController {
   private async assertAccess(req: AuthRequest) {
     if (!req.user) throw createError('Usuário não autenticado', 401);
-    await assertUserHasFuelSuppliesAccess(req.user.id, req.user.isAdmin);
+    await assertUserHasFuelGasStationsAccess(req.user.id, req.user.isAdmin);
   }
 
   async listContracts(req: AuthRequest, res: Response, next: NextFunction) {

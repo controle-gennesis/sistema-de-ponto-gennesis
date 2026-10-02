@@ -5,6 +5,7 @@ import { userHasAnyDpApproverAccess } from '../lib/dpApprovalAccess';
 import { userHasAnyFdApproverAccess } from '../lib/fdApprovalAccess';
 import { userHasAnyFuelApproverAccess } from '../lib/fuelApprovalAccess';
 import { userHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
+import { userHasFuelGasStationsAccess } from '../lib/fuelGasStationsAccess';
 import { userHasVehicleReservationSuppliesAccess } from '../lib/vehicleReservationSuppliesAccess';
 import { userHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
 import { userHasLogisticsDeliveryAccess } from '../lib/logisticsDeliveryAccess';
@@ -220,6 +221,26 @@ export const requireFuelSuppliesAccess = async (
       return next(createError('Usuário não autenticado', 401));
     }
     const ok = await userHasFuelSuppliesAccess(req.user.id, req.user.isAdmin);
+    if (!ok) {
+      return next(createError('Você não tem permissão para esta ação', 403));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Cadastro de postos de combustível — acesso à página (ou fila de abastecimento). */
+export const requireFuelGasStationsAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    const ok = await userHasFuelGasStationsAccess(req.user.id, req.user.isAdmin);
     if (!ok) {
       return next(createError('Você não tem permissão para esta ação', 403));
     }

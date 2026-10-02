@@ -648,8 +648,7 @@ function SegmentedSemiGauge({
   const startAngle = Math.PI;
   const endAngle = 0;
   const track = isDark ? '#374151' : '#e5e7eb';
-  const activeBase = over ? '#f43f5e' : '#22c55e';
-  const activeHi = over ? '#fb7185' : '#4ade80';
+  const active = over ? '#f43f5e' : '#22c55e';
   const labelFill = isDark ? '#f9fafb' : '#111827';
   const hintFill = isDark ? '#9ca3af' : '#6b7280';
   const segmentSpan = Math.max(1, segments - 1);
@@ -671,13 +670,7 @@ function SegmentedSemiGauge({
           const y1 = cy - sin * innerR;
           const x2 = cx + cos * outerR;
           const y2 = cy - sin * outerR;
-          const active = i < filledCount;
-          const fillT = filledCount <= 1 ? 1 : i / Math.max(1, filledCount - 1);
-          const stroke = active
-            ? fillT < 0.55
-              ? activeBase
-              : activeHi
-            : track;
+          const filled = i < filledCount;
           return (
             <line
               key={i}
@@ -685,7 +678,7 @@ function SegmentedSemiGauge({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke={stroke}
+              stroke={filled ? active : track}
               strokeWidth={3.2}
               strokeLinecap="round"
             />
@@ -715,13 +708,6 @@ function SegmentedSemiGauge({
 }
 
 function abastecimentoSpendOfRow(row: AbastecimentoUsedRequest): number {
-  if (row.status === 'COMPLETED') {
-    const liters = Number(row.litersRefueled);
-    const ppl = Number(row.pricePerLiter);
-    if (Number.isFinite(liters) && Number.isFinite(ppl) && liters > 0 && ppl > 0) {
-      return liters * ppl;
-    }
-  }
   const released = Number(row.releasedAmountReais);
   return Number.isFinite(released) && released > 0 ? released : 0;
 }
@@ -779,6 +765,7 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
         return anchor >= weekStartMs && anchor < weekEndMs;
       })
       .map((row) => ({ row, total: abastecimentoSpendOfRow(row) }))
+      .filter((item) => item.total > 0)
       .sort((a, b) => {
         const da = abastecimentoQuotaAnchorMs(a.row) ?? 0;
         const db = abastecimentoQuotaAnchorMs(b.row) ?? 0;
@@ -792,7 +779,7 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
   };
 
   const usedBlockClass =
-    'rounded-xl bg-gray-50 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:bg-gray-800/60 dark:hover:bg-gray-800';
+    'flex w-full items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:bg-gray-800/60 dark:hover:bg-gray-800';
 
   return (
     <>
@@ -878,10 +865,16 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                   onClick={openUsedSolicitacoes}
                   title="Ver solicitações usadas na semana"
                 >
-                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
-                  <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                    {formatCurrency(used)}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Usado</p>
+                    <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                      {formatCurrency(used)}
+                    </p>
+                  </div>
+                  <ExternalLink
+                    className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+                    aria-hidden
+                  />
                 </button>
               </div>
             </div>
@@ -917,7 +910,6 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                         year: 'numeric',
                       })
                     : '—';
-                const liters = Number(row.litersRefueled);
                 return (
                   <li
                     key={row.id}
@@ -938,11 +930,7 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                       <p className="font-semibold text-gray-800 dark:text-gray-200">
                         {formatCurrency(total)}
                       </p>
-                      {Number.isFinite(liters) && liters > 0 ? (
-                        <p className="text-xs text-gray-400">
-                          {liters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L
-                        </p>
-                      ) : null}
+                      <p className="text-xs text-gray-400">Liberado</p>
                     </div>
                   </li>
                 );

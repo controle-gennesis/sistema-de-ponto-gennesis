@@ -1655,8 +1655,10 @@ export default function ContractDetailPage() {
         refuelDate?: string | null;
         refuelReportedAt?: string | null;
         requestedAt?: string | null;
+        suppliesApprovedAt?: string | null;
         litersRefueled?: string | number | null;
         pricePerLiter?: string | number | null;
+        releasedAmountReais?: number | null;
       }>;
     },
     enabled: !!contractId && canAccessCombustivelModulo,
@@ -2752,36 +2754,30 @@ export default function ContractDetailPage() {
   }, [caixinhaPeriodoRows]);
 
   const abastecimentoPeriodoRows = useMemo(() => {
+    const liberadoStatuses = new Set(['APPROVED', 'AWAITING_REFUEL', 'COMPLETED']);
     const rows = Array.isArray(combustivelListaData) ? combustivelListaData : [];
     return rows
       .filter((row) => {
         if (row.contract?.id !== contractId) return false;
-        const raw = row.refuelReportedAt || row.refuelDate || row.requestedAt;
+        if (!liberadoStatuses.has(String(row.status || ''))) return false;
+        const released = Number(row.releasedAmountReais);
+        if (!Number.isFinite(released) || released <= 0) return false;
+        // Período pela liberação (não pelo preenchimento do abastecimento)
+        const raw = row.suppliesApprovedAt || row.requestedAt;
         if (!raw) return !periodFrom && !periodTo;
         return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
       })
       .map((row) => {
-        const liters = Number(row.litersRefueled);
-        const price = Number(row.pricePerLiter);
-        const total =
-          Number.isFinite(liters) && Number.isFinite(price) ? liters * price : 0;
-        const when = parseDateSafe(row.refuelReportedAt || row.refuelDate || row.requestedAt);
-        return { row, total, liters: Number.isFinite(liters) ? liters : null, when };
+        const total = Number(row.releasedAmountReais) || 0;
+        const when = parseDateSafe(row.suppliesApprovedAt || row.requestedAt);
+        return { row, total, when };
       })
       .sort((a, b) => (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0));
   }, [combustivelListaData, contractId, periodFrom, periodTo]);
 
   const abastecimentoResumo = useMemo(() => {
-    let total = 0;
-    let count = 0;
-    for (const item of abastecimentoPeriodoRows) {
-      const liters = Number(item.row.litersRefueled);
-      const price = Number(item.row.pricePerLiter);
-      if (!Number.isFinite(liters) || !Number.isFinite(price)) continue;
-      total += liters * price;
-      count += 1;
-    }
-    return { total, count };
+    const total = abastecimentoPeriodoRows.reduce((acc, item) => acc + item.total, 0);
+    return { total, count: abastecimentoPeriodoRows.length };
   }, [abastecimentoPeriodoRows]);
 
   const resumoAbastecimentoCota = useMemo((): ContratoResumoAbastecimento | null => {
@@ -7811,7 +7807,7 @@ export default function ContractDetailPage() {
                 </p>
               ) : (
                 <ul className="max-h-[55vh] divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
-                  {abastecimentoPeriodoRows.map(({ row, total, liters, when }) => (
+                  {abastecimentoPeriodoRows.map(({ row, total, when }) => (
                     <li
                       key={row.id}
                       className="flex items-start justify-between gap-3 px-3 py-3"
@@ -7831,11 +7827,7 @@ export default function ContractDetailPage() {
                         <p className="font-semibold text-gray-800 dark:text-gray-200">
                           {formatCurrency(total)}
                         </p>
-                        {liters != null && liters > 0 ? (
-                          <p className="text-xs text-gray-400">
-                            {liters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L
-                          </p>
-                        ) : null}
+                        <p className="text-xs text-gray-400">Liberado</p>
                       </div>
                     </li>
                   ))}

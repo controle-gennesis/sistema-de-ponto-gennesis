@@ -276,6 +276,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     user,
     isAdministrator,
     can,
+    canAccessModule,
     isLinkedEmpreiteiro,
     canAccessLicitacoesPage,
     canAccessDpApproverPages,
@@ -1499,7 +1500,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Fuel,
             description: 'Cidades satélites e postos para abastecimento',
             permission:
-              isAdministrator || can(pk('/ponto/regioes-postos-combustivel')),
+              isAdministrator || canAccessModule(pk('/ponto/regioes-postos-combustivel')),
             section: 'Frota'
           },
           {

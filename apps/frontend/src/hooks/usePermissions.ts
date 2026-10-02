@@ -590,6 +590,7 @@ export function usePermissions() {
     permissions: finalPermissions,
     can,
     canAction,
+    canAccessModule,
     allowedContractIds,
     dpApprovalContractIds,
     restrictedDpApprovalCostCenterIds,
@@ -865,7 +866,7 @@ export function useRoutePermission(route: string) {
     '/ponto/fornecedores': isAdministrator || can(pk('/ponto/fornecedores')),
     '/ponto/veiculos': isAdministrator || can(pk('/ponto/veiculos')),
     '/ponto/regioes-postos-combustivel':
-      isAdministrator || can(pk('/ponto/regioes-postos-combustivel')),
+      isAdministrator || canAccessModule(pk('/ponto/regioes-postos-combustivel')),
     '/ponto/reserva-veiculos': isAdministrator || can(pk('/ponto/reserva-veiculos')),
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
     '/ponto/condicoes-pagamento': isAdministrator || can(pk('/ponto/condicoes-pagamento')),
