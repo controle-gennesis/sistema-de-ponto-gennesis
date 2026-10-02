@@ -1680,7 +1680,7 @@ export default function ContractDetailPage() {
         weekEnd?: string;
       };
     },
-    enabled: !!contractId && canAccessCombustivelModulo,
+    enabled: !!contractId && hasThisContractAccess,
     staleTime: 30_000,
   });
 
@@ -2781,7 +2781,7 @@ export default function ContractDetailPage() {
   }, [abastecimentoPeriodoRows]);
 
   const resumoAbastecimentoCota = useMemo((): ContratoResumoAbastecimento | null => {
-    if (!canAccessCombustivelModulo) return null;
+    if (!hasThisContractAccess) return null;
     if (loadingFuelQuotaBalance && !fuelQuotaBalance) {
       return {
         contractId,
@@ -2790,6 +2790,7 @@ export default function ContractDetailPage() {
         remainingReais: null,
         unlimited: true,
         loading: true,
+        canInspectUsed: canAccessCombustivelModulo,
       };
     }
     if (!fuelQuotaBalance) {
@@ -2800,6 +2801,7 @@ export default function ContractDetailPage() {
         remainingReais: null,
         unlimited: true,
         loading: false,
+        canInspectUsed: canAccessCombustivelModulo,
       };
     }
     return {
@@ -2811,8 +2813,15 @@ export default function ContractDetailPage() {
       weekStart: fuelQuotaBalance.weekStart,
       weekEnd: fuelQuotaBalance.weekEnd,
       loading: loadingFuelQuotaBalance,
+      canInspectUsed: canAccessCombustivelModulo,
     };
-  }, [canAccessCombustivelModulo, contractId, fuelQuotaBalance, loadingFuelQuotaBalance]);
+  }, [
+    canAccessCombustivelModulo,
+    contractId,
+    fuelQuotaBalance,
+    hasThisContractAccess,
+    loadingFuelQuotaBalance,
+  ]);
 
   const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
     const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
