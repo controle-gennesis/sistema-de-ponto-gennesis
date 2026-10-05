@@ -3,9 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui/Button';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
@@ -59,6 +58,13 @@ function tanksFromReaisRaw(reaisRaw: string, tankPrice: number): string {
   if (reais == null || reais <= 0 || tankPrice <= 0) return '';
   return formatTanksAmount(reais / tankPrice);
 }
+
+const fieldClass =
+  'h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-900/70 dark:text-gray-100';
+const labelClass =
+  'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
+const saveButtonClass =
+  'inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50';
 
 function buildQuotaGroups(contracts: QuotaContract[]): QuotaGroup[] {
   const byId = new Map(contracts.map((c) => [c.id, c]));
@@ -253,176 +259,162 @@ export function FuelQuotaConfigModal({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Configurar cotas de abastecimento" size="xl">
-      <div className="space-y-5">
-        <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Valor do tanque (R$)
-          </label>
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            Usado pra calcular o saldo semanal de todos os contratos (cota em tanques × esse valor).
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[12rem] flex-1">
+              <label className={labelClass}>Valor do tanque</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={tankPriceInput}
+                onChange={(e) => handleTankPriceInputChange(e.target.value)}
+                placeholder="R$ 0,00"
+                className={fieldClass}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveTankPrice}
+              disabled={tankPriceMutation.isPending}
+              className={saveButtonClass}
+            >
+              {tankPriceMutation.isPending ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            A cota em tanques vira reais com esse valor, em todos os contratos.
           </p>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={tankPriceInput}
-              onChange={(e) => handleTankPriceInputChange(e.target.value)}
-              placeholder="R$ 0,00"
-              className="h-10 w-44 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            />
-            <Button type="button" onClick={handleSaveTankPrice} loading={tankPriceMutation.isPending}>
-              Salvar
-            </Button>
+        </div>
+
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Cotas da semana</p>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Campo vazio fica sem limite. Tanques e valor se calculam juntos.
+            </p>
           </div>
         </div>
 
-        <div>
-          <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-            Cota semanal por contrato
-          </p>
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            Edite tanques ou o valor em R$ — o outro campo calcula sozinho. Deixe em branco pra não
-            limitar. Em Agrupar com, junte contratos que compartilham o mesmo saldo.
-          </p>
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-            </div>
-          ) : (
-            <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
-                      Contrato
-                    </th>
-                    <th className="w-56 px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
-                      Agrupar com
-                    </th>
-                    <th className="w-28 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
-                      Tanques/semana
-                    </th>
-                    <th className="w-36 px-3 py-2 text-center font-medium text-gray-500 dark:text-gray-400">
-                      Equivale a (R$)
-                    </th>
-                    <th className="w-16 px-3 py-2" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {groups.map((group) => {
-                    const isGrouped = group.members.length > 1;
-                    const ownerTanksRaw = quotaInputs[group.owner.id] ?? '';
-                    const ownerReaisRaw = reaisInputs[group.owner.id] ?? '';
-                    const groupOptions = ownerOptions.filter((opt) => opt.value !== group.owner.id);
-                    const ownerReaisLabel =
-                      ownerReaisRaw.trim() ||
-                      (ownerTanksRaw.trim() ? '—' : 'Sem limite');
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          </div>
+        ) : (
+          <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+            {groups.map((group) => {
+              const isGrouped = group.members.length > 1;
+              const ownerTanksRaw = quotaInputs[group.owner.id] ?? '';
+              const ownerReaisRaw = reaisInputs[group.owner.id] ?? '';
+              const groupOptions = ownerOptions.filter((opt) => opt.value !== group.owner.id);
+              const members = group.members.filter((member) => member.id !== group.owner.id);
+              const ownerReaisLabel = ownerReaisRaw.trim()
+                ? ownerReaisRaw
+                : ownerTanksRaw.trim()
+                  ? '—'
+                  : 'Sem limite';
 
-                    return (
-                      <React.Fragment key={group.owner.id}>
-                        <tr
-                          className={
-                            isGrouped
-                              ? 'bg-red-50/70 dark:bg-red-950/25'
-                              : undefined
-                          }
+              return (
+                <article
+                  key={group.owner.id}
+                  className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/40"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {group.owner.name}
+                    </p>
+                    {isGrouped ? (
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+                        {group.members.length} contratos
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.3fr)_7.5rem_9.5rem_auto] sm:items-end">
+                    <div>
+                      <label className={labelClass}>Grupo</label>
+                      <StringSingleSelectDropdown
+                        value=""
+                        onChange={(value) =>
+                          handleGroupChange(group.owner.id, value, null, {
+                            dissolveIfEmpty: isGrouped,
+                          })
+                        }
+                        options={groupOptions}
+                        placeholder={isGrouped ? 'Este define a cota' : 'Sozinho'}
+                        emptyOptionLabel={isGrouped ? 'Desfazer grupo' : 'Sozinho'}
+                        searchPlaceholder="Buscar contrato..."
+                        matchTriggerWidth
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Tanques</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={ownerTanksRaw}
+                        onChange={(e) => handleTanksChange(group.owner.id, e.target.value)}
+                        placeholder="Sem limite"
+                        className={`${fieldClass} text-center`}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Valor</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={ownerReaisRaw}
+                        onChange={(e) => handleReaisChange(group.owner.id, e.target.value)}
+                        placeholder="Sem limite"
+                        className={fieldClass}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveQuota(group.owner.id)}
+                      disabled={quotaMutation.isPending}
+                      className={saveButtonClass}
+                    >
+                      Salvar
+                    </button>
+                  </div>
+
+                  {members.length > 0 ? (
+                    <div className="mt-3 space-y-1.5 border-t border-gray-100 pt-3 dark:border-gray-700">
+                      {members.map((member) => (
+                        <div
+                          key={member.id}
+                          className="grid grid-cols-1 items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_14rem] dark:bg-gray-900/50"
                         >
-                          <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
-                            <div className="font-medium">{group.owner.name}</div>
-                            {isGrouped ? (
-                              <div className="mt-0.5 text-xs text-red-600 dark:text-red-400">
-                                Grupo · {group.members.length} contratos
-                              </div>
-                            ) : null}
-                          </td>
-                          <td className="px-3 py-2">
-                            <StringSingleSelectDropdown
-                              value=""
-                              onChange={(value) =>
-                                handleGroupChange(group.owner.id, value, null, {
-                                  dissolveIfEmpty: isGrouped,
-                                })
-                              }
-                              options={groupOptions}
-                              placeholder={isGrouped ? 'Dono do grupo' : 'Sem grupo'}
-                              emptyOptionLabel={isGrouped ? 'Desfazer grupo' : 'Sem grupo'}
-                              searchPlaceholder="Buscar contrato..."
-                              matchTriggerWidth
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={ownerTanksRaw}
-                              onChange={(e) => handleTanksChange(group.owner.id, e.target.value)}
-                              placeholder="Sem limite"
-                              className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-center text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              value={ownerReaisRaw}
-                              onChange={(e) => handleReaisChange(group.owner.id, e.target.value)}
-                              placeholder="Sem limite"
-                              className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-center text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleSaveQuota(group.owner.id)}
-                              disabled={quotaMutation.isPending}
-                              aria-label={`Salvar cota de ${group.owner.name}`}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
-                            >
-                              <Save className="h-4 w-4" />
-                            </button>
-                          </td>
-                        </tr>
-                        {group.members
-                          .filter((member) => member.id !== group.owner.id)
-                          .map((member) => (
-                            <tr
-                              key={member.id}
-                              className="bg-red-50/40 dark:bg-red-950/15"
-                            >
-                              <td className="px-3 py-2 pl-8 text-gray-900 dark:text-gray-100">
-                                <div>{member.name}</div>
-                                <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                                  usa a cota de {group.owner.name}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2">
-                                <StringSingleSelectDropdown
-                                  value={group.owner.id}
-                                  onChange={(value) => handleGroupChange(member.id, value, group.owner.id)}
-                                  options={ownerOptions.filter((opt) => opt.value !== member.id)}
-                                  placeholder="Sem grupo"
-                                  emptyOptionLabel="Sem grupo"
-                                  searchPlaceholder="Buscar contrato..."
-                                  matchTriggerWidth
-                                />
-                              </td>
-                              <td className="px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400">
-                                usa esta cota
-                              </td>
-                              <td className="px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400">
-                                {ownerReaisLabel}
-                              </td>
-                              <td className="px-3 py-2" />
-                            </tr>
-                          ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-gray-800 dark:text-gray-100">
+                              {member.name}
+                            </p>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                              Usa esta cota · {ownerTanksRaw.trim() || 'sem limite'} tanque(s) ·{' '}
+                              {ownerReaisLabel}
+                            </p>
+                          </div>
+                          <StringSingleSelectDropdown
+                            value={group.owner.id}
+                            onChange={(value) =>
+                              handleGroupChange(member.id, value, group.owner.id)
+                            }
+                            options={ownerOptions.filter((opt) => opt.value !== member.id)}
+                            placeholder="Sozinho"
+                            emptyOptionLabel="Sair do grupo"
+                            searchPlaceholder="Buscar contrato..."
+                            matchTriggerWidth
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
     </Modal>
   );

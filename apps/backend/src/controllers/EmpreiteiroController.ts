@@ -3258,16 +3258,42 @@ export class EmpreiteiroController {
         throw createError('Só é possível excluir o último aditivo do histórico', 400);
       }
 
-      await prisma.empreiteiroContractAddendum.delete({ where: { id: addendumId } });
-      const empreiteiro = await prisma.empreiteiro.findUniqueOrThrow({
-        where: { id },
-        include: empreiteiroInclude,
+      const addendumNote = `Aditivo nº ${addendum.number}`;
+      const createdInstallments = await prisma.empreiteiroContractInstallment.findMany({
+        where: { empreiteiroContractId: linkId, note: addendumNote },
+        select: { id: true, status: true, number: true },
+      });
+      const blocked = createdInstallments.find((row) => {
+        const status = String(row.status || 'PENDING').toUpperCase();
+        return status === 'PAID' || status === 'RELEASED';
+      });
+      if (blocked) {
+        throw createError(
+          'Não é possível excluir este aditivo: uma parcela criada por ele já foi liberada ou paga',
+          400
+        );
+      }
+
+      const empreiteiro = await prisma.$transaction(async (tx) => {
+        if (createdInstallments.length > 0) {
+          await tx.empreiteiroContractInstallment.deleteMany({
+            where: { id: { in: createdInstallments.map((row) => row.id) } },
+          });
+        }
+        await tx.empreiteiroContractAddendum.delete({ where: { id: addendumId } });
+        return tx.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
       });
       const counts = await measurementCountsForEmpreiteiro(id);
       res.json({
         success: true,
         data: serializeEmpreiteiro(empreiteiro, counts),
-        message: 'Aditivo removido',
+        message:
+          createdInstallments.length > 0
+            ? 'Aditivo removido e parcelas criadas por ele excluídas'
+            : 'Aditivo removido',
       });
     } catch (error) {
       next(error);

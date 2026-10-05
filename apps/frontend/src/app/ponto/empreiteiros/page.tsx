@@ -263,16 +263,17 @@ const EMPREITEIRO_TEAM_ROLES = [
 
 const EMPREITEIRO_SPECIALTIES = [
   'Alvenaria / Civil',
-  'Elétrica',
-  'Hidráulica',
-  'Pintura',
-  'Gesso / Drywall',
-  'Marcenaria',
-  'Serralheria',
-  'Impermeabilização',
-  'Cobertura / Telhado',
   'Ar-condicionado',
+  'Cobertura / Telhado',
+  'Elétrica',
+  'Generalista',
+  'Gesso / Drywall',
+  'Hidráulica',
+  'Impermeabilização',
   'Limpeza',
+  'Marcenaria',
+  'Pintura',
+  'Serralheria',
   'Outros',
 ];
 
@@ -515,6 +516,7 @@ export default function EmpreiteirosPage() {
   const [newServiceLocation, setNewServiceLocation] = useState('');
   /** avista = 1 parcela · parcelado = N parcelas · null = não informar agora */
   const [newServicePayMode, setNewServicePayMode] = useState<'avista' | 'parcelado' | null>(null);
+  const [newServicePayDate, setNewServicePayDate] = useState('');
   const [newServiceParcelCount, setNewServiceParcelCount] = useState('6');
   const [newServiceParcelAmounts, setNewServiceParcelAmounts] = useState<string[]>([]);
   const [newServiceFiles, setNewServiceFiles] = useState<PaymentFile[]>([]);
@@ -550,6 +552,7 @@ export default function EmpreiteirosPage() {
   const [editServicePayMode, setEditServicePayMode] = useState<'avista' | 'parcelado' | null>(
     null
   );
+  const [editServicePayDate, setEditServicePayDate] = useState('');
   const [editServiceParcelCount, setEditServiceParcelCount] = useState('6');
   const [editServiceParcelAmounts, setEditServiceParcelAmounts] = useState<string[]>([]);
   const [editServicePayLocked, setEditServicePayLocked] = useState(false);
@@ -834,6 +837,7 @@ export default function EmpreiteirosPage() {
     setNewServicePlannedValue('');
     setNewServiceLocation('');
     setNewServicePayMode(null);
+    setNewServicePayDate('');
     setNewServiceParcelCount('6');
     setNewServiceParcelAmounts([]);
     setNewServiceFiles([]);
@@ -873,10 +877,21 @@ export default function EmpreiteirosPage() {
     }
     let parcelCount: number | undefined;
     let installments:
-      | Array<{ number: number; amount: number; status: 'PENDING' }>
+      | Array<{ number: number; amount: number; status: 'PENDING'; dueDate?: string | null }>
       | undefined;
     if (newServicePayMode === 'avista') {
-      parcelCount = 1;
+      if (!(plannedValue && plannedValue > 0)) {
+        toast.error('Informe o valor planejado para gerar o pagamento');
+        return;
+      }
+      installments = [
+        {
+          number: 1,
+          amount: plannedValue,
+          status: 'PENDING',
+          dueDate: newServicePayDate || null,
+        },
+      ];
     } else if (newServicePayMode === 'parcelado') {
       const n = Math.floor(Number(newServiceParcelCount.trim()));
       if (!Number.isFinite(n) || n < 2 || n > 60) {
@@ -941,6 +956,7 @@ export default function EmpreiteirosPage() {
       setNewServiceLocation('');
       setNewServiceCostCenterId('');
       setNewServicePayMode(null);
+      setNewServicePayDate('');
       setNewServiceParcelCount('6');
       setNewServiceParcelAmounts([]);
       setNewServiceFiles([]);
@@ -1233,10 +1249,12 @@ export default function EmpreiteirosPage() {
     const n = link.installments?.length || 0;
     if (n === 1) {
       setEditServicePayMode('avista');
+      setEditServicePayDate(toDateInputValue(link.installments?.[0]?.dueDate));
       setEditServiceParcelCount('6');
       setEditServiceParcelAmounts([]);
     } else if (n > 1) {
       setEditServicePayMode('parcelado');
+      setEditServicePayDate('');
       setEditServiceParcelCount(String(n));
       setEditServiceParcelAmounts(
         (link.installments || []).map((p) =>
@@ -1245,6 +1263,7 @@ export default function EmpreiteirosPage() {
       );
     } else {
       setEditServicePayMode(null);
+      setEditServicePayDate('');
       setEditServiceParcelCount('6');
       setEditServiceParcelAmounts([]);
     }
@@ -1277,11 +1296,22 @@ export default function EmpreiteirosPage() {
 
     let parcelCount: number | undefined;
     let installments:
-      | Array<{ number: number; amount: number; status: 'PENDING' }>
+      | Array<{ number: number; amount: number; status: 'PENDING'; dueDate?: string | null }>
       | undefined;
     if (!editServicePayLocked) {
       if (editServicePayMode === 'avista') {
-        parcelCount = 1;
+        if (!(plannedValue && plannedValue > 0)) {
+          toast.error('Informe o valor planejado para gerar o pagamento');
+          return;
+        }
+        installments = [
+          {
+            number: 1,
+            amount: plannedValue,
+            status: 'PENDING',
+            dueDate: editServicePayDate || null,
+          },
+        ];
       } else if (editServicePayMode === 'parcelado') {
         const n = Math.floor(Number(editServiceParcelCount.trim()));
         if (!Number.isFinite(n) || n < 2 || n > 60) {
@@ -2835,10 +2865,19 @@ export default function EmpreiteirosPage() {
                           })}
                         </div>
                         {newServicePayMode === 'avista' ? (
-                          <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                            1 parcela com o valor total — a baixa na aprovação libera a parcela
-                            com esse valor; pago só ao anexar o comprovante.
-                          </p>
+                          <div className="mt-2 max-w-xs">
+                            <label className={labelClass}>Data do pagamento</label>
+                            <input
+                              type="date"
+                              value={newServicePayDate}
+                              onChange={(e) => setNewServicePayDate(e.target.value)}
+                              className={inputClass}
+                            />
+                            <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                              1 parcela com o valor total — a baixa na aprovação libera a parcela
+                              com esse valor; pago só ao anexar o comprovante.
+                            </p>
+                          </div>
                         ) : null}
                         {newServicePayMode === 'parcelado' ? (
                           <div className="mt-2 space-y-2">
@@ -3325,10 +3364,19 @@ export default function EmpreiteirosPage() {
                                       })}
                                     </div>
                                     {editServicePayMode === 'avista' ? (
-                                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                                        1 parcela com o valor total — a baixa na aprovação libera
-                                        a parcela; pago ao anexar comprovante.
-                                      </p>
+                                      <div className="mt-2 max-w-xs">
+                                        <label className={labelClass}>Data do pagamento</label>
+                                        <input
+                                          type="date"
+                                          value={editServicePayDate}
+                                          onChange={(e) => setEditServicePayDate(e.target.value)}
+                                          className={inputClass}
+                                        />
+                                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                          1 parcela com o valor total — a baixa na aprovação libera
+                                          a parcela; pago ao anexar comprovante.
+                                        </p>
+                                      </div>
                                     ) : null}
                                     {editServicePayMode === 'parcelado' ? (
                                       <div className="mt-2 space-y-2">
