@@ -77,11 +77,11 @@ const MEMORIAL_ROW_H = 'h-[2.75rem] max-h-[2.75rem] box-border';
 const MEMORIAL_TITLE_ROW_MIN_H = 'min-h-[2.75rem] box-border';
 /** Sticky da 2ª linha do thead — `top` vem da altura real da faixa do item. */
 const memorialThStickySecondBase =
-  'sticky z-[19] bg-slate-50 dark:bg-slate-800/95 !shadow-none';
+  'sticky z-[19] bg-[var(--orc-header-bg,#f9fafb)] text-[var(--orc-header-fg,#4b5563)] !shadow-none';
 const thFirst =
-  `${MEMORIAL_ROW_H} px-3 sm:px-3.5 py-0 text-left text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide bg-slate-50 dark:bg-slate-800/85 border-b border-r border-gray-200 dark:border-gray-600 ${colDesc}`;
+  `${MEMORIAL_ROW_H} px-3 sm:px-3.5 py-0 text-left text-[11px] font-bold uppercase tracking-wide bg-[var(--orc-header-bg,#f9fafb)] text-[var(--orc-header-fg,#4b5563)] border-b border-r border-gray-200 dark:border-gray-600 ${colDesc}`;
 const thRest =
-  `${MEMORIAL_ROW_H} px-2 sm:px-3 py-0 text-center text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide bg-slate-50 dark:bg-slate-800/85 border-b border-r border-gray-200 dark:border-gray-600 ${colMed}`;
+  `${MEMORIAL_ROW_H} px-2 sm:px-3 py-0 text-center text-[11px] font-bold uppercase tracking-wide bg-[var(--orc-header-bg,#f9fafb)] text-[var(--orc-header-fg,#4b5563)] border-b border-r border-gray-200 dark:border-gray-600 ${colMed}`;
 /** Só no thead da grade de colunas (não reutilizar em linhas de seção do tbody). */
 const thFirstSticky = `${memorialThStickySecondBase} ${thFirst}`;
 const thRestSticky = `${memorialThStickySecondBase} ${thRest}`;
@@ -101,7 +101,7 @@ const tdCalcBody =
 const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0`;
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
 const inputThDescricaoCls =
-  'box-border h-full min-h-0 w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-0 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:text-gray-200 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
+  'box-border h-full min-h-0 w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-0 text-left text-[11px] font-bold uppercase tracking-wide text-[var(--orc-header-fg,#4b5563)] shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
 
 const MEMORIAL_COMMIT_MS = 180;
 

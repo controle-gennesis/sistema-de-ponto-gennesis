@@ -3241,9 +3241,10 @@ function estiloHeaderOrc(
     return { backgroundColor: '#1f2937', color: '#d1d5db' };
   }
   if (!isDark) return { backgroundColor: a.headerFundo, color: a.headerTexto };
+  // Fundo suavizado; letra escolhida (ex. laranja) permanece — só pretos/cinzas bem escuros viram claros.
   return {
     backgroundColor: corFundoAparenciaOrcDark(a.headerFundo, 'subtitulo'),
-    color: corTextoAparenciaOrcDark(a.headerTexto)
+    color: luminanciaHexOrc(a.headerTexto) < 0.18 ? '#e5e7eb' : a.headerTexto
   };
 }
 
