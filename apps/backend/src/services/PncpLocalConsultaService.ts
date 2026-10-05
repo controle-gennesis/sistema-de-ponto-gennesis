@@ -423,9 +423,23 @@ export async function consultarContratacoesLocais(
   const totalRegistros = await prisma.pncpContratacao.count({ where });
   const totalPaginas = Math.max(1, Math.ceil(totalRegistros / tamanhoPagina) || 1);
   const safePage = Math.min(pagina, totalPaginas);
+  const sortBy = params.sortBy === 'valorEstimado' ? 'valorEstimado' : null;
+  const sortDir = params.sortDir === 'asc' || params.sortDir === 'desc' ? params.sortDir : null;
+  const orderBy: Prisma.PncpContratacaoOrderByWithRelationInput[] =
+    sortBy && sortDir
+      ? [
+          { valorEstimado: sortDir },
+          { dataAberturaProposta: 'desc' },
+          { dataInclusao: 'desc' },
+        ]
+      : [
+          { dataAberturaProposta: 'desc' },
+          { dataInclusao: 'desc' },
+          { syncedAt: 'desc' },
+        ];
   const rows = await prisma.pncpContratacao.findMany({
     where,
-    orderBy: [{ dataAberturaProposta: 'desc' }, { dataInclusao: 'desc' }, { syncedAt: 'desc' }],
+    orderBy,
     skip: (safePage - 1) * tamanhoPagina,
     take: tamanhoPagina,
   });

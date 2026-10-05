@@ -1015,9 +1015,6 @@ export default function ContractDetailPage() {
   const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
   const canAccessCronogramasModulo = isAdministrator || can(pathToModuleKey('/ponto/cronogramas'));
-  const canAccessCaixinhaModulo = isAdministrator || can(pathToModuleKey('/ponto/caixinha'));
-  const canAccessCombustivelModulo =
-    isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-combustivel'));
   const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
   const { pendingByContractId } = useMensalReportPendingCount(Boolean(contractId));
   const mensalReportPendingForContract = pendingByContractId.has(contractId) ? 1 : 0;
@@ -1027,6 +1024,8 @@ export default function ContractDetailPage() {
   // Liberado na aba Contratos = operar no contrato (OS, produção, etc.).
   // Editar/excluir o cadastro do contrato na listagem exige Editar/Excluir na matriz Acesso.
   const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
+  /** Resumo Abastecimento/Caixinha no contrato: quem tem Liberado (abre a ficha) vê os valores. */
+  const canSeeContratoResumoFinanceiro = hasThisContractAccess;
   const canCreateContrato =
     isElevatedUser || permissions.canCreateContracts || hasThisContractAccess;
   const canEditContrato =
@@ -1617,7 +1616,7 @@ export default function ContractDetailPage() {
       }>('/caixinha', { params: { contractId } });
       return res.data?.data ?? [];
     },
-    enabled: !!contractId && canAccessCaixinhaModulo,
+    enabled: !!contractId && canSeeContratoResumoFinanceiro,
   });
 
   const {
@@ -1644,7 +1643,9 @@ export default function ContractDetailPage() {
   const { data: combustivelListaData, isLoading: loadingCombustivelTotal } = useQuery({
     queryKey: ['fuel-refuel-requests', 'contract-resumo', contractId],
     queryFn: async () => {
-      const res = await api.get('/fuel-refuel-requests');
+      const res = await api.get('/fuel-refuel-requests/contract-resumo', {
+        params: { contractId },
+      });
       return (res.data?.data || []) as Array<{
         id: string;
         displayNumber?: number | null;
@@ -1661,7 +1662,7 @@ export default function ContractDetailPage() {
         releasedAmountReais?: number | null;
       }>;
     },
-    enabled: !!contractId && canAccessCombustivelModulo,
+    enabled: !!contractId && canSeeContratoResumoFinanceiro,
     staleTime: 30_000,
   });
 
@@ -1680,7 +1681,7 @@ export default function ContractDetailPage() {
         weekEnd?: string;
       };
     },
-    enabled: !!contractId && hasThisContractAccess,
+    enabled: !!contractId && canSeeContratoResumoFinanceiro,
     staleTime: 30_000,
   });
 
@@ -2781,7 +2782,7 @@ export default function ContractDetailPage() {
   }, [abastecimentoPeriodoRows]);
 
   const resumoAbastecimentoCota = useMemo((): ContratoResumoAbastecimento | null => {
-    if (!hasThisContractAccess) return null;
+    if (!canSeeContratoResumoFinanceiro) return null;
     if (loadingFuelQuotaBalance && !fuelQuotaBalance) {
       return {
         contractId,
@@ -2790,7 +2791,7 @@ export default function ContractDetailPage() {
         remainingReais: null,
         unlimited: true,
         loading: true,
-        canInspectUsed: canAccessCombustivelModulo,
+        canInspectUsed: true,
       };
     }
     if (!fuelQuotaBalance) {
@@ -2801,7 +2802,7 @@ export default function ContractDetailPage() {
         remainingReais: null,
         unlimited: true,
         loading: false,
-        canInspectUsed: canAccessCombustivelModulo,
+        canInspectUsed: true,
       };
     }
     return {
@@ -2813,15 +2814,9 @@ export default function ContractDetailPage() {
       weekStart: fuelQuotaBalance.weekStart,
       weekEnd: fuelQuotaBalance.weekEnd,
       loading: loadingFuelQuotaBalance,
-      canInspectUsed: canAccessCombustivelModulo,
+      canInspectUsed: true,
     };
-  }, [
-    canAccessCombustivelModulo,
-    contractId,
-    fuelQuotaBalance,
-    hasThisContractAccess,
-    loadingFuelQuotaBalance,
-  ]);
+  }, [canSeeContratoResumoFinanceiro, contractId, fuelQuotaBalance, loadingFuelQuotaBalance]);
 
   const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
     const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
@@ -4423,7 +4418,7 @@ export default function ContractDetailPage() {
                     iconBg="bg-gray-100 dark:bg-gray-700/60"
                     iconColor="text-gray-600 dark:text-gray-300"
                   />
-                  {canAccessCombustivelModulo ? (
+                  {canSeeContratoResumoFinanceiro ? (
                     <>
                       <span
                         className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"
@@ -4441,10 +4436,6 @@ export default function ContractDetailPage() {
                         iconColor="text-gray-600 dark:text-gray-300"
                         onClick={() => setResumoPeriodoModal('abastecimento')}
                       />
-                    </>
-                  ) : null}
-                  {canAccessCaixinhaModulo ? (
-                    <>
                       <span
                         className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"
                         aria-hidden

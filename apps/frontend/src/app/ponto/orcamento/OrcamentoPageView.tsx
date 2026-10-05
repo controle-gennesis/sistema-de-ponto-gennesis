@@ -461,11 +461,92 @@ function precosMoMatDeLinhaOrcafascio(row: Record<string, unknown>): {
   return { mo, mat };
 }
 
+/**
+ * Garante que MO+MAT batam com o preço unitário sem BDI.
+ * Corrige splits gravados como total de linha / soma analítica fora de escala.
+ */
+function reconciliarMoMatComPrecoUnitario(
+  mo: number,
+  mat: number,
+  precoUnitario: number,
+  qtyLinha?: number | null
+): { mo: number; mat: number } {
+  let moN = mo > 0 ? mo : 0;
+  let matN = mat > 0 ? mat : 0;
+  const preco = precoUnitario > 0 ? precoUnitario : 0;
+  if (!(preco > 0)) return { mo: moN, mat: matN };
+
+  const soma = moN + matN;
+  if (!(soma > 0)) return { mo: moN, mat: matN };
+
+  const tol = Math.max(0.05, preco * 0.02);
+  if (Math.abs(soma - preco) <= tol) return { mo: moN, mat: matN };
+
+  // Split veio como total da linha (× quantidade do sintético).
+  const q = qtyLinha != null && Number.isFinite(qtyLinha) ? Number(qtyLinha) : 0;
+  if (q > 1) {
+    const somaUnit = soma / q;
+    if (Math.abs(somaUnit - preco) <= Math.max(0.05, preco * 0.02)) {
+      return { mo: moN / q, mat: matN / q };
+    }
+  }
+
+  // Reescala proporcionalmente para o PU sintético (fonte de verdade do orçamento).
+  const fator = preco / soma;
+  return { mo: moN * fator, mat: matN * fator };
+}
+
 function linhaEhMaoDeObraOrcafascio(row: Record<string, unknown>): boolean {
   if (row.mdo === true || row.labor === true) return true;
   const kind = String(row.kind ?? row.type ?? '').toLowerCase();
   if (kind.includes('labor') || kind.includes('mao') || kind.includes('mão')) return true;
   return false;
+}
+
+function somarMoMatDasLinhasAnalitico(
+  linhas: LinhaAnaliticoComposicao[] | undefined
+): { mo: number; mat: number } {
+  if (!linhas || linhas.length === 0) return { mo: 0, mat: 0 };
+  let mo = 0;
+  let mat = 0;
+  for (const l of linhas) {
+    const t = contribuicaoLinhaAnalitico(l);
+    if (!(t > 0)) continue;
+    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    else mat += t;
+  }
+  return { mo, mat };
+}
+
+/**
+ * Contribuição do insumo no preço unitário da composição (= coluna TOTAL do Orçafascio).
+ * Não usar o preço unitário do insumo: ex. caminhão R$ 422.626 × coef 0,000096 → R$ 49,61.
+ */
+function contribuicaoLinhaAnalitico(l: {
+  total?: number;
+  precoUnitario?: number;
+  quantidade?: number;
+}): number {
+  const qtd = Number(l.quantidade) || 0;
+  const vu = Number(l.precoUnitario) || 0;
+  const tot = Number(l.total) || 0;
+  const fromCoef = vu > 0 && qtd > 0 ? vu * qtd : 0;
+
+  if (fromCoef > 0) {
+    // `total` gravado é na verdade o VU do insumo (coef ≠ 1).
+    if (
+      vu > 0 &&
+      Math.abs(qtd - 1) > 1e-9 &&
+      Math.abs(tot - vu) <= Math.max(0.02, Math.abs(vu) * 0.001)
+    ) {
+      return fromCoef;
+    }
+    // `total` explodido (usou VU no lugar de VU×coef).
+    if (tot > fromCoef * 2) return fromCoef;
+    if (tot > 0 && Math.abs(tot - fromCoef) <= Math.max(0.05, fromCoef * 0.05)) return tot;
+    return fromCoef;
+  }
+  return tot > 0 ? tot : 0;
 }
 
 /** Preenche MO/MAT a partir do analítico gravado na linha (orçamentos já importados). */
@@ -476,28 +557,27 @@ function moMatUnitarioDeItemOuComposicao(
     precoUnitario?: number;
     descricao?: string;
     analiticoLinhas?: LinhaAnaliticoComposicao[];
+    quantidadeImportada?: number;
   },
   composicao: ComposicaoItem | null | undefined
 ): { mo: number; mat: number } {
   let mo = Number(item.maoDeObraUnitario ?? composicao?.maoDeObraUnitario ?? 0) || 0;
   let mat = Number(item.materialUnitario ?? composicao?.materialUnitario ?? 0) || 0;
+  const preco = Number(item.precoUnitario ?? composicao?.precoUnitario ?? 0) || 0;
   const linhas =
     item.analiticoLinhas && item.analiticoLinhas.length > 0
       ? item.analiticoLinhas
       : composicao?.analiticoLinhas;
+
+  // Sempre preferir soma dos TOTAIS do analítico (VU × coef), não VU do insumo.
   if (linhas && linhas.length > 0) {
-    if (!(mo > 0)) {
-      mo = linhas
-        .filter((l) => l.categoria === 'MÃO DE OBRA')
-        .reduce((s, l) => s + (Number(l.total) || 0), 0);
-    }
-    if (!(mat > 0)) {
-      mat = linhas
-        .filter((l) => l.categoria === 'MATERIAL')
-        .reduce((s, l) => s + (Number(l.total) || 0), 0);
+    const a = somarMoMatDasLinhasAnalitico(linhas);
+    if (a.mo > 0 || a.mat > 0) {
+      mo = a.mo;
+      mat = a.mat;
     }
   }
-  const preco = Number(item.precoUnitario ?? composicao?.precoUnitario ?? 0) || 0;
+
   // Composição só de mão de obra: o preço unitário inteiro cai em MO.
   if (!(mo > 0) && !(mat > 0) && preco > 0 && linhas && linhas.length > 0) {
     const soMo = linhas.every((l) => l.categoria === 'MÃO DE OBRA');
@@ -514,7 +594,13 @@ function moMatUnitarioDeItemOuComposicao(
       mo = preco;
     }
   }
-  return { mo: mo > 0 ? mo : 0, mat: mat > 0 ? mat : 0 };
+
+  return reconciliarMoMatComPrecoUnitario(
+    mo,
+    mat,
+    preco,
+    item.quantidadeImportada
+  );
 }
 
 /** Id enviado aos endpoints /orcamentos/:id (lista pode trazer só `_id` ou `budget_id`). */
@@ -817,43 +903,84 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
         ? (s.prices as Record<string, unknown>)
         : {};
     const qty = valorNumericoOrcafascio(s.qty ?? s.coefficient ?? s.quantity) ?? 0;
-    // `prices.pnd` é total da linha — não usar como unitário (senão vira total/coef e explode o VU).
+    // `prices.pnd` no item pode ser o VU do insumo — a contribuição real é VU × coeficiente (coluna TOTAL).
     const unitary =
       valorNumericoOrcafascio(
         prices.unitary ?? prices.unit_price ?? s.unitary_pnd ?? s.unit_price ?? s.unitary
       ) ?? 0;
-    const totalLinha =
+    const totalClaimed =
       valorNumericoOrcafascio(
-        prices.plus_ls ?? prices.plus_ls_qty ?? s.pnd ?? s.pd ?? s.total ?? s.total_price
-      ) ??
-      (unitary > 0 && qty > 0 ? unitary * qty : null) ??
-      valorNumericoOrcafascio(prices.type_mdo) ??
-      valorNumericoOrcafascio(prices.type_mat) ??
-      0;
-    let unitaryFinal = unitary > 0 ? unitary : qty > 0 && totalLinha > 0 ? totalLinha / qty : totalLinha;
-    // Se unitário veio inflado (≈ total/coef quando total já era o preço unitário), recupera.
-    if (
-      qty > 0 &&
-      qty < 1 &&
-      unitaryFinal > 0 &&
-      totalLinha > 0 &&
-      Math.abs(unitaryFinal * qty - totalLinha) <= Math.max(0.02, totalLinha * 0.02) &&
-      unitaryFinal > totalLinha * 5
-    ) {
-      unitaryFinal = totalLinha;
+        prices.plus_ls ??
+          prices.plus_ls_qty ??
+          prices.total ??
+          s.total ??
+          s.total_price ??
+          s.pnd ??
+          s.pd ??
+          prices.pnd ??
+          prices.pd
+      ) ?? 0;
+    const fromCoef = unitary > 0 && qty > 0 ? unitary * qty : 0;
+    let totalLinha = 0;
+    if (fromCoef > 0) {
+      // pnd/total veio igual ao VU (não é a contribuição da linha).
+      if (
+        unitary > 0 &&
+        Math.abs(qty - 1) > 1e-9 &&
+        Math.abs(totalClaimed - unitary) <= Math.max(0.02, Math.abs(unitary) * 0.001)
+      ) {
+        totalLinha = fromCoef;
+      } else if (totalClaimed > fromCoef * 2) {
+        totalLinha = fromCoef;
+      } else if (totalClaimed > 0) {
+        totalLinha = totalClaimed;
+      } else {
+        totalLinha = fromCoef;
+      }
+    } else if (totalClaimed > 0) {
+      totalLinha = totalClaimed;
+    } else {
+      totalLinha =
+        valorNumericoOrcafascio(prices.type_mdo) ??
+        valorNumericoOrcafascio(prices.type_mat) ??
+        0;
+    }
+    const unitaryFinal =
+      unitary > 0 ? unitary : qty > 0 && totalLinha > 0 ? totalLinha / qty : totalLinha;
+    const kind = String(s.kind ?? '').toLowerCase().trim();
+    const typeStr = String(s.type ?? '').trim();
+    const typeNum = Number(typeStr);
+    const kindRecurso =
+      kind === 'resource' ||
+      kind === 'input' ||
+      kind === 'insumo' ||
+      kind === 'insumos';
+    const kindComposicao =
+      kind === 'composition' ||
+      kind === 'composicao' ||
+      kind === 'service' ||
+      kind === 'servico' ||
+      kind === 'serviço';
+    let isResource = kindRecurso;
+    if (kindComposicao) isResource = false;
+    else if (s.is_resource === true) isResource = true;
+    else if (s.is_resource === false) isResource = false;
+    else if (!kind && typeStr !== '' && Number.isFinite(typeNum) && !Number.isNaN(typeNum)) {
+      // type numérico SINAPI/Orçafascio (0–14) indica insumo, não subcomposição.
+      isResource = true;
     }
     return {
       banco: String(s.base ?? row.base ?? '—'),
       code: String(s.code ?? '—'),
       description: textoDescricaoOrcafascio(s),
-      type: String(s.type ?? ''),
+      type: typeStr,
       unit: String(s.unity ?? s.unit ?? '—'),
       unitary_pnd: unitaryFinal,
       unitary_pd: unitaryFinal,
       coefficient: qty,
       pnd: totalLinha,
       pd: totalLinha,
-      is_resource: String(s.kind ?? '').toLowerCase() === 'resource',
+      is_resource: isResource,
     };
   });
   return {
@@ -1199,15 +1326,29 @@ function montarServicosDeLinhasOrcafascio(
     }
 
     // Preferir split explícito do analítico/sintético (type_mdo / type_mat).
+    const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
     const splitAna = analiticoRow ? precosMoMatDeLinhaOrcafascio(analiticoRow) : { mo: null, mat: null };
     const splitSint = precosMoMatDeLinhaOrcafascio(row);
     const moSplit = splitAna.mo ?? splitSint.mo;
     const matSplit = splitAna.mat ?? splitSint.mat;
-    if (!(maoDeObraUnitario != null && maoDeObraUnitario > 0) && moSplit != null && moSplit > 0) {
-      maoDeObraUnitario = moSplit;
-    }
-    if (!(materialUnitario != null && materialUnitario > 0) && matSplit != null && matSplit > 0) {
-      materialUnitario = matSplit;
+    if (moSplit != null || matSplit != null) {
+      const reconc = reconciliarMoMatComPrecoUnitario(
+        moSplit ?? maoDeObraUnitario ?? 0,
+        matSplit ?? materialUnitario ?? 0,
+        precoUnitario,
+        qty
+      );
+      if (reconc.mo > 0) maoDeObraUnitario = reconc.mo;
+      if (reconc.mat > 0) materialUnitario = reconc.mat;
+    } else if (maoDeObraUnitario != null || materialUnitario != null) {
+      const reconc = reconciliarMoMatComPrecoUnitario(
+        maoDeObraUnitario ?? 0,
+        materialUnitario ?? 0,
+        precoUnitario,
+        qty
+      );
+      maoDeObraUnitario = reconc.mo > 0 ? reconc.mo : undefined;
+      materialUnitario = reconc.mat > 0 ? reconc.mat : undefined;
     }
     // Composição de mão de obra sem material: preço unitário vai para MO.
     if (
@@ -1219,7 +1360,6 @@ function montarServicosDeLinhasOrcafascio(
       maoDeObraUnitario = precoUnitario;
     }
 
-    const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
     const precoComBdi =
       precoUnitarioComBdiOrcafascio(row) ??
       (precoUnitario > 0 ? precoUnitario : null);
@@ -1702,11 +1842,17 @@ function formatAnoOrcafascio(dateStr: string): string {
 
 /** Converte um item da composição Orçafascio na categoria analítica correta. */
 function categoriaOrcafascioItem(item: OrcafascioComposicaoItem): 'MATERIAL' | 'MÃO DE OBRA' {
-  // Itens que são sub-composições (serviços) → Mão de Obra
-  if (!item.is_resource) return 'MÃO DE OBRA';
-  // Insumos com type numérico: 3 = Mão de Obra no SINAPI
   const typeNum = Number(item.type);
-  if (!isNaN(typeNum) && typeNum === 3) return 'MÃO DE OBRA';
+  if (!Number.isNaN(typeNum) && String(item.type ?? '').trim() !== '') {
+    // 0/3 = mão de obra; demais tipos numéricos de insumo → material (equipamento incluso).
+    if (typeNum === 0 || typeNum === 3) return 'MÃO DE OBRA';
+    if (item.is_resource) return 'MATERIAL';
+  }
+  const tipoTxt = String(item.type ?? '').toUpperCase();
+  if (/M[AÃ]O\s*DE\s*OBRA|LABOR|HAND/.test(tipoTxt)) return 'MÃO DE OBRA';
+  if (/MATERIAL|EQUIP|INSUMO/.test(tipoTxt)) return 'MATERIAL';
+  // Subcomposição sem type claro: histórico trata como mão de obra (serviço).
+  if (!item.is_resource) return 'MÃO DE OBRA';
   return 'MATERIAL';
 }
 
@@ -1759,21 +1905,22 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
     tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
   }));
 
-  const maoDeObraUnitario = analiticoLinhas
-    .filter(l => l.categoria === 'MÃO DE OBRA')
-    .reduce((s, l) => s + (l.total ?? 0), 0);
-
-  const materialUnitario = analiticoLinhas
-    .filter(l => l.categoria === 'MATERIAL')
-    .reduce((s, l) => s + (l.total ?? 0), 0);
+  // MO/MAT = soma da coluna TOTAL (VU × coef) de cada insumo — nunca o VU isolado.
+  let mo = 0;
+  let mat = 0;
+  for (const l of analiticoLinhas) {
+    const t = contribuicaoLinhaAnalitico(l);
+    if (!(t > 0)) continue;
+    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    else mat += t;
+  }
 
   const preco = comp.prices?.pnd ?? 0;
-  let mo = maoDeObraUnitario;
-  let mat = materialUnitario;
   // Sem breakdown nos insumos: composição marcada como mão de obra → preço inteiro em MO.
   if (!(mo > 0) && !(mat > 0) && comp.labor && preco > 0) {
     mo = preco;
   }
+  ({ mo, mat } = reconciliarMoMatComPrecoUnitario(mo, mat, preco));
 
   const banco = String(comp.base ?? '').trim() || 'Orçafascio';
   return {
@@ -1920,13 +2067,16 @@ function sinapiToComposicaoItem(comp: SinapiComposicaoApi): ComposicaoItem | nul
   const codigo = String(comp.code ?? '').trim();
   if (!codigo) return null;
   const analiticoLinhas = linhasAnaliticoDeItensSinapi(comp.items ?? []);
-  const mo = analiticoLinhas
-    .filter((l) => l.categoria === 'MÃO DE OBRA')
-    .reduce((s, l) => s + (l.total ?? 0), 0);
-  const mat = analiticoLinhas
-    .filter((l) => l.categoria === 'MATERIAL')
-    .reduce((s, l) => s + (l.total ?? 0), 0);
+  let mo = 0;
+  let mat = 0;
+  for (const l of analiticoLinhas) {
+    const t = contribuicaoLinhaAnalitico(l);
+    if (!(t > 0)) continue;
+    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    else mat += t;
+  }
   const preco = centsSinapiParaReais(comp.baseUnitCost);
+  const reconc = reconciliarMoMatComPrecoUnitario(mo, mat, preco);
   return {
     codigo,
     banco: 'SINAPI',
@@ -1934,8 +2084,8 @@ function sinapiToComposicaoItem(comp: SinapiComposicaoApi): ComposicaoItem | nul
     descricao: decodificarEntidadesHtml(String(comp.description ?? '')),
     unidade: comp.unit,
     precoUnitario: preco,
-    maoDeObraUnitario: mo > 0 ? mo : undefined,
-    materialUnitario: mat > 0 ? mat : undefined,
+    maoDeObraUnitario: reconc.mo > 0 ? reconc.mo : undefined,
+    materialUnitario: reconc.mat > 0 ? reconc.mat : undefined,
     analiticoLinhas
   };
 }
@@ -9244,10 +9394,8 @@ export function OrcamentoPageView({
         const composicao = composicaoResolvidaDoItemServico(i, mapaComposicoes);
         const precoItem = Number(i.precoUnitario);
         const precoComp = Number(composicao?.precoUnitario);
-        const preco =
+        const precoCatalogo =
           precoItem > 0 ? precoItem : precoComp > 0 ? precoComp : 0;
-        // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
-        const precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao);
         const moMatManual = moMatManualPorItem[itemKey];
@@ -9291,33 +9439,44 @@ export function OrcamentoPageView({
         }
         const moUnit = maoDeObraUnitario;
         const matUnit = materialUnitario;
+        const somaMoMatUnit = moUnit + matUnit;
+        // PU = MO + MAT quando houver split; senão preço de catálogo/importação.
+        const preco = somaMoMatUnit > 0 ? somaMoMatUnit : precoCatalogo;
+        // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
+        const precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
         const modoArred = meta.modoArredondamento;
-        const subMaoDeObra = aplicarModoArredondamento(moUnit * qtd, modoArred);
-        const subMaterial = aplicarModoArredondamento(matUnit * qtd, modoArred);
-        const subMatMaisMo = aplicarModoArredondamento(subMaoDeObra + subMaterial, modoArred);
+        const subMoRaw = moUnit * qtd;
+        const subMatRaw = matUnit * qtd;
+        const subMaoDeObra = aplicarModoArredondamento(subMoRaw, modoArred);
+        const subMaterial = aplicarModoArredondamento(subMatRaw, modoArred);
+        const subMatMaisMo = aplicarModoArredondamento(subMoRaw + subMatRaw, modoArred);
 
-        // Importado: usa total da linha do Orçafascio (não recalcula unitário×qtd).
-        const qOrig = Number(i.quantidadeImportada);
-        const temTotaisImportados =
-          meta.importadoPlanilha === true &&
-          ((i.totalSemBdiImportado != null && Number.isFinite(i.totalSemBdiImportado)) ||
-            (i.totalComBdiImportado != null && Number.isFinite(i.totalComBdiImportado)));
-        const fatorQtd =
-          temTotaisImportados && qOrig > 0 && Number.isFinite(qOrig)
-            ? qtd / qOrig
-            : 1;
+        // Com split MO/MAT: total = Sub MO + Sub MAT (mesma base das colunas de cálculo).
+        // Sem split: mantém total importado (escalado pela qtd) ou PU × qtd.
         let totalItem: number;
-        let totalComBdiItem: number;
-        if (temTotaisImportados) {
-          const semImp = Number(i.totalSemBdiImportado);
-          totalItem =
-            Number.isFinite(semImp) && semImp !== 0
-              ? aplicarModoArredondamento(semImp * fatorQtd, modoArred)
-              : aplicarModoArredondamento(preco * qtd, modoArred);
+        if (somaMoMatUnit > 0) {
+          totalItem = subMatMaisMo;
         } else {
-          totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
+          const qOrig = Number(i.quantidadeImportada);
+          const temTotaisImportados =
+            meta.importadoPlanilha === true &&
+            ((i.totalSemBdiImportado != null && Number.isFinite(i.totalSemBdiImportado)) ||
+              (i.totalComBdiImportado != null && Number.isFinite(i.totalComBdiImportado)));
+          const fatorQtd =
+            temTotaisImportados && qOrig > 0 && Number.isFinite(qOrig)
+              ? qtd / qOrig
+              : 1;
+          if (temTotaisImportados) {
+            const semImp = Number(i.totalSemBdiImportado);
+            totalItem =
+              Number.isFinite(semImp) && semImp !== 0
+                ? aplicarModoArredondamento(semImp * fatorQtd, modoArred)
+                : aplicarModoArredondamento(preco * qtd, modoArred);
+          } else {
+            totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
+          }
         }
-        totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
+        const totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
         const precisaDecodeDesc =
           typeof i.descricao === 'string' && i.descricao.includes('&');
         const precisaDecodeAnalitico =
@@ -11359,8 +11518,8 @@ export function OrcamentoPageView({
         values[3] = String(bloco.servicoNome || '').toUpperCase();
         values[6] = truncarMoeda2(resumo.mo);
         values[7] = truncarMoeda2(resumo.mat);
-        values[8] = truncarMoeda2(resumo.custoDir);
-        values[9] = truncarMoeda2(resumo.totalComBdi);
+        values[8] = '';
+        values[9] = '';
         values[10] = truncarMoeda2(resumo.mo);
         values[11] = truncarMoeda2(resumo.mat);
         values[12] = truncarMoeda2(resumo.custoDir);
@@ -11375,8 +11534,8 @@ export function OrcamentoPageView({
       subValues[3] = String(bloco.subtituloNome || bloco.servicoNome || '').toUpperCase();
       subValues[6] = truncarMoeda2(resumoSub.mo);
       subValues[7] = truncarMoeda2(resumoSub.mat);
-      subValues[8] = truncarMoeda2(resumoSub.custoDir);
-      subValues[9] = truncarMoeda2(resumoSub.totalComBdi);
+      subValues[8] = '';
+      subValues[9] = '';
       subValues[10] = truncarMoeda2(resumoSub.mo);
       subValues[11] = truncarMoeda2(resumoSub.mat);
       subValues[12] = truncarMoeda2(resumoSub.custoDir);
@@ -14585,12 +14744,8 @@ export function OrcamentoPageView({
                               <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.mat} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
-                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
+                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.mo} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
@@ -14686,12 +14841,8 @@ export function OrcamentoPageView({
                               <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.mat} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
-                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
+                              <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.mo} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>

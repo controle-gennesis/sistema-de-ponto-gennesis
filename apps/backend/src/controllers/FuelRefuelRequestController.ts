@@ -9,6 +9,7 @@ import {
   getManagerFuelApprovalContractScope,
 } from '../lib/fuelApprovalAccess';
 import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
+import { assertLiberadoContractAccess } from '../lib/contractAccess';
 import {
   listActiveFuelGasStationsByCity,
   listActiveFuelGasStationsForRequest,
@@ -571,6 +572,20 @@ export class FuelRefuelRequestController {
     }
   }
 
+  /** Lista liberada no contrato (resumo / «Usado») — exige Liberado na aba Contratos. */
+  async listContractResumo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const contractId = String(req.query.contractId || '').trim();
+      if (!contractId) throw createError('Informe o contrato', 400);
+      await assertLiberadoContractAccess(req, contractId);
+      const rows = await fuelRefuelRequestService.listForContractResumo(contractId);
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listManagerApprovals(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = req.user;
@@ -840,6 +855,8 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
 
       const contractId = String(req.query.contractId || '').trim();
+      if (!contractId) throw createError('Informe o contrato', 400);
+      await assertLiberadoContractAccess(req, contractId);
       const data = await getFuelQuotaBalance(contractId);
       res.json({ success: true, data });
     } catch (error) {

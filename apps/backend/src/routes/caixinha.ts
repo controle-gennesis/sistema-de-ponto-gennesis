@@ -20,13 +20,19 @@ const upload = multer({
 });
 
 router.use(authenticate);
-router.use(requireCaixinha);
 
+/** Leitura: autenticado + escopo Liberado no controller (sem exigir módulo Caixinha). */
 router.get('/', (req, res, next) => caixinhaPurchaseController.list(req, res, next));
 router.get('/options', (req, res, next) => caixinhaPurchaseController.options(req, res, next));
-router.post('/accounts', (req, res, next) => caixinhaPurchaseController.createAccount(req, res, next));
+router.get('/:id', (req, res, next) => caixinhaPurchaseController.getById(req, res, next));
+
+/** Escrita: exige Ver em Caixinha. */
+router.post('/accounts', requireCaixinha, (req, res, next) =>
+  caixinhaPurchaseController.createAccount(req, res, next)
+);
 router.post(
   '/upload-invoice',
+  requireCaixinha,
   (req: AuthRequest, res: Response, next: NextFunction) => {
     upload.single('file')(req, res, (err: unknown) => {
       if (err && typeof err === 'object' && 'code' in err && err.code === 'LIMIT_FILE_SIZE') {
@@ -63,9 +69,14 @@ router.post(
     }
   }
 );
-router.get('/:id', (req, res, next) => caixinhaPurchaseController.getById(req, res, next));
-router.post('/', (req, res, next) => caixinhaPurchaseController.create(req, res, next));
-router.patch('/:id', (req, res, next) => caixinhaPurchaseController.update(req, res, next));
-router.delete('/:id', (req, res, next) => caixinhaPurchaseController.remove(req, res, next));
+router.post('/', requireCaixinha, (req, res, next) =>
+  caixinhaPurchaseController.create(req, res, next)
+);
+router.patch('/:id', requireCaixinha, (req, res, next) =>
+  caixinhaPurchaseController.update(req, res, next)
+);
+router.delete('/:id', requireCaixinha, (req, res, next) =>
+  caixinhaPurchaseController.remove(req, res, next)
+);
 
 export default router;

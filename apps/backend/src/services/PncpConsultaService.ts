@@ -47,6 +47,9 @@ export type PncpConsultaParams = {
    * padrão (engenharia, manutenção predial, áreas verdes, etc.).
    */
   filtroKeywords?: boolean;
+  /** Ordenação opcional (ex.: valor estimado). */
+  sortBy?: 'valorEstimado' | null;
+  sortDir?: 'asc' | 'desc' | null;
 };
 
 export type PncpContratacaoListItem = {
