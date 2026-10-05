@@ -2468,7 +2468,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                       arrowLeft,
                     });
                   }}
-                  className={`sidebar-rail-btn relative inline-flex h-10 w-10 items-center justify-center overflow-visible rounded-lg border border-white shadow-none focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-800 dark:focus-visible:ring-offset-gray-900 [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
+                  className={`sidebar-rail-btn relative flex h-10 w-10 items-center justify-center overflow-visible rounded-xl shadow-none focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
                     menuAtalhosRail
                       ? `sidebar-rail-btn--active bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-500${
                           isRailPopping('footer:atalhos') ? ' sidebar-rail-btn--pop' : ''

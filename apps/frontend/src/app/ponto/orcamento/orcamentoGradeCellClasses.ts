@@ -19,14 +19,16 @@ export const gradeHideVerticalScrollbarCls = 'orc-hide-v-scroll';
 export const gradeTableViewportCls =
   `h-full min-h-0 flex-1 overflow-auto overscroll-contain rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`;
 
-/** Sticky nos `<th>` (mais confiável que sticky no `<thead>` + border-collapse). */
+/**
+ * Sticky nos `<th>` (mais confiável que sticky no `<thead>` + border-collapse).
+ * Cores vêm de `--orc-header-bg` / `--orc-header-fg` (aparência do orçamento).
+ */
 export const gradeThStickyCls =
-  'sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
+  'sticky top-0 z-20 bg-[var(--orc-header-bg,#f9fafb)] text-[var(--orc-header-fg,#4b5563)] shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
 
 /** Segunda linha de cabeçalho (ex.: colunas C/L/H abaixo do título do item na memória). */
 export const gradeThStickySecondRowCls =
-  'sticky top-[2.75rem] z-[19] bg-slate-50 dark:bg-slate-800/95 shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
-
+  'sticky top-[2.75rem] z-[19] bg-[var(--orc-header-bg,#f8fafc)] text-[var(--orc-header-fg,#4b5563)] shadow-[inset_0_-1px_0_0_rgb(209_213_219)] dark:shadow-[inset_0_-1px_0_0_rgb(75_85_99)]';
 /**
  * Mesma regra aplicada na `<table>` (orçamento / analítico / memória): cobre todas as linhas de uma vez.
  */
@@ -50,7 +52,7 @@ export const selectGradeCls =
  * Cabeçalho memória de cálculo (C/L/H/N): lista suspensa sem seta — parece texto até abrir.
  */
 export const selectGradeHeaderMemorialCls =
-  'box-border flex h-full min-h-[2.75rem] w-full min-w-0 cursor-pointer items-center justify-center border-0 rounded-none bg-transparent px-1 py-2 text-center text-[11px] font-bold tracking-wide text-gray-700 shadow-none outline-none ring-0 dark:text-gray-200 focus:z-[1] focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60';
+  'box-border flex h-full min-h-[2.75rem] w-full min-w-0 cursor-pointer items-center justify-center border-0 rounded-none bg-transparent px-1 py-2 text-center text-[11px] font-bold tracking-wide text-[var(--orc-header-fg,#374151)] shadow-none outline-none ring-0 focus:z-[1] focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60';
 
 /**
  * Tipo MO/MA/LO (planilha analítica / ficha de demanda): mesmo padrão, sem seta visível.

@@ -69,6 +69,8 @@ export type OrcamentoExcelAparencia = {
   tituloTexto?: string;
   subtituloFundo?: string;
   subtituloTexto?: string;
+  headerFundo?: string;
+  headerTexto?: string;
   fonte?: string;
 };
 
@@ -169,6 +171,8 @@ async function fillWorkbook(
   const tituloFg = hexToArgb(options?.aparencia?.tituloTexto, WHITE);
   const subtituloBg = hexToArgb(options?.aparencia?.subtituloFundo, SUBTITLE_BG);
   const subtituloFg = hexToArgb(options?.aparencia?.subtituloTexto, SUBTITLE_FG);
+  const headerBg = hexToArgb(options?.aparencia?.headerFundo, HEADER_BG);
+  const headerFg = hexToArgb(options?.aparencia?.headerTexto, HEADER_FG);
 
   for (const spec of sheets) {
     if (!spec.columns.length) continue;
@@ -197,8 +201,8 @@ async function fillWorkbook(
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
         cell.value = col.header;
-        cell.font = { name: fontName, size: 8, bold: true, color: { argb: HEADER_FG } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
+        cell.font = { name: fontName, size: 8, bold: true, color: { argb: headerFg } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
         cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true, shrinkToFit: false };
         applyThinBorder(cell);
       });

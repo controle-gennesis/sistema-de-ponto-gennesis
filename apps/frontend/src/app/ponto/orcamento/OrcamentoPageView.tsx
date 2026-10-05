@@ -3065,6 +3065,10 @@ export type AparenciaOrcamento = {
   composicaoFundo: string;
   /** Letra da linha de composição no Analítico. */
   composicaoTexto: string;
+  /** Fundo do cabeçalho das tabelas (todas as abas / Excel). */
+  headerFundo: string;
+  /** Letra do cabeçalho das tabelas (todas as abas / Excel). */
+  headerTexto: string;
   /** CSS font-family; vazio = fonte padrão do sistema. */
   fonte: string;
 };
@@ -3077,6 +3081,9 @@ const APARENCIA_ORCAMENTO_PADRAO: AparenciaOrcamento = {
   /** Equivale ao `bg-slate-100` usado nas linhas de composição. */
   composicaoFundo: '#f1f5f9',
   composicaoTexto: '#111827',
+  /** Equivale ao `bg-gray-50` / `text-gray-600` dos `<th>`. */
+  headerFundo: '#f9fafb',
+  headerTexto: '#4b5563',
   fonte: ''
 };
 
@@ -3112,6 +3119,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
   const subtituloTexto = corHexOrcamento(o.subtituloTexto);
   const composicaoFundo = corHexOrcamento(o.composicaoFundo);
   const composicaoTexto = corHexOrcamento(o.composicaoTexto);
+  const headerFundo = corHexOrcamento(o.headerFundo);
+  const headerTexto = corHexOrcamento(o.headerTexto);
   const fonte = typeof o.fonte === 'string' ? o.fonte : '';
   if (
     !tituloFundo &&
@@ -3120,6 +3129,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
     !subtituloTexto &&
     !composicaoFundo &&
     !composicaoTexto &&
+    !headerFundo &&
+    !headerTexto &&
     !fonte.trim()
   ) {
     return undefined;
@@ -3131,6 +3142,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
     subtituloTexto: subtituloTexto ?? APARENCIA_ORCAMENTO_PADRAO.subtituloTexto,
     composicaoFundo: composicaoFundo ?? APARENCIA_ORCAMENTO_PADRAO.composicaoFundo,
     composicaoTexto: composicaoTexto ?? APARENCIA_ORCAMENTO_PADRAO.composicaoTexto,
+    headerFundo: headerFundo ?? APARENCIA_ORCAMENTO_PADRAO.headerFundo,
+    headerTexto: headerTexto ?? APARENCIA_ORCAMENTO_PADRAO.headerTexto,
     fonte
   };
 }
@@ -3144,6 +3157,8 @@ function aparenciaOrcamentoEhPadrao(a: AparenciaOrcamento): boolean {
     eq(a.subtituloTexto, APARENCIA_ORCAMENTO_PADRAO.subtituloTexto) &&
     eq(a.composicaoFundo, APARENCIA_ORCAMENTO_PADRAO.composicaoFundo) &&
     eq(a.composicaoTexto, APARENCIA_ORCAMENTO_PADRAO.composicaoTexto) &&
+    eq(a.headerFundo, APARENCIA_ORCAMENTO_PADRAO.headerFundo) &&
+    eq(a.headerTexto, APARENCIA_ORCAMENTO_PADRAO.headerTexto) &&
     !a.fonte.trim()
   );
 }
@@ -3210,6 +3225,37 @@ function estiloLinhaComposicaoOrc(
   return {
     backgroundColor: corFundoAparenciaOrcDark(ap.composicaoFundo, 'composicao'),
     color: corTextoAparenciaOrcDark(ap.composicaoTexto)
+  };
+}
+
+function estiloHeaderOrc(
+  ap?: AparenciaOrcamento,
+  isDark = false
+): { backgroundColor: string; color: string } {
+  const a = ap ?? APARENCIA_ORCAMENTO_PADRAO;
+  const eq = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
+  const isPadrao =
+    eq(a.headerFundo, APARENCIA_ORCAMENTO_PADRAO.headerFundo) &&
+    eq(a.headerTexto, APARENCIA_ORCAMENTO_PADRAO.headerTexto);
+  if (isDark && isPadrao) {
+    return { backgroundColor: '#1f2937', color: '#d1d5db' };
+  }
+  if (!isDark) return { backgroundColor: a.headerFundo, color: a.headerTexto };
+  return {
+    backgroundColor: corFundoAparenciaOrcDark(a.headerFundo, 'subtitulo'),
+    color: corTextoAparenciaOrcDark(a.headerTexto)
+  };
+}
+
+/** CSS vars para pintar o `<th>` de todas as abas (orçamento, analítico, memória, cronograma…). */
+function cssVarsHeaderOrc(
+  ap: AparenciaOrcamento | undefined,
+  isDark: boolean
+): React.CSSProperties {
+  const { backgroundColor, color } = estiloHeaderOrc(ap, isDark);
+  return {
+    ['--orc-header-bg' as string]: backgroundColor,
+    ['--orc-header-fg' as string]: color
   };
 }
 
@@ -5857,10 +5903,10 @@ const PLANILHA_FATOR_CUSTO_ESTIMADO = 0.4;
 const GRADE_COL_MOEDA_UNIT = 'w-[1%] whitespace-nowrap';
 const GRADE_COL_MOEDA_TOTAL = 'w-[1%] whitespace-nowrap';
 const GRADE_COL_MOEDA_TH =
-  'w-[1%] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300 border-l border-gray-300 dark:border-gray-600';
+  'w-[1%] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-[var(--orc-header-fg,#4b5563)] border-l border-gray-300 dark:border-gray-600';
 const GRADE_TH_STICKY = gradeThStickyCls;
 const GRADE_TH_STICKY_BASE =
-  `${GRADE_TH_STICKY} w-[1%] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide`;
+  `${GRADE_TH_STICKY} w-[1%] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide`;
 
 function GradeMoedaTh({
   title,
@@ -13643,22 +13689,22 @@ export function OrcamentoPageView({
                         <table className="w-full table-fixed text-sm">
                           <thead className="border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%] min-w-[5.5rem]">
+                              <th className="px-3 sm:px-6 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%] min-w-[5.5rem]">
                                 Código
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider">
                                 Descrição
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
+                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
                                 Status
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
+                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
                                 BDI
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
+                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[14%]">
                                 Total
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
+                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[14%]">
                                 Atualizado
                               </th>
                               <th className={listTableRowClasses.actionTh}>Ação</th>
@@ -13836,7 +13882,10 @@ export function OrcamentoPageView({
                   ? 'flex flex-col !border-0 !bg-transparent shadow-none dark:!bg-transparent'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !border-0 !bg-transparent shadow-none dark:!bg-transparent'
               }
-              style={aparenciaOrcamento?.fonte ? { fontFamily: aparenciaOrcamento.fonte } : undefined}
+              style={{
+                ...cssVarsHeaderOrc(aparenciaOrcamento, isDark),
+                ...(aparenciaOrcamento?.fonte ? { fontFamily: aparenciaOrcamento.fonte } : {})
+              }}
             >
               <CardContent
                 className={
@@ -14095,7 +14144,7 @@ export function OrcamentoPageView({
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Tipo</th>
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Código</th>
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Banco</th>
-                            <th className={`${GRADE_TH_STICKY} w-full min-w-[12rem] whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
+                            <th className={`${GRADE_TH_STICKY} w-full min-w-[12rem] whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Unidade</th>
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
                             <GradeMoedaTh className={GRADE_TH_STICKY}>Valor unitário</GradeMoedaTh>
@@ -14263,7 +14312,7 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                  className={`${GRADE_TH_STICKY} w-full min-w-[12rem] whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}
+                                  className={`${GRADE_TH_STICKY} w-full min-w-[12rem] whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}
                                 >
                                   Descrição
                                 </th>
@@ -14348,7 +14397,7 @@ export function OrcamentoPageView({
                                   % Custo / valor pago
                                 </GradeMoedaTh>
                                 <th
-                                  className={`${GRADE_TH_STICKY} min-w-[24rem] w-[24rem] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}
+                                  className={`${GRADE_TH_STICKY} min-w-[24rem] w-[24rem] whitespace-nowrap px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}
                                 >
                                   Observação
                                 </th>
@@ -15382,24 +15431,24 @@ export function OrcamentoPageView({
                                 />
                               </div>
                             </th>
-                            <th data-orc-col="item" className={`${GRADE_TH_STICKY} w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>
+                            <th data-orc-col="item" className={`${GRADE_TH_STICKY} w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>
                               Item
                             </th>
-                            <th data-orc-col="codigo" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Código</th>
-                            <th data-orc-col="banco" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Banco</th>
-                            <th data-orc-col="descricao" className={`${GRADE_TH_STICKY} min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
-                            <th data-orc-col="und" className={`${GRADE_TH_STICKY} min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Unidade</th>
-                            <th data-orc-col="qtd" className={`${GRADE_TH_STICKY} min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
-                            <th data-orc-col="mo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MÃO DE OBRA</th>
-                            <th data-orc-col="mat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MATERIAL</th>
-                            <th data-orc-col="pu" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário sem BDI</th>
-                            <th data-orc-col="puBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário com BDI</th>
-                            <th data-orc-col="subMo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub mão de obra</th>
-                            <th data-orc-col="subMat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub material</th>
-                            <th data-orc-col="total" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total sem BDI</th>
-                            <th data-orc-col="totalBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
-                            <th data-orc-col="peso" className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
-                            <th data-orc-col="obs" className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
+                            <th data-orc-col="codigo" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Código</th>
+                            <th data-orc-col="banco" className={`${GRADE_TH_STICKY} w-[88px] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Banco</th>
+                            <th data-orc-col="descricao" className={`${GRADE_TH_STICKY} min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Descrição</th>
+                            <th data-orc-col="und" className={`${GRADE_TH_STICKY} min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Unidade</th>
+                            <th data-orc-col="qtd" className={`${GRADE_TH_STICKY} min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
+                            <th data-orc-col="mo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MÃO DE OBRA</th>
+                            <th data-orc-col="mat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>MATERIAL</th>
+                            <th data-orc-col="pu" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário sem BDI</th>
+                            <th data-orc-col="puBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário com BDI</th>
+                            <th data-orc-col="subMo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub mão de obra</th>
+                            <th data-orc-col="subMat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub material</th>
+                            <th data-orc-col="total" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total sem BDI</th>
+                            <th data-orc-col="totalBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
+                            <th data-orc-col="peso" className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
+                            <th data-orc-col="obs" className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -16575,10 +16624,19 @@ export function OrcamentoPageView({
               Características do orçamento
             </h3>
             <p className="mb-5 text-sm text-gray-600 dark:text-gray-400">
-              Cores do título, subtítulo e composição (Analítico), e a fonte das tabelas. A alteração vale para este orçamento.
+              Cores do título, subtítulo, composição (Analítico) e cabeçalho das tabelas, e a fonte. O cabeçalho vale para todas as abas deste orçamento.
               {isDark ? ' No tema escuro, as faixas são suavizadas automaticamente.' : ''}
             </p>
             <div className="mb-5 overflow-hidden rounded-md border border-gray-200 text-xs dark:border-gray-700">
+              <div
+                className="px-3 py-2 font-semibold uppercase tracking-wide"
+                style={{
+                  ...estiloHeaderOrc(aparenciaDraft, isDark),
+                  fontFamily: aparenciaDraft.fonte || undefined
+                }}
+              >
+                Cabeçalho
+              </div>
               <div
                 className="px-3 py-2 font-bold uppercase tracking-wide"
                 style={{
@@ -16608,6 +16666,16 @@ export function OrcamentoPageView({
               </div>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <CampoCorOrcamento
+                label="Fundo do cabeçalho"
+                value={aparenciaDraft.headerFundo}
+                onChange={(headerFundo) => setAparenciaDraft((p) => ({ ...p, headerFundo }))}
+              />
+              <CampoCorOrcamento
+                label="Letra do cabeçalho"
+                value={aparenciaDraft.headerTexto}
+                onChange={(headerTexto) => setAparenciaDraft((p) => ({ ...p, headerTexto }))}
+              />
               <CampoCorOrcamento
                 label="Fundo do título"
                 value={aparenciaDraft.tituloFundo}
