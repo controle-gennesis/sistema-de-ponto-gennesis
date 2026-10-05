@@ -532,7 +532,11 @@ export default function EmpreiteirosPage() {
   const [addendumServicesRemoved, setAddendumServicesRemoved] = useState('');
   const [addendumApprovedBy, setAddendumApprovedBy] = useState('');
   const [addendumFiles, setAddendumFiles] = useState<PaymentFile[]>([]);
-  const [addendumCreateParcel, setAddendumCreateParcel] = useState(true);
+  /** new = nova condição (à vista ou parcelado) · redistribute = divide nas parcelas em aberto */
+  const [addendumPayMode, setAddendumPayMode] = useState<'new' | 'redistribute'>('new');
+  const [addendumScheduleMode, setAddendumScheduleMode] = useState<'avista' | 'parcelado'>('avista');
+  const [addendumParcelCount, setAddendumParcelCount] = useState('6');
+  const [addendumParcelAmounts, setAddendumParcelAmounts] = useState<string[]>([]);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [editServiceName, setEditServiceName] = useState('');
   const [editServiceDescription, setEditServiceDescription] = useState('');
@@ -1026,7 +1030,10 @@ export default function EmpreiteirosPage() {
     setAddendumServicesRemoved('');
     setAddendumApprovedBy('');
     setAddendumFiles([]);
-    setAddendumCreateParcel(true);
+    setAddendumPayMode('new');
+    setAddendumScheduleMode('avista');
+    setAddendumParcelCount('6');
+    setAddendumParcelAmounts([]);
   };
 
   const uploadAddendumFile = async (file: File | null | undefined) => {
@@ -1046,7 +1053,7 @@ export default function EmpreiteirosPage() {
           key: uploaded.key,
         },
       ]);
-      toast.success('Documento anexado');
+      toast.success('Contrato atualizado anexado');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Falha no upload do documento');
     } finally {
@@ -1061,14 +1068,39 @@ export default function EmpreiteirosPage() {
       toast.error('Informe o motivo do aditivo');
       return;
     }
-    let amountRaw = addendumAmount.trim().replace(/R\$\s?/gi, '');
-    const sign = amountRaw.startsWith('-') ? -1 : 1;
-    if (amountRaw.startsWith('-') || amountRaw.startsWith('+')) amountRaw = amountRaw.slice(1).trim();
-    if (amountRaw.includes(',')) amountRaw = amountRaw.replace(/\./g, '').replace(',', '.');
-    const amount = sign * Number(amountRaw);
-    if (!Number.isFinite(amount) || amount === 0) {
-      toast.error('Informe o valor do aditivo (diferente de zero)');
+    const amount = parseCurrencyInputBr(addendumAmount);
+    if (amount == null || amount <= 0) {
+      toast.error('Informe o valor do aditivo');
       return;
+    }
+    let installments: Array<{ amount: number }> | undefined;
+    if (addendumPayMode === 'new' && amount > 0) {
+      if (addendumScheduleMode === 'parcelado') {
+        const n = Math.floor(Number(addendumParcelCount.trim()));
+        if (!Number.isFinite(n) || n < 2 || n > 60) {
+          toast.error('No parcelado, informe de 2 a 60 parcelas');
+          return;
+        }
+        const parsed = parseParcelAmountInputs(
+          addendumParcelAmounts.length === n
+            ? addendumParcelAmounts
+            : buildEqualParcelAmountInputs(amount, n)
+        );
+        if (parsed.error) {
+          toast.error(parsed.error);
+          return;
+        }
+        const sum = parsed.amounts.reduce((a, b) => a + b, 0);
+        if (Math.abs(sum - amount) > 0.009) {
+          toast.error(
+            `A soma das parcelas (${formatMoneyBr(sum)}) deve ser igual ao valor do aditivo (${formatMoneyBr(amount)})`
+          );
+          return;
+        }
+        installments = parsed.amounts.map((value) => ({ amount: value }));
+      } else {
+        installments = [{ amount }];
+      }
     }
     setSavingContractLink(true);
     try {
@@ -1080,7 +1112,8 @@ export default function EmpreiteirosPage() {
         servicesRemoved: addendumServicesRemoved.trim() || null,
         approvedByName: addendumApprovedBy.trim() || null,
         files: addendumFiles,
-        createInstallment: amount > 0 && addendumCreateParcel,
+        paymentMode: addendumPayMode,
+        ...(installments ? { installments } : {}),
       });
       const data = res.data?.data as EmpreiteiroRow | undefined;
       if (data?.id) {
@@ -2063,9 +2096,11 @@ export default function EmpreiteirosPage() {
               <CardContent className={cadastroListClasses.cardContent}>
                 <EmpreiteiroDailyMeasurements
                   empreiteiroId={medicaoTargetItem.id}
+                  empreiteiroName={medicaoTargetItem.name || ''}
                   contracts={(medicaoTargetItem.contracts || []).map((link) => ({
                     contractId: link.id,
                     contratoNome: link.contratoNome || link.name || 'Contrato de serviço',
+                    description: link.description,
                     centroCustoNome: link.centroCustoNome,
                     isActive: link.isActive,
                     status: link.status,
@@ -2735,16 +2770,6 @@ export default function EmpreiteirosPage() {
                         />
                       </div>
                       <div>
-                        <label className={labelClass}>Local de execução</label>
-                        <input
-                          type="text"
-                          value={newServiceLocation}
-                          onChange={(e) => setNewServiceLocation(e.target.value)}
-                          placeholder=""
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
                         <label className={labelClass}>Centro de custo *</label>
                         <StringSingleSelectDropdown
                           value={newServiceCostCenterId}
@@ -2754,6 +2779,16 @@ export default function EmpreiteirosPage() {
                           emptyOptionLabel="Selecione o centro de custo"
                           searchPlaceholder="Pesquisar centro de custo..."
                           matchTriggerWidth
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Local de execução</label>
+                        <input
+                          type="text"
+                          value={newServiceLocation}
+                          onChange={(e) => setNewServiceLocation(e.target.value)}
+                          placeholder=""
+                          className={inputClass}
                         />
                       </div>
                       <div>
@@ -3180,15 +3215,6 @@ export default function EmpreiteirosPage() {
                                 />
                               </div>
                               <div>
-                                <label className={labelClass}>Local de execução</label>
-                                <input
-                                  type="text"
-                                  value={editServiceLocation}
-                                  onChange={(e) => setEditServiceLocation(e.target.value)}
-                                  className={inputClass}
-                                />
-                              </div>
-                              <div>
                                 <label className={labelClass}>Centro de custo *</label>
                                 <StringSingleSelectDropdown
                                   value={editServiceCostCenterId}
@@ -3198,6 +3224,15 @@ export default function EmpreiteirosPage() {
                                   emptyOptionLabel="Selecione o centro de custo"
                                   searchPlaceholder="Pesquisar centro de custo..."
                                   matchTriggerWidth
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Local de execução</label>
+                                <input
+                                  type="text"
+                                  value={editServiceLocation}
+                                  onChange={(e) => setEditServiceLocation(e.target.value)}
+                                  className={inputClass}
                                 />
                               </div>
                               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -3517,7 +3552,10 @@ export default function EmpreiteirosPage() {
                                     setAddendumServicesRemoved('');
                                     setAddendumApprovedBy('');
                                     setAddendumFiles([]);
-                                    setAddendumCreateParcel(true);
+                                    setAddendumPayMode('new');
+                                    setAddendumScheduleMode('avista');
+                                    setAddendumParcelCount('6');
+                                    setAddendumParcelAmounts([]);
                                     setAddingAddendumForId(link.id);
                                   }}
                                   className="inline-flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -3605,7 +3643,7 @@ export default function EmpreiteirosPage() {
                                             className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline dark:text-red-300"
                                           >
                                             <Paperclip className="h-3 w-3" />
-                                            {file.name || 'documento'}
+                                            {file.name || 'contrato atualizado'}
                                           </a>
                                         );
                                       })}
@@ -3631,11 +3669,22 @@ export default function EmpreiteirosPage() {
                                     <label className={labelClass}>Valor (R$) *</label>
                                     <input
                                       type="text"
-                                      inputMode="decimal"
+                                      inputMode="numeric"
                                       value={addendumAmount}
-                                      onChange={(e) => setAddendumAmount(e.target.value)}
+                                      onChange={(e) => {
+                                        const masked = maskCurrencyInputBrOrEmpty(e.target.value);
+                                        setAddendumAmount(masked);
+                                        if (addendumPayMode === 'new' && addendumScheduleMode === 'parcelado') {
+                                          const n = Math.floor(Number(addendumParcelCount));
+                                          if (Number.isFinite(n) && n >= 2 && n <= 60) {
+                                            setAddendumParcelAmounts(
+                                              buildEqualParcelAmountInputs(parseCurrencyInputBr(masked), n)
+                                            );
+                                          }
+                                        }
+                                      }}
                                       className={inputClass}
-                                      placeholder="0,00"
+                                      placeholder="R$ 0,00"
                                     />
                                   </div>
                                   <div>
@@ -3677,7 +3726,7 @@ export default function EmpreiteirosPage() {
                                   />
                                 </div>
                                 <div>
-                                  <label className={labelClass}>Documento</label>
+                                  <label className={labelClass}>Contrato atualizado</label>
                                   <input
                                     type="file"
                                     accept=".pdf,.doc,.docx,image/*,application/pdf"
@@ -3691,26 +3740,6 @@ export default function EmpreiteirosPage() {
                                     }}
                                   />
                                   <div className="space-y-1">
-                                    {addendumFiles.map((file, fi) => (
-                                      <div
-                                        key={`${file.url}-${fi}`}
-                                        className="flex items-center gap-2 text-xs"
-                                      >
-                                        <Paperclip className="h-3 w-3 text-gray-500" />
-                                        <span className="truncate">{file.name}</span>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setAddendumFiles((prev) =>
-                                              prev.filter((_, i) => i !== fi)
-                                            )
-                                          }
-                                          className="text-gray-400 hover:text-red-600"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
-                                      </div>
-                                    ))}
                                     <button
                                       type="button"
                                       disabled={uploadingFile}
@@ -3719,20 +3748,192 @@ export default function EmpreiteirosPage() {
                                           .getElementById(`empreiteiro-addendum-file-${link.id}`)
                                           ?.click()
                                       }
-                                      className="text-[11px] font-semibold text-gray-600 hover:text-red-700 dark:text-gray-300"
+                                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
                                     >
-                                      {uploadingFile ? 'Enviando…' : 'Anexar documento'}
+                                      <Paperclip className="h-3.5 w-3.5" />
+                                      {uploadingFile
+                                        ? 'Enviando…'
+                                        : 'Anexar o novo contrato atualizado'}
                                     </button>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                      O arquivo aparece em Contrato, junto com os que já estão anexados.
+                                    </p>
                                   </div>
                                 </div>
-                                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-                                  <input
-                                    type="checkbox"
-                                    checked={addendumCreateParcel}
-                                    onChange={(e) => setAddendumCreateParcel(e.target.checked)}
-                                  />
-                                  Se valor positivo, gerar parcela pendente com esse valor
-                                </label>
+                                <div>
+                                  <label className={labelClass}>Como aplicar o valor</label>
+                                  <div className="mt-1 flex flex-wrap gap-1.5">
+                                    {(
+                                      [
+                                        { value: 'new' as const, label: 'Nova condição de pagamento' },
+                                        {
+                                          value: 'redistribute' as const,
+                                          label: 'Redistribuir nas parcelas que faltam',
+                                        },
+                                      ] as const
+                                    ).map((opt) => {
+                                      const active = addendumPayMode === opt.value;
+                                      return (
+                                        <button
+                                          key={opt.value}
+                                          type="button"
+                                          onClick={() => setAddendumPayMode(opt.value)}
+                                          className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                                            active
+                                              ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
+                                              : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+                                          }`}
+                                        >
+                                          {opt.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  {addendumPayMode === 'new' ? (
+                                    <div className="mt-2">
+                                      <label className={labelClass}>Forma de pagamento</label>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {(
+                                          [
+                                            { value: 'avista' as const, label: 'À vista' },
+                                            { value: 'parcelado' as const, label: 'Parcelado' },
+                                          ] as const
+                                        ).map((opt) => {
+                                          const active = addendumScheduleMode === opt.value;
+                                          return (
+                                            <button
+                                              key={opt.value}
+                                              type="button"
+                                              onClick={() => {
+                                                setAddendumScheduleMode(opt.value);
+                                                if (opt.value === 'parcelado') {
+                                                  const n = Math.floor(Number(addendumParcelCount)) || 6;
+                                                  setAddendumParcelCount(String(n));
+                                                  setAddendumParcelAmounts(
+                                                    buildEqualParcelAmountInputs(
+                                                      parseCurrencyInputBr(addendumAmount),
+                                                      n
+                                                    )
+                                                  );
+                                                } else {
+                                                  setAddendumParcelAmounts([]);
+                                                }
+                                              }}
+                                              className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                                                active
+                                                  ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
+                                                  : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+                                              }`}
+                                            >
+                                              {opt.label}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      {addendumScheduleMode === 'avista' ? (
+                                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                          1 parcela nova com o valor do aditivo.
+                                        </p>
+                                      ) : (
+                                        <div className="mt-2 space-y-2">
+                                          <label className={labelClass}>Nº de parcelas</label>
+                                          <input
+                                            type="number"
+                                            min={2}
+                                            max={60}
+                                            value={addendumParcelCount}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              setAddendumParcelCount(value);
+                                              const n = Math.floor(Number(value));
+                                              if (Number.isFinite(n) && n >= 2 && n <= 60) {
+                                                setAddendumParcelAmounts(
+                                                  buildEqualParcelAmountInputs(
+                                                    parseCurrencyInputBr(addendumAmount),
+                                                    n
+                                                  )
+                                                );
+                                              } else {
+                                                setAddendumParcelAmounts([]);
+                                              }
+                                            }}
+                                            className={inputClass}
+                                          />
+                                          {(() => {
+                                            const n = Math.floor(Number(addendumParcelCount.trim()));
+                                            if (!Number.isFinite(n) || n < 2 || n > 60) return null;
+                                            const total = parseCurrencyInputBr(addendumAmount);
+                                            const amounts =
+                                              addendumParcelAmounts.length === n
+                                                ? addendumParcelAmounts
+                                                : buildEqualParcelAmountInputs(total, n);
+                                            const sum = amounts.reduce(
+                                              (acc, raw) => acc + (parseCurrencyInputBr(raw) || 0),
+                                              0
+                                            );
+                                            return (
+                                              <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                                                <div className="flex items-center justify-between gap-2">
+                                                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                                    Valor de cada parcela
+                                                  </p>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      setAddendumParcelAmounts(
+                                                        buildEqualParcelAmountInputs(total, n)
+                                                      )
+                                                    }
+                                                    className="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                                                  >
+                                                    Dividir igualmente
+                                                  </button>
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                  {amounts.map((parcelAmount, index) => (
+                                                    <div key={`addendum-parcel-${index}`}>
+                                                      <label className="mb-1 block text-[11px] text-gray-500 dark:text-gray-400">
+                                                        Parcela {index + 1}
+                                                      </label>
+                                                      <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        value={parcelAmount}
+                                                        onChange={(e) => {
+                                                          setAddendumParcelAmounts(
+                                                            redistributeParcelAmounts(
+                                                              amounts,
+                                                              index,
+                                                              e.target.value,
+                                                              total
+                                                            )
+                                                          );
+                                                        }}
+                                                        placeholder="R$ 0,00"
+                                                        className={inputClass}
+                                                      />
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                                  Soma: {formatMoneyBr(sum) || 'R$ 0,00'}
+                                                  {total != null
+                                                    ? ` · Aditivo: ${formatMoneyBr(total)}`
+                                                    : ''}
+                                                  . Ao mudar uma, as outras dividem o que sobra.
+                                                </p>
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                      O valor é dividido por igual nas parcelas que ainda não foram pagas.
+                                    </p>
+                                  )}
+                                </div>
                                 <button
                                   type="button"
                                   disabled={savingContractLink || !addendumReason.trim()}
@@ -3880,11 +4081,26 @@ export default function EmpreiteirosPage() {
                                 void uploadServiceContractFile(link.id, link.files, file);
                               }}
                             />
-                            {(link.files || []).map((file, fileIndex) => {
+                            {(
+                              [
+                                ...(link.files || []).map((file, fileIndex) => ({
+                                  file,
+                                  pending: false,
+                                  fileIndex,
+                                })),
+                                ...(addingAddendumForId === link.id
+                                  ? addendumFiles.map((file, fileIndex) => ({
+                                      file,
+                                      pending: true,
+                                      fileIndex,
+                                    }))
+                                  : []),
+                              ] as const
+                            ).map(({ file, pending, fileIndex }) => {
                               const href = resolveApiMediaUrl(file.url) || file.url;
                               return (
                                 <div
-                                  key={`${file.url}-${fileIndex}`}
+                                  key={`${pending ? 'novo' : 'salvo'}-${file.url}-${fileIndex}`}
                                   className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50"
                                 >
                                   <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
@@ -3900,13 +4116,19 @@ export default function EmpreiteirosPage() {
                                   {canManageCadastro ? (
                                     <button
                                       type="button"
-                                      onClick={() =>
+                                      onClick={() => {
+                                        if (pending) {
+                                          setAddendumFiles((prev) =>
+                                            prev.filter((_, i) => i !== fileIndex)
+                                          );
+                                          return;
+                                        }
                                         void removeServiceContractFile(
                                           link.id,
                                           link.files,
                                           fileIndex
-                                        )
-                                      }
+                                        );
+                                      }}
                                       className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
                                       aria-label="Remover anexo"
                                     >
@@ -3916,7 +4138,7 @@ export default function EmpreiteirosPage() {
                                 </div>
                               );
                             })}
-                            {canManageCadastro ? (
+                            {canManageCadastro && addingAddendumForId !== link.id ? (
                               <button
                                 type="button"
                                 disabled={uploadingFile || savingContractLink}
@@ -3932,7 +4154,9 @@ export default function EmpreiteirosPage() {
                                   ? 'Anexar outro'
                                   : 'Anexar contrato'}
                               </button>
-                            ) : (link.files || []).length === 0 ? (
+                            ) : (link.files || []).length +
+                              (addingAddendumForId === link.id ? addendumFiles.length : 0) ===
+                            0 ? (
                               <p className="rounded-xl border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
                                 Nenhum contrato anexado.
                               </p>

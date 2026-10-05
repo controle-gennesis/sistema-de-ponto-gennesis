@@ -307,6 +307,55 @@ function serializeInstallment(row: {
 }
 
 /** Aceita 17400, 17400.5, 17.400,00. allowNegative para aditivos. */
+function parseAddendumInstallmentAmounts(body: { installments?: unknown }, total: number): number[] {
+  const raw = body?.installments;
+  if (!Array.isArray(raw) || raw.length === 0) return [total];
+  if (raw.length > 60) throw createError('No máximo 60 parcelas', 400);
+  const amounts = raw.map((row, index) => {
+    const value = parseMoneyInput(
+      row && typeof row === 'object' ? (row as { amount?: unknown }).amount : row,
+      false
+    );
+    if (value == null || value <= 0) {
+      throw createError(`Informe o valor da parcela ${index + 1}`, 400);
+    }
+    return value;
+  });
+  const sum = amounts.reduce((acc, value) => acc + value, 0);
+  if (Math.abs(sum - total) > 0.02) {
+    throw createError('A soma das parcelas deve ser igual ao valor do aditivo', 400);
+  }
+  return amounts;
+}
+
+function splitAddendumAcrossInstallments(
+  installments: Array<{ id: string; amount: Prisma.Decimal | number; note?: string | null }>,
+  amount: number
+): Array<{ id: string; amountCents: number; note: string | null }> {
+  const count = installments.length;
+  if (count === 0) return [];
+  const deltaCents = Math.round(amount * 100);
+  const base = Math.trunc(deltaCents / count);
+  const remainder = deltaCents - base * count;
+  return installments.map((row, index) => {
+    const currentCents = Math.round(Number(row.amount) * 100);
+    const extra = base + (index === count - 1 ? remainder : 0);
+    const nextCents = currentCents + extra;
+    if (nextCents < 1) {
+      throw createError(
+        'O valor reduzido deixa alguma parcela em aberto zerada ou negativa',
+        400
+      );
+    }
+    const previous = String(row.note || '').trim();
+    return {
+      id: row.id,
+      amountCents: nextCents,
+      note: previous,
+    };
+  });
+}
+
 function parseMoneyInput(value: unknown, allowNegative = false): number | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'number') {
@@ -3060,7 +3109,10 @@ export class EmpreiteiroController {
         where: { id: linkId, empreiteiroId: id },
         include: {
           addenda: { select: { number: true }, orderBy: { number: 'desc' }, take: 1 },
-          installments: { select: { number: true }, orderBy: { number: 'desc' }, take: 1 },
+          installments: {
+            select: { id: true, number: true, amount: true, status: true, note: true },
+            orderBy: { number: 'asc' },
+          },
         },
       });
       if (!link) throw createError('Contrato de serviço não encontrado', 404);
@@ -3078,8 +3130,26 @@ export class EmpreiteiroController {
       const servicesRemoved = optionalStr(req.body?.servicesRemoved);
       const approvedByName = optionalStr(req.body?.approvedByName ?? req.body?.approvedBy);
       const files = parsePaymentFiles(req.body?.files);
-      const createInstallment = req.body?.createInstallment === true && amountNum > 0;
+      const paymentMode =
+        req.body?.paymentMode === 'redistribute' || req.body?.redistributeInstallments === true
+          ? 'redistribute'
+          : 'new';
+      const newInstallmentAmounts =
+        paymentMode === 'new' && amountNum > 0 ? parseAddendumInstallmentAmounts(req.body, amountNum) : [];
       const nextNumber = (link.addenda[0]?.number || 0) + 1;
+      const openInstallments =
+        paymentMode === 'redistribute'
+          ? link.installments.filter(
+              (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
+            )
+          : [];
+      if (paymentMode === 'redistribute' && openInstallments.length === 0) {
+        throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
+      }
+      const redistributed =
+        paymentMode === 'redistribute'
+          ? splitAddendumAcrossInstallments(openInstallments, amountNum)
+          : [];
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.empreiteiroContractAddendum.create({
@@ -3096,17 +3166,50 @@ export class EmpreiteiroController {
             createdBy: req.user?.id || null,
           },
         });
-        if (createInstallment) {
-          const nextParcel = (link.installments[0]?.number || 0) + 1;
-          await tx.empreiteiroContractInstallment.create({
+        if (newInstallmentAmounts.length > 0) {
+          let nextParcel = link.installments.reduce((max, row) => Math.max(max, row.number), 0);
+          for (const parcelAmount of newInstallmentAmounts) {
+            nextParcel += 1;
+            await tx.empreiteiroContractInstallment.create({
+              data: {
+                empreiteiroContractId: linkId,
+                number: nextParcel,
+                amount: new Prisma.Decimal(parcelAmount.toFixed(2)),
+                dueDate: effectiveDate,
+                status: 'PENDING',
+                note: `Aditivo nº ${nextNumber}`,
+              },
+            });
+          }
+        }
+        for (const row of redistributed) {
+          await tx.empreiteiroContractInstallment.update({
+            where: { id: row.id },
             data: {
-              empreiteiroContractId: linkId,
-              number: nextParcel,
-              amount: new Prisma.Decimal(amountNum.toFixed(2)),
-              dueDate: effectiveDate,
-              status: 'PENDING',
-              note: `Aditivo nº ${nextNumber}`,
+              amount: new Prisma.Decimal((row.amountCents / 100).toFixed(2)),
+              note: row.note,
             },
+          });
+        }
+        if (files.length > 0) {
+          const current = Array.isArray(link.files) ? link.files : [];
+          const existingUrls = new Set(
+            current
+              .filter(
+                (row): row is { url: string } =>
+                  !!row &&
+                  typeof row === 'object' &&
+                  typeof (row as { url?: unknown }).url === 'string'
+              )
+              .map((row) => row.url)
+          );
+          const merged = [
+            ...current,
+            ...files.filter((file) => file.url && !existingUrls.has(file.url)),
+          ];
+          await tx.empreiteiroContract.update({
+            where: { id: linkId },
+            data: { files: merged as Prisma.InputJsonValue },
           });
         }
         return tx.empreiteiro.findUniqueOrThrow({
@@ -3119,9 +3222,14 @@ export class EmpreiteiroController {
       res.json({
         success: true,
         data: serializeEmpreiteiro(updated, counts),
-        message: createInstallment
-          ? `Aditivo nº ${nextNumber} lançado e parcela criada`
-          : `Aditivo nº ${nextNumber} lançado`,
+        message:
+          paymentMode === 'redistribute'
+            ? `Aditivo nº ${nextNumber} lançado e redistribuído nas parcelas em aberto`
+            : newInstallmentAmounts.length > 1
+              ? `Aditivo nº ${nextNumber} lançado em ${newInstallmentAmounts.length} parcelas`
+              : newInstallmentAmounts.length === 1
+                ? `Aditivo nº ${nextNumber} lançado e parcela criada`
+                : `Aditivo nº ${nextNumber} lançado`,
       });
     } catch (error) {
       next(error);

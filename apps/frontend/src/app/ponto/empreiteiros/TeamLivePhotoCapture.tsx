@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, MapPin, RotateCcw, X } from 'lucide-react';
+import { Camera, ImageIcon, MapPin, RotateCcw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import api from '@/lib/api';
@@ -128,17 +128,33 @@ function stampOnCanvas(
 /** Limite para encode/upload mais rápidos em celular. */
 const MAX_PHOTO_EDGE = 1600;
 
-function drawVideoScaled(
-  video: HTMLVideoElement,
+function drawSourceScaled(
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D
 ) {
-  const srcW = video.videoWidth;
-  const srcH = video.videoHeight;
   const scale = Math.min(1, MAX_PHOTO_EDGE / Math.max(srcW, srcH));
   canvas.width = Math.max(1, Math.round(srcW * scale));
   canvas.height = Math.max(1, Math.round(srcH * scale));
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+}
+
+function loadImageFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Não foi possível ler a imagem. Use JPG ou PNG.'));
+    };
+    img.src = url;
+  });
 }
 
 function getFreshPosition(): Promise<GeolocationPosition> {
@@ -202,8 +218,9 @@ export function TeamLivePhotoCapture({
   emptyButtonLabel = 'Tirar foto da equipe',
   replaceButtonLabel = 'Tirar de novo',
   fileNamePrefix = 'equipe',
-  hint = 'Só pela câmera, no momento. Galeria não vale. A foto grava data, hora e o local do GPS.',
+  hint = 'Pela câmera ou pela galeria. A foto grava data, hora e o local do GPS.',
   showEmptyButton = true,
+  galleryMultiple = false,
 }: {
   value: TeamGeoPhoto | null;
   onChange: (value: TeamGeoPhoto | null) => void;
@@ -217,9 +234,12 @@ export function TeamLivePhotoCapture({
   hint?: string;
   /** Quando false, só abre a câmera via openCamera externo / botão pai. */
   showEmptyButton?: boolean;
+  /** Permite escolher várias imagens da galeria de uma vez. */
+  galleryMultiple?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const lastFixRef = useRef<GeoFix | null>(null);
@@ -384,6 +404,61 @@ export function TeamLivePhotoCapture({
     setOpen(true);
   };
 
+  const resolvePosition = async (): Promise<GeoFix | null> => {
+    const last = lastFixRef.current;
+    if (last && Date.now() - last.timestamp < 25000) return last;
+    try {
+      const fresh = await getFreshPosition();
+      const position: GeoFix = {
+        latitude: fresh.coords.latitude,
+        longitude: fresh.coords.longitude,
+        accuracy: Number.isFinite(fresh.coords.accuracy) ? fresh.coords.accuracy : null,
+        timestamp: Date.now(),
+      };
+      lastFixRef.current = position;
+      return position;
+    } catch {
+      if (last && Date.now() - last.timestamp < 45000) return last;
+      return null;
+    }
+  };
+
+  const uploadStampedCanvas = async (
+    canvas: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D,
+    position: GeoFix
+  ) => {
+    const capturedAt = new Date();
+    const resolvedAddress =
+      address && lastFixRef.current && Date.now() - lastFixRef.current.timestamp < 45000
+        ? address
+        : null;
+    stampOnCanvas(ctx, canvas, {
+      title: stampTitle,
+      capturedAt,
+      latitude: position.latitude,
+      longitude: position.longitude,
+      address: resolvedAddress,
+    });
+    const fileName = `${fileNamePrefix}-${capturedAt.toISOString().replace(/[:.]/g, '-')}.jpg`;
+    const file = await canvasToJpegFile(canvas, fileName, 0.82);
+    const data = new FormData();
+    data.append('file', file);
+    const res = await api.post('/empreiteiros/upload-file', data);
+    const uploaded = res.data?.data as { url?: string; name?: string; key?: string } | undefined;
+    if (!uploaded?.url) throw new Error('Falha no upload');
+    onChange({
+      url: uploaded.url,
+      name: uploaded.name || fileName,
+      key: uploaded.key,
+      latitude: position.latitude,
+      longitude: position.longitude,
+      accuracy: position.accuracy,
+      capturedAt: capturedAt.toISOString(),
+      address: resolvedAddress,
+    });
+  };
+
   const capture = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -395,71 +470,63 @@ export function TeamLivePhotoCapture({
 
     setCapturing(true);
     try {
-      // Preferir GPS já obtido no watch (botão só libera com fix). Evita nova espera de 6–12s.
-      let position: GeoFix | null = null;
-      const last = lastFixRef.current;
-      if (last && Date.now() - last.timestamp < 25000) {
-        position = last;
-      } else {
-        try {
-          const fresh = await getFreshPosition();
-          position = {
-            latitude: fresh.coords.latitude,
-            longitude: fresh.coords.longitude,
-            accuracy: Number.isFinite(fresh.coords.accuracy) ? fresh.coords.accuracy : null,
-            timestamp: Date.now(),
-          };
-        } catch {
-          if (last && Date.now() - last.timestamp < 45000) position = last;
-        }
-      }
+      const position = await resolvePosition();
       if (!position) {
-        toast.error('Não deu para gravar a localização neste instante. Ative o GPS e tire de novo.');
+        toast.error('Não deu para gravar a localização neste instante. Ative o GPS e tente de novo.');
         return;
       }
-
-      const capturedAt = new Date();
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Não foi possível capturar a foto');
-      drawVideoScaled(video, canvas, ctx);
-
-      // Não bloqueia o upload esperando reverse-geocode; usa o que já veio do watch.
-      const resolvedAddress =
-        address && lastFixRef.current && Date.now() - lastFixRef.current.timestamp < 45000
-          ? address
-          : null;
-
-      stampOnCanvas(ctx, canvas, {
-        title: stampTitle,
-        capturedAt,
-        latitude: position.latitude,
-        longitude: position.longitude,
-        address: resolvedAddress,
-      });
-
-      const fileName = `${fileNamePrefix}-${capturedAt.toISOString().replace(/[:.]/g, '-')}.jpg`;
-      const file = await canvasToJpegFile(canvas, fileName, 0.82);
-      const data = new FormData();
-      data.append('file', file);
-      const res = await api.post('/empreiteiros/upload-file', data);
-      const uploaded = res.data?.data as { url?: string; name?: string; key?: string } | undefined;
-      if (!uploaded?.url) throw new Error('Falha no upload');
-
-      onChange({
-        url: uploaded.url,
-        name: uploaded.name || fileName,
-        key: uploaded.key,
-        latitude: position.latitude,
-        longitude: position.longitude,
-        accuracy: position.accuracy,
-        capturedAt: capturedAt.toISOString(),
-        address: resolvedAddress,
-      });
+      drawSourceScaled(video, video.videoWidth, video.videoHeight, canvas, ctx);
+      await uploadStampedCanvas(canvas, ctx, position);
       closeCamera();
     } catch (error: unknown) {
       const message =
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
         (error instanceof Error ? error.message : 'Não foi possível tirar a foto');
+      toast.error(message);
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const openGallery = () => {
+    if (disabled || capturing) return;
+    galleryInputRef.current?.click();
+  };
+
+  const onGalleryChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0 || capturing) return;
+    const images = files.filter((file) => file.type.startsWith('image/'));
+    if (images.length === 0) {
+      toast.error('Escolha uma imagem da galeria');
+      return;
+    }
+
+    setCapturing(true);
+    try {
+      const position = await resolvePosition();
+      if (!position) {
+        toast.error('Não deu para gravar a localização neste instante. Ative o GPS e tente de novo.');
+        return;
+      }
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) throw new Error('Não foi possível processar a foto');
+      for (const file of images) {
+        const img = await loadImageFile(file);
+        if (img.naturalWidth < 8 || img.naturalHeight < 8) {
+          throw new Error('Não foi possível ler a imagem. Use JPG ou PNG.');
+        }
+        drawSourceScaled(img, img.naturalWidth, img.naturalHeight, canvas, ctx);
+        await uploadStampedCanvas(canvas, ctx, position);
+      }
+    } catch (error: unknown) {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (error instanceof Error ? error.message : 'Não foi possível usar a foto da galeria');
       toast.error(message);
     } finally {
       setCapturing(false);
@@ -524,6 +591,15 @@ export function TeamLivePhotoCapture({
                   </button>
                   <button
                     type="button"
+                    disabled={capturing}
+                    onClick={openGallery}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 hover:underline disabled:opacity-50 dark:text-gray-300"
+                  >
+                    <ImageIcon className="h-3 w-3" />
+                    {capturing ? 'Enviando...' : 'Galeria'}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onChange(null)}
                     className="text-xs font-medium text-gray-500 hover:text-red-600 dark:text-gray-400"
                   >
@@ -535,16 +611,38 @@ export function TeamLivePhotoCapture({
           </div>
         </div>
       ) : showEmptyButton ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => openCamera()}
-          className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-red-400 hover:bg-red-50/40 hover:text-red-600 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-red-950/20"
-        >
-          <Camera className="h-6 w-6" />
-          <span className="text-sm font-medium">{emptyButtonLabel}</span>
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={disabled || capturing}
+            onClick={() => openCamera()}
+            className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-red-400 hover:bg-red-50/40 hover:text-red-600 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-red-950/20"
+          >
+            <Camera className="h-6 w-6" />
+            <span className="text-sm font-medium">{emptyButtonLabel}</span>
+          </button>
+          <button
+            type="button"
+            disabled={disabled || capturing}
+            onClick={openGallery}
+            className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-red-400 hover:bg-red-50/40 hover:text-red-600 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-red-950/20"
+          >
+            <ImageIcon className="h-6 w-6" />
+            <span className="text-sm font-medium">
+              {capturing ? 'Enviando...' : 'Escolher da galeria'}
+            </span>
+          </button>
+        </div>
       ) : null}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        multiple={galleryMultiple}
+        className="hidden"
+        onChange={(event) => void onGalleryChange(event)}
+      />
+      <canvas ref={canvasRef} className="hidden" />
 
       {open ? (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center p-4">
@@ -569,7 +667,6 @@ export function TeamLivePhotoCapture({
                 muted
                 className="aspect-[3/4] w-full object-cover sm:aspect-video"
               />
-              <canvas ref={canvasRef} className="hidden" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 text-white">
                 <p className="text-sm font-medium">{formatDateTime(now)}</p>
                 {fix ? (
@@ -640,10 +737,12 @@ export function LiveGeoPhotosField({
   emptyButtonLabel?: string;
   fileNamePrefix?: string;
 }) {
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Só pela câmera, no momento. Galeria não vale. Cada foto grava data, hora e o local do GPS.
+        Pela câmera ou pela galeria. Cada foto grava data, hora e o local do GPS.
       </p>
       {values.length > 0 ? (
         <div className="flex flex-wrap gap-2">
@@ -688,7 +787,10 @@ export function LiveGeoPhotosField({
         <TeamLivePhotoCapture
           value={null}
           onChange={(photo) => {
-            if (photo) onChange([...values, photo]);
+            if (!photo) return;
+            const next = [...valuesRef.current, photo];
+            valuesRef.current = next;
+            onChange(next);
           }}
           disabled={disabled}
           onPreview={onPreview}
@@ -697,6 +799,7 @@ export function LiveGeoPhotosField({
           emptyButtonLabel={emptyButtonLabel}
           fileNamePrefix={fileNamePrefix}
           hint=""
+          galleryMultiple
         />
       ) : null}
     </div>

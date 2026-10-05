@@ -8,6 +8,7 @@ import {
   Eye,
   FileText,
   ImageIcon,
+  Info,
   MoreVertical,
   Pencil,
   Plus,
@@ -60,6 +61,7 @@ type TeamMember = {
 export type DailyMeasurementContractOption = {
   contractId: string;
   contratoNome: string;
+  description?: string | null;
   centroCustoNome?: string;
   isActive?: boolean;
   status?: string | null;
@@ -293,6 +295,7 @@ function asGeoPhotos(raw: PaymentFile[] | TeamGeoPhoto[] | undefined): TeamGeoPh
 
 export function EmpreiteiroDailyMeasurements({
   empreiteiroId,
+  empreiteiroName = '',
   contracts = [],
   defaultContractId = '',
   filterContractId = null,
@@ -303,6 +306,7 @@ export function EmpreiteiroDailyMeasurements({
   onPreviewPhoto,
 }: {
   empreiteiroId: string;
+  empreiteiroName?: string;
   contracts?: DailyMeasurementContractOption[];
   defaultContractId?: string;
   /** Quando definido, lista só as entregas desse contrato. */
@@ -475,7 +479,7 @@ export function EmpreiteiroDailyMeasurements({
         empreiteiroContractId: form.contractId,
         contractId: form.contractId,
         description: form.description.trim(),
-        confirmedBy: form.confirmedBy.trim() || null,
+        confirmedBy: empreiteiroName.trim() || form.confirmedBy.trim() || null,
         quantity: null,
         unit: null,
         workerIds: form.workerIds,
@@ -602,6 +606,7 @@ export function EmpreiteiroDailyMeasurements({
     setEditing(null);
     setForm({
       ...emptyForm(targetId),
+      confirmedBy: empreiteiroName.trim(),
       workerIds: teamWithId.map((member) => member.id as string),
     });
     setFormOpen(true);
@@ -617,7 +622,7 @@ export function EmpreiteiroDailyMeasurements({
       workDate: item.workDate,
       contractId: item.contractId || preferredContractId,
       description: item.description,
-      confirmedBy: item.confirmedBy || '',
+      confirmedBy: empreiteiroName.trim() || item.confirmedBy || '',
       workerIds: item.workers.map((worker) => worker.teamMemberId).filter((id): id is string => !!id),
       photos: asGeoPhotos(item.photos),
       teamPhoto: item.teamPhoto || null,
@@ -668,42 +673,49 @@ export function EmpreiteiroDailyMeasurements({
 
   return (
     <div className="space-y-5">
+      <div className="flex items-start gap-3 rounded-2xl border border-red-200/70 bg-gradient-to-r from-red-50/80 to-white px-4 py-3 dark:border-red-900/40 dark:from-red-950/30 dark:to-gray-900/50">
+        <div className="mt-0.5 shrink-0 rounded-xl bg-red-100 p-2 dark:bg-red-950/60">
+          <Info className="h-4 w-4 text-red-600 dark:text-red-400" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            O pagamento está sempre condicionado à entrega.
+          </p>
+          <p className="mt-0.5 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+            A entrega só é computada após a baixa realizada pelo responsável direto.
+          </p>
+        </div>
+      </div>
       {contractChips.length > 1 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Filtrar por contrato
           </p>
-          <div className="flex flex-wrap gap-2">
-            {contractChips.map((chip) => {
-              const active =
-                chip.contractId === null
-                  ? !filterContractId
-                  : filterContractId === chip.contractId;
-              return (
-                <button
-                  key={chip.contractId ?? 'all'}
-                  type="button"
-                  onClick={() => selectContractFilter(chip.contractId)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    active
-                      ? 'border-red-500 bg-red-600 text-white'
-                      : 'border-gray-300 bg-white text-gray-700 hover:border-red-300 hover:bg-red-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30'
-                  }`}
-                >
-                  {chip.label}
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                      active
-                        ? 'bg-white/20 text-white'
-                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                    }`}
-                  >
-                    {chip.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <StringSingleSelectDropdown
+            value={filterContractId || ''}
+            onChange={(value) => selectContractFilter(value || null)}
+            allowEmpty
+            emptyOptionLabel={`Todos (${allItems.length})`}
+            placeholder="Todos"
+            searchPlaceholder="Pesquisar contrato..."
+            emptySearchMessage="Nenhum contrato com esse nome."
+            matchTriggerWidth
+            className="w-full max-w-md"
+            options={contractChips
+              .filter((chip): chip is { contractId: string; label: string; count: number } =>
+                Boolean(chip.contractId)
+              )
+              .map((chip) => ({
+                value: chip.contractId,
+                label: `${chip.label} (${chip.count})`,
+              }))}
+          />
+          {filterContract ? (
+            <p className="max-w-3xl text-sm text-gray-600 dark:text-gray-300">
+              <span className="font-semibold text-gray-500 dark:text-gray-400">Descrição: </span>
+              {filterContract.description?.trim() || 'Sem descrição'}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -798,7 +810,7 @@ export function EmpreiteiroDailyMeasurements({
             className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
           >
             <Plus className="h-4 w-4" />
-            Nova entrega
+            Nova medição de entrega
           </button>
         ) : null}
       </div>
@@ -812,7 +824,7 @@ export function EmpreiteiroDailyMeasurements({
                   ? normalizeStatus(editing.status) === 'CORRECTION'
                     ? 'Corrigir e reenviar'
                     : 'Editar entrega'
-                  : 'Nova entrega'}
+                  : 'Nova medição de entrega'}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Foto da equipe + fotos do serviço são obrigatórias. A entrega vai para aprovação do
@@ -842,7 +854,9 @@ export function EmpreiteiroDailyMeasurements({
                   <label className={labelClass}>Contrato de serviço *</label>
                   <StringSingleSelectDropdown
                     value={form.contractId}
+                    disabled={Boolean(filterContractId)}
                     onChange={(contractId) => {
+                      if (filterContractId) return;
                       const nextTeam = (contracts.find((c) => c.contractId === contractId)?.team ||
                         []
                       ).filter((member) => member.id);
@@ -872,10 +886,10 @@ export function EmpreiteiroDailyMeasurements({
               <div>
                 <label className={labelClass}>Confirmado por</label>
                 <input
-                  value={form.confirmedBy}
-                  onChange={(e) => setForm((prev) => ({ ...prev, confirmedBy: e.target.value }))}
-                  className={inputClass}
-                  placeholder="Encarregado ou fiscal"
+                  value={empreiteiroName.trim() || form.confirmedBy}
+                  readOnly
+                  disabled
+                  className={`${inputClass} cursor-not-allowed opacity-80`}
                 />
               </div>
               <div>
@@ -998,7 +1012,7 @@ export function EmpreiteiroDailyMeasurements({
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
             >
               <Plus className="h-4 w-4" />
-              Registrar primeira entrega
+              Registrar nova medição de entrega
             </button>
           ) : filterClosed ? (
             <p className="mt-4 text-xs font-medium text-gray-500 dark:text-gray-400">
