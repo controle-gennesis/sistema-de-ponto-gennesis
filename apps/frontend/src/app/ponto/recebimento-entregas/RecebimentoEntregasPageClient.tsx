@@ -314,17 +314,17 @@ export default function RecebimentoEntregasPageClient() {
   return (
     <ProtectedRoute route="/ponto/recebimento-entregas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-8">
+        <div className="space-y-4">
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Recebimento de Entregas
             </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+            <p className="mt-1 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
               Confirme o recebimento de material na obra. Esta tela é exclusiva para a engenharia.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FilterStatCard
               label="Pendentes"
               count={summary.awaitingEngineering}

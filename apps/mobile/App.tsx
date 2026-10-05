@@ -24,7 +24,6 @@ import GestaoOsDetailScreen from './src/screens/GestaoOsDetailScreen';
 import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
 import GestaoOsUnplannedScreen from './src/screens/GestaoOsUnplannedScreen';
 import FieldAssistantScreen from './src/screens/FieldAssistantScreen';
-import ApprovalsScreen from './src/screens/ApprovalsScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
 import ThemeBackground from './src/components/ThemeBackground';
 
@@ -50,7 +49,6 @@ export type RootStackParamList = {
   KanbanBoard: { departmentKey?: string; title?: string };
   KanbanCard: { cardId: string; departmentKey?: string };
   DpRequests: undefined;
-  Approvals: undefined;
   GestaoOsDetail: { id: string };
   GestaoOsQr: { token: string };
   GestaoOsUnplanned: undefined;
@@ -166,7 +164,6 @@ function AppNavigator() {
               <Stack.Screen name="KanbanBoard" component={KanbanBoardScreen} />
               <Stack.Screen name="KanbanCard" component={KanbanCardScreen} />
               <Stack.Screen name="DpRequests" component={DpRequestsScreen} />
-              <Stack.Screen name="Approvals" component={ApprovalsScreen} />
               <Stack.Screen name="GestaoOsDetail" component={GestaoOsDetailScreen} />
               <Stack.Screen name="GestaoOsQr" component={GestaoOsQrScreen} />
               <Stack.Screen name="GestaoOsUnplanned" component={GestaoOsUnplannedScreen} />

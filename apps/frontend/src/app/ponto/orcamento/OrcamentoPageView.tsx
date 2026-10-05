@@ -264,7 +264,7 @@ export interface OrcafascioComposicaoDetalhe {
   is_sicro: boolean;
   labor: boolean;
   calculation_method: { type: number; description: string };
-  prices: { pnd: number; pd: number };
+  prices: { pnd: number; pd: number; type_mdo?: number; type_mat?: number };
   items: OrcafascioComposicaoItem[];
   created_at: string;
 }
@@ -466,6 +466,9 @@ function precosMoMatDeLinhaOrcafascio(row: Record<string, unknown>): {
 /**
  * Garante que MO+MAT batam com o preço unitário sem BDI.
  * Corrige splits gravados como total de linha / soma analítica fora de escala.
+ *
+ * Nunca infla um split incompleto (soma << PU): isso distorce a razão
+ * (ex.: MO certo + MAT zerado → MO engorda até cobrir o PU).
  */
 function reconciliarMoMatComPrecoUnitario(
   mo: number,
@@ -493,7 +496,12 @@ function reconciliarMoMatComPrecoUnitario(
     }
   }
 
-  // Reescala proporcionalmente para o PU sintético (fonte de verdade do orçamento).
+  // Longe do PU (incompleto ou soma de VU): não inventar razão — cai no PU de catálogo.
+  if (Math.abs(soma - preco) / preco > 0.08) {
+    return { mo: 0, mat: 0 };
+  }
+
+  // Ajuste fino quando está perto o suficiente do PU.
   const fator = preco / soma;
   return { mo: moN * fator, mat: matN * fator };
 }
@@ -505,16 +513,83 @@ function linhaEhMaoDeObraOrcafascio(row: Record<string, unknown>): boolean {
   return false;
 }
 
+/** Equipamento/veículo/frota puro — PU inteiro em Material (não título de serviço). */
+function textoEhEquipamentoOuVeiculo(texto: string): boolean {
+  const t = String(texto || '').toUpperCase();
+  // Serviço composto (deslocamento de equipe, etc.) só menciona veículo — não é equipamento puro.
+  if (/DESLOCAMENTO|EQUIPE\b|POR\s+VE[IÍ]CULO|COMPOSI[CÇ][AÃ]O\b/.test(t)) return false;
+  if (
+    /ENGENHEIRO|T[ÉE]CNICO|AUXILIAR|AJUDANTE|PEDREIRO|SERVENTE/.test(t) &&
+    /VE[IÍ]CULO|CAMINH[AÃ]O/.test(t)
+  ) {
+    return false;
+  }
+  return /VE[IÍ]CULO|CAMINH[AÃ]O|CARRO\b|MOTOCICLE|EQUIPAMENTO|FROTA|BETONEIRA|GUINDASTE|TRATOR|RETROESCAV|ESCAVADEIRA/.test(
+    t
+  );
+}
+
+/** Mão de obra típica (cargos) — PU inteiro em MO quando não há breakdown. */
+function textoEhMaoDeObraTipica(texto: string): boolean {
+  const t = String(texto || '').toUpperCase();
+  // Título de serviço misto (MO + veículo/combustível) — não jogar o PU inteiro em MO.
+  if (/DESLOCAMENTO|POR\s+VE[IÍ]CULO|EQUIPE\b.*VE[IÍ]CULO|VE[IÍ]CULO.*EQUIPE/.test(t)) {
+    return false;
+  }
+  return /ENGENHEIRO|ARQUITETO|MESTRE|ENCARREGADO|T[ÉE]CNICO|ALMOXARIFE|APONTADOR|APROPRIADOR|PEDREIRO|SERVENTE|AUXILIAR|OPERADOR|MOTORISTA|VIGIA|PORTEIRO|ENCARGOS/.test(
+    t
+  );
+}
+
+/**
+ * Analítico importado com campos deslocados: `total` guarda o VU do insumo e `precoUnitario`
+ * guarda VU ÷ coef (ex. gasolina 56,10 / 5,61 com coef 0,1). Só dá para distinguir do caso
+ * normal (VU × coef = total) olhando a composição inteira contra o PU.
+ */
+function normalizarLinhasAnaliticoDeslocadas(
+  linhas: LinhaAnaliticoComposicao[] | undefined,
+  preco: number
+): LinhaAnaliticoComposicao[] | undefined {
+  if (!linhas?.length || !(preco > 0)) return linhas;
+  let somaTot = 0;
+  let somaTotCoef = 0;
+  let comCoef = 0;
+  for (const l of linhas) {
+    const q = Number(l.quantidade) || 0;
+    const vu = Number(l.precoUnitario) || 0;
+    const t = Number(l.total) || 0;
+    if (!(q > 0) || !(t > 0)) continue;
+    if (vu > 0 && Math.abs(q - 1) > 1e-9) {
+      if (Math.abs(vu * q - t) > Math.max(0.01, t * 0.01)) return linhas;
+      comCoef += 1;
+    }
+    somaTot += t;
+    somaTotCoef += t * q;
+  }
+  if (comCoef === 0) return linhas;
+  if (!(somaTot > preco * 1.5)) return linhas;
+  if (Math.abs(somaTotCoef - preco) / preco > 0.25) return linhas;
+  return linhas.map((l) => {
+    const q = Number(l.quantidade) || 0;
+    const t = Number(l.total) || 0;
+    if (!(q > 0) || !(t > 0)) return l;
+    return { ...l, precoUnitario: t, total: t * q };
+  });
+}
+
 function somarMoMatDasLinhasAnalitico(
-  linhas: LinhaAnaliticoComposicao[] | undefined
+  linhas: LinhaAnaliticoComposicao[] | undefined,
+  qtdOrcamento?: number | null,
+  qtdOrcamentoAlt?: number | null
 ): { mo: number; mat: number } {
   if (!linhas || linhas.length === 0) return { mo: 0, mat: 0 };
   let mo = 0;
   let mat = 0;
+  const opts = { qtdOrcamento, qtdOrcamentoAlt };
   for (const l of linhas) {
-    const t = contribuicaoLinhaAnalitico(l);
+    const t = contribuicaoLinhaAnalitico(l, opts);
     if (!(t > 0)) continue;
-    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    if (categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') mo += t;
     else mat += t;
   }
   return { mo, mat };
@@ -523,34 +598,126 @@ function somarMoMatDasLinhasAnalitico(
 /**
  * Contribuição do insumo no preço unitário da composição (= coluna TOTAL do Orçafascio).
  * Não usar o preço unitário do insumo: ex. caminhão R$ 422.626 × coef 0,000096 → R$ 49,61.
+ *
+ * Importante: quando `quantidade` veio como qtd do orçamento (ex. 56,40) e `total` espelha o VU,
+ * NÃO devolver o VU nem VU×qtd — isso vira split errado após reescala (41,50/252,13 em vez de 5,94/287,70).
  */
-function contribuicaoLinhaAnalitico(l: {
-  total?: number;
-  precoUnitario?: number;
-  quantidade?: number;
-}): number {
+function contribuicaoLinhaAnalitico(
+  l: {
+    total?: number;
+    precoUnitario?: number;
+    quantidade?: number;
+  },
+  opts?: { qtdOrcamento?: number | null; qtdOrcamentoAlt?: number | null }
+): number {
   const qtd = Number(l.quantidade) || 0;
   const vu = Number(l.precoUnitario) || 0;
   const tot = Number(l.total) || 0;
   const fromCoef = vu > 0 && qtd > 0 ? vu * qtd : 0;
+  const totEhVu =
+    vu > 0 &&
+    tot > 0 &&
+    Math.abs(tot - vu) <= Math.max(0.02, Math.abs(vu) * 0.001);
+  const qOrcCandidates = [opts?.qtdOrcamento, opts?.qtdOrcamentoAlt]
+    .map((v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : 0))
+    .filter((v) => v > 1);
+  const qOrcMatch = qOrcCandidates.find(
+    (qOrc) => qtd > 0 && Math.abs(qtd - qOrc) <= Math.max(1e-6, qOrc * 0.001)
+  );
+
+  // Quantidade da linha = qtd orçada: distinguir total-orçamento vs contribuição já unitária.
+  if (qOrcMatch != null && vu > 0) {
+    // total ≈ VU (ou ausente): recurso horário/unitário (ex. caminhão EMOP) — coef ≈ 1.
+    if (!(tot > 0) || totEhVu) return vu;
+    // total já é a contribuição na composição (VU×coef), bem menor que o VU — NÃO dividir pela qtd.
+    // Ex.: 13042 engenheiro tot=2,41 / qtd orçada 366 → deve permanecer 2,41 (não 2,41/366).
+    if (tot + 1e-9 < vu) return tot;
+    // total é o total orçamento da linha (VU×coef×qtd) → contribuição unitária.
+    const totUnit = tot / qOrcMatch;
+    if (totUnit > 0 && totUnit <= vu * 1.05) return totUnit;
+    return 0;
+  }
+
+  // TOTAL real da composição (plus_ls / pnd da linha): menor que o VU do insumo.
+  if (tot > 0 && vu > 0 && !totEhVu && tot + 1e-9 < vu) {
+    if (fromCoef > 0 && Math.abs(tot - fromCoef) <= Math.max(0.05, Math.max(tot, fromCoef) * 0.05)) {
+      return tot;
+    }
+    // Coef veio como qtd do orçamento: VU×qtd explode; confia no TOTAL.
+    if (fromCoef > tot * 2) return tot;
+    if (fromCoef > 0) return fromCoef;
+    return tot;
+  }
 
   if (fromCoef > 0) {
-    // `total` gravado é na verdade o VU do insumo (coef ≠ 1).
-    if (
-      vu > 0 &&
-      Math.abs(qtd - 1) > 1e-9 &&
-      Math.abs(tot - vu) <= Math.max(0.02, Math.abs(vu) * 0.001)
-    ) {
+    // total ≈ VU e coef parece real (não qtd orçada) → contribuição = VU×coef.
+    if (totEhVu && Math.abs(qtd - 1) > 1e-9 && fromCoef <= tot * 2) {
       return fromCoef;
     }
-    // `total` explodido (usou VU no lugar de VU×coef).
+    // total ≈ VU mas VU×qtd explodiu (qtd = quantidade do orçamento) → sem contribuição confiável.
+    if (totEhVu && fromCoef > tot * 2) {
+      return 0;
+    }
+    // total explodido (gravou VU no lugar de VU×coef com coef correto / total orçamento).
     if (tot > fromCoef * 2) return fromCoef;
-    // Coef veio como qtd do orçamento (ex. 56,40): VU×coef explode; TOTAL real está em `total`.
-    if (tot > 0 && fromCoef > tot * 2) return tot;
     if (tot > 0 && Math.abs(tot - fromCoef) <= Math.max(0.05, fromCoef * 0.05)) return tot;
-    return fromCoef;
+    if (!totEhVu) return fromCoef;
   }
-  return tot > 0 ? tot : 0;
+
+  if (tot > 0 && !totEhVu) return tot;
+  return 0;
+}
+
+/** Há insumos com VU mas sem contribuição confiável — soma parcial não deve ser reescalada. */
+function analiticoParcialSemContribuicao(
+  linhas: LinhaAnaliticoComposicao[] | undefined,
+  preco: number,
+  qtdOrcamento?: number | null,
+  qtdOrcamentoAlt?: number | null
+): boolean {
+  if (!linhas?.length || !(preco > 0)) return false;
+  let com = 0;
+  let sem = 0;
+  const opts = { qtdOrcamento, qtdOrcamentoAlt };
+  for (const l of linhas) {
+    const vu = Number(l.precoUnitario) || 0;
+    const tot = Number(l.total) || 0;
+    if (!(vu > 0) && !(tot > 0)) continue;
+    const t = contribuicaoLinhaAnalitico(l, opts);
+    if (t > 0) com += 1;
+    else sem += 1;
+  }
+  if (sem <= 0 || com <= 0) return false;
+  const a = somarMoMatDasLinhasAnalitico(linhas, qtdOrcamento, qtdOrcamentoAlt);
+  // Parcial de verdade: a soma boa não fecha o PU.
+  return distanciaMoMatAoPreco(a.mo, a.mat, preco) > 0.05;
+}
+
+/** Split gravado que só replica a soma dos VUs reescalada ao PU (razão errada). */
+function moMatPareceReescalaDeVu(
+  mo: number,
+  mat: number,
+  linhas: LinhaAnaliticoComposicao[] | undefined,
+  preco: number
+): boolean {
+  if (!linhas?.length || !(preco > 0)) return false;
+  const moN = mo > 0 ? mo : 0;
+  const matN = mat > 0 ? mat : 0;
+  if (!(moN > 0 || matN > 0)) return false;
+  let moVu = 0;
+  let matVu = 0;
+  for (const l of linhas) {
+    const vu = Number(l.precoUnitario) || 0;
+    if (!(vu > 0)) continue;
+    if (categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') moVu += vu;
+    else matVu += vu;
+  }
+  if (!(moVu + matVu > 0)) return false;
+  // Se a soma dos VUs já é o PU, o ratio pode ser legítimo.
+  if (Math.abs(moVu + matVu - preco) <= Math.max(0.05, preco * 0.02)) return false;
+  const r = reconciliarMoMatComPrecoUnitario(moVu, matVu, preco);
+  const tol = Math.max(0.08, preco * 0.005);
+  return Math.abs(r.mo - moN) <= tol && Math.abs(r.mat - matN) <= tol;
 }
 
 /** Quão perto MO+MAT fica do PU (antes de reescalar). Menor = melhor. */
@@ -608,40 +775,86 @@ function moMatUnitarioDeItemOuComposicao(
     descricao?: string;
     analiticoLinhas?: LinhaAnaliticoComposicao[];
     quantidadeImportada?: number;
+    totalSemBdiImportado?: number;
   },
-  composicao: ComposicaoItem | null | undefined
+  composicao: ComposicaoItem | null | undefined,
+  qtdAtual?: number | null
 ): { mo: number; mat: number } {
-  const preco = Number(item.precoUnitario ?? composicao?.precoUnitario ?? 0) || 0;
+  const precoItem = Number(item.precoUnitario) || 0;
+  const precoComp = Number(composicao?.precoUnitario) || 0;
+  const qOrig = Number(item.quantidadeImportada) || 0;
+  const totImp = Number(item.totalSemBdiImportado) || 0;
+  const precoDosTotais = qOrig > 0 && totImp > 0 ? totImp / qOrig : 0;
+  const preco =
+    precoItem > 0 ? precoItem : precoComp > 0 ? precoComp : precoDosTotais > 0 ? precoDosTotais : 0;
+  const qtdOrc = item.quantidadeImportada;
+  const qtdAlt = qtdAtual != null && Number.isFinite(Number(qtdAtual)) ? Number(qtdAtual) : null;
   type Cand = { mo: number; mat: number; score: number; fonte: string };
   const candidatos: Cand[] = [];
+
+  const linhasComp = normalizarLinhasAnaliticoDeslocadas(composicao?.analiticoLinhas, preco);
+  const linhasItem = normalizarLinhasAnaliticoDeslocadas(item.analiticoLinhas, preco);
 
   const pushLinhas = (linhas: LinhaAnaliticoComposicao[] | undefined, fonte: string) => {
     if (!linhas?.length) return;
     if (analiticoPareceSomaDeVuSemCoef(linhas, preco)) return;
-    const a = somarMoMatDasLinhasAnalitico(linhas);
+    if (analiticoParcialSemContribuicao(linhas, preco, qtdOrc, qtdAlt)) return;
+    const a = somarMoMatDasLinhasAnalitico(linhas, qtdOrc, qtdAlt);
     if (!(a.mo > 0 || a.mat > 0)) return;
-    candidatos.push({ mo: a.mo, mat: a.mat, score: distanciaMoMatAoPreco(a.mo, a.mat, preco), fonte });
+    const score = distanciaMoMatAoPreco(a.mo, a.mat, preco);
+    if (score <= 0.05) {
+      candidatos.push({ mo: a.mo, mat: a.mat, score, fonte });
+      return;
+    }
+    // Analítico misto um pouco abaixo do PU (insumo omitido, ex. pneus/depreciação):
+    // MO fica como está e a diferença vai para Material — sem reescalar a razão.
+    if (a.mo > 0 && a.mat > 0 && a.mo + a.mat < preco && score <= 0.2 && a.mo < preco) {
+      candidatos.push({ mo: a.mo, mat: preco - a.mo, score: 0.04, fonte });
+    }
   };
 
   // Preferir analítico da composição do catálogo quando o da linha veio sem coef (VU puro).
-  pushLinhas(composicao?.analiticoLinhas, 'comp');
-  pushLinhas(item.analiticoLinhas, 'item');
+  pushLinhas(linhasComp, 'comp');
+  pushLinhas(linhasItem, 'item');
+
+  const temAnaliticoMistoValido = candidatos.some((c) => c.mo > 0 && c.mat > 0);
 
   // Só usa MO/MAT gravados se o analítico não fechou com o PU (evita split reescalado de VU).
   if (!candidatos.some((c) => c.score <= 0.02)) {
-    const pushPar = (moRaw: number, matRaw: number, fonte: string) => {
+    const pushPar = (
+      moRaw: number,
+      matRaw: number,
+      fonte: string,
+      linhasRef?: LinhaAnaliticoComposicao[]
+    ) => {
       const moN = moRaw > 0 ? moRaw : 0;
       const matN = matRaw > 0 ? matRaw : 0;
       if (!(moN > 0 || matN > 0)) return;
+      // Split gravado todo numa coluna (fallback antigo) não vence analítico com MO e MAT.
+      if (temAnaliticoMistoValido && (!(moN > 0) || !(matN > 0))) return;
+      // Descarta split que só é a soma dos VUs reescalada ao PU (razão errada).
+      if (moMatPareceReescalaDeVu(moN, matN, linhasRef, preco)) return;
+      const score = distanciaMoMatAoPreco(moN, matN, preco);
+      if (score > 0.05) return;
       candidatos.push({
         mo: moN,
         mat: matN,
-        score: distanciaMoMatAoPreco(moN, matN, preco),
+        score,
         fonte,
       });
     };
-    pushPar(Number(composicao?.maoDeObraUnitario) || 0, Number(composicao?.materialUnitario) || 0, 'comp-st');
-    pushPar(Number(item.maoDeObraUnitario) || 0, Number(item.materialUnitario) || 0, 'item-st');
+    pushPar(
+      Number(composicao?.maoDeObraUnitario) || 0,
+      Number(composicao?.materialUnitario) || 0,
+      'comp-st',
+      linhasComp
+    );
+    pushPar(
+      Number(item.maoDeObraUnitario) || 0,
+      Number(item.materialUnitario) || 0,
+      'item-st',
+      linhasItem ?? linhasComp
+    );
   }
 
   candidatos.sort((a, b) => {
@@ -661,32 +874,62 @@ function moMatUnitarioDeItemOuComposicao(
 
   // Composição só de mão de obra: o preço unitário inteiro cai em MO.
   const linhasRef =
-    !analiticoPareceSomaDeVuSemCoef(composicao?.analiticoLinhas, preco) &&
-    composicao?.analiticoLinhas?.length
-      ? composicao.analiticoLinhas
-      : item.analiticoLinhas;
+    !analiticoPareceSomaDeVuSemCoef(linhasComp, preco) &&
+    !analiticoParcialSemContribuicao(linhasComp, preco, qtdOrc, qtdAlt) &&
+    linhasComp?.length
+      ? linhasComp
+      : !analiticoParcialSemContribuicao(linhasItem, preco, qtdOrc, qtdAlt)
+        ? linhasItem
+        : undefined;
   if (!(mo > 0) && !(mat > 0) && preco > 0 && linhasRef && linhasRef.length > 0) {
-    const soMo = linhasRef.every((l) => l.categoria === 'MÃO DE OBRA');
+    const soMo = linhasRef.every((l) => categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA');
     if (soMo) mo = preco;
+    const soMat = linhasRef.every((l) => categoriaEfetivaLinhaAnalitico(l) === 'MATERIAL');
+    if (soMat) mat = preco;
   }
-  // Orçamentos já importados só com preço total (sem split): mão de obra típica de planilha.
+
+  const descFallback = `${item.descricao ?? ''} ${composicao?.descricao ?? ''}`;
+  // Sem split e sem analítico misto: equipamento puro → material; cargo puro → MO.
+  // Não aplicar em títulos de serviço (ex. deslocamento por veículo).
   if (!(mo > 0) && !(mat > 0) && preco > 0) {
-    const desc = `${item.descricao ?? ''} ${composicao?.descricao ?? ''}`.toUpperCase();
-    if (
-      /ENGENHEIRO|ARQUITETO|MESTRE|ENCARREGADO|T[ÉE]CNICO|ALMOXARIFE|APONTADOR|APROPRIADOR|PEDREIRO|SERVENTE|AUXILIAR|OPERADOR|MOTORISTA|VIGIA|PORTEIRO|ENCARGOS/.test(
-        desc
-      )
-    ) {
-      mo = preco;
+    const temAnaliticoMisto =
+      (linhasRef?.length ?? 0) > 1 &&
+      linhasRef!.some((l) => categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') &&
+      linhasRef!.some((l) => categoriaEfetivaLinhaAnalitico(l) === 'MATERIAL');
+    if (!temAnaliticoMisto) {
+      if (textoEhEquipamentoOuVeiculo(descFallback)) {
+        mat = preco;
+      } else if (textoEhMaoDeObraTipica(descFallback)) {
+        mo = preco;
+      }
+    } else {
+      // Último recurso com analítico misto: soma contribuições mesmo se score ficou na margem.
+      const a = somarMoMatDasLinhasAnalitico(linhasRef, qtdOrc, qtdAlt);
+      if (a.mo > 0 || a.mat > 0) {
+        mo = a.mo;
+        mat = a.mat;
+      }
     }
   }
 
-  return reconciliarMoMatComPrecoUnitario(
+  let reconc = reconciliarMoMatComPrecoUnitario(
     mo,
     mat,
     preco,
     item.quantidadeImportada
   );
+  // Se a reescala/validação zerou tudo mas há PU, não deixar a linha sem split.
+  if (!(reconc.mo > 0 || reconc.mat > 0) && preco > 0) {
+    if (textoEhEquipamentoOuVeiculo(descFallback)) {
+      reconc = { mo: 0, mat: preco };
+    } else if (textoEhMaoDeObraTipica(descFallback)) {
+      reconc = { mo: preco, mat: 0 };
+    } else {
+      // Último recurso: mantém o PU na coluna de material (evita zerar a linha).
+      reconc = { mo: 0, mat: preco };
+    }
+  }
+  return reconc;
 }
 
 /** Id enviado aos endpoints /orcamentos/:id (lista pode trazer só `_id` ou `budget_id`). */
@@ -988,19 +1231,25 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
       s.prices && typeof s.prices === 'object' && !Array.isArray(s.prices)
         ? (s.prices as Record<string, unknown>)
         : {};
-    const qty =
+    // Coeficiente da composição — NUNCA preferir `qty`/`quantity` (no orçamento costuma ser a qtd orçada).
+    const coefExplicito =
       valorNumericoOrcafascio(
-        s.qty ??
-          s.coefficient ??
+        s.coefficient ??
           s.coeficient ??
           s.coeficiente ??
           s.coef ??
-          s.quantity ??
-          prices.qty ??
           prices.coefficient ??
           prices.coeficiente ??
           prices.coef
-      ) ?? 0;
+      ) ?? null;
+    const qtyCampo =
+      valorNumericoOrcafascio(s.qty ?? s.quantity ?? prices.qty ?? prices.quantity) ?? null;
+    const qty =
+      coefExplicito != null && coefExplicito > 0
+        ? coefExplicito
+        : qtyCampo != null && qtyCampo > 0
+          ? qtyCampo
+          : 0;
     // `prices.pnd` no item pode ser o VU do insumo — a contribuição real é VU × coeficiente (coluna TOTAL).
     const unitary =
       valorNumericoOrcafascio(
@@ -1019,26 +1268,28 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
           prices.pd
       ) ?? 0;
     const fromCoef = unitary > 0 && qty > 0 ? unitary * qty : 0;
+    const totEhVu =
+      unitary > 0 &&
+      totalClaimed > 0 &&
+      Math.abs(totalClaimed - unitary) <= Math.max(0.02, Math.abs(unitary) * 0.001);
     let totalLinha = 0;
-    if (fromCoef > 0) {
-      // pnd/total veio igual ao VU (não é a contribuição da linha).
-      if (
-        unitary > 0 &&
-        Math.abs(qty - 1) > 1e-9 &&
-        Math.abs(totalClaimed - unitary) <= Math.max(0.02, Math.abs(unitary) * 0.001)
-      ) {
+    if (totalClaimed > 0 && unitary > 0 && !totEhVu && totalClaimed + 1e-9 < unitary) {
+      // TOTAL real (plus_ls) — menor que o VU.
+      totalLinha = totalClaimed;
+    } else if (fromCoef > 0) {
+      if (totEhVu && Math.abs(qty - 1) > 1e-9 && fromCoef <= totalClaimed * 2) {
         totalLinha = fromCoef;
+      } else if (totEhVu && fromCoef > totalClaimed * 2) {
+        // qtd veio como quantidade do orçamento e total=VU — sem TOTAL confiável ainda.
+        totalLinha = 0;
       } else if (totalClaimed > fromCoef * 2) {
         totalLinha = fromCoef;
-      } else if (totalClaimed > 0 && fromCoef > totalClaimed * 2) {
-        // Coef veio como qtd do orçamento; TOTAL real está em totalClaimed.
-        totalLinha = totalClaimed;
-      } else if (totalClaimed > 0) {
+      } else if (totalClaimed > 0 && !totEhVu) {
         totalLinha = totalClaimed;
       } else {
         totalLinha = fromCoef;
       }
-    } else if (totalClaimed > 0) {
+    } else if (totalClaimed > 0 && !totEhVu) {
       totalLinha = totalClaimed;
     } else {
       totalLinha =
@@ -1084,6 +1335,7 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
       is_resource: isResource,
     };
   });
+  const splitRow = precosMoMatDeLinhaOrcafascio(row);
   return {
     id: String(row.id ?? ''),
     code: String(row.code ?? '—'),
@@ -1095,7 +1347,13 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
     is_sicro: false,
     labor: Boolean(row.mdo) || Boolean(row.labor),
     calculation_method: { type: 0, description: '' },
-    prices: { pnd: precoOrcafascioAnalitico(row) ?? 0, pd: precoOrcafascioAnalitico(row) ?? 0 },
+    prices: {
+      pnd: precoOrcafascioAnalitico(row) ?? 0,
+      pd: precoOrcafascioAnalitico(row) ?? 0,
+      // Preserva split oficial do Orçafascio (cabeçalho da composição).
+      ...(splitRow.mo != null ? { type_mdo: splitRow.mo } : {}),
+      ...(splitRow.mat != null ? { type_mat: splitRow.mat } : {}),
+    },
     items,
     created_at: '',
   };
@@ -1426,32 +1684,36 @@ function montarServicosDeLinhasOrcafascio(
       if (!composicoesMap.has(chave)) composicoesMap.set(chave, bare);
     }
 
-    // type_mdo / type_mat só entram se fecharem melhor com o PU do que o split do analítico.
-    // (Na API às vezes vêm como soma dos VU dos insumos, não da coluna TOTAL.)
+    // type_mdo / type_mat do Orçafascio (cabeçalho) têm prioridade quando fecham com o PU.
+    // O analítico às vezes traz só VU dos insumos; reescalar isso gera razão errada.
     const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
     const splitAna = analiticoRow ? precosMoMatDeLinhaOrcafascio(analiticoRow) : { mo: null, mat: null };
     const splitSint = precosMoMatDeLinhaOrcafascio(row);
     const moSplit = splitAna.mo ?? splitSint.mo;
     const matSplit = splitAna.mat ?? splitSint.mat;
-    const scoreAnalitico = distanciaMoMatAoPreco(
-      maoDeObraUnitario ?? 0,
-      materialUnitario ?? 0,
-      precoUnitario
-    );
     const scoreSplit = distanciaMoMatAoPreco(moSplit ?? 0, matSplit ?? 0, precoUnitario);
-    if (
-      (moSplit != null || matSplit != null) &&
-      scoreSplit <= 0.02 &&
-      (scoreAnalitico > 0.02 || scoreSplit + 1e-9 < scoreAnalitico)
-    ) {
+    const linhasAna = analiticoLinhas;
+    const anaRuim =
+      !!linhasAna?.length &&
+      (analiticoPareceSomaDeVuSemCoef(linhasAna, precoUnitario) ||
+        moMatPareceReescalaDeVu(
+          maoDeObraUnitario ?? 0,
+          materialUnitario ?? 0,
+          linhasAna,
+          precoUnitario
+        ));
+    if ((moSplit != null || matSplit != null) && scoreSplit <= 0.02) {
       const reconc = reconciliarMoMatComPrecoUnitario(
-        moSplit ?? maoDeObraUnitario ?? 0,
-        matSplit ?? materialUnitario ?? 0,
+        moSplit ?? 0,
+        matSplit ?? 0,
         precoUnitario,
         qty
       );
-      if (reconc.mo > 0) maoDeObraUnitario = reconc.mo;
-      if (reconc.mat > 0) materialUnitario = reconc.mat;
+      maoDeObraUnitario = reconc.mo > 0 ? reconc.mo : undefined;
+      materialUnitario = reconc.mat > 0 ? reconc.mat : undefined;
+    } else if (anaRuim) {
+      maoDeObraUnitario = undefined;
+      materialUnitario = undefined;
     } else if (maoDeObraUnitario != null || materialUnitario != null) {
       const reconc = reconciliarMoMatComPrecoUnitario(
         maoDeObraUnitario ?? 0,
@@ -1462,14 +1724,20 @@ function montarServicosDeLinhasOrcafascio(
       maoDeObraUnitario = reconc.mo > 0 ? reconc.mo : undefined;
       materialUnitario = reconc.mat > 0 ? reconc.mat : undefined;
     }
-    // Composição de mão de obra sem material: preço unitário vai para MO.
+    // Sem breakdown: mão de obra → MO; equipamento/veículo (ex. caminhão EMOP) → Material.
     if (
       !(maoDeObraUnitario != null && maoDeObraUnitario > 0) &&
       !(materialUnitario != null && materialUnitario > 0) &&
-      precoUnitario > 0 &&
-      (linhaEhMaoDeObraOrcafascio(row) || (analiticoRow != null && linhaEhMaoDeObraOrcafascio(analiticoRow)))
+      precoUnitario > 0
     ) {
-      maoDeObraUnitario = precoUnitario;
+      if (
+        linhaEhMaoDeObraOrcafascio(row) ||
+        (analiticoRow != null && linhaEhMaoDeObraOrcafascio(analiticoRow))
+      ) {
+        maoDeObraUnitario = precoUnitario;
+      } else if (textoEhEquipamentoOuVeiculo(desc)) {
+        materialUnitario = precoUnitario;
+      }
     }
 
     const precoComBdi =
@@ -1956,16 +2224,48 @@ function formatAnoOrcafascio(dateStr: string): string {
 function categoriaOrcafascioItem(item: OrcafascioComposicaoItem): 'MATERIAL' | 'MÃO DE OBRA' {
   const typeNum = Number(item.type);
   if (!Number.isNaN(typeNum) && String(item.type ?? '').trim() !== '') {
-    // 0/3 = mão de obra; demais tipos numéricos de insumo → material (equipamento incluso).
+    // 0/3 = mão de obra; demais tipos numéricos (1 equip., 4 material, 10 aluguel…) → material.
+    // Importante: mesmo com is_resource=false (subcomposição de veículo/equipamento).
     if (typeNum === 0 || typeNum === 3) return 'MÃO DE OBRA';
-    if (item.is_resource) return 'MATERIAL';
+    return 'MATERIAL';
   }
   const tipoTxt = String(item.type ?? '').toUpperCase();
+  const desc = String(item.description ?? '').toUpperCase();
   if (/M[AÃ]O\s*DE\s*OBRA|LABOR|HAND/.test(tipoTxt)) return 'MÃO DE OBRA';
-  if (/MATERIAL|EQUIP|INSUMO/.test(tipoTxt)) return 'MATERIAL';
-  // Subcomposição sem type claro: histórico trata como mão de obra (serviço).
+  if (/MATERIAL|EQUIP|INSUMO|ALUGUEL|TRANSPORTE|COMBUST/.test(tipoTxt)) return 'MATERIAL';
+  if (
+    /VE[IÍ]CULO|CAMINH[AÃ]O|CARRO\b|MOTOCICLE|COMBUST[IÍ]VEL|DIESEL|GASOLINA|EQUIPAMENTO|FROTA|BETONEIRA|GUINDASTE/.test(
+      desc
+    )
+  ) {
+    return 'MATERIAL';
+  }
+  // Subcomposição de serviço (sem type) → mão de obra.
   if (!item.is_resource) return 'MÃO DE OBRA';
   return 'MATERIAL';
+}
+
+/**
+ * Recategoriza linha já gravada: equipamento/veículo/combustível às vezes veio como MO
+ * (subcomposição sem type ou type numérico ignorado quando is_resource=false).
+ */
+function categoriaEfetivaLinhaAnalitico(
+  l: Pick<LinhaAnaliticoComposicao, 'categoria' | 'descricao' | 'tipoLabel'>
+): 'MÃO DE OBRA' | 'MATERIAL' {
+  const tipo = String(l.tipoLabel || '').toUpperCase();
+  const desc = String(l.descricao || '').toUpperCase();
+  if (/EQUIP|MATERIAL|COMBUST|INSUMO|AQUISI|ALUGUEL|TRANSPORTE|OUTROS|TAXAS|FRANQUIA|VERBA/.test(tipo)) {
+    return 'MATERIAL';
+  }
+  if (/M[AÃ]O\s*DE\s*OBRA|LABOR/.test(tipo)) return 'MÃO DE OBRA';
+  if (
+    /VE[IÍ]CULO|CAMINH[AÃ]O|CARRO\b|MOTOCICLE|COMBUST[IÍ]VEL|DIESEL|GASOLINA|\b[OÓ]LEO\b|EQUIPAMENTO|FROTA|BETONEIRA|GUINDASTE/.test(
+      desc
+    )
+  ) {
+    return 'MATERIAL';
+  }
+  return l.categoria === 'MÃO DE OBRA' ? 'MÃO DE OBRA' : 'MATERIAL';
 }
 
 const TIPO_INSUMO_LABEL_POR_CODIGO: Record<number, string> = {
@@ -2005,17 +2305,22 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
       : (detalheCatalogoAPartirAnaliticoOrcamento(
           comp as unknown as Record<string, unknown>
         ).items ?? []);
-  const analiticoLinhas: LinhaAnaliticoComposicao[] = itemsSrc.map(item => ({
-    categoria: categoriaOrcafascioItem(item),
-    descricao: decodificarEntidadesHtml(String(item.description ?? '')),
-    unidade: item.unit,
-    quantidade: item.coefficient,
-    precoUnitario: item.unitary_pnd,
-    total: item.pnd,
-    codigo: item.code,
-    banco: item.banco,
-    tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
-  }));
+  const preco = comp.prices?.pnd ?? 0;
+  const analiticoLinhas: LinhaAnaliticoComposicao[] =
+    normalizarLinhasAnaliticoDeslocadas(
+      itemsSrc.map(item => ({
+        categoria: categoriaOrcafascioItem(item),
+        descricao: decodificarEntidadesHtml(String(item.description ?? '')),
+        unidade: item.unit,
+        quantidade: item.coefficient,
+        precoUnitario: item.unitary_pnd,
+        total: item.pnd,
+        codigo: item.code,
+        banco: item.banco,
+        tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
+      })),
+      preco
+    ) ?? [];
 
   // MO/MAT = soma da coluna TOTAL (VU × coef) de cada insumo — nunca o VU isolado.
   let mo = 0;
@@ -2023,16 +2328,40 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
   for (const l of analiticoLinhas) {
     const t = contribuicaoLinhaAnalitico(l);
     if (!(t > 0)) continue;
-    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    if (categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') mo += t;
     else mat += t;
   }
-
-  const preco = comp.prices?.pnd ?? 0;
-  // Sem breakdown nos insumos: composição marcada como mão de obra → preço inteiro em MO.
-  if (!(mo > 0) && !(mat > 0) && comp.labor && preco > 0) {
-    mo = preco;
+  // Analítico misto até 20% abaixo do PU: diferença (insumo omitido) vai para Material.
+  {
+    const dist = distanciaMoMatAoPreco(mo, mat, preco);
+    if (mo > 0 && mat > 0 && mo + mat < preco && dist > 0.02 && dist <= 0.2 && mo < preco) {
+      mat = preco - mo;
+    }
   }
-  ({ mo, mat } = reconciliarMoMatComPrecoUnitario(mo, mat, preco));
+  const splitHeader = precosMoMatDeLinhaOrcafascio(comp as unknown as Record<string, unknown>);
+  // Cabeçalho type_mdo/type_mat do Orçafascio é a fonte de verdade quando fecha com o PU.
+  if (
+    (splitHeader.mo != null || splitHeader.mat != null) &&
+    distanciaMoMatAoPreco(splitHeader.mo ?? 0, splitHeader.mat ?? 0, preco) <= 0.02
+  ) {
+    mo = splitHeader.mo ?? 0;
+    mat = splitHeader.mat ?? 0;
+  } else if (analiticoPareceSomaDeVuSemCoef(analiticoLinhas, preco) || moMatPareceReescalaDeVu(mo, mat, analiticoLinhas, preco)) {
+    // Não reescalar soma de VU — isso inventa razão errada (41,50/252,13).
+    mo = 0;
+    mat = 0;
+  } else if (mo > 0 || mat > 0) {
+    ({ mo, mat } = reconciliarMoMatComPrecoUnitario(mo, mat, preco));
+  }
+  // Sem breakdown: labor → MO; equipamento/veículo → Material (caminhão EMOP etc.).
+  if (!(mo > 0) && !(mat > 0) && preco > 0) {
+    const descComp = String(comp.description ?? '');
+    if (comp.labor) {
+      mo = preco;
+    } else if (textoEhEquipamentoOuVeiculo(descComp)) {
+      mat = preco;
+    }
+  }
 
   const banco = String(comp.base ?? '').trim() || 'Orçafascio';
   return {
@@ -2184,7 +2513,7 @@ function sinapiToComposicaoItem(comp: SinapiComposicaoApi): ComposicaoItem | nul
   for (const l of analiticoLinhas) {
     const t = contribuicaoLinhaAnalitico(l);
     if (!(t > 0)) continue;
-    if (l.categoria === 'MÃO DE OBRA') mo += t;
+    if (categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') mo += t;
     else mat += t;
   }
   const preco = centsSinapiParaReais(comp.baseUnitCost);
@@ -2302,8 +2631,21 @@ async function enriquecerServicosComAnaliticoOrcafascio(
       return distanciaMoMatAoPreco(a.mo, a.mat, precoIt);
     };
     const melhor = Math.min(scoreLinhas(it.analiticoLinhas), scoreLinhas(local?.analiticoLinhas));
-    // Já tem analítico que fecha com o PU — não busca de novo.
-    if (melhor <= 0.02) continue;
+    const poison =
+      moMatPareceReescalaDeVu(
+        Number(it.maoDeObraUnitario) || 0,
+        Number(it.materialUnitario) || 0,
+        it.analiticoLinhas ?? local?.analiticoLinhas,
+        precoIt
+      ) ||
+      moMatPareceReescalaDeVu(
+        Number(local?.maoDeObraUnitario) || 0,
+        Number(local?.materialUnitario) || 0,
+        local?.analiticoLinhas ?? it.analiticoLinhas,
+        precoIt
+      );
+    // Já tem analítico que fecha com o PU — não busca de novo (exceto split reescalado de VU).
+    if (melhor <= 0.02 && !poison) continue;
     faltando.push(it);
   }
 
@@ -2346,8 +2688,16 @@ async function enriquecerServicosComAnaliticoOrcafascio(
           distanciaMoMatAoPreco(aCompCheck.mo, aCompCheck.mat, precoIt) <= 0.02;
 
         if (it.analiticoLinhas?.length && !itemAnaRuim) {
-          encontradas += 1;
-          return it;
+          const poisonGuardado = moMatPareceReescalaDeVu(
+            Number(it.maoDeObraUnitario) || 0,
+            Number(it.materialUnitario) || 0,
+            it.analiticoLinhas,
+            precoIt
+          );
+          if (!poisonGuardado) {
+            encontradas += 1;
+            return it;
+          }
         }
         if (!comp?.analiticoLinhas?.length) return it;
         if (itemAnaRuim && !compAnaBoa && it.analiticoLinhas?.length) {
@@ -2360,8 +2710,8 @@ async function enriquecerServicosComAnaliticoOrcafascio(
         return {
           ...it,
           analiticoLinhas: comp.analiticoLinhas,
-          ...(reconc.mo > 0 ? { maoDeObraUnitario: reconc.mo } : {}),
-          ...(reconc.mat > 0 ? { materialUnitario: reconc.mat } : {}),
+          ...(reconc.mo > 0 ? { maoDeObraUnitario: reconc.mo } : { maoDeObraUnitario: undefined }),
+          ...(reconc.mat > 0 ? { materialUnitario: reconc.mat } : { materialUnitario: undefined }),
           ...(!it.unidade && comp.unidade ? { unidade: comp.unidade } : {})
         };
       })
@@ -6391,6 +6741,7 @@ export function OrcamentoPageView({
     imports: []
   });
   const orcamentoAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moMatHealOrcamentoRef = useRef<string | null>(null);
   const autosaveBaselineRef = useRef<{ orcamentoId: string | null; hadData: boolean }>({
     orcamentoId: null,
     hadData: false
@@ -7129,6 +7480,95 @@ export function OrcamentoPageView({
       }
     };
   }, [centroCustoId, orcamentoAtivoId]);
+
+  // Corrige MO/MAT gravados como soma de VU reescalada (ex.: 41,50/252,13 em vez de 5,94/287,70).
+  useEffect(() => {
+    if (!orcamentoAtivoId || loadingFromApi) return;
+    const healKey = orcamentoAtivoId;
+    if (
+      moMatHealOrcamentoRef.current === healKey ||
+      moMatHealOrcamentoRef.current === `pending:${healKey}`
+    ) {
+      return;
+    }
+
+    const svcs = servicosImportsRef.current.servicos;
+    if (svcs.length === 0) return;
+
+    const mapaLocal = composicoes;
+    let precisa = false;
+    outer: for (const s of svcs) {
+      for (const sub of s.subtitulos) {
+        for (const it of sub.itens) {
+          const preco = Number(it.precoUnitario) || 0;
+          if (
+            moMatPareceReescalaDeVu(
+              Number(it.maoDeObraUnitario) || 0,
+              Number(it.materialUnitario) || 0,
+              it.analiticoLinhas,
+              preco
+            ) ||
+            analiticoPareceSomaDeVuSemCoef(it.analiticoLinhas, preco)
+          ) {
+            precisa = true;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!precisa) {
+      moMatHealOrcamentoRef.current = healKey;
+      return;
+    }
+
+    moMatHealOrcamentoRef.current = `pending:${healKey}`;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const enriq = await enriquecerServicosComAnaliticoOrcafascio(
+          svcs,
+          mapaLocal,
+          orcafascioUfOrse
+        );
+        if (cancelled) return;
+        moMatHealOrcamentoRef.current = healKey;
+        if (enriq.encontradas <= 0) return;
+        setServicos(enriq.servicos);
+        if (enriq.novasComposicoes.length > 0) {
+          setComposicoes((prev) => {
+            const porChave = new Map(prev.map((c) => [c.chave, c]));
+            for (const c of enriq.novasComposicoes) {
+              const atual = porChave.get(c.chave);
+              porChave.set(c.chave, atual ? escolherComposicaoParaChaveMapa(atual, c) : c);
+            }
+            return Array.from(porChave.values());
+          });
+        }
+        if (meta.importadoPlanilha) {
+          sessaoRef.current = {
+            ...sessaoRef.current,
+            servicosDocumento: enriq.servicos,
+          };
+        }
+      } catch (err) {
+        console.warn('Falha ao corrigir MO/MAT do orçamento:', err);
+        moMatHealOrcamentoRef.current = healKey;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (moMatHealOrcamentoRef.current === `pending:${healKey}`) {
+        moMatHealOrcamentoRef.current = null;
+      }
+    };
+  }, [
+    orcamentoAtivoId,
+    loadingFromApi,
+    servicos.length,
+    composicoes,
+    orcafascioUfOrse,
+    meta.importadoPlanilha,
+  ]);
 
   useEffect(() => {
     sessaoRef.current = {
@@ -9714,21 +10154,6 @@ export function OrcamentoPageView({
         const precoComp = Number(composicao?.precoUnitario);
         const precoCatalogo =
           precoItem > 0 ? precoItem : precoComp > 0 ? precoComp : 0;
-        const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
-          moMatUnitarioDeItemOuComposicao(i, composicao);
-        const moMatManual = moMatManualPorItem[itemKey];
-        const maoDeObraUnitario =
-          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mo')
-            ? moMatManual.mo == null
-              ? 0
-              : Number(moMatManual.mo) || 0
-            : maoDeObraUnitarioAuto;
-        const materialUnitario =
-          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mat')
-            ? moMatManual.mat == null
-              ? 0
-              : Number(moMatManual.mat) || 0
-            : materialUnitarioAuto;
         const dim = dimensoesPorItemDeferred[itemKey];
         const tipoAuto = inferirTipoUnidadePorDimensao(dim?.linhas);
         const tipoDaComp = parseUnidadeComposicao(composicao?.unidade ?? i.unidade);
@@ -9755,6 +10180,21 @@ export function OrcamentoPageView({
         } else {
           qtd = qtdSintetico ?? 0;
         }
+        const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
+          moMatUnitarioDeItemOuComposicao(i, composicao, qtd);
+        const moMatManual = moMatManualPorItem[itemKey];
+        const maoDeObraUnitario =
+          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mo')
+            ? moMatManual.mo == null
+              ? 0
+              : Number(moMatManual.mo) || 0
+            : maoDeObraUnitarioAuto;
+        const materialUnitario =
+          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mat')
+            ? moMatManual.mat == null
+              ? 0
+              : Number(moMatManual.mat) || 0
+            : materialUnitarioAuto;
         const moUnit = maoDeObraUnitario;
         const matUnit = materialUnitario;
         const somaMoMatUnit = moUnit + matUnit;
@@ -12183,17 +12623,18 @@ export function OrcamentoPageView({
       if (l.kind === 'tituloServico') {
         rows.push({
           kind: 'titulo',
-          values: [l.main, '', '', '', l.servicoNome, '', '', '', ''],
+          values: [l.main, '', '', '', l.servicoNome, '', '', '', '', ''],
         });
         continue;
       }
       if (l.kind === 'subtituloBloco') {
         rows.push({
           kind: 'subtitulo',
-          values: [`${l.main}.${l.subIdx}`, '', '', '', l.texto, '', '', '', ''],
+          values: [`${l.main}.${l.subIdx}`, '', '', '', l.texto, '', '', '', '', ''],
         });
         continue;
       }
+      const totalUnitarioLinha = (Number(l.quant) || 0) * (Number(l.valorUnit) || 0);
       const values: OrcamentoExcelRow['values'] = l.kind === 'composicao'
         ? [
             l.item,
@@ -12204,6 +12645,7 @@ export function OrcamentoPageView({
             l.und,
             l.quant,
             l.valorUnit,
+            totalUnitarioLinha,
             l.total,
           ]
         : [
@@ -12215,6 +12657,7 @@ export function OrcamentoPageView({
             l.und,
             l.quant,
             l.valorUnit,
+            totalUnitarioLinha,
             l.total,
           ];
       rows.push({ kind: 'item', values });
@@ -12233,6 +12676,7 @@ export function OrcamentoPageView({
         { header: 'Quant.', width: 12, format: 'qty4' },
         { header: 'Valor unit.', width: 14, format: 'currency' },
         { header: 'Total', width: 14, format: 'currency' },
+        { header: 'Total orçamento', width: 16, format: 'currency' },
       ],
       rows,
     };
@@ -13656,12 +14100,17 @@ export function OrcamentoPageView({
                             <th className={`${GRADE_TH_STICKY_BASE} px-3 border-l border-gray-300 dark:border-gray-600`}>Quantidade</th>
                             <GradeMoedaTh className={GRADE_TH_STICKY}>Valor unitário</GradeMoedaTh>
                             <GradeMoedaTh className={GRADE_TH_STICKY}>Total</GradeMoedaTh>
+                            <GradeMoedaTh className={GRADE_TH_STICKY}>Total orçamento</GradeMoedaTh>
                           </tr>
                         </thead>
                         <tbody ref={janelaAnalitico.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                          <TabelaJanelaSpacer height={janelaAnalitico.topPad} colSpan={9} />
+                          <TabelaJanelaSpacer height={janelaAnalitico.topPad} colSpan={10} />
                           {linhasAnaliticoOrcamento.slice(janelaAnalitico.start, janelaAnalitico.end).map((l, i) => {
                             const idxLinha = janelaAnalitico.start + i;
+                            const totalUnitarioLinha =
+                              l.kind === 'composicao' || l.kind === 'insumo'
+                                ? (Number(l.quant) || 0) * (Number(l.valorUnit) || 0)
+                                : 0;
                             if (l.kind === 'tituloServico') {
                               return (
                                 <tr key={l.key} className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
@@ -13670,7 +14119,7 @@ export function OrcamentoPageView({
                                     {l.main}
                                   </td>
                                   <td
-                                    colSpan={8}
+                                    colSpan={9}
                                     className="px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-left text-white align-middle"
                                   >
                                     {l.servicoNome}
@@ -13691,7 +14140,7 @@ export function OrcamentoPageView({
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
                                   </td>
-                                  <td colSpan={8} className="px-3 py-2.5 align-middle">
+                                  <td colSpan={9} className="px-3 py-2.5 align-middle">
                                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                       {l.texto}
                                     </span>
@@ -13725,6 +14174,13 @@ export function OrcamentoPageView({
                                     </td>
                                     <td className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
                                       <MoedaCelula
+                                        valor={totalUnitarioLinha}
+                                        className="font-semibold text-gray-900 dark:text-gray-50"
+                                        valorClassName="font-semibold"
+                                      />
+                                    </td>
+                                    <td className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
+                                      <MoedaCelula
                                         valor={l.total}
                                         className="font-semibold text-gray-900 dark:text-gray-50"
                                         valorClassName="font-semibold"
@@ -13753,12 +14209,15 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={l.valorUnit} className="text-gray-700 dark:text-gray-300" />
                                 </td>
                                 <td className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
+                                  <MoedaCelula valor={totalUnitarioLinha} className="text-gray-900 dark:text-gray-100" />
+                                </td>
+                                <td className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
                                   <MoedaCelula valor={l.total} className="text-gray-900 dark:text-gray-100" />
                                 </td>
                               </tr>
                             );
                           })}
-                          <TabelaJanelaSpacer height={janelaAnalitico.bottomPad} colSpan={9} />
+                          <TabelaJanelaSpacer height={janelaAnalitico.bottomPad} colSpan={10} />
                         </tbody>
                       </table>
                     </div>

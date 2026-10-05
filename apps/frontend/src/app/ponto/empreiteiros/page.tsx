@@ -1343,7 +1343,7 @@ export default function EmpreiteirosPage() {
       } else {
         parcelCount = 0;
       }
-      if (parcelCount > 0 && !(plannedValue && plannedValue > 0)) {
+      if ((parcelCount ?? 0) > 0 && !(plannedValue && plannedValue > 0)) {
         toast.error('Informe o valor planejado para gerar o pagamento');
         return;
       }

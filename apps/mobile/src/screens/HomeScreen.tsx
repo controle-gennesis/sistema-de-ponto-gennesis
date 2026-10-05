@@ -16,6 +16,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useChromeScroll, useChromeVisibility } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
+import HomeAprovacoesCard from '../components/HomeAprovacoesCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import type { RootStackParamList } from '../../App';
@@ -69,6 +70,7 @@ export default function HomeScreen() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['planner-events'] }),
         queryClient.invalidateQueries({ queryKey: ['planner-task-lists'] }),
+        queryClient.invalidateQueries({ queryKey: ['approvals'] }),
       ]);
     } finally {
       setRefreshing(false);
@@ -113,6 +115,8 @@ export default function HomeScreen() {
             />
           </TouchableOpacity>
         </View>
+
+        <HomeAprovacoesCard />
 
         <HomeAgendaCard />
 
