@@ -8,6 +8,9 @@ type PermissionItem = { module: string; action: string };
 type PermissionsMeData = {
   isAdmin?: boolean;
   permissions?: PermissionItem[];
+  dpApprovalContractIds?: string[];
+  fdApprovalContractIds?: string[];
+  fuelApprovalContractIds?: string[];
 };
 
 /** Igual ao web (`@sistema-ponto/permission-modules`). */
@@ -18,8 +21,6 @@ function pathToModuleKey(href: string): string {
 }
 
 const ACCESS_ACTION = 'acesso';
-const PNCP_KEY = pathToModuleKey('/ponto/licitacoes-pncp');
-const LICITACOES_KEY = pathToModuleKey('/ponto/licitacoes');
 const COMBUSTIVEL_KEY = pathToModuleKey('/ponto/solicitar-combustivel');
 const RESERVAS_KEY = pathToModuleKey('/ponto/reserva-veiculos');
 const SOLICITACOES_DP_KEY = pathToModuleKey('/ponto/solicitacoes-dp');
@@ -62,6 +63,10 @@ export function usePermissions() {
     return set;
   }, [data?.permissions]);
 
+  const dpApprovalContractIds = data?.dpApprovalContractIds ?? [];
+  const fdApprovalContractIds = data?.fdApprovalContractIds ?? [];
+  const fuelApprovalContractIds = data?.fuelApprovalContractIds ?? [];
+
   const ready = moduleReady(isFetched, isPending);
 
   const can = (moduleKey: string) => {
@@ -92,6 +97,45 @@ export function usePermissions() {
   /** Registros de ponto — mesmo critério do web (`requiresTimeClock`). */
   const canSeePonto = user?.employee?.requiresTimeClock !== false;
 
+  /** Aprovações — mesmas regras do hub web `/ponto/aprovacoes`. */
+  const canAccessDpApproverPages =
+    isElevated ||
+    can(pathToModuleKey('/ponto/controle/aprovar-solicitacoes-restritas-dp')) ||
+    can(pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp'));
+
+  const canApproveFuel =
+    isElevated ||
+    (can(pathToModuleKey('/ponto/controle/aprovar-combustivel')) &&
+      fuelApprovalContractIds.length > 0);
+
+  const canApproveFd =
+    isElevated ||
+    (can(pathToModuleKey('/ponto/controle/aprovar-fichas-demanda')) &&
+      fdApprovalContractIds.length > 0);
+
+  const canApproveMaterialRequests =
+    isElevated ||
+    dpApprovalContractIds.length > 0 ||
+    can(pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'));
+
+  const canApproveOcCompras =
+    isElevated || can(pathToModuleKey('/ponto/controle/aprovar-oc-compras'));
+  const canApproveOcDiretoria =
+    isElevated || can(pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'));
+  const canApproveOcGestor = isElevated || dpApprovalContractIds.length > 0;
+  const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
+
+  const canApproveEmpreiteiroDaily =
+    isElevated || can(pathToModuleKey('/ponto/controle/aprovar-medicoes-empreita'));
+
+  const canSeeAprovacoes =
+    canAccessDpApproverPages ||
+    canApproveFuel ||
+    canApproveFd ||
+    canApproveMaterialRequests ||
+    canApproveOc ||
+    canApproveEmpreiteiroDaily;
+
   return {
     isLoading: isAuthenticated && !!user?.id && !isElevated && (isPending || !isFetched),
     isAdministrator: isElevated,
@@ -102,5 +146,15 @@ export function usePermissions() {
     canSeeDpRequests,
     canSeeGestaoOs,
     canSeePonto,
+    canSeeAprovacoes,
+    canAccessDpApproverPages,
+    canApproveFuel,
+    canApproveFd,
+    canApproveMaterialRequests,
+    canApproveOc,
+    canApproveOcCompras,
+    canApproveOcDiretoria,
+    canApproveOcGestor,
+    canApproveEmpreiteiroDaily,
   };
 }

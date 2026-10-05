@@ -14,7 +14,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Moon, Sun, LogOut, X, Clock, Calendar } from 'lucide-react-native';
+import { Home, Moon, Sun, LogOut, X, Clock, Calendar, ClipboardCheck } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../context/ThemeContext';
@@ -76,7 +76,7 @@ function MenuItemRow({
 export default function Menu({ visible, onClose }: MenuProps) {
   const { colors, isDark, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
-  const { canSeePonto } = usePermissions();
+  const { canSeePonto, canSeeAprovacoes } = usePermissions();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -128,6 +128,16 @@ export default function Menu({ visible, onClose }: MenuProps) {
   const links = [
     { key: 'home', label: 'Início', icon: Home, onPress: () => go('Home') },
     { key: 'agenda', label: 'Agenda', icon: Calendar, onPress: () => go('Agenda') },
+    ...(canSeeAprovacoes
+      ? [
+          {
+            key: 'approvals',
+            label: 'Aprovações',
+            icon: ClipboardCheck,
+            onPress: () => go('Approvals'),
+          },
+        ]
+      : []),
     ...(canSeePonto
       ? [
           {

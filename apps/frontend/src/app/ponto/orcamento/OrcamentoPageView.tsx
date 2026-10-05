@@ -44,6 +44,7 @@ import {
   Unlock,
   Columns3,
   LayoutGrid,
+  Undo2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -148,6 +149,7 @@ import {
 } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula, RotulosColunasMedicao } from './orcamentoMedicaoTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
 export type { LinhaMedicao, TipoUnidadeFormula, DimensoesItem } from './orcamentoMedicaoTypes';
 
@@ -543,10 +545,58 @@ function contribuicaoLinhaAnalitico(l: {
     }
     // `total` explodido (usou VU no lugar de VU×coef).
     if (tot > fromCoef * 2) return fromCoef;
+    // Coef veio como qtd do orçamento (ex. 56,40): VU×coef explode; TOTAL real está em `total`.
+    if (tot > 0 && fromCoef > tot * 2) return tot;
     if (tot > 0 && Math.abs(tot - fromCoef) <= Math.max(0.05, fromCoef * 0.05)) return tot;
     return fromCoef;
   }
   return tot > 0 ? tot : 0;
+}
+
+/** Quão perto MO+MAT fica do PU (antes de reescalar). Menor = melhor. */
+function distanciaMoMatAoPreco(mo: number, mat: number, preco: number): number {
+  if (!(preco > 0)) return Number.POSITIVE_INFINITY;
+  const soma = (mo > 0 ? mo : 0) + (mat > 0 ? mat : 0);
+  if (!(soma > 0)) return Number.POSITIVE_INFINITY;
+  return Math.abs(soma - preco) / preco;
+}
+
+/**
+ * Analítico corrompido: totais ≈ VU dos insumos (sem coef), tipicamente depois reescalado ao PU
+ * (ex.: 20,52+24,59+274 → 41,50 / 252,13 em vez de 5,94 / 287,70).
+ */
+function analiticoPareceSomaDeVuSemCoef(
+  linhas: LinhaAnaliticoComposicao[] | undefined,
+  preco: number
+): boolean {
+  if (!linhas?.length || !(preco > 0)) return false;
+  let somaVu = 0;
+  let somaTot = 0;
+  let somaVuCoef = 0;
+  let temCoefUtil = false;
+  for (const l of linhas) {
+    const vu = Number(l.precoUnitario) || 0;
+    const q = Number(l.quantidade) || 0;
+    const t = Number(l.total) || 0;
+    if (vu > 0) somaVu += vu;
+    if (t > 0) somaTot += t;
+    if (vu > 0 && q > 0) {
+      somaVuCoef += vu * q;
+      if (Math.abs(q - 1) > 1e-9) temCoefUtil = true;
+    }
+  }
+  if (temCoefUtil && preco > 0 && Math.abs(somaVuCoef - preco) / preco <= 0.02) return false;
+  const a = somarMoMatDasLinhasAnalitico(linhas);
+  if (distanciaMoMatAoPreco(a.mo, a.mat, preco) <= 0.02) return false;
+  // Totais espelham VU e a soma VU não é o PU.
+  if (
+    somaVu > 0 &&
+    Math.abs(somaTot - somaVu) <= Math.max(0.05, somaVu * 0.02) &&
+    Math.abs(somaVu - preco) > Math.max(0.05, preco * 0.02)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Preenche MO/MAT a partir do analítico gravado na linha (orçamentos já importados). */
@@ -561,26 +611,62 @@ function moMatUnitarioDeItemOuComposicao(
   },
   composicao: ComposicaoItem | null | undefined
 ): { mo: number; mat: number } {
-  let mo = Number(item.maoDeObraUnitario ?? composicao?.maoDeObraUnitario ?? 0) || 0;
-  let mat = Number(item.materialUnitario ?? composicao?.materialUnitario ?? 0) || 0;
   const preco = Number(item.precoUnitario ?? composicao?.precoUnitario ?? 0) || 0;
-  const linhas =
-    item.analiticoLinhas && item.analiticoLinhas.length > 0
-      ? item.analiticoLinhas
-      : composicao?.analiticoLinhas;
+  type Cand = { mo: number; mat: number; score: number; fonte: string };
+  const candidatos: Cand[] = [];
 
-  // Sempre preferir soma dos TOTAIS do analítico (VU × coef), não VU do insumo.
-  if (linhas && linhas.length > 0) {
+  const pushLinhas = (linhas: LinhaAnaliticoComposicao[] | undefined, fonte: string) => {
+    if (!linhas?.length) return;
+    if (analiticoPareceSomaDeVuSemCoef(linhas, preco)) return;
     const a = somarMoMatDasLinhasAnalitico(linhas);
-    if (a.mo > 0 || a.mat > 0) {
-      mo = a.mo;
-      mat = a.mat;
-    }
+    if (!(a.mo > 0 || a.mat > 0)) return;
+    candidatos.push({ mo: a.mo, mat: a.mat, score: distanciaMoMatAoPreco(a.mo, a.mat, preco), fonte });
+  };
+
+  // Preferir analítico da composição do catálogo quando o da linha veio sem coef (VU puro).
+  pushLinhas(composicao?.analiticoLinhas, 'comp');
+  pushLinhas(item.analiticoLinhas, 'item');
+
+  // Só usa MO/MAT gravados se o analítico não fechou com o PU (evita split reescalado de VU).
+  if (!candidatos.some((c) => c.score <= 0.02)) {
+    const pushPar = (moRaw: number, matRaw: number, fonte: string) => {
+      const moN = moRaw > 0 ? moRaw : 0;
+      const matN = matRaw > 0 ? matRaw : 0;
+      if (!(moN > 0 || matN > 0)) return;
+      candidatos.push({
+        mo: moN,
+        mat: matN,
+        score: distanciaMoMatAoPreco(moN, matN, preco),
+        fonte,
+      });
+    };
+    pushPar(Number(composicao?.maoDeObraUnitario) || 0, Number(composicao?.materialUnitario) || 0, 'comp-st');
+    pushPar(Number(item.maoDeObraUnitario) || 0, Number(item.materialUnitario) || 0, 'item-st');
+  }
+
+  candidatos.sort((a, b) => {
+    const aAna = a.fonte === 'comp' || a.fonte === 'item';
+    const bAna = b.fonte === 'comp' || b.fonte === 'item';
+    if (a.score <= 0.02 && b.score <= 0.02 && aAna !== bAna) return aAna ? -1 : 1;
+    if (a.score !== b.score) return a.score - b.score;
+    return a.fonte.startsWith('comp') ? -1 : 1;
+  });
+
+  let mo = 0;
+  let mat = 0;
+  if (candidatos.length > 0) {
+    mo = candidatos[0]!.mo;
+    mat = candidatos[0]!.mat;
   }
 
   // Composição só de mão de obra: o preço unitário inteiro cai em MO.
-  if (!(mo > 0) && !(mat > 0) && preco > 0 && linhas && linhas.length > 0) {
-    const soMo = linhas.every((l) => l.categoria === 'MÃO DE OBRA');
+  const linhasRef =
+    !analiticoPareceSomaDeVuSemCoef(composicao?.analiticoLinhas, preco) &&
+    composicao?.analiticoLinhas?.length
+      ? composicao.analiticoLinhas
+      : item.analiticoLinhas;
+  if (!(mo > 0) && !(mat > 0) && preco > 0 && linhasRef && linhasRef.length > 0) {
+    const soMo = linhasRef.every((l) => l.categoria === 'MÃO DE OBRA');
     if (soMo) mo = preco;
   }
   // Orçamentos já importados só com preço total (sem split): mão de obra típica de planilha.
@@ -902,7 +988,19 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
       s.prices && typeof s.prices === 'object' && !Array.isArray(s.prices)
         ? (s.prices as Record<string, unknown>)
         : {};
-    const qty = valorNumericoOrcafascio(s.qty ?? s.coefficient ?? s.quantity) ?? 0;
+    const qty =
+      valorNumericoOrcafascio(
+        s.qty ??
+          s.coefficient ??
+          s.coeficient ??
+          s.coeficiente ??
+          s.coef ??
+          s.quantity ??
+          prices.qty ??
+          prices.coefficient ??
+          prices.coeficiente ??
+          prices.coef
+      ) ?? 0;
     // `prices.pnd` no item pode ser o VU do insumo — a contribuição real é VU × coeficiente (coluna TOTAL).
     const unitary =
       valorNumericoOrcafascio(
@@ -932,6 +1030,9 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
         totalLinha = fromCoef;
       } else if (totalClaimed > fromCoef * 2) {
         totalLinha = fromCoef;
+      } else if (totalClaimed > 0 && fromCoef > totalClaimed * 2) {
+        // Coef veio como qtd do orçamento; TOTAL real está em totalClaimed.
+        totalLinha = totalClaimed;
       } else if (totalClaimed > 0) {
         totalLinha = totalClaimed;
       } else {
@@ -1325,13 +1426,24 @@ function montarServicosDeLinhasOrcafascio(
       if (!composicoesMap.has(chave)) composicoesMap.set(chave, bare);
     }
 
-    // Preferir split explícito do analítico/sintético (type_mdo / type_mat).
+    // type_mdo / type_mat só entram se fecharem melhor com o PU do que o split do analítico.
+    // (Na API às vezes vêm como soma dos VU dos insumos, não da coluna TOTAL.)
     const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
     const splitAna = analiticoRow ? precosMoMatDeLinhaOrcafascio(analiticoRow) : { mo: null, mat: null };
     const splitSint = precosMoMatDeLinhaOrcafascio(row);
     const moSplit = splitAna.mo ?? splitSint.mo;
     const matSplit = splitAna.mat ?? splitSint.mat;
-    if (moSplit != null || matSplit != null) {
+    const scoreAnalitico = distanciaMoMatAoPreco(
+      maoDeObraUnitario ?? 0,
+      materialUnitario ?? 0,
+      precoUnitario
+    );
+    const scoreSplit = distanciaMoMatAoPreco(moSplit ?? 0, matSplit ?? 0, precoUnitario);
+    if (
+      (moSplit != null || matSplit != null) &&
+      scoreSplit <= 0.02 &&
+      (scoreAnalitico > 0.02 || scoreSplit + 1e-9 < scoreAnalitico)
+    ) {
       const reconc = reconciliarMoMatComPrecoUnitario(
         moSplit ?? maoDeObraUnitario ?? 0,
         matSplit ?? materialUnitario ?? 0,
@@ -2180,7 +2292,18 @@ async function enriquecerServicosComAnaliticoOrcafascio(
   const poolInicial = [...catalogoLocal];
   const faltando: ItemServico[] = [];
   for (const [, it] of porCodigo) {
-    if (acharComposicaoParaItemServico(it, poolInicial)?.analiticoLinhas?.length) continue;
+    const local = acharComposicaoParaItemServico(it, poolInicial);
+    const precoIt = Number(it.precoUnitario ?? local?.precoUnitario ?? 0) || 0;
+    const scoreLinhas = (linhas: LinhaAnaliticoComposicao[] | undefined) => {
+      if (!linhas?.length || analiticoPareceSomaDeVuSemCoef(linhas, precoIt)) {
+        return Number.POSITIVE_INFINITY;
+      }
+      const a = somarMoMatDasLinhasAnalitico(linhas);
+      return distanciaMoMatAoPreco(a.mo, a.mat, precoIt);
+    };
+    const melhor = Math.min(scoreLinhas(it.analiticoLinhas), scoreLinhas(local?.analiticoLinhas));
+    // Já tem analítico que fecha com o PU — não busca de novo.
+    if (melhor <= 0.02) continue;
     faltando.push(it);
   }
 
@@ -2210,16 +2333,35 @@ async function enriquecerServicosComAnaliticoOrcafascio(
     subtitulos: s.subtitulos.map(sub => ({
       ...sub,
       itens: sub.itens.map(it => {
-        if (it.analiticoLinhas?.length) {
+        const comp = acharComposicaoParaItemServico(it, pool);
+        const precoIt = Number(it.precoUnitario ?? comp?.precoUnitario ?? 0) || 0;
+        const itemAnaRuim =
+          !!it.analiticoLinhas?.length && analiticoPareceSomaDeVuSemCoef(it.analiticoLinhas, precoIt);
+        const aCompCheck = comp?.analiticoLinhas?.length
+          ? somarMoMatDasLinhasAnalitico(comp.analiticoLinhas)
+          : { mo: 0, mat: 0 };
+        const compAnaBoa =
+          !!comp?.analiticoLinhas?.length &&
+          !analiticoPareceSomaDeVuSemCoef(comp.analiticoLinhas, precoIt) &&
+          distanciaMoMatAoPreco(aCompCheck.mo, aCompCheck.mat, precoIt) <= 0.02;
+
+        if (it.analiticoLinhas?.length && !itemAnaRuim) {
           encontradas += 1;
           return it;
         }
-        const comp = acharComposicaoParaItemServico(it, pool);
         if (!comp?.analiticoLinhas?.length) return it;
+        if (itemAnaRuim && !compAnaBoa && it.analiticoLinhas?.length) {
+          encontradas += 1;
+          return it;
+        }
         encontradas += 1;
+        const aComp = somarMoMatDasLinhasAnalitico(comp.analiticoLinhas);
+        const reconc = reconciliarMoMatComPrecoUnitario(aComp.mo, aComp.mat, precoIt);
         return {
           ...it,
           analiticoLinhas: comp.analiticoLinhas,
+          ...(reconc.mo > 0 ? { maoDeObraUnitario: reconc.mo } : {}),
+          ...(reconc.mat > 0 ? { materialUnitario: reconc.mat } : {}),
           ...(!it.unidade && comp.unidade ? { unidade: comp.unidade } : {})
         };
       })
@@ -3117,6 +3259,16 @@ function parseInsumosAnaliticoManuais(raw: unknown): Record<string, InsumoAnalit
   return out;
 }
 
+/** Snapshot da montagem para desfazer remoção (composição / subtítulo / título). */
+type SnapshotMontagemUndo = {
+  subtitulosNoOrcamento: string[];
+  itensOcultosNoOrcamento: string[];
+  quantidadesPorItem: Record<string, number>;
+  formulasQuantidadePorItem: Record<string, string>;
+  dimensoesPorItem: Record<string, DimensoesItem>;
+  insumosAnaliticoOcultos: string[];
+};
+
 interface SessaoOrcamentoPersist {
   subtitulosNoOrcamento: string[];
   quantidadesPorItem: Record<string, number>;
@@ -3206,6 +3358,9 @@ const ORC_COLUNAS_MONTAGEM_TOGGLE: { id: string; label: string }[] = [
   { id: 'peso', label: 'Peso' },
   { id: 'obs', label: 'Observação' },
 ];
+
+/** Colunas “com BDI”: ocultas por padrão quando o BDI da meta é 0%. */
+const ORC_COLUNAS_COM_BDI = ['puBdi', 'totalBdi'] as const;
 
 const ORC_COLUNAS_MONTAGEM_TOGGLE_IDS = new Set(ORC_COLUNAS_MONTAGEM_TOGGLE.map((c) => c.id));
 
@@ -5216,13 +5371,23 @@ function escolherComposicaoParaChaveMapa(prev: ComposicaoItem, next: ComposicaoI
   return prev;
 }
 
-/** Catálogo global ou snapshot gravado na linha do orçamento (prioridade ao snapshot). */
+/** Catálogo global ou snapshot gravado na linha do orçamento. */
 function composicaoResolvidaDoItemServico(
   item: ItemServico,
   mapa: Record<string, ComposicaoItem>
 ): ComposicaoItem | null {
+  const preco = Number(item.precoUnitario) || 0;
+  let doCatalogo: ComposicaoItem | null = null;
+  for (const k of chavesParaBusca(item.codigo, item.banco, item.chave)) {
+    const c = mapa[k];
+    if (c) {
+      doCatalogo = c;
+      break;
+    }
+  }
+
   if (item.analiticoLinhas && item.analiticoLinhas.length > 0) {
-    return {
+    const snap: ComposicaoItem = {
       codigo: item.codigo,
       banco: item.banco,
       chave: item.chave,
@@ -5231,15 +5396,22 @@ function composicaoResolvidaDoItemServico(
       maoDeObraUnitario: item.maoDeObraUnitario,
       materialUnitario: item.materialUnitario,
       unidade: item.unidade,
-      analiticoLinhas: item.analiticoLinhas
+      analiticoLinhas: item.analiticoLinhas,
     };
+    const snapRuim = analiticoPareceSomaDeVuSemCoef(item.analiticoLinhas, preco);
+    const precoCat = preco || Number(doCatalogo?.precoUnitario) || 0;
+    const aCat = doCatalogo?.analiticoLinhas?.length
+      ? somarMoMatDasLinhasAnalitico(doCatalogo.analiticoLinhas)
+      : { mo: 0, mat: 0 };
+    const catBom =
+      !!doCatalogo?.analiticoLinhas?.length &&
+      !analiticoPareceSomaDeVuSemCoef(doCatalogo.analiticoLinhas, precoCat) &&
+      distanciaMoMatAoPreco(aCat.mo, aCat.mat, precoCat) <= 0.02;
+    // Snapshot sem coef (VU puro) cede ao catálogo quando este fecha com o PU.
+    if (snapRuim && catBom && doCatalogo) return doCatalogo;
+    return snap;
   }
-  const chaves = chavesParaBusca(item.codigo, item.banco, item.chave);
-  for (const k of chaves) {
-    const c = mapa[k];
-    if (c) return c;
-  }
-  return null;
+  return doCatalogo;
 }
 
 /** Converte UND da planilha (M, M², M2, M³, M3, M^3, M**3, UN, …) para TipoUnidadeFormula */
@@ -6001,6 +6173,7 @@ export function OrcamentoPageView({
   const [coresLinhaPorKey, setCoresLinhaPorKey] = useState<Record<string, string>>({});
   const [coresCelulaPorKey, setCoresCelulaPorKey] = useState<Record<string, string>>({});
   const [colunasOcultasMontagem, setColunasOcultasMontagem] = useState<string[]>([]);
+  const bdiPctMetaAnteriorRef = useRef<number | null>(null);
   const [menuColunasMontagem, setMenuColunasMontagem] = useState<{
     top: number;
     left: number;
@@ -6079,6 +6252,15 @@ export function OrcamentoPageView({
   /** Composições marcadas na grade da aba Orçamento (`servicoId|subtituloId|chave`). */
   const [itensSelecionadosMontagem, setItensSelecionadosMontagem] = useState<Set<string>>(new Set());
   const [confirmApagarSelecaoMontagem, setConfirmApagarSelecaoMontagem] = useState(false);
+  /** Confirmação do menu de contexto: apagar composição / subtítulo / título. */
+  const [confirmApagarCtxMontagem, setConfirmApagarCtxMontagem] = useState<
+    | { kind: 'composicao'; composicaoKey: string }
+    | { kind: 'subtitulo'; blocoKey: string }
+    | { kind: 'tituloServico'; servicoId: string }
+    | null
+  >(null);
+  /** Painel das composições removidas (ocultas) para restaurar. */
+  const [modalRemovidasAberto, setModalRemovidasAberto] = useState(false);
   const servicosDropdownRef = useRef<HTMLDivElement | null>(null);
   const contratoDropdownRef = useRef<HTMLDivElement | null>(null);
   const contratoSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -6201,6 +6383,9 @@ export function OrcamentoPageView({
     nomeOrcamento: ''
   });
   const sessaoRef = useRef<SessaoOrcamentoPersist>(sessaoVazia());
+  /** Última remoção na montagem — permite Desfazer no toast. */
+  const undoMontagemRef = useRef<SnapshotMontagemUndo | null>(null);
+  const restaurarUndoMontagemRef = useRef<() => void>(() => {});
   const servicosImportsRef = useRef<{ servicos: ServicoPadrao[]; imports: ImportRecord[] }>({
     servicos: [],
     imports: []
@@ -6416,6 +6601,8 @@ export function OrcamentoPageView({
     setMenuCtxMontagem(null);
     setItensSelecionadosMontagem(new Set());
     setConfirmApagarSelecaoMontagem(false);
+    setConfirmApagarCtxMontagem(null);
+    undoMontagemRef.current = null;
     setMeta((m) => ({ ...m, gradeTravada: next ? true : undefined }));
     if (next) toast.success('Orçamento e memória travados.');
     else toast.success('Orçamento e memória liberados.');
@@ -6666,6 +6853,7 @@ export function OrcamentoPageView({
 
   useEffect(() => {
     if (!centroCustoId || !orcamentoAtivoId) return;
+    undoMontagemRef.current = null;
     let cancelled = false;
     const cc = centroCustoId;
     const oid = orcamentoAtivoId;
@@ -8864,29 +9052,95 @@ export function OrcamentoPageView({
     await executarAtualizarOrcamentoOrcafascio();
   };
 
+  const capturarSnapshotMontagem = (): SnapshotMontagemUndo => {
+    const s = sessaoRef.current;
+    return {
+      subtitulosNoOrcamento: [...(s.subtitulosNoOrcamento ?? [])],
+      itensOcultosNoOrcamento: [...(s.itensOcultosNoOrcamento ?? [])],
+      quantidadesPorItem: { ...(s.quantidadesPorItem ?? {}) },
+      formulasQuantidadePorItem: { ...(s.formulasQuantidadePorItem ?? {}) },
+      dimensoesPorItem: { ...(s.dimensoesPorItem ?? {}) },
+      insumosAnaliticoOcultos: [...(s.insumosAnaliticoOcultos ?? [])],
+    };
+  };
+
+  restaurarUndoMontagemRef.current = () => {
+    const snap = undoMontagemRef.current;
+    if (!snap) {
+      toast.error('Nada para desfazer.');
+      return;
+    }
+    if (gradeTravadaRef.current) {
+      toast.error('Orçamento travado — não é possível desfazer.');
+      return;
+    }
+    undoMontagemRef.current = null;
+    setSubtitulosNoOrcamento(snap.subtitulosNoOrcamento);
+    setItensOcultosNoOrcamento(snap.itensOcultosNoOrcamento);
+    setQuantidadesPorItem(snap.quantidadesPorItem);
+    setFormulasQuantidadePorItem(snap.formulasQuantidadePorItem);
+    setDimensoesPorItem(snap.dimensoesPorItem);
+    setInsumosAnaliticoOcultos(snap.insumosAnaliticoOcultos);
+    const { servicos: s, imports: i } = servicosImportsRef.current;
+    if (centroCustoId && orcamentoAtivoId) {
+      persistToApi(s, i, {
+        ...sessaoRef.current,
+        subtitulosNoOrcamento: snap.subtitulosNoOrcamento,
+        itensOcultosNoOrcamento: snap.itensOcultosNoOrcamento,
+        quantidadesPorItem: snap.quantidadesPorItem,
+        formulasQuantidadePorItem: snap.formulasQuantidadePorItem,
+        dimensoesPorItem: snap.dimensoesPorItem,
+        insumosAnaliticoOcultos: snap.insumosAnaliticoOcultos,
+      });
+    }
+    toast.success('Remoção desfeita.');
+  };
+
+  const toastRemocaoComDesfazer = (mensagem: string, snap: SnapshotMontagemUndo) => {
+    undoMontagemRef.current = snap;
+    toast(
+      (t) => (
+        <div className="flex items-center gap-3">
+          <span className="text-sm">{mensagem}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
+            onClick={() => {
+              toast.dismiss(t.id);
+              restaurarUndoMontagemRef.current();
+            }}
+          >
+            Desfazer
+          </button>
+        </div>
+      ),
+      { duration: 8000 }
+    );
+  };
+
+  /** Retira o subtítulo da grade, mas mantém as composições em `itensOcultos` (lixeira). */
   function removeSubtituloDoOrcamento(key: string) {
+    const sub =
+      findSubtituloPorBlocoKey(servicos, key) ||
+      findSubtituloPorBlocoKey(servicosParaDropdown, key);
     setSubtitulosNoOrcamento(prev => prev.filter(k => k !== key));
-    setItensOcultosNoOrcamento(prev => prev.filter(k => !k.startsWith(`${key}|`)));
-    setQuantidadesPorItem(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(k => {
-        if (k.startsWith(key + '|')) delete next[k];
-      });
-      return next;
-    });
-    setDimensoesPorItem(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(k => {
-        if (k.startsWith(key + '|')) delete next[k];
-      });
-      return next;
+    setItensOcultosNoOrcamento(prev => {
+      const next = new Set(prev);
+      if (sub?.itens?.length) {
+        for (const i of sub.itens) next.add(buildItemKeyOrcamento(key, i.chave));
+      }
+      for (const k of prev) {
+        if (k.startsWith(`${key}|`)) next.add(k);
+      }
+      return Array.from(next);
     });
   }
 
   const removeItemFromServico = (servicoId: string, subtituloId: string, chave: string) => {
+    const snap = capturarSnapshotMontagem();
     const itemKey = `${servicoId}|${subtituloId}|${chave}`;
     const blocoKey = `${servicoId}|${subtituloId}`;
-    const svc = servicos.find(s => s.id === servicoId);
+    const svc = servicos.find(s => s.id === servicoId) ?? servicosParaDropdown.find(s => s.id === servicoId);
     const sub = svc?.subtitulos.find(sb => sb.id === subtituloId);
 
     const nextOcultos = itensOcultosNoOrcamento.includes(itemKey)
@@ -8899,20 +9153,11 @@ export function OrcamentoPageView({
 
     if (allHidden) {
       removeSubtituloDoOrcamento(blocoKey);
-      toast.success('Última composição removida; subtítulo retirado do orçamento');
+      toastRemocaoComDesfazer('Composição removida — restaure em Removidas', snap);
       return;
     }
 
-    setQuantidadesPorItem(prev => {
-      const next = { ...prev };
-      delete next[itemKey];
-      return next;
-    });
-    setDimensoesPorItem(prev => {
-      const next = { ...prev };
-      delete next[itemKey];
-      return next;
-    });
+    // Mantém qtd/memória: só oculta na grade para poder restaurar depois.
     setItensOcultosNoOrcamento(prev => (prev.includes(itemKey) ? prev : [...prev, itemKey]));
     setInsumosAnaliticoOcultos(prev => prev.filter(k => !k.startsWith(`${itemKey}|insumo`)));
     const baseOcultos = sessaoRef.current.itensOcultosNoOrcamento ?? [];
@@ -8920,7 +9165,7 @@ export function OrcamentoPageView({
     if (centroCustoId && orcamentoAtivoId) {
       persistToApi(servicos, imports, { ...sessaoRef.current, itensOcultosNoOrcamento: nextOcultosPersist });
     }
-    toast.success('Item removido');
+    toastRemocaoComDesfazer('Composição removida — restaure em Removidas', snap);
   };
 
   /** `itemKey` = `servicoId|subtituloId|chave` — remove a composição da lista do serviço (definitivo). */
@@ -8948,6 +9193,7 @@ export function OrcamentoPageView({
       return;
     }
     setConfirmApagarSelecaoMontagem(false);
+    const snap = capturarSnapshotMontagem();
 
     const itemKeys = keys.filter(isChaveComposicaoMontagem);
     const blocoKeys = keys
@@ -8955,61 +9201,35 @@ export function OrcamentoPageView({
       .map(k => k.slice(SELECAO_MONTAGEM_BLOCO_PREFIX.length));
 
     let nextOcultos = [...itensOcultosNoOrcamento];
-    const nextQuantidades = { ...quantidadesPorItem };
-    const nextFormulasQtd = { ...formulasQuantidadePorItem };
-    const nextDimensoes = { ...dimensoesPorItem };
     let nextSubtitulos = [...subtitulosNoOrcamento];
     const blocosAfetados = new Set<string>(blocoKeys);
 
     for (const itemKey of itemKeys) {
       if (!nextOcultos.includes(itemKey)) nextOcultos.push(itemKey);
-      delete nextQuantidades[itemKey];
-      delete nextFormulasQtd[itemKey];
-      delete nextDimensoes[itemKey];
       const parsed = parseItemKeyOrcamento(itemKey);
       if (parsed) blocosAfetados.add(parsed.blocoKey);
     }
 
     for (const blocoKey of Array.from(blocosAfetados)) {
-      const sub = findSubtituloPorBlocoKey(servicos, blocoKey);
+      const sub =
+        findSubtituloPorBlocoKey(servicos, blocoKey) ||
+        findSubtituloPorBlocoKey(servicosParaDropdown, blocoKey);
       const blocoVazioSelecionado = blocoKeys.includes(blocoKey);
-      if (blocoVazioSelecionado) {
-        nextSubtitulos = nextSubtitulos.filter(k => k !== blocoKey);
-        nextOcultos = nextOcultos.filter(k => !k.startsWith(`${blocoKey}|`));
-        Object.keys(nextQuantidades).forEach(k => {
-          if (k.startsWith(`${blocoKey}|`)) delete nextQuantidades[k];
-        });
-        Object.keys(nextFormulasQtd).forEach(k => {
-          if (k.startsWith(`${blocoKey}|`)) delete nextFormulasQtd[k];
-        });
-        Object.keys(nextDimensoes).forEach(k => {
-          if (k.startsWith(`${blocoKey}|`)) delete nextDimensoes[k];
-        });
-        continue;
-      }
-      if (!sub || sub.itens.length === 0) continue;
-      const allHidden = sub.itens.every(i =>
+      if (blocoVazioSelecionado || (sub && sub.itens.length > 0 && sub.itens.every(i =>
         nextOcultos.includes(buildItemKeyOrcamento(blocoKey, i.chave))
-      );
-      if (!allHidden) continue;
-      nextSubtitulos = nextSubtitulos.filter(k => k !== blocoKey);
-      nextOcultos = nextOcultos.filter(k => !k.startsWith(`${blocoKey}|`));
-      Object.keys(nextQuantidades).forEach(k => {
-        if (k.startsWith(`${blocoKey}|`)) delete nextQuantidades[k];
-      });
-      Object.keys(nextFormulasQtd).forEach(k => {
-        if (k.startsWith(`${blocoKey}|`)) delete nextFormulasQtd[k];
-      });
-      Object.keys(nextDimensoes).forEach(k => {
-        if (k.startsWith(`${blocoKey}|`)) delete nextDimensoes[k];
-      });
+      ))) {
+        nextSubtitulos = nextSubtitulos.filter(k => k !== blocoKey);
+        if (sub?.itens?.length) {
+          for (const i of sub.itens) {
+            const full = buildItemKeyOrcamento(blocoKey, i.chave);
+            if (!nextOcultos.includes(full)) nextOcultos.push(full);
+          }
+        }
+      }
     }
 
     setSubtitulosNoOrcamento(nextSubtitulos);
     setItensOcultosNoOrcamento(nextOcultos);
-    setQuantidadesPorItem(nextQuantidades);
-    setFormulasQuantidadePorItem(nextFormulasQtd);
-    setDimensoesPorItem(nextDimensoes);
     setItensSelecionadosMontagem(new Set());
 
     if (centroCustoId && orcamentoAtivoId) {
@@ -9019,7 +9239,10 @@ export function OrcamentoPageView({
         itensOcultosNoOrcamento: nextOcultos
       });
     }
-    toast.success(keys.length === 1 ? 'Item removido' : `${keys.length} itens removidos`);
+    toastRemocaoComDesfazer(
+      keys.length === 1 ? 'Item removido — restaure em Removidas' : `${keys.length} itens removidos — restaure em Removidas`,
+      snap
+    );
   };
 
 
@@ -9330,25 +9553,120 @@ export function OrcamentoPageView({
 
   /** Remove do orçamento todos os subtítulos/itens daquele serviço (linha vermelha de título). */
   const removerTituloServicoDoOrcamento = (servicoId: string) => {
+    const snap = capturarSnapshotMontagem();
     const prefix = `${servicoId}|`;
+    const svc =
+      servicos.find(s => s.id === servicoId) ?? servicosParaDropdown.find(s => s.id === servicoId);
     setSubtitulosNoOrcamento(prev => prev.filter(k => !k.startsWith(prefix)));
-    setItensOcultosNoOrcamento(prev => prev.filter(k => !k.startsWith(prefix)));
+    setItensOcultosNoOrcamento(prev => {
+      const next = new Set(prev);
+      for (const k of prev) {
+        if (k.startsWith(prefix)) next.add(k);
+      }
+      if (svc) {
+        for (const sub of svc.subtitulos) {
+          const blocoKey = `${servicoId}|${sub.id}`;
+          for (const i of sub.itens) next.add(buildItemKeyOrcamento(blocoKey, i.chave));
+        }
+      }
+      return Array.from(next);
+    });
     setLinhasSelecionadasDropdown(prev => new Set(Array.from(prev).filter(k => !k.startsWith(prefix))));
-    setQuantidadesPorItem(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(k => {
-        if (k.startsWith(prefix)) delete next[k];
+    toastRemocaoComDesfazer('Serviço removido — restaure em Removidas', snap);
+  };
+
+  const composicoesRemovidasLista = useMemo(() => {
+    const catalogo =
+      servicosCatalogoDropdown.length > 0
+        ? servicosCatalogoDropdown
+        : servicosParaDropdown.length > 0
+          ? servicosParaDropdown
+          : servicos;
+    type Removida = {
+      itemKey: string;
+      codigo: string;
+      banco: string;
+      descricao: string;
+      servicoNome: string;
+      subtituloNome: string;
+    };
+    const out: Removida[] = [];
+    for (const ik of itensOcultosNoOrcamento) {
+      const p = parseItemKeyOrcamento(ik);
+      if (!p) continue;
+      const bp = parseBlocoKeyOrcamento(p.blocoKey);
+      if (!bp) continue;
+      const svc =
+        catalogo.find(s => s.id === bp.servicoId) ?? servicos.find(s => s.id === bp.servicoId);
+      const sub = svc?.subtitulos.find(sb => sb.id === bp.subtituloId);
+      const item = sub?.itens.find(i => i.chave === p.chave);
+      if (!item) continue;
+      out.push({
+        itemKey: ik,
+        codigo: item.codigo || '',
+        banco: item.banco || '',
+        descricao: item.descricao || '',
+        servicoNome: svc?.nome ?? '',
+        subtituloNome: sub?.nome ?? '',
       });
-      return next;
-    });
-    setDimensoesPorItem(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(k => {
-        if (k.startsWith(prefix)) delete next[k];
+    }
+    return out;
+  }, [itensOcultosNoOrcamento, servicos, servicosParaDropdown, servicosCatalogoDropdown]);
+
+  const restaurarComposicoesRemovidas = (itemKeys: string[]) => {
+    if (gradeTravadaRef.current) {
+      toast.error('Orçamento travado — não é possível restaurar.');
+      return;
+    }
+    const keys = itemKeys.filter(Boolean);
+    if (keys.length === 0) return;
+
+    const blocosParaAdd: string[] = [];
+    for (const ik of keys) {
+      const p = parseItemKeyOrcamento(ik);
+      if (!p) continue;
+      if (!subtitulosNoOrcamento.includes(p.blocoKey) && !blocosParaAdd.includes(p.blocoKey)) {
+        blocosParaAdd.push(p.blocoKey);
+      }
+    }
+
+    const servicosParaSalvar =
+      blocosParaAdd.length > 0
+        ? incorporarNovosBlocosNoEstadoServicos(servicos, blocosParaAdd, servicosCatalogoDropdown)
+        : servicos;
+    if (blocosParaAdd.length > 0) {
+      setServicos(servicosParaSalvar);
+      if (centroCustoId) saveServicos(centroCustoId, servicosParaSalvar);
+      setSubtitulosNoOrcamento(prev => {
+        const next = [...prev];
+        for (const bk of blocosParaAdd) {
+          if (!next.includes(bk)) next.push(bk);
+        }
+        return next;
       });
-      return next;
-    });
-    toast.success('Serviço removido do orçamento');
+    }
+
+    setItensOcultosNoOrcamento(prev => prev.filter(k => !keys.includes(k)));
+    const nextOcultosPersist = (sessaoRef.current.itensOcultosNoOrcamento ?? []).filter(
+      k => !keys.includes(k)
+    );
+    const nextSubsPersist = (() => {
+      const base = [...(sessaoRef.current.subtitulosNoOrcamento ?? [])];
+      for (const bk of blocosParaAdd) {
+        if (!base.includes(bk)) base.push(bk);
+      }
+      return base;
+    })();
+    if (centroCustoId && orcamentoAtivoId) {
+      persistToApi(servicosParaSalvar, imports, {
+        ...sessaoRef.current,
+        subtitulosNoOrcamento: nextSubsPersist,
+        itensOcultosNoOrcamento: nextOcultosPersist,
+      });
+    }
+    toast.success(
+      keys.length === 1 ? 'Composição restaurada no orçamento.' : `${keys.length} composições restauradas.`
+    );
   };
 
   const mapaComposicoes = useMemo(() => {
@@ -10695,6 +11013,33 @@ export function OrcamentoPageView({
     }
   }, []);
 
+  // BDI 0%: esconde por padrão as colunas “com BDI”; ao voltar BDI > 0, mostra de novo.
+  useEffect(() => {
+    const bdiPct = parsePercentualMeta(meta.bdiPercentual);
+    const prev = bdiPctMetaAnteriorRef.current;
+    bdiPctMetaAnteriorRef.current = bdiPct;
+    if (bdiPct <= 0) {
+      setColunasOcultasMontagem((p) => {
+        let changed = false;
+        const next = [...p];
+        for (const id of ORC_COLUNAS_COM_BDI) {
+          if (!next.includes(id)) {
+            next.push(id);
+            changed = true;
+          }
+        }
+        return changed ? next : p;
+      });
+      return;
+    }
+    if (prev != null && prev <= 0 && bdiPct > 0) {
+      setColunasOcultasMontagem((p) => {
+        const next = p.filter((id) => id !== 'puBdi' && id !== 'totalBdi');
+        return next.length === p.length ? p : next;
+      });
+    }
+  }, [meta.bdiPercentual]);
+
   const resumoFinanceiro = useMemo(() => {
     const descontoPct = parsePercentualMeta(meta.descontoPercentual);
     const bdiPctMeta = parsePercentualMeta(meta.bdiPercentual);
@@ -11516,12 +11861,12 @@ export function OrcamentoPageView({
         const resumo = somarLinhas(rowsDoTitulo);
         const values = empty();
         values[3] = String(bloco.servicoNome || '').toUpperCase();
-        values[6] = truncarMoeda2(resumo.mo);
-        values[7] = truncarMoeda2(resumo.mat);
+        values[6] = '';
+        values[7] = '';
         values[8] = '';
         values[9] = '';
-        values[10] = truncarMoeda2(resumo.mo);
-        values[11] = truncarMoeda2(resumo.mat);
+        values[10] = '';
+        values[11] = '';
         values[12] = truncarMoeda2(resumo.custoDir);
         values[13] = truncarMoeda2(resumo.totalComBdi);
         values[14] = resumo.pesoPct;
@@ -11532,12 +11877,12 @@ export function OrcamentoPageView({
       const subValues = empty();
       subValues[0] = `${main}.${subIdx}`;
       subValues[3] = String(bloco.subtituloNome || bloco.servicoNome || '').toUpperCase();
-      subValues[6] = truncarMoeda2(resumoSub.mo);
-      subValues[7] = truncarMoeda2(resumoSub.mat);
+      subValues[6] = '';
+      subValues[7] = '';
       subValues[8] = '';
       subValues[9] = '';
-      subValues[10] = truncarMoeda2(resumoSub.mo);
-      subValues[11] = truncarMoeda2(resumoSub.mat);
+      subValues[10] = '';
+      subValues[11] = '';
       subValues[12] = truncarMoeda2(resumoSub.custoDir);
       subValues[13] = truncarMoeda2(resumoSub.totalComBdi);
       subValues[14] = resumoSub.pesoPct;
@@ -14738,20 +15083,12 @@ export function OrcamentoPageView({
                               </td>
                               <td data-orc-col="und" className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
                               <td data-orc-col="qtd" className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
-                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.mo} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.mat} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
+                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
-                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.mo} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.mat} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
+                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
@@ -14835,20 +15172,12 @@ export function OrcamentoPageView({
                               </td>
                               <td data-orc-col="und" className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
                               <td data-orc-col="qtd" className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
-                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.mo} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.mat} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="mo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
+                              <td data-orc-col="mat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="pu" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
-                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.mo} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
-                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.mat} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                              </td>
+                              <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
+                              <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
@@ -15231,21 +15560,25 @@ export function OrcamentoPageView({
                               className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
                               onClick={() => {
                                 if (menuCtxMontagem.kind === 'tituloServico') {
-                                  if (
-                                    typeof window !== 'undefined' &&
-                                    !window.confirm(
-                                      'Remover este serviço inteiro do orçamento? Todos os subtítulos e composições dele serão retirados.'
-                                    )
-                                  ) {
-                                    setMenuCtxMontagem(null);
-                                    return;
-                                  }
-                                  removerTituloServicoDoOrcamento(menuCtxMontagem.servicoId);
-                                } else if (menuCtxMontagem.kind === 'subtitulo') {
-                                  removeSubtituloDoOrcamento(menuCtxMontagem.blocoKey);
-                                } else {
-                                  removerItemComposicaoDoOrcamento(menuCtxMontagem.composicaoKey);
+                                  setConfirmApagarCtxMontagem({
+                                    kind: 'tituloServico',
+                                    servicoId: menuCtxMontagem.servicoId,
+                                  });
+                                  setMenuCtxMontagem(null);
+                                  return;
                                 }
+                                if (menuCtxMontagem.kind === 'subtitulo') {
+                                  setConfirmApagarCtxMontagem({
+                                    kind: 'subtitulo',
+                                    blocoKey: menuCtxMontagem.blocoKey,
+                                  });
+                                  setMenuCtxMontagem(null);
+                                  return;
+                                }
+                                setConfirmApagarCtxMontagem({
+                                  kind: 'composicao',
+                                  composicaoKey: menuCtxMontagem.composicaoKey,
+                                });
                                 setMenuCtxMontagem(null);
                               }}
                             >
@@ -15280,6 +15613,7 @@ export function OrcamentoPageView({
                 <div className="flex min-w-0 shrink-0 flex-wrap items-end gap-x-5 gap-y-1 sm:gap-x-8">
                   {subtitulosAdicionados.length > 0 ? (
                     <>
+                  {(resumoFinanceiro.descontoPct > 0 || resumoFinanceiro.bdiPct > 0) && (
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Orçamento
@@ -15288,6 +15622,7 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalBase)}
                     </p>
                   </div>
+                  )}
                   {resumoFinanceiro.descontoPct > 0 && (
                     <>
                       <div className="shrink-0">
@@ -15311,17 +15646,19 @@ export function OrcamentoPageView({
                       </div>
                     </>
                   )}
-                  <div className="shrink-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      {`BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}%)`}
-                    </p>
-                    <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
-                      {formatarBRLExport(resumoFinanceiro.valorBdi)}
-                    </p>
-                  </div>
+                  {resumoFinanceiro.bdiPct > 0 && (
+                    <div className="shrink-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        {`BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}%)`}
+                      </p>
+                      <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
+                        {formatarBRLExport(resumoFinanceiro.valorBdi)}
+                      </p>
+                    </div>
+                  )}
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Total geral
@@ -15490,7 +15827,7 @@ export function OrcamentoPageView({
                   ? '1 item selecionado'
                   : `${itensSelecionadosMontagem.size} itens selecionados`}
               </span>
-              ? Esta ação não pode ser desfeita.
+              ? Você pode restaurá-los depois em Removidas.
             </p>
             <div className="flex items-center justify-center space-x-3">
               <button
@@ -15503,6 +15840,164 @@ export function OrcamentoPageView({
               <button
                 type="button"
                 onClick={apagarItensSelecionadosMontagem}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
+              >
+                Apagar
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {modalRemovidasAberto && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setModalRemovidasAberto(false)}
+          />
+          <div className="relative mx-4 flex max-h-[min(80vh,720px)] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-gray-700">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Composições removidas
+                </h3>
+                <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                  {composicoesRemovidasLista.length === 0
+                    ? 'Nenhuma composição removida neste orçamento.'
+                    : composicoesRemovidasLista.length === 1
+                      ? '1 composição fora da grade — restaure quando quiser.'
+                      : `${composicoesRemovidasLista.length} composições fora da grade — restaure quando quiser.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalRemovidasAberto(false)}
+                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+              {composicoesRemovidasLista.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                  Apague uma linha na aba Orçamento para ela aparecer aqui.
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {composicoesRemovidasLista.map((row) => (
+                    <li
+                      key={row.itemKey}
+                      className="flex items-start gap-3 py-3 first:pt-1 last:pb-1"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <span className="tabular-nums text-gray-600 dark:text-gray-300">
+                            {row.codigo || '—'}
+                          </span>
+                          {row.banco ? (
+                            <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                              {row.banco}
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="mt-0.5 line-clamp-2 text-sm text-gray-700 dark:text-gray-300">
+                          {row.descricao || 'Sem descrição'}
+                        </p>
+                        {(row.servicoNome || row.subtituloNome) && (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {[row.servicoNome, row.subtituloNome].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={gradeTravada}
+                        onClick={() => restaurarComposicoesRemovidas([row.itemKey])}
+                        className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700 disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        Restaurar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {composicoesRemovidasLista.length > 0 && (
+              <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-5 py-3 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setModalRemovidasAberto(false)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  disabled={gradeTravada}
+                  onClick={() => {
+                    restaurarComposicoesRemovidas(
+                      composicoesRemovidasLista.map((r) => r.itemKey)
+                    );
+                  }}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  Restaurar todas
+                </button>
+              </div>
+            )}
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {confirmApagarCtxMontagem && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setConfirmApagarCtxMontagem(null)}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {confirmApagarCtxMontagem.kind === 'composicao'
+                ? 'Deseja mesmo apagar?'
+                : confirmApagarCtxMontagem.kind === 'subtitulo'
+                  ? 'Apagar subtítulo?'
+                  : 'Apagar título?'}
+            </h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              {confirmApagarCtxMontagem.kind === 'composicao'
+                ? 'Tem certeza que deseja apagar esta composição do orçamento? Depois você pode restaurá-la em Removidas.'
+                : confirmApagarCtxMontagem.kind === 'subtitulo'
+                  ? 'Tem certeza que deseja apagar este subtítulo e as composições dele? Depois você pode restaurá-los em Removidas.'
+                  : 'Remover este serviço inteiro do orçamento? Depois você pode restaurar as composições em Removidas.'}
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmApagarCtxMontagem(null)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const pendente = confirmApagarCtxMontagem;
+                  setConfirmApagarCtxMontagem(null);
+                  if (!pendente || gradeTravadaRef.current) return;
+                  if (pendente.kind === 'composicao') {
+                    removerItemComposicaoDoOrcamento(pendente.composicaoKey);
+                  } else if (pendente.kind === 'subtitulo') {
+                    const snap = capturarSnapshotMontagem();
+                    removeSubtituloDoOrcamento(pendente.blocoKey);
+                    toastRemocaoComDesfazer('Subtítulo removido do orçamento', snap);
+                  } else {
+                    removerTituloServicoDoOrcamento(pendente.servicoId);
+                  }
+                }}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
               >
                 Apagar
@@ -17040,6 +17535,29 @@ export function OrcamentoPageView({
                 aria-label="Escolher colunas visíveis"
               >
                 <Columns3 className="h-5 w-5 shrink-0" aria-hidden />
+              </button>
+            )}
+            {orcamentoViewTab === 'montagem' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  setModalRemovidasAberto(true);
+                }}
+                className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                title={
+                  composicoesRemovidasLista.length > 0
+                    ? `Composições removidas (${composicoesRemovidasLista.length})`
+                    : 'Composições removidas'
+                }
+                aria-label={
+                  composicoesRemovidasLista.length > 0
+                    ? `Composições removidas, ${composicoesRemovidasLista.length}`
+                    : 'Composições removidas'
+                }
+              >
+                <Undo2 className="h-5 w-5 shrink-0" aria-hidden />
+                <NotificationCountBadge count={composicoesRemovidasLista.length} rail />
               </button>
             )}
             <button
