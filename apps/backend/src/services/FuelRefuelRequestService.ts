@@ -262,8 +262,8 @@ export class FuelRefuelRequestService {
       });
 
       // Chatbot WhatsApp: se o solicitante não tem celular no cadastro, grava o número usado.
-      const waPhoneDigits = normalizeBrPhoneDigits(input.sourceWhatsAppPhone || '');
-      if (hasUsablePhoneDigits(waPhoneDigits)) {
+      const waPhoneFormatted = formatPhoneBrStored(input.sourceWhatsAppPhone || '');
+      if (waPhoneFormatted) {
         const employee = await tx.employee.findUnique({
           where: { userId: input.requesterId },
           select: { id: true, phone: true },
@@ -271,7 +271,7 @@ export class FuelRefuelRequestService {
         if (employee && !hasUsablePhoneDigits(employee.phone)) {
           await tx.employee.update({
             where: { id: employee.id },
-            data: { phone: waPhoneDigits },
+            data: { phone: waPhoneFormatted },
           });
         }
       }
@@ -914,7 +914,7 @@ export class FuelRefuelRequestService {
       if (user.employee) {
         await prisma.employee.update({
           where: { id: user.employee.id },
-          data: { phone: phoneDigits },
+          data: { phone: formatPhoneBrStored(phoneDigits) },
         });
       }
 
@@ -942,6 +942,16 @@ function normalizeBrPhoneDigits(raw: string): string {
 function hasUsablePhoneDigits(value: string | null | undefined): boolean {
   const digits = normalizeBrPhoneDigits(value || '');
   return digits.length >= 10 && digits.length <= 11;
+}
+
+/** Padrão do cadastro: (61) 98332-6520 */
+function formatPhoneBrStored(raw: string): string | null {
+  const digits = normalizeBrPhoneDigits(raw);
+  if (!hasUsablePhoneDigits(digits)) return null;
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
 }
 
 export const fuelRefuelRequestService = new FuelRefuelRequestService();
