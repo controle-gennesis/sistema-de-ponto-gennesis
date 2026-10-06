@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { FileSpreadsheet, RotateCcw, Truck, Wrench, X } from 'lucide-react';
@@ -19,7 +19,9 @@ import {
   OcFilialField,
   OcStockLocationField,
   formatOcCostCenterLabel,
+  getOcSupplierLabel,
 } from '@/components/oc/OcPurchaseOrderFormFields';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import {
   TOTVS_FREIGHT_TYPES,
   TOTVS_OC_PAYMENT_AVISTA,
@@ -125,6 +127,7 @@ type Supplier = {
   pixKeyType?: string | null;
   pixKey?: string | null;
   tradeName?: string | null;
+  cnpj?: string | null;
 };
 
 type PurchaseOrderCreateInput = {
@@ -758,28 +761,55 @@ export default function MapaCotacaoPage() {
     });
   }, [approvedRequests, allOrders]);
 
-  const { data: suppliersData } = useQuery({
-    queryKey: ['suppliers-map'],
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const handleSupplierSearchChange = useCallback((query: string) => {
+    setSupplierSearch(query);
+  }, []);
+  const [selectedSuppliersById, setSelectedSuppliersById] = useState<Record<string, Supplier>>({});
+
+  const { data: suppliersSearchData } = useQuery({
+    queryKey: ['suppliers-map', supplierSearch.trim()],
     queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { limit: 500 } });
-      return res.data;
+      const rows = await searchOcSuppliers(supplierSearch);
+      return rows as Supplier[];
     },
-    staleTime: 60_000,
+    staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
 
-  const suppliers: Supplier[] = useMemo(
-    () => (suppliersData?.data || []).filter((s: Supplier) => s.isActive),
-    [suppliersData?.data]
-  );
+  useEffect(() => {
+    const rows = suppliersSearchData || [];
+    if (rows.length === 0) return;
+    setSelectedSuppliersById((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of rows) {
+        if (!selectedSupplierIds.has(row.id)) continue;
+        if (next[row.id]?.id === row.id && next[row.id]?.name === row.name) continue;
+        next[row.id] = row;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [suppliersSearchData, selectedSupplierIds]);
+
+  const suppliers: Supplier[] = useMemo(() => {
+    const byId = new Map<string, Supplier>();
+    for (const s of Object.values(selectedSuppliersById)) byId.set(s.id, s);
+    for (const s of suppliersSearchData || []) byId.set(s.id, s);
+    return Array.from(byId.values());
+  }, [suppliersSearchData, selectedSuppliersById]);
 
   const supplierOptions = useMemo(
     () =>
-      suppliers.map((s) => ({
-        value: s.id,
-        label: s.code ? `${s.code} - ${s.name}` : s.name,
-        searchText: `${s.code ?? ''} ${s.name}`,
-      })),
+      suppliers.map((s) => {
+        const label = getOcSupplierLabel(s) || s.name;
+        return {
+          value: s.id,
+          label: s.code ? `${s.code} - ${label}` : label,
+          searchText: `${s.code ?? ''} ${s.name} ${s.tradeName ?? ''} ${s.cnpj ?? ''}`,
+        };
+      }),
     [suppliers]
   );
 
@@ -854,6 +884,8 @@ export default function MapaCotacaoPage() {
   useEffect(() => {
     if (!selectedRequestId) return;
     setSelectedSupplierIds(new Set());
+    setSelectedSuppliersById({});
+    setSupplierSearch('');
     setFreightBySupplier({});
     setUnitPriceBySupplierItem({});
     setSupplierItemDetailByKey({});
@@ -1414,10 +1446,23 @@ export default function MapaCotacaoPage() {
                       label="Fornecedores"
                       options={supplierOptions}
                       selected={Array.from(selectedSupplierIds)}
-                      onChange={(ids) => setSelectedSupplierIds(new Set(ids))}
+                      onChange={(ids) => {
+                        const next = new Set(ids);
+                        setSelectedSupplierIds(next);
+                        setSelectedSuppliersById((prev) => {
+                          const kept: Record<string, Supplier> = {};
+                          for (const id of next) {
+                            const fromSearch = (suppliersSearchData || []).find((s) => s.id === id);
+                            kept[id] = fromSearch || prev[id] || ({ id, code: '', name: id, isActive: true } as Supplier);
+                          }
+                          return kept;
+                        });
+                      }}
+                      onSearchChange={handleSupplierSearchChange}
+                      filterLocally={false}
                       placeholder="Selecione fornecedores para comparar..."
-                      searchPlaceholder="Pesquisar..."
-                      emptyOptionsMessage="Nenhum fornecedor cadastrado."
+                      searchPlaceholder="Digite nome, fantasia ou CNPJ..."
+                      emptyOptionsMessage="Digite para buscar fornecedores."
                       emptySearchMessage="Nenhum fornecedor encontrado."
                       listMaxHeight={280}
                       noFocusRing

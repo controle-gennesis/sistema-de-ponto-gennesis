@@ -273,6 +273,13 @@ export type MultiSelectSearchDropdownProps = {
   /** Controle externo de abertura (ex.: só um campo aberto por vez em modais de filtro). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Chamado quando o texto da busca muda (útil para buscar opções no servidor).
+   * Com `filterLocally={false}`, o dropdown não filtra de novo no cliente.
+   */
+  onSearchChange?: (query: string) => void;
+  /** Quando false, mostra `options` como já filtradas pelo pai (padrão: true). */
+  filterLocally?: boolean;
 };
 
 type FloatingPos = {
@@ -495,6 +502,8 @@ export function MultiSelectSearchDropdown({
   hideFocus = false,
   open: openControlled,
   onOpenChange,
+  onSearchChange,
+  filterLocally = true,
 }: MultiSelectSearchDropdownProps) {
   void _menuOverlapContent;
   const effectiveListMax = listMaxHeightProp ?? LIST_MAX;
@@ -520,16 +529,21 @@ export function MultiSelectSearchDropdown({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listScrollTopRef = useRef(0);
 
+  useEffect(() => {
+    onSearchChange?.(search);
+  }, [search, onSearchChange]);
+
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   const filtered = useMemo(() => {
+    if (!filterLocally) return options;
     const q = search.trim();
     if (!q) return options;
     return options.filter((o) => {
       const hay = `${o.label} ${o.description ?? ''} ${o.searchText ?? ''} ${o.value}`;
       return textMatchesSearch(hay, q);
     });
-  }, [options, search]);
+  }, [options, search, filterLocally]);
 
   const allValues = useMemo(() => options.map((o) => o.value), [options]);
   const allFilteredValues = useMemo(() => filtered.map((o) => o.value), [filtered]);
