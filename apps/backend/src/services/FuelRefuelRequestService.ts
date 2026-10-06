@@ -236,7 +236,7 @@ export class FuelRefuelRequestService {
       const agg = await tx.fuelRefuelRequest.aggregate({ _max: { displayNumber: true } });
       const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
 
-      return tx.fuelRefuelRequest.create({
+      const created = await tx.fuelRefuelRequest.create({
         data: {
           displayNumber: nextDisplay,
           requesterId: input.requesterId,
@@ -260,6 +260,23 @@ export class FuelRefuelRequestService {
         },
         include: fuelRefuelInclude,
       });
+
+      // Chatbot WhatsApp: se o solicitante não tem celular no cadastro, grava o número usado.
+      const waPhoneDigits = normalizeBrPhoneDigits(input.sourceWhatsAppPhone || '');
+      if (hasUsablePhoneDigits(waPhoneDigits)) {
+        const employee = await tx.employee.findUnique({
+          where: { userId: input.requesterId },
+          select: { id: true, phone: true },
+        });
+        if (employee && !hasUsablePhoneDigits(employee.phone)) {
+          await tx.employee.update({
+            where: { id: employee.id },
+            data: { phone: waPhoneDigits },
+          });
+        }
+      }
+
+      return created;
     });
 
     const approverIds = await getFuelApprovalNotifyUserIds(contract.id);
