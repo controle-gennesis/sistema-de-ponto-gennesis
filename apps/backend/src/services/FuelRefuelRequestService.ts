@@ -834,6 +834,97 @@ export class FuelRefuelRequestService {
     });
     return presentFuelRowsPhotos(rows);
   }
+
+  /** Solicitantes que já pediram combustível e não têm telefone utilizável. */
+  async listRequestersMissingPhone(): Promise<Array<{ userId: string; name: string }>> {
+    const users = await prisma.user.findMany({
+      where: { fuelRefuelRequestsRequested: { some: {} } },
+      select: {
+        id: true,
+        name: true,
+        employee: { select: { phone: true } },
+        fuelRefuelRequestsRequested: {
+          where: {
+            sourceWhatsAppPhone: { not: null },
+          },
+          select: { sourceWhatsAppPhone: true },
+          take: 5,
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return users
+      .filter((u) => {
+        if (hasUsablePhoneDigits(u.employee?.phone)) return false;
+        return !u.fuelRefuelRequestsRequested.some((r) =>
+          hasUsablePhoneDigits(r.sourceWhatsAppPhone),
+        );
+      })
+      .map((u) => ({ userId: u.id, name: u.name }));
+  }
+
+  /**
+   * Cadastra telefone do solicitante (Employee.phone) e preenche
+   * sourceWhatsAppPhone nas solicitações que ainda estão sem número.
+   */
+  async setRequesterPhones(
+    items: Array<{ userId: string; phone: string }>,
+  ): Promise<{ updated: number }> {
+    let updated = 0;
+    for (const item of items) {
+      const userId = String(item.userId || '').trim();
+      const phoneDigits = normalizeBrPhoneDigits(item.phone);
+      if (!userId || !hasUsablePhoneDigits(phoneDigits)) {
+        throw createError(
+          'Informe um telefone válido com DDD (10 ou 11 dígitos) para cada pessoa.',
+          400,
+        );
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          employee: { select: { id: true } },
+          fuelRefuelRequestsRequested: { select: { id: true }, take: 1 },
+        },
+      });
+      if (!user || user.fuelRefuelRequestsRequested.length === 0) {
+        throw createError('Solicitante sem histórico de abastecimento', 404);
+      }
+
+      if (user.employee) {
+        await prisma.employee.update({
+          where: { id: user.employee.id },
+          data: { phone: phoneDigits },
+        });
+      }
+
+      await prisma.fuelRefuelRequest.updateMany({
+        where: {
+          requesterId: userId,
+          OR: [{ sourceWhatsAppPhone: null }, { sourceWhatsAppPhone: '' }],
+        },
+        data: { sourceWhatsAppPhone: phoneDigits },
+      });
+      updated += 1;
+    }
+    return { updated };
+  }
+}
+
+function normalizeBrPhoneDigits(raw: string): string {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  return digits;
+}
+
+function hasUsablePhoneDigits(value: string | null | undefined): boolean {
+  const digits = normalizeBrPhoneDigits(value || '');
+  return digits.length >= 10 && digits.length <= 11;
 }
 
 export const fuelRefuelRequestService = new FuelRefuelRequestService();

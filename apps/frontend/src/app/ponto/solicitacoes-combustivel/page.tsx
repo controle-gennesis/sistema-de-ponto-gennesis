@@ -52,6 +52,7 @@ import {
 } from '@/lib/parseFlexibleDecimal';
 import { FuelRequestPhoto } from '@/components/fuel/FuelRequestPhoto';
 import { FuelQuotaConfigModal } from './FuelQuotaConfigModal';
+import { FuelMissingPhonesModal } from './FuelMissingPhonesModal';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -2221,6 +2222,8 @@ function SolicitacoesCombustivelPageContent() {
             </div>
           ) : null}
         </Modal>
+
+        <FuelMissingPhonesModal enabled={!loadingUser && Boolean(userData)} />
 
         {isAdministrator ? (
         <FuelQuotaConfigModal

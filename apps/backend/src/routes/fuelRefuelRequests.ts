@@ -58,6 +58,12 @@ router.get('/contract-resumo', (req, res, next) =>
 router.get('/', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.list(req, res, next),
 );
+router.get('/requesters-missing-phone', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listRequestersMissingPhone(req, res, next),
+);
+router.put('/requesters-phones', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.setRequesterPhones(req, res, next),
+);
 router.get('/quota-balance', (req, res, next) =>
   fuelRefuelRequestController.getQuotaBalance(req, res, next),
 );

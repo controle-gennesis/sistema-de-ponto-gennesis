@@ -78,6 +78,17 @@ const rejectSchema = z.object({
   comment: z.string().optional(),
 });
 
+const setRequesterPhonesSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        userId: z.string().min(1),
+        phone: z.string().min(1),
+      }),
+    )
+    .min(1, 'Informe ao menos um telefone'),
+});
+
 const adminUpdateSchema = z.object({
   contractId: z.string().min(1, 'Selecione o contrato'),
 });
@@ -567,6 +578,40 @@ export class FuelRefuelRequestController {
       });
 
       res.json({ success: true, data: rows });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listRequestersMissingPhone(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const rows = await fuelRefuelRequestService.listRequestersMissingPhone();
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async setRequesterPhones(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const body = setRequesterPhonesSchema.parse(req.body);
+      const result = await fuelRefuelRequestService.setRequesterPhones(body.items);
+      res.json({
+        success: true,
+        data: result,
+        message:
+          result.updated === 1
+            ? 'Telefone cadastrado'
+            : `${result.updated} telefones cadastrados`,
+      });
     } catch (error) {
       next(error);
     }
