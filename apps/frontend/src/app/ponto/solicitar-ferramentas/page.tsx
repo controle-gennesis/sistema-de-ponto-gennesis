@@ -14,6 +14,9 @@ import { Loading } from '@/components/ui/Loading';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -157,16 +160,7 @@ function SolicitarLocacoesFerramentasPage() {
     },
   });
 
-  const { data: suppliersData } = useQuery({
-    queryKey: ['tool-rental-suppliers'],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', {
-        params: { page: 1, limit: 500, isActive: 'true' },
-      });
-      return res.data?.data ?? [];
-    },
-    enabled: showForm,
-  });
+  const [supplierLabel, setSupplierLabel] = useState('');
 
   const contractOptions = useMemo(
     () =>
@@ -175,17 +169,6 @@ function SolicitarLocacoesFerramentasPage() {
         .map((label: string) => ({ value: label, label, searchText: label })),
     [costCentersList]
   );
-
-  const supplierOptions = useMemo(() => {
-    const rows = Array.isArray(suppliersData) ? suppliersData : [];
-    return rows.map(
-      (s: { id: string; name: string; tradeName?: string | null; code?: string }) => ({
-        value: s.id,
-        label: s.tradeName || s.name,
-        searchText: `${s.tradeName || ''} ${s.name} ${s.code || ''}`,
-      })
-    );
-  }, [suppliersData]);
 
   const createMutation = useMutation({
     mutationFn: async (payload: FormState) => {
@@ -242,6 +225,7 @@ function SolicitarLocacoesFerramentasPage() {
 
   const openForm = () => {
     setForm(EMPTY_FORM());
+    setSupplierLabel('');
     setShowForm(true);
   };
 
@@ -662,13 +646,20 @@ function SolicitarLocacoesFerramentasPage() {
 
           <div>
             <label className={labelCls}>Fornecedor</label>
-            <SingleSelectSearchDropdown
+            <AsyncSearchSelectDropdown
               value={form.supplierId}
-              onChange={(supplierId) => setForm((f) => ({ ...f, supplierId }))}
-              options={supplierOptions}
-              placeholder="Selecionar fornecedor (opcional)…"
-              searchPlaceholder="Pesquisar fornecedor…"
-              emptyOptionsMessage="Nenhum fornecedor encontrado."
+              selectedLabel={supplierLabel || undefined}
+              onChange={(supplier) => {
+                setForm((f) => ({ ...f, supplierId: supplier.id }));
+                setSupplierLabel(getOcSupplierLabel(supplier));
+              }}
+              searchFn={searchOcSuppliers}
+              getOptionId={(supplier) => supplier.id}
+              getOptionLabel={getOcSupplierLabel}
+              queryKeyPrefix="tool-rental-supplier"
+              placeholder="Digite para buscar fornecedor (opcional)…"
+              searchPlaceholder="Nome, fantasia ou CNPJ…"
+              minSearchLength={0}
               noFocusRing
             />
           </div>

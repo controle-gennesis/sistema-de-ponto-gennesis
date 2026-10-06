@@ -40,6 +40,8 @@ import {
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import {
@@ -329,15 +331,6 @@ export default function CaixinhaPageClient() {
     }
   });
 
-  const { data: suppliers = [] } = useQuery({
-    queryKey: ['caixinha-suppliers'],
-    enabled: formOpen,
-    queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { isActive: true, limit: 2000, page: 1 } });
-      return ((res.data?.data || []) as SupplierOption[]).filter((s) => s.id);
-    }
-  });
-
   const { rowActionMenu, rowForActionMenu, toggleRowActionMenu, closeRowActionMenu, isRowMenuOpen } =
     useRowActionMenu(rows);
 
@@ -393,28 +386,6 @@ export default function CaixinhaPageClient() {
         .map((name) => ({ value: name, label: name }))
     );
   }, [options, extraCaixinhas, form.caixinha]);
-
-  const supplierOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const opts: Array<{ value: string; label: string; searchText: string }> = [];
-    for (const s of suppliers) {
-      if (s.isActive === false) continue;
-      const label = supplierStoreLabel(s);
-      const key = label.toLocaleLowerCase('pt-BR');
-      if (!label || seen.has(key)) continue;
-      seen.add(key);
-      opts.push({
-        value: label,
-        label,
-        searchText: [s.code, s.name, s.tradeName].filter(Boolean).join(' ')
-      });
-    }
-    const current = form.storeName.trim();
-    if (current && !seen.has(current.toLocaleLowerCase('pt-BR'))) {
-      opts.unshift({ value: current, label: current, searchText: current });
-    }
-    return labeledToSelectOptions(opts);
-  }, [suppliers, form.storeName]);
 
   const openCreate = () => {
     setEditing(null);
@@ -886,15 +857,20 @@ export default function CaixinhaPageClient() {
               </div>
               <div>
                 <label className={GESTAO_OS_FORM_LABEL_CLS}>Fornecedor</label>
-                <StringSingleSelectDropdown
+                <AsyncSearchSelectDropdown
                   value={form.storeName}
-                  onChange={(v) => patchForm({ storeName: v })}
-                  options={supplierOptions}
-                  placeholder="Selecione o fornecedor..."
-                  emptyOptionLabel="Selecione..."
-                  emptyOptionsMessage="Nenhum fornecedor cadastrado."
-                  allowEmpty
-                  matchTriggerWidth
+                  selectedLabel={form.storeName || undefined}
+                  onChange={(supplier) =>
+                    patchForm({ storeName: supplierStoreLabel(supplier as SupplierOption) })
+                  }
+                  searchFn={searchOcSuppliers}
+                  getOptionId={(supplier) => supplier.id}
+                  getOptionLabel={(supplier) => supplierStoreLabel(supplier as SupplierOption)}
+                  queryKeyPrefix="caixinha-supplier"
+                  placeholder="Digite para buscar fornecedor..."
+                  searchPlaceholder="Nome, fantasia ou CNPJ..."
+                  minSearchLength={0}
+                  noFocusRing
                 />
               </div>
               <div>

@@ -20,6 +20,9 @@ import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { ConstructionMaterialSearchDropdown } from '@/components/suprimentos/ConstructionMaterialSearchDropdown';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
@@ -317,12 +320,7 @@ export default function EntregasLogisticaPageClient() {
     enabled: modalOpen,
   });
 
-  const { data: suppliersRes } = useQuery({
-    queryKey: ['suppliers-for-logistics'],
-    queryFn: async () =>
-      (await api.get('/suppliers', { params: { isActive: true, limit: 500 } })).data,
-    enabled: modalOpen,
-  });
+  const [supplierLabel, setSupplierLabel] = useState('');
 
   const { data: driversRes } = useQuery({
     queryKey: ['drivers-for-logistics'],
@@ -349,18 +347,6 @@ export default function EntregasLogisticaPageClient() {
         })
       ),
     [contractsRes]
-  );
-
-  const supplierOptions = useMemo(
-    () =>
-      ((suppliersRes?.data ?? []) as Array<{ id: string; name: string; code?: string }>).map(
-        (s) => ({
-          value: s.id,
-          label: s.name,
-          searchText: `${s.code ?? ''} ${s.name}`,
-        })
-      ),
-    [suppliersRes]
   );
 
   const driverOptions = useMemo(
@@ -411,6 +397,7 @@ export default function EntregasLogisticaPageClient() {
     closeRowActionMenu();
     setEditingId(null);
     setForm(emptyForm());
+    setSupplierLabel('');
     setAttachmentFile(null);
     setModalOpen(true);
   };
@@ -436,6 +423,7 @@ export default function EntregasLogisticaPageClient() {
       observations: row.observations ?? '',
       expectedDelivery: row.expectedDelivery ? row.expectedDelivery.slice(0, 10) : '',
     });
+    setSupplierLabel(row.supplier ? getOcSupplierLabel(row.supplier as Parameters<typeof getOcSupplierLabel>[0]) : '');
     setAttachmentFile(null);
     setModalOpen(true);
   };
@@ -910,12 +898,21 @@ export default function EntregasLogisticaPageClient() {
               </div>
               <div>
                 <label className={labelCls}>Fornecedor</label>
-                <SingleSelectSearchDropdown
+                <AsyncSearchSelectDropdown
                   value={form.supplierId}
-                  onChange={(supplierId) => setForm((p) => ({ ...p, supplierId }))}
-                  options={supplierOptions}
-                  placeholder="Selecione o fornecedor"
-                  searchPlaceholder="Pesquisar fornecedor..."
+                  selectedLabel={supplierLabel || undefined}
+                  onChange={(supplier) => {
+                    setForm((p) => ({ ...p, supplierId: supplier.id }));
+                    setSupplierLabel(getOcSupplierLabel(supplier));
+                  }}
+                  searchFn={searchOcSuppliers}
+                  getOptionId={(supplier) => supplier.id}
+                  getOptionLabel={getOcSupplierLabel}
+                  queryKeyPrefix="logistics-supplier"
+                  placeholder="Digite para buscar fornecedor..."
+                  searchPlaceholder="Nome, fantasia ou CNPJ..."
+                  minSearchLength={0}
+                  noFocusRing
                 />
               </div>
 

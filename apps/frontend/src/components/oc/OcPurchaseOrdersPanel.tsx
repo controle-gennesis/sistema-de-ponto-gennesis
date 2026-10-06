@@ -153,6 +153,8 @@ import {
   ocPaymentListStatusLabel,
 } from '@/components/oc/ocPaymentListStatus';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   ApprovalPhaseStatCards,
@@ -2640,6 +2642,7 @@ export function OcPurchaseOrdersPanel({
     dueDateTo: ''
   };
   const [finalizedFilters, setFinalizedFilters] = useState(emptyFinalizedFilters);
+  const [finalizedSupplierLabel, setFinalizedSupplierLabel] = useState('');
   const [paymentDueFilters, setPaymentDueFilters] = useState(emptyPaymentDueFilters);
 
   const effectiveSearchTerm = onSearchChange ? searchTerm : internalSearchTerm;
@@ -2661,6 +2664,7 @@ export function OcPurchaseOrdersPanel({
 
   const clearFinalizedFilters = () => {
     setFinalizedFilters(emptyFinalizedFilters);
+    setFinalizedSupplierLabel('');
     setFinalizedPage(1);
   };
 
@@ -3982,15 +3986,6 @@ export function OcPurchaseOrdersPanel({
     refetchOnWindowFocus: false
   });
 
-  const { data: suppliersForFilter = [] } = useQuery({
-    queryKey: ['suppliers', 'oc-finalizadas-filter'],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { limit: 500 } });
-      return res.data?.data || [];
-    },
-    enabled: activeTab === 'FINALIZADAS'
-  });
-
   const { data: costCentersResponse } = useQuery({
     queryKey: ['cost-centers', 'oc-finalizadas-filter'],
     queryFn: async () => {
@@ -4008,18 +4003,6 @@ export function OcPurchaseOrdersPanel({
       return ca.localeCompare(cb, 'pt-BR', { numeric: true });
     });
   }, [costCentersResponse]);
-
-  const supplierFilterSelectOptions = useMemo(
-    () => [
-      { value: '', label: 'Todos', searchText: 'Todos' },
-      ...(suppliersForFilter as Array<{ id: string; name: string }>).map((s) => ({
-        value: s.id,
-        label: s.name,
-        searchText: s.name,
-      })),
-    ],
-    [suppliersForFilter]
-  );
 
   const costCenterFilterSelectOptions = useMemo(
     () => [
@@ -7266,14 +7249,38 @@ export function OcPurchaseOrdersPanel({
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Fornecedor
                   </label>
-                  <StringSingleSelectDropdown
-                    value={finalizedFilters.supplierId}
-                    onChange={(supplierId) =>
-                      setFinalizedFilters((f) => ({ ...f, supplierId }))
-                    }
-                    options={supplierFilterSelectOptions}
-                    allowEmpty={false}
-                  />
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <AsyncSearchSelectDropdown
+                        value={finalizedFilters.supplierId}
+                        selectedLabel={finalizedSupplierLabel || undefined}
+                        onChange={(supplier) => {
+                          setFinalizedFilters((f) => ({ ...f, supplierId: supplier.id }));
+                          setFinalizedSupplierLabel(getOcSupplierLabel(supplier));
+                        }}
+                        searchFn={searchOcSuppliers}
+                        getOptionId={(supplier) => supplier.id}
+                        getOptionLabel={getOcSupplierLabel}
+                        queryKeyPrefix="oc-finalizadas-supplier-filter"
+                        placeholder="Digite para buscar fornecedor..."
+                        searchPlaceholder="Nome, fantasia ou CNPJ..."
+                        minSearchLength={0}
+                        noFocusRing
+                      />
+                    </div>
+                    {finalizedFilters.supplierId ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFinalizedFilters((f) => ({ ...f, supplierId: '' }));
+                          setFinalizedSupplierLabel('');
+                        }}
+                        className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Todos
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">

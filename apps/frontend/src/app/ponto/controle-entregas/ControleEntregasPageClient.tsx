@@ -26,6 +26,9 @@ import { Modal } from '@/components/ui/Modal';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -93,6 +96,7 @@ type FormState = {
   currentStatus: CurrentStatusValue;
   paymentStatus: PaymentStatusValue;
   supplierId: string;
+  supplierName: string;
   purchaseOrderId: string;
   orderValue: string;
   expectedDelivery: string;
@@ -110,6 +114,7 @@ const EMPTY_FORM: FormState = {
   currentStatus: 'APROVADO_SUPRIMENTOS',
   paymentStatus: 'AGUARDANDO_PAGAMENTO',
   supplierId: '',
+  supplierName: '',
   purchaseOrderId: '',
   orderValue: '',
   expectedDelivery: '',
@@ -192,6 +197,8 @@ function rowToForm(row: MaterialDeliveryRow): FormState {
     currentStatus: row.currentStatus,
     paymentStatus: row.paymentStatus,
     supplierId: row.supplierId ?? '',
+    supplierName:
+      (row.supplier ? getOcSupplierLabel(row.supplier) : '') || row.supplierName || '',
     purchaseOrderId: row.purchaseOrderId ?? '',
     orderValue: formatCurrencyInputBrFromNumber(row.orderValue),
     expectedDelivery: toInputDate(row.expectedDelivery),
@@ -356,15 +363,6 @@ export default function ControleEntregasPageClient() {
     },
   });
 
-  const { data: suppliersRes } = useQuery({
-    queryKey: ['suppliers-for-deliveries'],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { isActive: true, limit: 500 } });
-      return res.data;
-    },
-    enabled: showForm,
-  });
-
   const { data: contractsRes } = useQuery({
     queryKey: ['contracts-for-deliveries'],
     queryFn: async () => {
@@ -382,17 +380,11 @@ export default function ControleEntregasPageClient() {
   const summary = summaryRes?.data ?? { total: 0, awaitingEngineering: 0, delivered: 0, overdue: 0 };
   const listHeader = useMemo(() => getListHeaderConfig(viewFilter), [viewFilter]);
   const ListHeaderIcon = listHeader.Icon;
-  const suppliers = suppliersRes?.data ?? [];
   const contracts = (contractsRes?.data ?? []) as ContractForDelivery[];
 
   const contractOptions = useMemo(
     () => contracts.map((c: { id: string; name: string }) => ({ value: c.id, label: c.name })),
     [contracts]
-  );
-
-  const supplierOptions = useMemo(
-    () => suppliers.map((s: { id: string; name: string }) => ({ value: s.id, label: s.name })),
-    [suppliers]
   );
 
   const currentStatusOptions = useMemo(
@@ -443,9 +435,6 @@ export default function ControleEntregasPageClient() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const selectedSupplier = suppliers.find(
-        (s: { id: string; name: string }) => s.id === form.supplierId
-      );
       const payload = {
         polo: form.polo,
         movementId: form.movementId,
@@ -454,7 +443,7 @@ export default function ControleEntregasPageClient() {
         currentStatus: form.currentStatus,
         paymentStatus: form.paymentStatus,
         supplierId: form.supplierId || null,
-        supplierName: selectedSupplier?.name ?? null,
+        supplierName: form.supplierName || null,
         purchaseOrderId: form.purchaseOrderId || null,
         orderValue: parseCurrencyInputBr(form.orderValue),
         totalPaid: parseCurrencyInputBr(form.totalPaid),
@@ -570,8 +559,12 @@ export default function ControleEntregasPageClient() {
     setShowForm(true);
   };
 
-  const handleSupplierChange = (supplierId: string) => {
-    setForm((prev) => ({ ...prev, supplierId }));
+  const handleSupplierChange = (supplier: { id: string; name: string; tradeName?: string | null; code?: string }) => {
+    setForm((prev) => ({
+      ...prev,
+      supplierId: supplier.id,
+      supplierName: supplier.tradeName?.trim() || supplier.name,
+    }));
   };
 
   useEffect(() => {
@@ -1199,12 +1192,17 @@ export default function ControleEntregasPageClient() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Fornecedor</label>
-                <SingleSelectSearchDropdown
+                <AsyncSearchSelectDropdown
                   value={form.supplierId}
+                  selectedLabel={form.supplierName || undefined}
                   onChange={handleSupplierChange}
-                  options={supplierOptions}
-                  allowEmpty={false}
-                  placeholder="Selecionar fornecedor..."
+                  searchFn={searchOcSuppliers}
+                  getOptionId={(supplier) => supplier.id}
+                  getOptionLabel={getOcSupplierLabel}
+                  queryKeyPrefix="controle-entregas-supplier"
+                  placeholder="Digite para buscar fornecedor..."
+                  searchPlaceholder="Nome, fantasia ou CNPJ..."
+                  minSearchLength={0}
                   noFocusRing
                 />
               </div>

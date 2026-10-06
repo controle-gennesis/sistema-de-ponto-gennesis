@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
-import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import api from '@/lib/api';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
@@ -48,14 +49,6 @@ const YEAR_SELECT_OPTIONS = labeledToSelectOptions(
     return { value: String(year), label: String(year) };
   }).reverse()
 );
-
-type SupplierOption = {
-  id: string;
-  name: string;
-  tradeName?: string | null;
-  code?: string | null;
-  isActive?: boolean;
-};
 
 function CurrencyInput({
   value,
@@ -177,26 +170,6 @@ export function FinancialControlEntryFormModal({
   const [interestValue, setInterestValue] = useState('');
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const showQuickLaunch = simplifiedFromOc && !editingEntry;
-
-  const { data: suppliers = [] } = useQuery({
-    queryKey: ['suppliers', 'financial-control-entry'],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { limit: 2000 } });
-      return (res.data?.data || []) as SupplierOption[];
-    },
-    enabled: isOpen && !showQuickLaunch,
-    staleTime: 60_000,
-  });
-
-  const supplierOptions = useMemo(() => {
-    const active = suppliers.filter((s) => s.isActive !== false);
-    const opts = active.map((s) => financialControlSupplierSelectOption(s));
-    const current = form.supplierName.trim();
-    if (current && !opts.some((o) => o.value === current)) {
-      opts.unshift({ value: current, label: current, searchText: current });
-    }
-    return opts;
-  }, [suppliers, form.supplierName]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -412,17 +385,23 @@ export function FinancialControlEntryFormModal({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Fornecedor
             </label>
-            <SingleSelectSearchDropdown
+            <AsyncSearchSelectDropdown
               value={form.supplierName}
-              onChange={(supplierName) => setForm({ ...form, supplierName })}
-              options={supplierOptions}
-              placeholder="Selecione o fornecedor"
-              searchPlaceholder="Pesquisar fornecedor..."
-              emptyOptionsMessage="Nenhum fornecedor cadastrado."
-              emptySearchMessage="Nenhum fornecedor encontrado."
-              allowEmpty={false}
+              selectedLabel={form.supplierName || undefined}
+              onChange={(supplier) =>
+                setForm({
+                  ...form,
+                  supplierName: financialControlSupplierSelectOption(supplier).value,
+                })
+              }
+              searchFn={searchOcSuppliers}
+              getOptionId={(supplier) => supplier.id}
+              getOptionLabel={(supplier) => financialControlSupplierSelectOption(supplier).label}
+              queryKeyPrefix="financial-control-form-supplier"
+              placeholder="Digite para buscar fornecedor..."
+              searchPlaceholder="Nome, fantasia ou CNPJ..."
+              minSearchLength={0}
               noFocusRing
-              className="w-full"
             />
           </div>
           <div className="sm:col-span-2">

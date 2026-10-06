@@ -9,7 +9,6 @@ import {
   Building2,
   Camera,
   ClipboardList,
-  ChevronDown,
   FileText,
   HardHat,
   Link2Off,
@@ -28,9 +27,11 @@ import {
   CadastroListLoading,
 } from '@/components/ui/CadastroListSummary';
 import {
+  RowActionMenuCell,
   RowActionMenuPortal,
   cadastroListClasses,
 } from '@/components/ui/RowActionMenu';
+import { ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -656,7 +657,7 @@ export default function EmpreiteirosPage() {
   const [savingTeamLinkId, setSavingTeamLinkId] = useState<string | null>(null);
   const [openTeamLinkIds, setOpenTeamLinkIds] = useState<Record<string, boolean>>({});
   const [openParcelLinkIds, setOpenParcelLinkIds] = useState<Record<string, boolean>>({});
-  const [openServiceDetailIds, setOpenServiceDetailIds] = useState<Record<string, boolean>>({});
+  const [serviceDetailLinkId, setServiceDetailLinkId] = useState<string | null>(null);
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
   const [empSkipAutoDetail, setEmpSkipAutoDetail] = useState(false);
 
@@ -822,7 +823,14 @@ export default function EmpreiteirosPage() {
     setEditingServiceId(null);
     setAddingContract(false);
     setAddingAddendumForId(null);
+    setServiceDetailLinkId(null);
     setPageSection('cadastro');
+  };
+
+  const closeServiceDetailModal = () => {
+    setServiceDetailLinkId(null);
+    setEditingServiceId(null);
+    if (addingAddendumForId) resetAddendumForm();
   };
 
   const openDetails = (item: EmpreiteiroRow) => {
@@ -832,6 +840,7 @@ export default function EmpreiteirosPage() {
     setContractTeamDraftById(teamDraftsFromContracts(item.contracts));
     setAddingContract(false);
     setEditingServiceId(null);
+    setServiceDetailLinkId(null);
     setAddingAddendumForId(null);
     setNewServiceName('');
     setNewServiceDescription('');
@@ -1214,6 +1223,7 @@ export default function EmpreiteirosPage() {
         queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
       }
       if (editingServiceId === link.id) setEditingServiceId(null);
+      if (serviceDetailLinkId === link.id) setServiceDetailLinkId(null);
       toast.success(res.data?.message || 'Contrato de serviço excluído');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível excluir o contrato');
@@ -1231,6 +1241,7 @@ export default function EmpreiteirosPage() {
 
   const openEditService = (link: EmpreiteiroContractLink) => {
     setAddingContract(false);
+    setServiceDetailLinkId(link.id);
     setEditingServiceId(link.id);
     setEditServiceName(link.contratoNome || link.name || '');
     setEditServiceDescription(link.description || '');
@@ -1768,6 +1779,15 @@ export default function EmpreiteirosPage() {
     closeRowActionMenu,
     isRowMenuOpen,
   } = useRowActionMenu(items);
+
+  const contractLinksForMenu = viewingItem?.contracts ?? [];
+  const {
+    rowActionMenu: contractRowActionMenu,
+    rowForActionMenu: contractRowForActionMenu,
+    toggleRowActionMenu: toggleContractRowActionMenu,
+    closeRowActionMenu: closeContractRowActionMenu,
+    isRowMenuOpen: isContractRowMenuOpen,
+  } = useRowActionMenu(contractLinksForMenu);
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const saving = createMutation.isPending || updateMutation.isPending;
@@ -3086,136 +3106,229 @@ export default function EmpreiteirosPage() {
                       </button>
                     </div>
                   ) : null}
-                  <div className="space-y-2">
-                    {(viewingItem.contracts || []).length === 0 ? (
-                      <p className="rounded-xl border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                        Nenhum contrato de serviço. Use “Adicionar serviço” para cadastrar.
-                      </p>
-                    ) : null}
-                    {(viewingItem.contracts || []).map((link) => {
-                      const statusMeta = contractStatusMeta(link.status);
-                      const contractValue =
-                        link.currentValue != null && Number.isFinite(link.currentValue)
-                          ? link.currentValue
-                          : link.plannedValue != null && Number.isFinite(link.plannedValue)
-                            ? link.plannedValue
-                            : null;
-                      let paidTotal = 0;
-                      for (const parcel of link.installments || []) {
-                        const amount = Number(parcel.amount) || 0;
-                        if (String(parcel.status || '').toUpperCase() === 'PAID') {
-                          paidTotal += amount;
-                        }
-                      }
-                      const executedTotal =
-                        link.executedAmountTotal != null &&
-                        Number.isFinite(Number(link.executedAmountTotal))
-                          ? Number(link.executedAmountTotal)
-                          : 0;
-                      const saldoValue =
-                        contractValue != null
-                          ? Number((contractValue - paidTotal).toFixed(2))
-                          : null;
-                      const executedPct =
-                        contractValue != null && contractValue > 0
-                          ? Math.min(100, Math.round((executedTotal / contractValue) * 100))
-                          : null;
-                      const measurementLabel =
-                        (link.measurementCount ?? 0) === 1
-                          ? '1 medição'
-                          : `${link.measurementCount ?? 0} medições`;
-                      const serviceDetailsOpen = Boolean(openServiceDetailIds[link.id]);
-                      const lastAddendumNumber = (link.addenda || []).reduce(
-                        (max, a) => Math.max(max, a.number),
-                        0
-                      );
-                      return (
-                        <article
-                          key={link.id}
-                          className="rounded-2xl border border-gray-200/90 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/55 sm:p-5"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                {link.contratoNome || link.name || 'Contrato de serviço'}
-                              </p>
-                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                {[
-                                  link.location,
-                                  link.centroCustoNome,
-                                  `${formatDateBr(link.startDate)} – ${formatDateBr(link.endDate)}`,
-                                ]
-                                  .filter(Boolean)
-                                  .join(' · ')}
-                              </p>
-                            </div>
-                            <div
-                              className="flex shrink-0 flex-wrap items-center gap-1.5"
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
-                              >
-                                {statusMeta.label}
-                              </span>
-                              <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                                {paymentLabelForLink(link)}
-                              </span>
+                  {(viewingItem.contracts || []).length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                      Nenhum contrato de serviço. Use “Adicionar serviço” para cadastrar.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="table-scroll">
+                        <table className={`${cadastroListClasses.table} text-sm`}>
+                          <thead className="border-b border-gray-200 dark:border-gray-700">
+                            <tr>
+                              <th className={cadastroListClasses.th}>Serviço</th>
+                              <th className={cadastroListClasses.th}>Local / CC</th>
+                              <th className={cadastroListClasses.th}>Período</th>
+                              <th className={cadastroListClasses.th}>Valor</th>
+                              <th className={cadastroListClasses.th}>Status</th>
+                              <th className={cadastroListClasses.th}>Pagamento</th>
                               {canManageCadastro ? (
-                                <select
-                                  disabled={savingContractLink}
-                                  value={String(link.status || 'IN_PROGRESS').toUpperCase()}
-                                  onChange={(e) => {
-                                    void handleUpdateContractStatus(
-                                      link.id,
-                                      e.target.value as EmpreiteiroContractStatus
-                                    );
-                                  }}
-                                  className="max-w-[9.5rem] rounded-lg border border-gray-300 bg-white px-1.5 py-1 text-[11px] font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
-                                  aria-label="Alterar status do contrato"
-                                >
-                                  {CONTRACT_STATUS_OPTIONS.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </option>
-                                  ))}
-                                </select>
+                                <th className={listTableRowClasses.actionTh}>Ação</th>
                               ) : null}
-                              {canManageCadastro ? (
-                                <button
-                                  type="button"
-                                  disabled={savingContractLink}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditService(link);
-                                  }}
-                                  className="rounded-lg border border-gray-300 p-1.5 text-gray-500 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-50 dark:border-gray-600 dark:hover:border-sky-800 dark:hover:bg-sky-950/40 dark:hover:text-sky-300"
-                                  title="Editar contrato de serviço"
-                                  aria-label="Editar contrato de serviço"
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                            {(viewingItem.contracts || []).map((link) => {
+                              const statusMeta = contractStatusMeta(link.status);
+                              const contractValue =
+                                link.currentValue != null && Number.isFinite(link.currentValue)
+                                  ? link.currentValue
+                                  : link.plannedValue != null && Number.isFinite(link.plannedValue)
+                                    ? link.plannedValue
+                                    : null;
+                              const localCc = [
+                                link.location,
+                                link.centroCustoNome || link.costCenter?.name,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ');
+                              return (
+                                <tr
+                                  key={link.id}
+                                  className={`${listTableRowClasses.tr} cursor-pointer`}
+                                  onClick={() => setServiceDetailLinkId(link.id)}
                                 >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                              ) : null}
-                              {canManageCadastro ? (
-                                <button
-                                  type="button"
-                                  disabled={savingContractLink}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void handleDeleteContractLink(link);
-                                  }}
-                                  className="rounded-lg border border-gray-300 p-1.5 text-gray-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:border-gray-600 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-                                  title="Excluir contrato de serviço"
-                                  aria-label="Excluir contrato de serviço"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
+                                  <td className={cadastroListClasses.td}>
+                                    <ListRowNavigableLabel>
+                                      {link.contratoNome || link.name || 'Contrato de serviço'}
+                                    </ListRowNavigableLabel>
+                                  </td>
+                                  <td className={cadastroListClasses.td}>
+                                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                                      {localCc || '—'}
+                                    </span>
+                                  </td>
+                                  <td className={cadastroListClasses.td}>
+                                    <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                                      {formatDateBr(link.startDate)} – {formatDateBr(link.endDate)}
+                                    </span>
+                                  </td>
+                                  <td className={cadastroListClasses.td}>
+                                    <span className="whitespace-nowrap text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                                      {formatMoneyBr(contractValue) || '—'}
+                                    </span>
+                                  </td>
+                                  <td className={cadastroListClasses.td}>
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
+                                    >
+                                      {statusMeta.label}
+                                    </span>
+                                  </td>
+                                  <td className={cadastroListClasses.td}>
+                                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                                      {paymentLabelForLink(link)}
+                                    </span>
+                                  </td>
+                                  {canManageCadastro ? (
+                                    <RowActionMenuCell
+                                      isOpen={isContractRowMenuOpen(link.id)}
+                                      onToggle={(e) =>
+                                        toggleContractRowActionMenu(
+                                          link.id,
+                                          e.currentTarget as HTMLButtonElement
+                                        )
+                                      }
+                                    />
+                                  ) : null}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      {contractRowActionMenu && contractRowForActionMenu ? (
+                        <RowActionMenuPortal
+                          menu={contractRowActionMenu}
+                          onClose={closeContractRowActionMenu}
+                          onEdit={() => openEditService(contractRowForActionMenu)}
+                          onDelete={() => {
+                            void handleDeleteContractLink(contractRowForActionMenu);
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  )}
 
-                          {editingServiceId === link.id ? (
+                  {serviceDetailLinkId
+                    ? (() => {
+                        const link = (viewingItem.contracts || []).find(
+                          (c) => c.id === serviceDetailLinkId
+                        );
+                        if (!link) return null;
+                        const statusMeta = contractStatusMeta(link.status);
+                        const contractValue =
+                          link.currentValue != null && Number.isFinite(link.currentValue)
+                            ? link.currentValue
+                            : link.plannedValue != null && Number.isFinite(link.plannedValue)
+                              ? link.plannedValue
+                              : null;
+                        let paidTotal = 0;
+                        for (const parcel of link.installments || []) {
+                          const amount = Number(parcel.amount) || 0;
+                          if (String(parcel.status || '').toUpperCase() === 'PAID') {
+                            paidTotal += amount;
+                          }
+                        }
+                        const executedTotal =
+                          link.executedAmountTotal != null &&
+                          Number.isFinite(Number(link.executedAmountTotal))
+                            ? Number(link.executedAmountTotal)
+                            : 0;
+                        const saldoValue =
+                          contractValue != null
+                            ? Number((contractValue - paidTotal).toFixed(2))
+                            : null;
+                        const executedPct =
+                          contractValue != null && contractValue > 0
+                            ? Math.min(100, Math.round((executedTotal / contractValue) * 100))
+                            : null;
+                        const measurementLabel =
+                          (link.measurementCount ?? 0) === 1
+                            ? '1 medição'
+                            : `${link.measurementCount ?? 0} medições`;
+                        const lastAddendumNumber = (link.addenda || []).reduce(
+                          (max, a) => Math.max(max, a.number),
+                          0
+                        );
+                        return (
+                          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
+                            <div
+                              className="absolute inset-0 bg-black/50"
+                              onClick={closeServiceDetailModal}
+                            />
+                            <div className="relative mx-auto flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800">
+                              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
+                                <div className="min-w-0">
+                                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                                    {link.contratoNome || link.name || 'Contrato de serviço'}
+                                  </h3>
+                                  {link.description?.trim() ? (
+                                    <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-300">
+                                      {link.description.trim()}
+                                    </p>
+                                  ) : null}
+                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {[
+                                      link.location,
+                                      link.centroCustoNome || link.costCenter?.name,
+                                      `${formatDateBr(link.startDate)} – ${formatDateBr(link.endDate)}`,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' · ')}
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
+                                    >
+                                      {statusMeta.label}
+                                    </span>
+                                    <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                                      {paymentLabelForLink(link)}
+                                    </span>
+                                    {canManageCadastro ? (
+                                      <select
+                                        disabled={savingContractLink}
+                                        value={String(link.status || 'IN_PROGRESS').toUpperCase()}
+                                        onChange={(e) => {
+                                          void handleUpdateContractStatus(
+                                            link.id,
+                                            e.target.value as EmpreiteiroContractStatus
+                                          );
+                                        }}
+                                        className="max-w-[9.5rem] rounded-lg border border-gray-300 bg-white px-1.5 py-1 text-[11px] font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                                        aria-label="Alterar status do contrato"
+                                      >
+                                        {CONTRACT_STATUS_OPTIONS.map((opt) => (
+                                          <option key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openMedicaoPage(viewingItem, link.id)}
+                                    className="inline-flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                  >
+                                    <ClipboardList className="h-3.5 w-3.5" />
+                                    Ver medições
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={closeServiceDetailModal}
+                                    className="rounded p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                    aria-label="Fechar"
+                                  >
+                                    <X className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+{editingServiceId === link.id ? (
                             <div
                               className="mt-3 space-y-3 rounded-xl border border-dashed border-sky-300 bg-sky-50/40 p-3 dark:border-sky-900/50 dark:bg-sky-950/20"
                               onClick={(e) => e.stopPropagation()}
@@ -3530,49 +3643,22 @@ export default function EmpreiteirosPage() {
                             />
                           </div>
 
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {measurementLabel}
-                              {(link.teamCount ?? link.team?.length ?? 0) > 0
-                                ? ` · ${link.teamCount ?? link.team?.length} na equipe`
-                                : ' · Sem equipe'}
-                              {(link.addendaCount || 0) > 0
-                                ? ` · ${link.addendaCount} aditivo${
-                                    (link.addendaCount || 0) === 1 ? '' : 's'
-                                  }`
-                                : ''}
-                              {(link.plannedValue != null || (link.addendaTotal || 0) !== 0) &&
-                              (link.addendaCount || 0) > 0
-                                ? ` · original ${formatMoneyBr(link.plannedValue) || '—'}`
-                                : ''}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => openMedicaoPage(viewingItem, link.id)}
-                              className="inline-flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                            >
-                              <ClipboardList className="h-3.5 w-3.5" />
-                              Ver medições
-                            </button>
-                          </div>
+                          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                            {measurementLabel}
+                            {(link.teamCount ?? link.team?.length ?? 0) > 0
+                              ? ` · ${link.teamCount ?? link.team?.length} na equipe`
+                              : ' · Sem equipe'}
+                            {(link.addendaCount || 0) > 0
+                              ? ` · ${link.addendaCount} aditivo${
+                                  (link.addendaCount || 0) === 1 ? '' : 's'
+                                }`
+                              : ''}
+                            {(link.plannedValue != null || (link.addendaTotal || 0) !== 0) &&
+                            (link.addendaCount || 0) > 0
+                              ? ` · original ${formatMoneyBr(link.plannedValue) || '—'}`
+                              : ''}
+                          </p>
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOpenServiceDetailIds((prev) => ({
-                                ...prev,
-                                [link.id]: !prev[link.id],
-                              }))
-                            }
-                            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <ChevronDown
-                              className={`h-3.5 w-3.5 transition ${serviceDetailsOpen ? 'rotate-180' : ''}`}
-                            />
-                            {serviceDetailsOpen ? 'Ocultar detalhes' : 'Ver detalhes do serviço'}
-                          </button>
-
-                          {serviceDetailsOpen ? (
                           <>
                           {!isOwnEmpreiteiroAccount ? (
                           <div
@@ -4215,11 +4301,12 @@ export default function EmpreiteirosPage() {
                           ) : null}
                           {renderContractTeamSection(link)}
                           </>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
+                              </div>
+                            </div>
+                          </AppModalOverlay>
+                        );
+                      })()
+                    : null}
                 </div>
 
               <div className="flex flex-wrap justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">

@@ -344,6 +344,7 @@ type CostCenterOption = { id: string; name: string; code?: string | null };
 const CATEGORY_ORDER = [
   'Principal',
   'Departamento Pessoal',
+  'Administração',
   'Financeiro',
   'Métricas',
   'Engenharia',
@@ -399,6 +400,9 @@ function inferCategoryFromHref(href: string): string {
     ].some((p) => h === p)
   ) {
     return 'Departamento Pessoal';
+  }
+  if (h === '/ponto/gerenciar-solicitacoes-adm-tst') {
+    return 'Administração';
   }
   if (
     h === '/ponto/financeiro/analise-extrato' ||

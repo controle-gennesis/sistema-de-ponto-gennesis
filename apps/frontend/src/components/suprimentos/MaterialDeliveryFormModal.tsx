@@ -4,6 +4,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/ui/Modal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -32,6 +35,7 @@ export type MaterialDeliveryFormState = {
   currentStatus: CurrentStatusValue;
   paymentStatus: PaymentStatusValue;
   supplierId: string;
+  supplierName: string;
   purchaseOrderId: string;
   orderValue: string;
   expectedDelivery: string;
@@ -52,6 +56,7 @@ export const EMPTY_MATERIAL_DELIVERY_FORM: MaterialDeliveryFormState = {
   currentStatus: 'APROVADO_SUPRIMENTOS',
   paymentStatus: 'AGUARDANDO_PAGAMENTO',
   supplierId: '',
+  supplierName: '',
   purchaseOrderId: '',
   orderValue: '',
   expectedDelivery: '',
@@ -74,6 +79,7 @@ type EditingDelivery = {
   currentStatus: CurrentStatusValue;
   paymentStatus: PaymentStatusValue;
   supplierId?: string | null;
+  supplierName?: string | null;
   purchaseOrderId: string | null;
   orderValue: string | number | null;
   expectedDelivery: string | null;
@@ -118,6 +124,7 @@ export function editingDeliveryToForm(row: EditingDelivery): MaterialDeliveryFor
     currentStatus: row.currentStatus,
     paymentStatus: row.paymentStatus,
     supplierId: row.supplierId ?? '',
+    supplierName: row.supplierName ?? '',
     purchaseOrderId: row.purchaseOrderId ?? '',
     orderValue: formatCurrencyInputBrFromNumber(row.orderValue),
     expectedDelivery: toInputDate(row.expectedDelivery),
@@ -168,15 +175,6 @@ export function MaterialDeliveryFormModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
 
-  const { data: suppliersRes } = useQuery({
-    queryKey: ['suppliers-for-deliveries'],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', { params: { isActive: true, limit: 500 } });
-      return res.data;
-    },
-    enabled: isOpen,
-  });
-
   const { data: contractsRes } = useQuery({
     queryKey: ['contracts-for-deliveries'],
     queryFn: async () => {
@@ -186,17 +184,11 @@ export function MaterialDeliveryFormModal({
     enabled: isOpen,
   });
 
-  const suppliers = suppliersRes?.data ?? [];
   const contracts = (contractsRes?.data ?? []) as { id: string; name: string }[];
 
   const contractOptions = useMemo(
     () => contracts.map((c) => ({ value: c.id, label: c.name })),
     [contracts]
-  );
-
-  const supplierOptions = useMemo(
-    () => suppliers.map((s: { id: string; name: string }) => ({ value: s.id, label: s.name })),
-    [suppliers]
   );
 
   const currentStatusOptions = useMemo(
@@ -216,9 +208,6 @@ export function MaterialDeliveryFormModal({
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const selectedSupplier = suppliers.find(
-        (s: { id: string; name: string }) => s.id === form.supplierId
-      );
       const payload = {
         polo: form.polo,
         movementId: form.movementId,
@@ -227,7 +216,7 @@ export function MaterialDeliveryFormModal({
         currentStatus: form.currentStatus,
         paymentStatus: form.paymentStatus,
         supplierId: form.supplierId || null,
-        supplierName: selectedSupplier?.name ?? null,
+        supplierName: form.supplierName || null,
         purchaseOrderId: form.purchaseOrderId || null,
         orderValue: parseCurrencyInputBr(form.orderValue),
         totalPaid: parseCurrencyInputBr(form.totalPaid),
@@ -405,12 +394,23 @@ export function MaterialDeliveryFormModal({
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Fornecedor</label>
-            <SingleSelectSearchDropdown
+            <AsyncSearchSelectDropdown
               value={form.supplierId}
-              onChange={(supplierId) => setForm((f) => ({ ...f, supplierId }))}
-              options={supplierOptions}
-              allowEmpty={false}
-              placeholder="Selecionar fornecedor..."
+              selectedLabel={form.supplierName || undefined}
+              onChange={(supplier) =>
+                setForm((f) => ({
+                  ...f,
+                  supplierId: supplier.id,
+                  supplierName: supplier.tradeName?.trim() || supplier.name,
+                }))
+              }
+              searchFn={searchOcSuppliers}
+              getOptionId={(supplier) => supplier.id}
+              getOptionLabel={getOcSupplierLabel}
+              queryKeyPrefix="material-delivery-supplier"
+              placeholder="Digite para buscar fornecedor..."
+              searchPlaceholder="Nome, fantasia ou CNPJ..."
+              minSearchLength={0}
               noFocusRing
             />
           </div>
