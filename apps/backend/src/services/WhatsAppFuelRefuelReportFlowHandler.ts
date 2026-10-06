@@ -33,6 +33,8 @@ const TANK_OPTIONS: Array<{ level: FuelTankLevelAfter; label: string }> = [
   { level: FuelTankLevelAfter.FULL, label: 'Tanque cheio' },
 ];
 
+const TANK_OPTION_ID_PREFIX = 'fuel_tank_';
+
 function waButtons(body: string, extra?: Array<{ id: string; title: string }>): SendAction {
   return {
     type: 'buttons',
@@ -42,6 +44,70 @@ function waButtons(body: string, extra?: Array<{ id: string; title: string }>): 
       { id: 'END', title: 'Encerrar' },
     ],
   };
+}
+
+function waList(
+  body: string,
+  rows: Array<{ id: string; title: string }>,
+  buttonText = 'Escolher',
+): SendAction {
+  return {
+    type: 'list',
+    body,
+    buttonText,
+    sections: [{ title: 'Opções', rows: rows.slice(0, 10) }],
+  };
+}
+
+function tankOptionId(level: FuelTankLevelAfter): string {
+  return `${TANK_OPTION_ID_PREFIX}${level}`;
+}
+
+function tankListAction(body = 'Qual o nível do tanque após o abastecimento?'): SendAction {
+  return waList(
+    body,
+    TANK_OPTIONS.map((o) => ({
+      id: tankOptionId(o.level),
+      title: o.label.slice(0, 24),
+    })),
+    'Ver opções',
+  );
+}
+
+function resolveTankChoice(content: string, textRaw: string): (typeof TANK_OPTIONS)[number] | null {
+  const raw = content.trim() || textRaw.trim();
+  if (!raw) return null;
+
+  if (raw.startsWith(TANK_OPTION_ID_PREFIX)) {
+    const level = raw.slice(TANK_OPTION_ID_PREFIX.length) as FuelTankLevelAfter;
+    return TANK_OPTIONS.find((o) => o.level === level) ?? null;
+  }
+
+  const asIndex = parseInt(raw, 10);
+  if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= TANK_OPTIONS.length) {
+    return TANK_OPTIONS[asIndex - 1];
+  }
+
+  const lower = raw.toLowerCase();
+  return (
+    TANK_OPTIONS.find((o) => o.label.toLowerCase() === lower) ||
+    TANK_OPTIONS.find((o) => o.label.toLowerCase().includes(lower)) ||
+    null
+  );
+}
+
+function requestListAction(
+  options: Array<{ id: string; displayNumber: number; label: string }>,
+  body = 'Selecione a solicitação do abastecimento:',
+): SendAction {
+  return waList(
+    body,
+    options.slice(0, 10).map((o) => ({
+      id: o.id,
+      title: `#${o.displayNumber} ${o.label}`.slice(0, 24),
+    })),
+    'Ver solicitações',
+  );
 }
 
 function tankLabel(level?: FuelTankLevelAfter): string {
@@ -59,16 +125,6 @@ function formatMoney(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function formatRequestList(
-  options: Array<{ id: string; displayNumber: number; label: string }>,
-): string {
-  if (options.length === 0) {
-    return 'Não há solicitações aprovadas aguardando informe de abastecimento.';
-  }
-  const lines = options.map((o, i) => `${i + 1}. #${o.displayNumber} — ${o.label}`);
-  return `Escolha a solicitação (digite o número da opção):\n${lines.join('\n')}`;
-}
-
 type RequestOption = {
   id: string;
   displayNumber: number;
@@ -76,8 +132,17 @@ type RequestOption = {
   requesterId: string;
 };
 
-function resolveRequestChoice(input: string, options: RequestOption[]): RequestOption | null {
-  const trimmed = input.trim();
+function resolveRequestChoice(
+  content: string,
+  textRaw: string,
+  options: RequestOption[],
+): RequestOption | null {
+  const trimmed = (content || textRaw).trim();
+  if (!trimmed) return null;
+
+  const byId = options.find((o) => o.id === trimmed);
+  if (byId) return byId;
+
   const asIndex = parseInt(trimmed, 10);
   if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= options.length) {
     return options[asIndex - 1];
@@ -117,6 +182,12 @@ function buildSummary(payload: Record<string, unknown>): string {
 const CONFIRM_YES_NO_BUTTONS = [
   { id: 'SIM', title: 'Sim' },
   { id: 'NAO', title: 'Não' },
+];
+
+const OBSERVATIONS_BUTTONS = [
+  { id: 'NAO', title: 'Não' },
+  { id: 'MENU', title: 'Menu' },
+  { id: 'END', title: 'Encerrar' },
 ];
 
 export function isWhatsAppFuelReportFlowStatus(status: string): boolean {
@@ -309,7 +380,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
 
     newPayload.requestOptions = requestOptions;
     return {
-      sendAction: waButtons(formatRequestList(requestOptions)),
+      sendAction: requestListAction(requestOptions),
       newStatus: 'FUEL_REPORT_SELECT_REQUEST',
       newPayload,
     };
@@ -318,10 +389,10 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
   switch (newStatus) {
     case 'FUEL_REPORT_SELECT_REQUEST': {
       const options = (newPayload.requestOptions as RequestOption[]) ?? [];
-      const chosen = resolveRequestChoice(textRaw, options);
+      const chosen = resolveRequestChoice(content, textRaw, options);
       if (!chosen) {
         return {
-          sendAction: waButtons(`Opção inválida.\n${formatRequestList(options)}`),
+          sendAction: requestListAction(options, 'Opção inválida. Selecione a solicitação:'),
           newStatus,
           newPayload,
         };
@@ -350,31 +421,25 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
         };
       }
       newPayload.odometerKm = km;
-      const tankLines = TANK_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
       return {
-        sendAction: waButtons(`Tanque após o abastecimento — digite o número:\n${tankLines}`),
+        sendAction: tankListAction(),
         newStatus: 'FUEL_REPORT_ASK_TANK',
         newPayload,
       };
     }
 
     case 'FUEL_REPORT_ASK_TANK': {
-      const asIndex = parseInt(textRaw.trim(), 10);
-      const chosen =
-        Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= TANK_OPTIONS.length
-          ? TANK_OPTIONS[asIndex - 1]
-          : TANK_OPTIONS.find((o) => o.label.toLowerCase().includes(textRaw.toLowerCase()));
+      const chosen = resolveTankChoice(content, textRaw);
       if (!chosen) {
-        const tankLines = TANK_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
         return {
-          sendAction: waButtons(`Opção inválida.\n${tankLines}`),
+          sendAction: tankListAction('Opção inválida. Selecione o nível do tanque:'),
           newStatus,
           newPayload,
         };
       }
       newPayload.tankLevelAfter = chosen.level;
       return {
-        sendAction: waButtons('Quantos litros foram abastecidos? (ex.: 45,500)'),
+        sendAction: waButtons('Quantos litros foram abastecidos?'),
         newStatus: 'FUEL_REPORT_ASK_LITERS',
         newPayload,
       };
@@ -400,7 +465,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
       }
       newPayload.litersRefueled = liters;
       return {
-        sendAction: waButtons('Qual o valor por litro? (ex.: R$ 5,89)'),
+        sendAction: waButtons('Qual o valor por litro?'),
         newStatus: 'FUEL_REPORT_ASK_PRICE',
         newPayload,
       };
@@ -436,7 +501,8 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
       newPayload.receiptPhotoName = savedMedia!.fileName;
       return {
         sendAction: waButtons(
-          'Alguma observação sobre o abastecimento? (opcional — digite «não» para pular)',
+          'Alguma observação sobre o abastecimento?',
+          OBSERVATIONS_BUTTONS,
         ),
         newStatus: 'FUEL_REPORT_ASK_OBSERVATIONS',
         newPayload,
@@ -501,6 +567,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
         receiptPhotoKey: (newPayload.receiptPhotoKey as string | undefined) || null,
         receiptPhotoName: (newPayload.receiptPhotoName as string | undefined) || null,
         observations: (newPayload.observations as string | undefined) || null,
+        skipRequesterNotify: true,
       });
 
       return {
@@ -557,7 +624,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
           requesterId: r.requesterId,
         }));
         return {
-          sendAction: waButtons(formatRequestList(requestOptions)),
+          sendAction: requestListAction(requestOptions),
           newStatus: 'FUEL_REPORT_SELECT_REQUEST',
           newPayload: { flow: 'FUEL_REPORT', requestOptions },
           newConversationStatus: 'PENDING',

@@ -84,6 +84,11 @@ export type SubmitFuelRefuelReportInput = {
   requesterId: string;
   /** Quando true, Suprimentos pode informar o abastecimento em nome do solicitante. */
   allowNonRequester?: boolean;
+  /**
+   * Quando true, não envia a mensagem “Dados… recebidos” no chat/WhatsApp —
+   * o fluxo (WhatsApp/Gennecy) já responde com a confirmação.
+   */
+  skipRequesterNotify?: boolean;
   requestId: string;
   odometerKm: number;
   tankLevelAfter: FuelTankLevelAfter;
@@ -744,11 +749,13 @@ export class FuelRefuelRequestService {
       include: fuelRefuelInclude,
     });
 
-    await notifyFuelRequesterReportCompleted(
-      updated.sourceChatId,
-      updated.displayNumber,
-      updated.sourceWhatsAppPhone,
-    );
+    if (!input.skipRequesterNotify) {
+      await notifyFuelRequesterReportCompleted(
+        updated.sourceChatId,
+        updated.displayNumber,
+        updated.sourceWhatsAppPhone,
+      );
+    }
     return updated;
   }
 

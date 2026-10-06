@@ -255,7 +255,7 @@ export class GennecyFuelRefuelReportFlowService {
         const tankLines = TANK_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
         return {
           handled: true,
-          reply: `Tanque após o abastecimento — digite o número:\n${tankLines}`,
+          reply: `Qual o nível do tanque após o abastecimento?\n${tankLines}`,
         };
       }
 
@@ -273,7 +273,7 @@ export class GennecyFuelRefuelReportFlowService {
           ...payload,
           tankLevelAfter: chosen.level,
         });
-        return { handled: true, reply: 'Quantos litros foram abastecidos? (ex.: 45,500)' };
+        return { handled: true, reply: 'Quantos litros foram abastecidos?' };
       }
 
       case 'ASK_LITERS': {
@@ -291,7 +291,7 @@ export class GennecyFuelRefuelReportFlowService {
           ...payload,
           litersRefueled: liters,
         });
-        return { handled: true, reply: 'Qual o valor por litro? (ex.: R$ 5,89)' };
+        return { handled: true, reply: 'Qual o valor por litro?' };
       }
 
       case 'ASK_PRICE': {
@@ -338,7 +338,7 @@ export class GennecyFuelRefuelReportFlowService {
         });
         return {
           handled: true,
-          reply: 'Alguma observação sobre o abastecimento? (opcional — digite «não» para pular)',
+          reply: 'Alguma observação sobre o abastecimento?',
         };
       }
 
@@ -387,6 +387,7 @@ export class GennecyFuelRefuelReportFlowService {
           receiptPhotoKey: payload.receiptPhotoKey,
           receiptPhotoName: payload.receiptPhotoName,
           observations: payload.observations,
+          skipRequesterNotify: true,
         });
 
         await completeSession(params.chatId, params.userId);
