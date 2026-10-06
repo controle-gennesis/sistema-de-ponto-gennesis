@@ -60,7 +60,9 @@ import {
   createLicitacaoRegiaoManual,
   deleteLicitacaoRegiaoManual,
   getCanonicalRegiaoHeaders,
+  getLicitacaoRegiaoManualByRowKey,
   normalizeManualRowSnapshot,
+  updateLicitacaoRegiaoManualSnapshot,
 } from '../services/licitacaoRegiaoManualStore';
 import {
   removeLicitacoesLinkedToAceites,
@@ -617,6 +619,87 @@ export class LicitacaoController {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao criar licitação';
+      next(error instanceof Error ? createError(message, 400) : error);
+    }
+  }
+
+  async updateManualRegiao(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const regiaoKey = typeof req.body?.regiaoKey === 'string' ? req.body.regiaoKey.trim() : '';
+      const rowKey = typeof req.body?.rowKey === 'string' ? req.body.rowKey.trim() : '';
+      const tab = findLicitacaoRegiaoTab(regiaoKey);
+      if (!regiaoKey || !tab) {
+        throw createError('Região inválida.', 400);
+      }
+      if (!rowKey.startsWith('manual:')) {
+        throw createError('Somente licitações criadas no sistema podem ser editadas.', 400);
+      }
+
+      const existing = await getLicitacaoRegiaoManualByRowKey(regiaoKey, rowKey);
+      if (!existing) {
+        throw createError('Licitação criada no sistema não encontrada.', 404);
+      }
+
+      const fieldsRaw = req.body?.fields;
+      if (!fieldsRaw || typeof fieldsRaw !== 'object' || Array.isArray(fieldsRaw)) {
+        throw createError('Informe os campos da licitação.', 400);
+      }
+
+      const headersFromBody = Array.isArray(req.body?.headers)
+        ? req.body.headers.filter((header: unknown): header is string => typeof header === 'string' && header.trim().length > 0)
+        : [];
+      let editHeaders = headersFromBody;
+      if (editHeaders.length === 0) {
+        editHeaders = existing.headers;
+      }
+      if (editHeaders.length === 0) {
+        try {
+          const sheet = await fetchLicitacaoRegiaoSheet(regiaoKey, false);
+          editHeaders = sheet.headers.length > 0 ? sheet.headers : getCanonicalRegiaoHeaders(regiaoKey);
+        } catch {
+          editHeaders = getCanonicalRegiaoHeaders(regiaoKey);
+        }
+      }
+
+      const fields: Record<string, string> = {};
+      for (const [key, value] of Object.entries(fieldsRaw as Record<string, unknown>)) {
+        if (typeof value === 'string') fields[key] = value;
+        else if (value != null) fields[key] = String(value);
+      }
+
+      const edited = normalizeManualRowSnapshot(editHeaders, fields);
+      const rowSnapshot: Record<string, string> = { ...existing.rowSnapshot };
+      for (const header of editHeaders) {
+        const value = edited[header];
+        const trimmed = header.trim();
+        if (value) {
+          rowSnapshot[header] = value;
+          continue;
+        }
+        delete rowSnapshot[header];
+        for (const key of Object.keys(rowSnapshot)) {
+          if (key.trim() === trimmed) delete rowSnapshot[key];
+        }
+      }
+      if (Object.keys(rowSnapshot).length === 0) {
+        throw createError('Preencha ao menos um campo da licitação.', 400);
+      }
+
+      await updateLicitacaoRegiaoManualSnapshot({
+        regiaoKey,
+        rowKey,
+        rowSnapshot,
+      });
+
+      invalidateLicitacaoRegiaoSheetCache(regiaoKey);
+
+      res.json({
+        success: true,
+        data: { rowKey, rowSnapshot },
+        message: 'Licitação atualizada.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao atualizar licitação';
       next(error instanceof Error ? createError(message, 400) : error);
     }
   }

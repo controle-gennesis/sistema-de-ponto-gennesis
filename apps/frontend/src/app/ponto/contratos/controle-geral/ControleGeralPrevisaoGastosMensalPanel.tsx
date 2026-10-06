@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CalendarRange,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   Plus,
   RefreshCw,
@@ -14,6 +16,11 @@ import {
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import {
+  formatCurrencyInputBrFromNumber,
+  maskCurrencyInputBrOrEmpty,
+  parseCurrencyInputBr
+} from '@/lib/maskCurrencyBr';
 import type { GastosLocalityGroup } from './buildQueryGastosRows';
 import {
   createPrevisaoGastosColumn,
@@ -22,6 +29,11 @@ import {
   savePrevisaoGastosColumns,
   type PrevisaoGastosColumn
 } from './previsaoGastosColumns';
+import {
+  loadPrevisaoGastosMonthValues,
+  savePrevisaoGastosMonthValues,
+  type PrevisaoGastosMonthValues
+} from './previsaoGastosValues';
 
 type PrevisaoLocalityGroup = Pick<
   GastosLocalityGroup,
@@ -36,9 +48,56 @@ type ControleGeralPrevisaoGastosMensalPanelProps = {
   errorMessage?: string;
   onRetry?: () => void;
   localityGroups: PrevisaoLocalityGroup[];
-  /** Ano de referência da previsão mensal (filtro ou ano corrente). */
+  /** Mês inicial da previsão (filtro do controle ou mês corrente). */
   year: number;
+  month: number;
 };
+
+function shiftPrevisaoMonth(year: number, month: number, delta: -1 | 1) {
+  const next = new Date(year, month - 1 + delta, 1);
+  return { year: next.getFullYear(), month: next.getMonth() + 1 };
+}
+
+function formatPrevisaoMonthLabel(year: number, month: number): string {
+  return new Date(year, month - 1, 1).toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric'
+  });
+}
+
+function PrevisaoAmountCell({
+  value,
+  onCommit
+}: {
+  value: number | null;
+  onCommit: (next: number | null) => void;
+}) {
+  const [text, setText] = useState(() =>
+    value == null ? '' : formatCurrencyInputBrFromNumber(value)
+  );
+
+  useEffect(() => {
+    setText(value == null ? '' : formatCurrencyInputBrFromNumber(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      placeholder="—"
+      aria-label="Valor previsto"
+      onChange={(event) => setText(maskCurrencyInputBrOrEmpty(event.target.value))}
+      onBlur={() => onCommit(parseCurrencyInputBr(text))}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      }}
+      className="h-9 w-full rounded-md border border-transparent bg-transparent px-2 text-center text-sm tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-sky-500 focus:bg-white dark:text-gray-100 dark:placeholder:text-gray-500 dark:hover:border-gray-600 dark:focus:bg-gray-900"
+    />
+  );
+}
 
 export function ControleGeralPrevisaoGastosMensalPanel({
   isLoading,
@@ -46,11 +105,23 @@ export function ControleGeralPrevisaoGastosMensalPanel({
   errorMessage,
   onRetry,
   localityGroups,
-  year
+  year,
+  month
 }: ControleGeralPrevisaoGastosMensalPanelProps) {
   const [columns, setColumns] = useState<PrevisaoGastosColumn[]>(() => loadPrevisaoGastosColumns());
   const [isAddColumnOpen, setIsAddColumnOpen] = useState(false);
   const [newColumnLabel, setNewColumnLabel] = useState('');
+  const [cursor, setCursor] = useState(() => ({
+    year,
+    month: month >= 1 && month <= 12 ? month : new Date().getMonth() + 1
+  }));
+  const [monthValues, setMonthValues] = useState<PrevisaoGastosMonthValues>({});
+
+  useEffect(() => {
+    setMonthValues(loadPrevisaoGastosMonthValues(cursor.year, cursor.month));
+  }, [cursor.year, cursor.month]);
+
+  const monthLabel = formatPrevisaoMonthLabel(cursor.year, cursor.month);
 
   const contractCount = useMemo(
     () => localityGroups.reduce((sum, group) => sum + group.rows.length, 0),
@@ -97,6 +168,21 @@ export function ControleGeralPrevisaoGastosMensalPanel({
     toast.success('Colunas restauradas ao padrão.');
   };
 
+  const handleAmountCommit = (contract: string, columnId: string, next: number | null) => {
+    setMonthValues((prev) => {
+      const contractValues = { ...(prev[contract] ?? {}) };
+      if (next == null) delete contractValues[columnId];
+      else contractValues[columnId] = next;
+
+      const updated: PrevisaoGastosMonthValues = { ...prev };
+      if (Object.keys(contractValues).length === 0) delete updated[contract];
+      else updated[contract] = contractValues;
+
+      savePrevisaoGastosMonthValues(cursor.year, cursor.month, updated);
+      return updated;
+    });
+  };
+
   return (
     <Card>
       <CardHeader className="border-b-0 pb-1">
@@ -110,13 +196,36 @@ export function ControleGeralPrevisaoGastosMensalPanel({
                 Previsão de Gastos Mensal
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Mesmos centros de custo do Controle de Contratos · {year}
+                Mesmos centros de custo do Controle de Contratos
                 {contractCount > 0 ? ` · ${contractCount} contrato(s)` : ''}
               </p>
             </div>
           </div>
 
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+            <div className="inline-flex items-center rounded-full border border-gray-200 bg-white p-0.5 dark:border-gray-600 dark:bg-gray-800">
+              <button
+                type="button"
+                onClick={() => setCursor((current) => shiftPrevisaoMonth(current.year, current.month, -1))}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                aria-label="Mês anterior"
+                title="Mês anterior"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden />
+              </button>
+              <span className="min-w-[9.5rem] px-1 text-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {monthLabel}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCursor((current) => shiftPrevisaoMonth(current.year, current.month, 1))}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                aria-label="Próximo mês"
+                title="Próximo mês"
+              >
+                <ChevronRight className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
             <button
               type="button"
               onClick={handleResetColumns}
@@ -216,14 +325,18 @@ export function ControleGeralPrevisaoGastosMensalPanel({
                         <td className="sticky left-0 z-10 bg-white px-3 py-3 text-sm font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100">
                           {row.contract}
                         </td>
-                        {columns.map((column) => (
-                          <td
-                            key={`${row.rowKey}-${column.id}`}
-                            className="px-2 py-3 text-center text-sm tabular-nums text-gray-400 dark:text-gray-500"
-                          >
-                            —
-                          </td>
-                        ))}
+                        {columns.map((column) => {
+                          const amount = monthValues[row.contract]?.[column.id];
+                          return (
+                            <td key={`${row.rowKey}-${column.id}`} className="px-2 py-1.5">
+                              <PrevisaoAmountCell
+                                key={`${cursor.year}-${cursor.month}-${row.rowKey}-${column.id}`}
+                                value={amount == null ? null : amount}
+                                onCommit={(next) => handleAmountCommit(row.contract, column.id, next)}
+                              />
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </React.Fragment>

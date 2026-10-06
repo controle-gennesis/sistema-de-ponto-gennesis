@@ -47,6 +47,7 @@ import { LicitacoesRegiaoPanel } from './LicitacoesRegiaoPanel';
 import { BancoCatsPanel } from './BancoCatsPanel';
 import { LicitacaoOrcamentoPanel } from './LicitacaoOrcamentoPanel';
 import { LicitacaoArquivoPanel } from './LicitacaoArquivoPanel';
+import { LicitacaoHabilitacaoPendentePanel } from './LicitacaoHabilitacaoPendentePanel';
 import { buildLicitacaoTituloDisplay } from './licitacaoDisplay';
 import {
   emptyChecklistState,
@@ -83,7 +84,8 @@ type LicitacaoViewMode =
   | 'arquivo'
   | 'regioes'
   | 'banco-cats'
-  | 'consulta-rapida-cats';
+  | 'consulta-rapida-cats'
+  | 'habilitacao-pendente';
 
 type LicitacaoAnaliseEtapa = 'preliminar' | 'em_analise';
 
@@ -500,7 +502,8 @@ export default function LicitacoesPage() {
       saved === 'banco-cats' ||
       saved === 'consulta-rapida-cats' ||
       saved === 'orcamento' ||
-      saved === 'arquivo'
+      saved === 'arquivo' ||
+      saved === 'habilitacao-pendente'
     ) {
       return saved;
     }
@@ -2066,6 +2069,7 @@ export default function LicitacoesPage() {
                 { id: 'regioes' as const, label: 'Por Região' },
                 { id: 'banco-cats' as const, label: 'Banco CATs' },
                 { id: 'consulta-rapida-cats' as const, label: 'Consulta Rápida - CATs' },
+                { id: 'habilitacao-pendente' as const, label: 'Habilitação Pendente' },
                 { id: 'arquivo' as const, label: 'Arquivo' },
               ] as const
             ).map((tab) => {
@@ -2187,6 +2191,8 @@ export default function LicitacoesPage() {
             </>
           ) : viewMode === 'orcamento' ? (
             <LicitacaoOrcamentoPanel />
+          ) : viewMode === 'habilitacao-pendente' ? (
+            <LicitacaoHabilitacaoPendentePanel />
           ) : (
             <div className="space-y-5">
             {renderLicitacaoListToolbar()}
