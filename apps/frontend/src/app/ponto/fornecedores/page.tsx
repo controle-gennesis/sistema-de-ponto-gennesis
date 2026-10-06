@@ -188,6 +188,11 @@ function cell(value?: string | null): string {
   return trimmed || '-';
 }
 
+function formatSupplierListId(code?: string | null): string {
+  const trimmed = code?.trim();
+  return trimmed || '—';
+}
+
 type DetailSection = {
   title: string;
   rows: Array<{ label: string; value: string }>;
@@ -198,7 +203,7 @@ function getSupplierDetailSections(s: Supplier): DetailSection[] {
     {
       title: 'Identificação',
       rows: [
-        { label: 'Cliente/Fornecedor', value: cell(s.code) },
+        { label: 'ID', value: formatSupplierListId(s.code) },
         { label: 'Tipo', value: cell(s.partyType) },
         { label: 'Nome Fantasia', value: cell(s.tradeName) },
         { label: 'Nome', value: cell(s.name) },
@@ -368,6 +373,24 @@ export default function FornecedoresPage() {
       return res.data;
     }
   });
+
+  // Ao abrir a tela, puxa novidades do TOTVS (sem duplicar) e atualiza a lista.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await api.post('/suppliers/sync-totvs', null, { timeout: 300_000 });
+        if (!cancelled) {
+          await queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+        }
+      } catch {
+        /* sync em background — falha não bloqueia a tela */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -658,10 +681,10 @@ export default function FornecedoresPage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Cadastro de Fornecedores
+              Fornecedores
             </h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Gerencie fornecedores para ordens de compra (estilo TOTVS RM)
+              Gerencie o cadastro de fornecedores
             </p>
           </div>
 
@@ -712,9 +735,7 @@ export default function FornecedoresPage() {
                       Fornecedores
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {isError
-                        ? 'Erro ao carregar a lista'
-                        : `${pagination.total} ${pagination.total === 1 ? 'fornecedor' : 'fornecedores'} cadastrado(s)`}
+                      {isError ? 'Erro ao carregar a lista' : 'Lista de fornecedores'}
                     </p>
                   </div>
                 </div>
@@ -754,23 +775,6 @@ export default function FornecedoresPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
-                  {canCreate && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowImportModal(true);
-                      setImportData('');
-                      setImportFileName('');
-                      setImportRowCount(0);
-                      setIsImportDragging(false);
-                      setShowImportJson(false);
-                    }}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <Upload className="h-4 w-4 shrink-0" />
-                    <span>Importar</span>
-                  </button>
-                  )}
                   {canCreate && (
                   <button
                     type="button"
@@ -831,7 +835,7 @@ export default function FornecedoresPage() {
                       </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th scope="col" className={cadastroListClasses.th}>Cliente/Fornecedor</th>
+                          <th scope="col" className={cadastroListClasses.th}>ID</th>
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
                             Nome Fantasia
                           </th>
@@ -857,7 +861,7 @@ export default function FornecedoresPage() {
                               className={`${cadastroListClasses.tdMono} max-w-0 truncate`}
                               title={s.code || undefined}
                             >
-                              {s.code || '—'}
+                              {formatSupplierListId(s.code)}
                             </td>
                             <td className={`${cadastroListClasses.tdTruncate} min-w-[12rem]`}>
                               <ListRowNavigableLabel className="block whitespace-normal break-words">

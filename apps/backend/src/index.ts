@@ -135,6 +135,7 @@ import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
 import { startBirthdayGreetingScheduler } from './services/BirthdayGreetingScheduler';
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
+import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -700,6 +701,12 @@ try {
         startFuelRefuelEveningCheckScheduler();
       } catch (e) {
         console.error('[fuel-evening-check] falha ao agendar:', e);
+      }
+
+      try {
+        startSupplierTotvsSyncScheduler();
+      } catch (e) {
+        console.error('[supplier-totvs] falha ao agendar:', e);
       }
     })();
 

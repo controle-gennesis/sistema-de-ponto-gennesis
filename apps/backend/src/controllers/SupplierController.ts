@@ -1,9 +1,14 @@
 import { Response, NextFunction } from 'express';
-import { Prisma } from '@prisma/client';
+import { Prisma, Supplier } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
+import {
+  getSupplierTotvsSyncStatus,
+  runSupplierTotvsSync,
+  runSupplierTotvsSyncIfStale,
+} from '../services/SupplierTotvsSyncService';
 
 function normalizeOptionalString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -137,19 +142,54 @@ export class SupplierController {
       const limitNum = Math.min(Math.max(Number(limit) || 20, 1), 2000);
       const pageNum = Math.max(1, Number(page) || 1);
       const skip = (pageNum - 1) * limitNum;
+
+      // Ordena pelo ID numérico (código RM) do maior para o menor
+      const conditions: Prisma.Sql[] = [Prisma.sql`TRUE`];
+      if (where.id && typeof where.id === 'object' && where.id !== null && 'in' in where.id) {
+        const ids = (where.id as { in: string[] }).in;
+        conditions.push(Prisma.sql`id IN (${Prisma.join(ids)})`);
+      }
+      if (typeof where.isActive === 'boolean') {
+        conditions.push(Prisma.sql`"isActive" = ${where.isActive}`);
+      }
+      const whereSql = Prisma.join(conditions, ' AND ');
+
       const [suppliers, total] = await Promise.all([
-        prisma.supplier.findMany({
-          where,
-          skip,
-          take: limitNum,
-          orderBy: [{ createdAt: 'asc' }]
-        }),
-        prisma.supplier.count({ where })
+        prisma.$queryRaw<Supplier[]>`
+          SELECT *
+          FROM suppliers
+          WHERE ${whereSql}
+          ORDER BY
+            CASE WHEN code ~ '^[0-9]+$' THEN CAST(code AS BIGINT) ELSE NULL END DESC NULLS LAST,
+            code DESC
+          OFFSET ${skip} LIMIT ${limitNum}
+        `,
+        prisma.supplier.count({ where }),
       ]);
+
       res.json({
         success: true,
         data: suppliers,
         pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Sincroniza fornecedores do TOTVS RM (upsert por CPF/CNPJ ou código). */
+  async syncFromTotvs(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const force = String(req.query.force || '').trim() === '1';
+      const result = force
+        ? await runSupplierTotvsSync('manual')
+        : await runSupplierTotvsSyncIfStale(60_000);
+      res.json({
+        success: true,
+        data: result ?? getSupplierTotvsSyncStatus(),
+        message: result
+          ? `Sync TOTVS: ${result.created} criado(s), ${result.updated} atualizado(s)`
+          : 'Sync já em andamento ou recente',
       });
     } catch (error) {
       next(error);
