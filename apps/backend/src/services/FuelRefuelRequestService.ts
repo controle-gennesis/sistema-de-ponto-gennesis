@@ -262,7 +262,10 @@ export class FuelRefuelRequestService {
       });
 
       // Chatbot WhatsApp: se o solicitante não tem celular no cadastro, grava o número usado.
-      const waPhoneFormatted = formatPhoneBrStored(input.sourceWhatsAppPhone || '');
+      // Se o WhatsApp mandar sem o 9º dígito, insere após o DDD antes de salvar.
+      const waPhoneFormatted = formatPhoneBrStored(
+        ensureBrMobileNinthDigit(input.sourceWhatsAppPhone || ''),
+      );
       if (waPhoneFormatted) {
         const employee = await tx.employee.findUnique({
           where: { userId: input.requesterId },
@@ -942,6 +945,18 @@ function normalizeBrPhoneDigits(raw: string): string {
 function hasUsablePhoneDigits(value: string | null | undefined): boolean {
   const digits = normalizeBrPhoneDigits(value || '');
   return digits.length >= 10 && digits.length <= 11;
+}
+
+/**
+ * Celular BR via WhatsApp: se vier com 10 dígitos nacionais (sem o 9º),
+ * insere o 9 após o DDD — ex.: 6191723452 → 61991723452.
+ */
+function ensureBrMobileNinthDigit(raw: string): string {
+  const digits = normalizeBrPhoneDigits(raw);
+  if (digits.length === 10) {
+    return `${digits.slice(0, 2)}9${digits.slice(2)}`;
+  }
+  return digits;
 }
 
 /** Padrão do cadastro: (61) 98332-6520 */
