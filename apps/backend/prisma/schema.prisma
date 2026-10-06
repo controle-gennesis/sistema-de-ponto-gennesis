@@ -1940,6 +1940,8 @@ model Supplier {
   pixKey                String? // Chave PIX
   notes                 String?
   isActive              Boolean  @default(true)
+  /// LOCAL = criado no Conecta | TOTVS = sincronizado do RM
+  origin                String   @default("LOCAL")
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -1953,6 +1955,7 @@ model Supplier {
 
   @@index([code])
   @@index([isActive])
+  @@index([origin])
   @@map("suppliers")
 }
 

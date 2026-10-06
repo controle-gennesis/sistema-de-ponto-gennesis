@@ -2857,6 +2857,24 @@ export async function ensureConstructionMaterialTotvsIdPrd(prisma: PrismaClient)
   `);
 }
 
+/** Coluna origin em suppliers: LOCAL (Conecta) vs TOTVS (RM). */
+export async function ensureSupplierOriginColumn(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "suppliers"
+      ADD COLUMN IF NOT EXISTS "origin" TEXT NOT NULL DEFAULT 'LOCAL';
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "suppliers_origin_idx" ON "suppliers"("origin");
+  `);
+  // Códigos RM costumam vir com 9 dígitos (zeros à esquerda) — marca como TOTVS
+  await prisma.$executeRawUnsafe(`
+    UPDATE "suppliers"
+    SET "origin" = 'TOTVS'
+    WHERE "origin" = 'LOCAL'
+      AND code ~ '^[0-9]{9}$';
+  `);
+}
+
 export async function ensureStockLocationsTable(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'stock_locations')) return;
   console.warn('[Schema] Tabela stock_locations ausente — criando automaticamente.');
@@ -2906,6 +2924,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureUserTotvsCredentialsTable(prisma);
     await ensureConstructionMaterialTotvsIdPrd(prisma);
     await ensureStockLocationsTable(prisma);
+    await ensureSupplierOriginColumn(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);
     await ensureFinancialControlLancadoStatus(prisma);
     await ensureFinancialControlNfNumberColumn(prisma);

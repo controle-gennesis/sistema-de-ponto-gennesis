@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { getTotvsRmRelatorioFinService } from './TotvsRmRelatorioFinService';
 
@@ -392,6 +393,16 @@ export async function runSupplierTotvsSync(
         )
       );
       updated += chunk.length;
+    }
+
+    // Marca os códigos vindos do RM como TOTVS (fora da sequência LOCAL 1, 2, 3…)
+    const syncedCodes = mapped.map((m) => m.code);
+    for (let i = 0; i < syncedCodes.length; i += 500) {
+      const chunk = syncedCodes.slice(i, i + 500);
+      if (chunk.length === 0) continue;
+      await prisma.$executeRaw`
+        UPDATE suppliers SET origin = 'TOTVS' WHERE code IN (${Prisma.join(chunk)})
+      `;
     }
 
     const durationMs = Date.now() - startedAt;

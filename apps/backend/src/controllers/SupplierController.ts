@@ -102,7 +102,10 @@ async function generateSupplierCode(): Promise<string> {
   return code;
 }
 
-/** Reserva N códigos numéricos sequenciais: 1, 2, 3, ... */
+/**
+ * Reserva N códigos numéricos sequenciais só entre cadastros LOCAL (ignora TOTVS).
+ * Ex.: último local 25 → próximo 26.
+ */
 async function reserveSupplierCodes(count: number): Promise<string[]> {
   if (count <= 0) return [];
 
@@ -114,6 +117,7 @@ async function reserveSupplierCodes(count: number): Promise<string[]> {
       END
     ) AS max
     FROM suppliers
+    WHERE COALESCE(origin, 'LOCAL') = 'LOCAL'
   `;
 
   let start = Number(result[0]?.max ?? 0);
@@ -212,8 +216,8 @@ export class SupplierController {
       const parsed = buildSupplierData(req.body);
       if (!parsed.name) throw createError('Nome é obrigatório', 400);
 
-      const requestedCode = normalizeOptionalString(req.body.code);
-      const finalCode = requestedCode || (await generateSupplierCode());
+      // Código automático só na sequência LOCAL (não usa códigos do TOTVS)
+      const finalCode = await generateSupplierCode();
       const existingCode = await prisma.supplier.findUnique({ where: { code: finalCode } });
       if (existingCode) throw createError('Código Cliente/Fornecedor já existe', 400);
 
@@ -225,9 +229,13 @@ export class SupplierController {
       const supplier = await prisma.supplier.create({
         data: {
           code: finalCode,
-          ...parsed
+          ...parsed,
         }
       });
+      // Garante origem LOCAL (coluna default no banco; evita depender do Prisma Client regenerado)
+      await prisma.$executeRaw`
+        UPDATE suppliers SET origin = 'LOCAL' WHERE id = ${supplier.id}
+      `;
       res.status(201).json({ success: true, data: supplier, message: 'Fornecedor criado com sucesso' });
     } catch (error) {
       next(error);
@@ -243,23 +251,16 @@ export class SupplierController {
       const parsed = buildSupplierData({ ...supplier, ...req.body });
       if (!parsed.name) throw createError('Nome é obrigatório', 400);
 
-      if (req.body.code !== undefined) {
-        const newCode = normalizeOptionalString(req.body.code);
-        if (newCode && newCode !== supplier.code) {
-          const existingCode = await prisma.supplier.findUnique({ where: { code: newCode } });
-          if (existingCode) throw createError('Código Cliente/Fornecedor já existe', 400);
-        }
-      }
-
       if (parsed.cnpj && parsed.cnpj !== supplier.cnpj) {
         const existingCnpj = await prisma.supplier.findUnique({ where: { cnpj: parsed.cnpj } });
         if (existingCnpj) throw createError('CPF/CNPJ já cadastrado', 400);
       }
 
-      const data: Record<string, unknown> = { ...parsed };
-      if (req.body.code !== undefined) data.code = normalizeOptionalString(req.body.code) || supplier.code;
-
-      const updated = await prisma.supplier.update({ where: { id }, data });
+      // Código (ID) não é editável — mantém o gerado/sincronizado
+      const updated = await prisma.supplier.update({
+        where: { id },
+        data: { ...parsed },
+      });
       res.json({ success: true, data: updated, message: 'Fornecedor atualizado com sucesso' });
     } catch (error) {
       next(error);
@@ -304,10 +305,9 @@ export class SupplierController {
             continue;
           }
 
-          const requestedCode = normalizeOptionalString(row.code);
-          const finalCode = requestedCode || reservedCodes[i];
+          const finalCode = reservedCodes[i];
           if (!finalCode) {
-            errors.push({ index: i, message: 'Código Cliente/Fornecedor é obrigatório' });
+            errors.push({ index: i, message: 'Não foi possível gerar o código do fornecedor' });
             continue;
           }
 
@@ -325,12 +325,15 @@ export class SupplierController {
             }
           }
 
-          await prisma.supplier.create({
+          const created = await prisma.supplier.create({
             data: {
               code: finalCode,
               ...parsed
             }
           });
+          await prisma.$executeRaw`
+            UPDATE suppliers SET origin = 'LOCAL' WHERE id = ${created.id}
+          `;
 
           created += 1;
         } catch (err: unknown) {

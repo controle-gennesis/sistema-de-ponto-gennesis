@@ -456,10 +456,6 @@ export default function FornecedoresPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.code.trim()) {
-      toast.error('Código Cliente/Fornecedor é obrigatório');
-      return;
-    }
     if (!formData.name.trim()) {
       toast.error('Nome é obrigatório');
       return;
@@ -475,7 +471,8 @@ export default function FornecedoresPage() {
         toast.error('Você não tem permissão para criar.');
         return;
       }
-      createMutation.mutate(formData);
+      // Código (ID) é gerado no backend — sequência só dos criados no sistema
+      createMutation.mutate({ ...formData, code: '' });
     }
   };
 
@@ -938,18 +935,18 @@ export default function FornecedoresPage() {
                     Identificação
                   </h3>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className={labelClass}>Cliente/Fornecedor *</label>
-                      <input
-                        type="text"
-                        value={formData.code}
-                        onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                        placeholder="Ex.: 000019582"
-                        className={inputClass}
-                        inputMode="numeric"
-                        autoComplete="off"
-                      />
-                    </div>
+                    {editingSupplier ? (
+                      <div>
+                        <label className={labelClass}>ID</label>
+                        <input
+                          type="text"
+                          value={formatSupplierListId(formData.code)}
+                          readOnly
+                          className={`${inputClass} cursor-not-allowed bg-gray-50 dark:bg-gray-900/60`}
+                          autoComplete="off"
+                        />
+                      </div>
+                    ) : null}
                     <div>
                       <label className={labelClass}>Tipo</label>
                       <StringSingleSelectDropdown
