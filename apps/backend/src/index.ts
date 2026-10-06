@@ -138,6 +138,7 @@ import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveni
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
 import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
 import { startPaymentConditionTotvsSyncScheduler } from './services/PaymentConditionTotvsSync';
+import { startFluigDatasetMirrorScheduler } from './services/FluigDatasetMirrorSync';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -721,6 +722,12 @@ try {
         startPaymentConditionTotvsSyncScheduler();
       } catch (e) {
         console.error('[payment-conditions-sync] falha ao agendar:', e);
+      }
+
+      try {
+        startFluigDatasetMirrorScheduler();
+      } catch (e) {
+        console.error('[fluig-mirror] falha ao agendar:', e);
       }
     })();
 

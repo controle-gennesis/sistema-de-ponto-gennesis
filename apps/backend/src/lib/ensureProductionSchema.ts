@@ -3,6 +3,7 @@ import { ensureGestaoOsSchema } from './ensureGestaoOsSchema';
 import { ensureSupportTicketsSchema } from './ensureSupportTicketsSchema';
 import { ensureToolRentalRequestsSchema } from './ensureToolRentalRequestsSchema';
 import { ensureCaixinhaAccountsTable } from './ensureCaixinhaAccounts';
+import { ensureFluigDatasetMirrorSchema } from './ensureFluigDatasetMirrorSchema';
 
 async function columnExists(
   prisma: PrismaClient,
@@ -2958,6 +2959,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureGestaoOsSchema(prisma);
     await ensurePunchPocColumns(prisma);
     await ensureSupportTicketsSchema(prisma);
+    await ensureFluigDatasetMirrorSchema(prisma);
     await ensureJuridicoProcessosTables(prisma);
     await ensureJuridicoProcessoAdvogadoColumns(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);

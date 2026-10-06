@@ -5578,3 +5578,28 @@ model TrainingCertificate {
   @@index([code])
   @@map("training_certificates")
 }
+
+/// Metadados do espelho local de um dataset Fluig (última sync).
+model FluigDatasetMirrorMeta {
+  datasetId String   @id
+  columns   Json
+  rowCount  Int      @default(0)
+  syncedAt  DateTime
+  updatedAt DateTime @updatedAt
+
+  @@map("fluig_dataset_mirror_meta")
+}
+
+/// Linhas espelhadas de um dataset Fluig (payload JSON dinâmico).
+model FluigDatasetMirrorRow {
+  id          String   @id @default(cuid())
+  datasetId   String
+  externalKey String
+  payload     Json
+  syncedAt    DateTime
+
+  @@unique([datasetId, externalKey])
+  @@index([datasetId])
+  @@index([syncedAt])
+  @@map("fluig_dataset_mirror_rows")
+}

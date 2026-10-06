@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
 import { FluigService } from '../services/FluigService';
+import {
+  getFluigDatasetMirrorPayload,
+  isFluigMirroredDataset,
+} from '../services/FluigDatasetMirrorSync';
 
 export const fluigService = new FluigService();
 
@@ -52,6 +56,25 @@ export async function getDatasetData(req: Request, res: Response) {
     }
     const { fields, constraints, order } = req.body || {};
     const startedAt = Date.now();
+
+    // Datasets espelhados: página lê do Postgres (job sync a cada 30 min).
+    if (isFluigMirroredDataset(datasetId)) {
+      const mirrored = await getFluigDatasetMirrorPayload(datasetId);
+      if (mirrored) {
+        const elapsed = Date.now() - startedAt;
+        res.setHeader('X-Fluig-Cache', 'MIRROR');
+        res.setHeader('X-Fluig-Elapsed-Ms', String(elapsed));
+        if (mirrored.syncedAt) {
+          res.setHeader('X-Fluig-Mirror-Synced-At', mirrored.syncedAt);
+        }
+        return res.json({
+          success: true,
+          data: mirrored.data,
+          mirror: { syncedAt: mirrored.syncedAt, fromMirror: true },
+        });
+      }
+    }
+
     const data = await fluigService.getDatasetData(datasetId, {
       fields: Array.isArray(fields) ? fields : undefined,
       constraints: Array.isArray(constraints) ? constraints : undefined,

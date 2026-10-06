@@ -367,6 +367,27 @@ export class FluigService {
     return promise;
   }
 
+  /**
+   * Busca direta no Fluig (sem cache / sem flag de disable).
+   * Usado pelo espelho Postgres (job de sync).
+   */
+  async fetchDatasetUncached(
+    datasetId: string,
+    options?: {
+      fields?: string[];
+      constraints?: Array<{
+        _field: string;
+        _initialValue?: string;
+        _finalValue?: string;
+        _type?: number;
+        _likeSearch?: boolean;
+      }>;
+      order?: string[];
+    }
+  ): Promise<FluigDatasetValues> {
+    return this.fetchDatasetDirect(datasetId, options);
+  }
+
   async getDatasetData(
     datasetId: string,
     options?: {

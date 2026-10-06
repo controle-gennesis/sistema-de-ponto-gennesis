@@ -1507,6 +1507,19 @@ export function FluigSolicitacoesPage({
   }
 
   const currentQuery = datasetQueries[activeTab];
+  const mirrorSyncedAt = currentQuery?.data?.mirror?.syncedAt as string | null | undefined;
+  const mirrorSyncedLabel = useMemo(() => {
+    if (!mirrorSyncedAt) return null;
+    const d = new Date(mirrorSyncedAt);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [mirrorSyncedAt]);
   const currentContent = currentQuery?.data?.data?.content;
   const currentValues = useMemo(() => {
     const values = currentContent?.values;
@@ -2201,6 +2214,11 @@ export function FluigSolicitacoesPage({
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
             {config?.subtitle ?? 'Veja em qual etapa está cada solicitação e acompanhe o andamento em tempo real'}
           </p>
+          {mirrorSyncedLabel ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Última atualização do espelho: {mirrorSyncedLabel}
+            </p>
+          ) : null}
         </div>
 
         {showProcessCard && (

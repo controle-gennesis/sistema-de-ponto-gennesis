@@ -9,7 +9,8 @@ export default function SolicitacoesFluigDpPage() {
       <FluigSolicitacoesPage
         config={{
           title: 'Solicitações - Fluig',
-          subtitle: 'Solicitações do Departamento Pessoal no Fluig',
+          subtitle:
+            'Solicitações do Departamento Pessoal no Fluig (espelho local atualizado a cada 30 min)',
           datasets: ['G5-Relatorio-DF-GO-DP'],
           datasetTabLabels: {
             'G5-Relatorio-DF-GO-DP': 'DP',
