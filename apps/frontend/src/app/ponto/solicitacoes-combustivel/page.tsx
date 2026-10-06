@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/DetailInfoLayout';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ListPageHeader, PageStack, pageStatCardsGrid5Class } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -913,16 +914,12 @@ function SolicitacoesCombustivelPageContent() {
   return (
     <ProtectedRoute route="/ponto/solicitacoes-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
+        <PageStack>
           <div className="relative flex flex-col items-center gap-3 sm:block">
-            <div className="text-center">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-                Fila de Abastecimento
-              </h1>
-              <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-                Acompanhe e atenda as solicitações de combustível.
-              </p>
-            </div>
+            <ListPageHeader
+              title="Fila de Abastecimento"
+              description="Acompanhe e atenda as solicitações de combustível."
+            />
             <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
               {isAdministrator ? (
               <button
@@ -947,7 +944,7 @@ function SolicitacoesCombustivelPageContent() {
             </div>
           </div>
 
-          <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          <div className={pageStatCardsGrid5Class}>
             {SUPPLIES_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}
@@ -1259,7 +1256,7 @@ function SolicitacoesCombustivelPageContent() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <ActionMenuOverlay
           open={!!actionMenu && !!requestForMenu}

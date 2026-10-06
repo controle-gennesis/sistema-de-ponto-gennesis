@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock, Filter, PackageCheck, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -314,17 +315,13 @@ export default function RecebimentoEntregasPageClient() {
   return (
     <ProtectedRoute route="/ponto/recebimento-entregas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-4">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Recebimento de Entregas
-            </h1>
-            <p className="mt-1 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Confirme o recebimento de material na obra. Esta tela é exclusiva para a engenharia.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Recebimento de Entregas"
+            description="Confirme o recebimento de material na obra. Esta tela é exclusiva para a engenharia."
+          />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
             <FilterStatCard
               label="Pendentes"
               count={summary.awaitingEngineering}
@@ -563,7 +560,7 @@ export default function RecebimentoEntregasPageClient() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal isOpen={isFiltersOpen} onClose={() => setIsFiltersOpen(false)} title="Filtros">
           <div className="space-y-4">

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { PageStack } from '@/components/ui/pageLayout';
 import {
   ApprovalPhaseStatCards,
   DEFAULT_APPROVAL_PHASE_CARDS,
@@ -245,7 +246,7 @@ export function MedicaoApprovalsSection() {
   const detailDocs = (detail?.photos || []).filter((file) => file.url && !isImageFile(file));
 
   return (
-    <div className="space-y-6">
+    <PageStack>
       <ApprovalPhaseStatCards
         cards={MEDICAO_PHASE_CARDS}
         activeFilter={phase}
@@ -630,7 +631,7 @@ export function MedicaoApprovalsSection() {
             document.body,
           )
         : null}
-    </div>
+    </PageStack>
   );
 }
 

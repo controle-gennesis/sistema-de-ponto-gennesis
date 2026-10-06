@@ -52,6 +52,7 @@ import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { downloadGestaoOsAssetQrLabelsPdf } from '@/lib/printGestaoOsAssetQrLabels';
 import type { GestaoOsAssetQr } from '../gestaoOsTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 type LocationAdminTree = Array<{
   id: string;
@@ -879,15 +880,11 @@ export default function GestaoOsLocaisPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/locais">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Locais e Ativos
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Hierarquia prédio › andar › local e ativos com QR Code para a Central de Chamados.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Locais e Ativos"
+            description="Hierarquia prédio › andar › local e ativos com QR Code para a Central de Chamados."
+          />
 
           <AppUnderlineTabList aria-label="Seções de locais e ativos">
             {TABS.map((item) => {
@@ -1282,7 +1279,7 @@ export default function GestaoOsLocaisPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

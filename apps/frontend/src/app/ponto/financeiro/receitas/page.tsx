@@ -40,6 +40,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { formatDateBr } from '@/lib/dateTimeBr';
@@ -837,15 +838,11 @@ export default function ReceitasPage() {
         userName={user.name}
         onLogout={handleLogout}
       >
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Receitas
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Faturamento, recebimentos e repasses por consórcio.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Receitas"
+            description="Faturamento, recebimentos e repasses por consórcio."
+          />
 
           <TabNav
             tabs={TOP_TABS}
@@ -1364,7 +1361,7 @@ export default function ReceitasPage() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={showExport}

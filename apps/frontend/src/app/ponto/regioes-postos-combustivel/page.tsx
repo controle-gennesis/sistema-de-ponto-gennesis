@@ -15,6 +15,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { BRAZIL_STATE_SELECT_OPTIONS, type BrazilStateCode } from '@/lib/brazilStates';
 import {
   MultiSelectSearchDropdown,
@@ -349,15 +350,11 @@ export default function RegioesPostosCombustivelPage() {
   return (
     <ProtectedRoute route="/ponto/regioes-postos-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Postos de Combustível
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Gerencie os postos credenciados para abastecimento.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Postos de Combustível"
+            description="Gerencie os postos credenciados para abastecimento."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -572,7 +569,7 @@ export default function RegioesPostosCombustivelPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={!!detailStation}

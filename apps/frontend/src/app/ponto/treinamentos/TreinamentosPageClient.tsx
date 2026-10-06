@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -254,15 +255,11 @@ export default function TreinamentosPageClient() {
   return (
     <ProtectedRoute route="/ponto/treinamentos">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Central de Treinamentos
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Assista às videoaulas, faça a avaliação e emita seu certificado de conclusão.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Central de Treinamentos"
+            description="Assista às videoaulas, faça a avaliação e emita seu certificado de conclusão."
+          />
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <FilterStatCard
@@ -483,7 +480,7 @@ export default function TreinamentosPageClient() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={isFiltersModalOpen}

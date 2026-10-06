@@ -31,6 +31,7 @@ import {
   ListRowNavigableLabel,
 } from '@/components/ui/listTableUi';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
@@ -716,15 +717,11 @@ export default function NfsRecebidasPage() {
   return (
     <ProtectedRoute route="/ponto/financeiro/nfs-recebidas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Entrada Fiscal
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Consulte e acompanhe as notas fiscais da empresa.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Entrada Fiscal"
+            description="Consulte e acompanhe as notas fiscais da empresa."
+          />
 
           <Modal
             isOpen={filtersOpen}
@@ -1333,7 +1330,7 @@ export default function NfsRecebidasPage() {
               </div>
             )}
           </Modal>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

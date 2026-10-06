@@ -33,6 +33,7 @@ import {
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   getListTableRowClassName,
@@ -557,15 +558,11 @@ export default function SolicitacoesReservaVeiculosPage() {
   return (
     <ProtectedRoute route="/ponto/solicitacoes-reserva-veiculos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Gestão da Frota
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Fila do Suprimentos: analise e aprove ou rejeite solicitações de uso da frota.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Gestão da Frota"
+            description="Fila do Suprimentos: analise e aprove ou rejeite solicitações de uso da frota."
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5">
             {SUPPLIES_STAT_CARDS.map((card) => (
@@ -791,7 +788,7 @@ export default function SolicitacoesReservaVeiculosPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={!!selected}

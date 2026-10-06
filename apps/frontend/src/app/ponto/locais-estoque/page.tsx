@@ -27,6 +27,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { TOTVS_OC_FILIAL_OPTIONS, totvsFilialLabel } from '@/lib/ocTotvsDestination';
 
 const ACTIVE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
@@ -265,15 +266,11 @@ export default function LocaisEstoquePage() {
   return (
     <ProtectedRoute route="/ponto/locais-estoque">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Gerenciar Locais de Estoque
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cadastre os locais de estoque no mesmo padrão do TOTVS (CODLOC)
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Gerenciar Locais de Estoque"
+            description="Cadastre os locais de estoque no mesmo padrão do TOTVS (CODLOC)"
+          />
 
           <StockLocationFormModal
             isOpen={showForm}
@@ -504,7 +501,7 @@ export default function LocaisEstoquePage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showDeleteModal && (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">

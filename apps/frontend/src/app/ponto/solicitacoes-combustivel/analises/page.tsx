@@ -42,6 +42,7 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { useTheme } from '@/context/ThemeContext';
@@ -826,7 +827,7 @@ function AnalisesCombustivelContent() {
       {periodFilterBar}
       {filtersModal}
       {weeklyQuotaCard}
-      <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
         <FilterStatCard
           icon={Wallet}
           label="Gasto total"
@@ -861,7 +862,7 @@ function AnalisesCombustivelContent() {
         />
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-2">
         <ChartCard
           title="Gasto por contrato"
           subtitle="Clique no contrato ou na barra para ver as solicitações."
@@ -1019,7 +1020,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-2">
         <ChartCard
           title="Preço médio do litro"
           subtitle="Variação do R$/L ao longo dos meses (média dos abastecimentos)."
@@ -1096,7 +1097,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
         <ChartCard
           title="Condutores com maior gasto"
           subtitle="Clique no nome para ver as solicitações."
@@ -1152,19 +1153,13 @@ export default function AnalisesCombustivelPage() {
   return (
     <ProtectedRoute route="/ponto/solicitacoes-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Análises de Abastecimento
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Gastos por contrato, quem mais consome, preço médio do litro e tendências dos
-              abastecimentos concluídos.
-            </p>
-          </div>
-
+        <PageStack>
+          <ListPageHeader
+            title="Análises de Abastecimento"
+            description="Gastos por contrato, quem mais consome, preço médio do litro e tendências dos abastecimentos concluídos."
+          />
           <AnalisesCombustivelContent />
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

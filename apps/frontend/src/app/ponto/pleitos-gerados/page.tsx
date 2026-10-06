@@ -17,6 +17,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import api from '@/lib/api';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 
 interface PleitoGerado {
@@ -140,15 +141,11 @@ export default function PleitosGeradosPage() {
   return (
     <ProtectedRoute route="/ponto/pleitos-gerados">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Pleitos Gerados
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Visualize todos os pleitos com valor pleiteado informado
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Pleitos Gerados"
+            description="Visualize todos os pleitos com valor pleiteado informado"
+          />
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -363,7 +360,7 @@ export default function PleitosGeradosPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

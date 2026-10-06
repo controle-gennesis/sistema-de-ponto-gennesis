@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { PageStack } from '@/components/ui/pageLayout';
 import {
   ApprovalPhaseStatCards,
   DEFAULT_APPROVAL_PHASE_CARDS,
@@ -244,7 +245,7 @@ export function FuelApprovalsSection() {
 
   return (
     <>
-      <div className="space-y-6">
+      <PageStack>
         <ApprovalPhaseStatCards
           cards={DEFAULT_APPROVAL_PHASE_CARDS}
           activeFilter={fuelPhase}
@@ -436,7 +437,7 @@ export function FuelApprovalsSection() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </PageStack>
 
       <ActionMenuOverlay
         open={!!actionMenu && !!requestForMenu}

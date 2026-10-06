@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { ControleGeralGastosOperacionaisPanel } from '../controle-geral/ControleGeralGastosOperacionaisPanel';
 import {
@@ -136,15 +137,11 @@ export default function ContratosSociosPage() {
   return (
     <ProtectedRoute route="/ponto/contratos/socios">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Contratos Sócios
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Visão financeira dos contratos compartilhados com sócios
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Contratos Sócios"
+            description="Visão financeira dos contratos compartilhados com sócios"
+          />
 
           <ControleGeralGastosOperacionaisPanel
             detailRows={gastosDetailRows}
@@ -174,7 +171,7 @@ export default function ContratosSociosPage() {
             showPdfExport
             enableContractFluxoModal
           />
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

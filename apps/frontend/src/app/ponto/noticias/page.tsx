@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   MultiSelectSearchDropdown,
   type MultiSelectSearchOption,
@@ -384,15 +385,11 @@ export default function NoticiasPage() {
   return (
     <ProtectedRoute route="/ponto/noticias">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Notícias Agendadas
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Programe flyers e comunicados para aparecer no primeiro acesso dos usuários.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Notícias Agendadas"
+            description="Programe flyers e comunicados para aparecer no primeiro acesso dos usuários."
+          />
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -539,7 +536,7 @@ export default function NoticiasPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={isModalOpen}

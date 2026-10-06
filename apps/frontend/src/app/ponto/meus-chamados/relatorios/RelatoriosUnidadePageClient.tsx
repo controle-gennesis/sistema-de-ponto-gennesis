@@ -24,6 +24,7 @@ import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/Cadastro
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { exportGestaoOsReportsPdf } from '@/lib/exportGestaoOsReportsPdf';
 import api from '@/lib/api';
@@ -225,16 +226,11 @@ export default function RelatoriosUnidadePageClient() {
   return (
     <ProtectedRoute route="/ponto/meus-chamados/relatorios">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Relatórios da Localidade
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Acompanhe os serviços executados nas localidades sob sua responsabilidade e exporte
-              em PDF ou CSV.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Relatórios da Localidade"
+            description="Acompanhe os serviços executados nas localidades sob sua responsabilidade e exporte em PDF ou CSV."
+          />
 
           {!loadingBuildings && unitBuildings.length === 0 ? (
             <Card className={`mx-auto max-w-2xl ${cadastroListClasses.card}`}>
@@ -464,7 +460,7 @@ export default function RelatoriosUnidadePageClient() {
               )}
             </>
           )}
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

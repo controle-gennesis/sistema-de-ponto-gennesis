@@ -31,6 +31,7 @@ import {
 } from '@/lib/maskCurrencyBr';
 import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
 import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import api from '@/lib/api';
@@ -543,15 +544,11 @@ export default function EntregasLogisticaPageClient() {
   return (
     <ProtectedRoute route="/ponto/entregas-logistica">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Entregas Logística
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Registre e acompanhe solicitações de entrega logística
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Entregas Logística"
+            description="Registre e acompanhe solicitações de entrega logística"
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
             {STAT_CARDS.map((card) => (
@@ -720,7 +717,7 @@ export default function EntregasLogisticaPageClient() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={!!detailRow}

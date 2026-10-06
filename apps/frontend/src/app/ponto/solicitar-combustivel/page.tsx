@@ -42,6 +42,7 @@ import {
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   VehicleReturnPhotoField,
   isBlankVehiclePhoto,
@@ -937,15 +938,11 @@ export default function SolicitarCombustivelPage() {
   return (
     <ProtectedRoute route="/ponto/solicitar-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Abastecimento
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Solicite e acompanhe seus abastecimentos.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Abastecimento"
+            description="Solicite e acompanhe seus abastecimentos."
+          />
 
           <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
             {STAT_CARDS.map((card) => (
@@ -1200,7 +1197,7 @@ export default function SolicitarCombustivelPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={Boolean(detailRequest)}

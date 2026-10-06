@@ -13,6 +13,7 @@ import { CadastroListLoading, formatCadastroListId } from '@/components/ui/Cadas
 import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   RowActionMenuCell,
@@ -393,15 +394,11 @@ export default function OrcamentosPage() {
   return (
     <ProtectedRoute route="/ponto/orcamentos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Orçamentos
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Orçamentos dos contratos liberados para você.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Orçamentos"
+            description="Orçamentos dos contratos liberados para você."
+          />
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -753,7 +750,7 @@ export default function OrcamentosPage() {
               </div>
             </div>
           </Modal>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

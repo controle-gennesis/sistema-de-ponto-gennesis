@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { ControleGeralGastosOperacionaisPanel } from '../controle-geral/ControleGeralGastosOperacionaisPanel';
 import { GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY } from '../controle-geral/fetchGastosOperacionaisTotvs';
@@ -67,15 +68,11 @@ export default function GastosOperacionaisPage() {
   return (
     <ProtectedRoute route="/ponto/contratos/gastos-operacionais">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Gastos Operacionais
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Visualize e exporte os gastos de todos os centros de custo.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Gastos Operacionais"
+            description="Visualize e exporte os gastos de todos os centros de custo."
+          />
 
           <ControleGeralGastosOperacionaisPanel
             detailRows={gastosDetailRows}
@@ -98,7 +95,7 @@ export default function GastosOperacionaisPage() {
               void queryClient.invalidateQueries({ queryKey: GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY });
             }}
           />
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

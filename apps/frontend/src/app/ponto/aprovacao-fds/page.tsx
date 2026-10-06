@@ -30,6 +30,7 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
 const ITEMS_PER_PAGE = 20;
@@ -225,15 +226,11 @@ export default function AprovacaoFdsPage() {
   return (
     <ProtectedRoute route="/ponto/aprovacao-fds">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Fichas de Demanda
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cadastre e acompanhe as fichas de demanda.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Fichas de Demanda"
+            description="Cadastre e acompanhe as fichas de demanda."
+          />
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -481,7 +478,7 @@ export default function AprovacaoFdsPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <FichaDemandaDetailModal
           isOpen={detailRecord != null}

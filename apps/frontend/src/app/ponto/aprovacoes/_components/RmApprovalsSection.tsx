@@ -61,6 +61,7 @@ import {
   ApprovalStatusBadge,
   rmToApprovalStatus,
 } from './ApprovalStatusBadge';
+import { PageStack } from '@/components/ui/pageLayout';
 
 type RmPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
 
@@ -318,7 +319,7 @@ export function RmApprovalsSection() {
 
   return (
     <>
-      <div className="space-y-6">
+      <PageStack>
         <ApprovalPhaseStatCards
           cards={RM_STAT_CARDS}
           activeFilter={rmPhase}
@@ -521,7 +522,7 @@ export function RmApprovalsSection() {
           )}
         </CardContent>
       </Card>
-      </div>
+      </PageStack>
 
       {detailRequest && (
         <Modal isOpen onClose={() => setDetailRequest(null)} title="Detalhes da Requisição" size="lg">

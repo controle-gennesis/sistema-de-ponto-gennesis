@@ -31,6 +31,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -565,10 +566,10 @@ export default function ContratosPage() {
   return (
     <ProtectedRoute route="/ponto/contratos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="w-full space-y-6">
+        <PageStack className="w-full">
           {permissionsContract ? (
             permissionsTarget ? (
-              <div className="w-full space-y-6">
+              <PageStack className="w-full">
                 <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
                   <button
                     type="button"
@@ -582,7 +583,7 @@ export default function ContratosPage() {
                     <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
                       Permissões de funcionário
                     </h1>
-                    <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400">
+                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
                       Defina o que este colaborador pode acessar no sistema
                     </p>
                   </div>
@@ -602,9 +603,9 @@ export default function ContratosPage() {
                   onPermissionTabChange={setPermissionTab}
                   onContractsTabAvailabilityChange={setShowContractsTab}
                 />
-              </div>
+              </PageStack>
             ) : (
-              <div className="w-full space-y-6">
+              <PageStack className="w-full">
                 <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
                   <button
                     type="button"
@@ -618,7 +619,7 @@ export default function ContratosPage() {
                     <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
                       Permissões do contrato
                     </h1>
-                    <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400">
+                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
                       Defina quais usuários podem acessar o contrato selecionado
                     </p>
                   </div>
@@ -770,19 +771,15 @@ export default function ContratosPage() {
                     </div>
                   </div>
                 </Card>
-              </div>
+              </PageStack>
             )
           )
           : (
           <>
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Contratos
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Consulte e gerencie os contratos.
-            </p>
-          </div>
+          <ListPageHeader
+            title="Contratos"
+            description="Consulte e gerencie os contratos."
+          />
 
           <Card>
             <CardHeader className="border-b-0 pb-1">
@@ -1052,7 +1049,7 @@ export default function ContratosPage() {
           </Card>
           </>
           )}
-        </div>
+        </PageStack>
 
         {/* Modal Criar/Editar */}
         {showForm && (

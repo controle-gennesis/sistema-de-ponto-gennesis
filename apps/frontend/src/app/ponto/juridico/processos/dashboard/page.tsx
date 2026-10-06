@@ -7,6 +7,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { JuridicoProcessosDashboard } from '@/components/juridico/JuridicoProcessosDashboard';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 
 export default function ProcessosAtivosDashboardPage() {
@@ -32,18 +33,14 @@ export default function ProcessosAtivosDashboardPage() {
   return (
     <ProtectedRoute route="/ponto/juridico/processos/dashboard">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Dashboards dos Processos
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Indicadores de causas, sentenças, custas, recursos e acordos
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Dashboards dos Processos"
+            description="Indicadores de causas, sentenças, custas, recursos e acordos"
+          />
 
           <JuridicoProcessosDashboard />
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

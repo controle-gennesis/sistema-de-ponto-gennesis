@@ -8,6 +8,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { RmOcDashboard } from '@/components/dashboard/RmOcDashboard';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 
 export default function PainelDoSistemaPage() {
@@ -49,18 +50,14 @@ export default function PainelDoSistemaPage() {
   return (
     <ProtectedRoute route="/ponto/painel-do-sistema">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Painel do Sistema
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Visão operacional de requisições de materiais (RMs) e ordens de compra (OCs)
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Painel do Sistema"
+            description="Visão operacional de requisições de materiais (RMs) e ordens de compra (OCs)"
+          />
 
           <RmOcDashboard />
-        </div>
+        </PageStack>
 
         <ChangePasswordModal
           isOpen={isChangePasswordOpen}

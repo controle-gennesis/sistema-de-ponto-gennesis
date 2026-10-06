@@ -57,6 +57,7 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { FileDropZone } from '@/components/ui/FileDropZone';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 type CaixinhaPurchase = {
   id: string;
@@ -571,17 +572,13 @@ export default function CaixinhaPageClient() {
   return (
     <ProtectedRoute route="/ponto/caixinha">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Caixinha
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Registre e acompanhe os lançamentos da caixinha.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Caixinha"
+            description="Registre e acompanhe os lançamentos da caixinha."
+          />
 
-          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
             <FilterStatCard
               label="Lançamentos"
               count={listStats.count}
@@ -779,7 +776,7 @@ export default function CaixinhaPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={formOpen}

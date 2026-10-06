@@ -67,6 +67,7 @@ import {
   type TaxRule
 } from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 /** Campos opcionais que o usuário escolhe exibir no formulário (Constar na nota fiscal). */
 type NfConstarNaNotaFields = {
@@ -2188,15 +2189,11 @@ export default function EspelhoNfPage() {
   return (
     <ProtectedRoute route="/ponto/espelho-nf">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Espelho da Nota Fiscal
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Base para emissão de nota fiscal com regras tributárias (em evolução).
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Espelho da Nota Fiscal"
+            description="Base para emissão de nota fiscal com regras tributárias (em evolução)."
+          />
 
 
           {showEspelhoForm && (
@@ -3747,7 +3744,7 @@ export default function EspelhoNfPage() {
               </div>
             </AppModalOverlay>
           )}
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

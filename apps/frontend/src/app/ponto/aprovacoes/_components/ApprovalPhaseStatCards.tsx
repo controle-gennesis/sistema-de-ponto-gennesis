@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { CheckCircle, Clock, LayoutList, XCircle } from 'lucide-react';
 import api from '@/lib/api';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { pageStatCardsGridClass } from '@/components/ui/pageLayout';
 
 export type ApprovalPhaseStatCard<T extends string> = {
   filter: T;
@@ -62,7 +63,7 @@ export function ApprovalPhaseStatCards<T extends string>({
   counts,
   loading = false,
   onSelect,
-  columnsClassName = 'grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4',
+  columnsClassName = pageStatCardsGridClass,
 }: ApprovalPhaseStatCardsProps<T>) {
   return (
     <div className={columnsClassName}>

@@ -47,6 +47,7 @@ import { exportGestaoOsReportsPdf } from '@/lib/exportGestaoOsReportsPdf';
 import toast from 'react-hot-toast';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { GestaoOsReportsGeoMap } from './GestaoOsReportsGeoMap';
 
@@ -267,15 +268,11 @@ export default function GestaoOsRelatoriosPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/relatorios">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Relatórios de Chamados
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Indicadores de backlog, atraso, MTTR, volume mensal, insumos e pendências.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Relatórios de Chamados"
+            description="Indicadores de backlog, atraso, MTTR, volume mensal, insumos e pendências."
+          />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <div>
@@ -785,7 +782,7 @@ export default function GestaoOsRelatoriosPageClient() {
               </Card>
             </div>
           )}
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

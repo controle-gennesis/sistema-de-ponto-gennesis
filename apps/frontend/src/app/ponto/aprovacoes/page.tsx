@@ -61,6 +61,7 @@ import {
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 const DP_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type DpPhaseFilter = (typeof DP_PHASES)[number];
 
@@ -776,13 +777,11 @@ function AprovacoesPage() {
   return (
     <ProtectedRoute route="/ponto/aprovacoes">
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Aprovações</h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Analise e decida sobre as solicitações pendentes da sua área
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Aprovações"
+            description="Analise e decida sobre as solicitações pendentes da sua área"
+          />
 
           {approvalTabs.length > 0 ? (
             <AprovacoesTabsNav
@@ -797,7 +796,7 @@ function AprovacoesPage() {
           )}
 
           {canApproveDp && activeTab === 'dp' && (
-          <div className="space-y-6">
+          <PageStack>
             <ApprovalPhaseStatCards
               cards={DEFAULT_APPROVAL_PHASE_CARDS}
               activeFilter={dpPhase}
@@ -1004,7 +1003,7 @@ function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
-          </div>
+          </PageStack>
           )}
 
           {dpActionMenu &&
@@ -1077,14 +1076,13 @@ function AprovacoesPage() {
             )}
 
           {canApproveEspelhoNf && activeTab === 'espelho' && (
-          <div className="space-y-6">
+          <PageStack>
             <ApprovalPhaseStatCards
               cards={ESPELHO_STAT_CARDS}
               activeFilter={espelhoPhase}
               counts={espelhoPhaseCounts}
               loading={loadingEspelhoApprovals}
               onSelect={setEspelhoPhase}
-              columnsClassName="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4"
             />
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -1255,7 +1253,7 @@ function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
-          </div>
+          </PageStack>
           )}
 
           {espelhoActionMenu &&
@@ -1533,7 +1531,7 @@ function AprovacoesPage() {
               </div>
             </div>
           </Modal>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

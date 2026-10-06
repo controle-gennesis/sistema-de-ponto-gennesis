@@ -31,6 +31,7 @@ import {
 } from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 /** Cópia nova da matriz federal vazia (evita mutar referências exportadas). */
 function emptyFederalTaxRatesByContext(): FederalTaxRatesByContext {
@@ -304,15 +305,11 @@ export default function CodigosTributariosEspelhoNfPage() {
   return (
     <ProtectedRoute route="/ponto/codigos-tributarios">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Códigos Tributários
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Parâmetros por município ou regime usados em Tomadores de Serviço e espelhos.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Códigos Tributários"
+            description="Parâmetros por município ou regime usados em Tomadores de Serviço e espelhos."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -462,7 +459,7 @@ export default function CodigosTributariosEspelhoNfPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

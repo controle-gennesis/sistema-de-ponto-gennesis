@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { PageStack } from '@/components/ui/pageLayout';
 import {
   ApprovalPhaseStatCards,
   fetchApprovalPhaseCounts,
@@ -191,7 +192,7 @@ export function FdApprovalsSection() {
 
   return (
     <>
-      <div className="space-y-6">
+      <PageStack>
         <ApprovalPhaseStatCards
           cards={FD_PHASE_CARDS}
           activeFilter={fdPhase}
@@ -386,7 +387,7 @@ export function FdApprovalsSection() {
           )}
         </CardContent>
       </Card>
-      </div>
+      </PageStack>
 
       <ActionMenuOverlay
         open={!!actionMenu && !!requestForMenu}

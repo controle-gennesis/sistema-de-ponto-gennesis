@@ -40,6 +40,7 @@ import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi
 import { formatCpfInput } from '@/lib/cpf';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -623,15 +624,11 @@ export default function TreinamentosAdminPageClient() {
   return (
     <ProtectedRoute route="/ponto/treinamentos/administracao">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Treinamentos
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Crie múltiplos cursos com videoaulas, questionário de avaliação e certificado.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Treinamentos"
+            description="Crie múltiplos cursos com videoaulas, questionário de avaliação e certificado."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -832,7 +829,7 @@ export default function TreinamentosAdminPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showCourseForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

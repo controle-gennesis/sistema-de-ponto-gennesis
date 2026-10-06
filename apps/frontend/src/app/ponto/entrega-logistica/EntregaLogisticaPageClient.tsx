@@ -30,6 +30,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
@@ -533,15 +534,11 @@ export default function EntregaLogisticaPageClient() {
   return (
     <ProtectedRoute route="/ponto/entrega-logistica">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Entrega da Logística
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Registre o recebimento das solicitações de entrega logística criadas pelo Suprimentos
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Entrega da Logística"
+            description="Registre o recebimento das solicitações de entrega logística criadas pelo Suprimentos"
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
             {STAT_CARDS.map((card) => (
@@ -700,7 +697,7 @@ export default function EntregaLogisticaPageClient() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={Boolean(finalizeRow)}

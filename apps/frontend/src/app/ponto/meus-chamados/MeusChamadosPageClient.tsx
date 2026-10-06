@@ -28,6 +28,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { GestaoOsAttachmentsField } from '@/components/gestao-os/GestaoOsAttachmentsField';
 import { GestaoOsCommentsSection } from '@/components/gestao-os/GestaoOsCommentsSection';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   GESTAO_OS_FORM_LABEL_CLS,
   GestaoOsAssetHistoryCard,
@@ -476,15 +477,11 @@ export default function MeusChamadosPageClient() {
   return (
     <ProtectedRoute route="/ponto/meus-chamados">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Meus Chamados
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Acompanhe seus chamados
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Meus Chamados"
+            description="Acompanhe seus chamados"
+          />
 
           {unitBuildings.length > 0 ? (
             <div className="flex justify-center gap-2">
@@ -727,7 +724,7 @@ export default function MeusChamadosPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={createOpen}

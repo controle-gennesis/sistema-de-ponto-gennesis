@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -496,13 +497,11 @@ export default function AjusteEstoquePage() {
   return (
     <ProtectedRoute route="/ponto/ajuste-estoque">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Ajuste de Estoque</h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Registre entradas e saídas para ajuste de saldo
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Ajuste de Estoque"
+            description="Registre entradas e saídas para ajuste de saldo"
+          />
 
           <Card className="w-full">
               <CardHeader className="border-b-0 pb-1">
@@ -1083,7 +1082,7 @@ export default function AjusteEstoquePage() {
               </div>
             }
           />
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

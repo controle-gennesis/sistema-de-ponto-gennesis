@@ -6,6 +6,7 @@ import {
   OcPurchaseOrdersPanel,
   type OcTab,
 } from '@/components/oc/OcPurchaseOrdersPanel';
+import { PageStack } from '@/components/ui/pageLayout';
 
 export function OcApprovalsSection() {
   const { canApproveOcCompras, canApproveOcDiretoria, canApproveOcGestor, ocGestorScopedCostCenterIds } =
@@ -30,7 +31,7 @@ export function OcApprovalsSection() {
   }
 
   return (
-    <div className="w-full space-y-8 scroll-mt-4" id="secao-oc-aprovacoes">
+    <PageStack className="w-full scroll-mt-4" id="secao-oc-aprovacoes" as="div">
       {visiblePhases.map((tab) => (
         <OcPurchaseOrdersPanel
           key={tab}
@@ -43,6 +44,6 @@ export function OcApprovalsSection() {
           gestorCostCenterIds={tab === 'gestor' ? ocGestorScopedCostCenterIds : undefined}
         />
       ))}
-    </div>
+    </PageStack>
   );
 }

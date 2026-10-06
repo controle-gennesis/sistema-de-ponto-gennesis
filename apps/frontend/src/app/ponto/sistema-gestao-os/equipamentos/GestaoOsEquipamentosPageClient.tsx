@@ -38,6 +38,7 @@ import {
 } from '@/app/ponto/sistema-gestao-os/gestaoOsTypes';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 type EquipmentTab = 'equipamentos' | 'grupos' | 'subgrupos';
 
@@ -601,15 +602,11 @@ export default function GestaoOsEquipamentosPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/equipamentos">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Equipamentos
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Grupo, subgrupo e equipamento para classificação dos chamados.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Equipamentos"
+            description="Grupo, subgrupo e equipamento para classificação dos chamados."
+          />
 
           <AppUnderlineTabList aria-label="Seções de equipamentos">
             {TABS.map((item) => {
@@ -901,7 +898,7 @@ export default function GestaoOsEquipamentosPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

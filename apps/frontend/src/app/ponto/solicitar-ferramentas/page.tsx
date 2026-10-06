@@ -32,6 +32,7 @@ import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { POLO_OPTIONS } from '@/components/suprimentos/materialDeliveryLabels';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
@@ -264,15 +265,11 @@ function SolicitarLocacoesFerramentasPage() {
 
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-      <div className="space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-            Solicitação de Ferramentas
-          </h1>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-            Solicite locação, renovação, devolução ou compra de equipamentos
-          </p>
-        </div>
+      <PageStack>
+          <ListPageHeader
+            title="Solicitação de Ferramentas"
+            description="Solicite locação, renovação, devolução ou compra de equipamentos"
+          />
 
         <Card className={cadastroListClasses.card}>
           <CardHeader className={cadastroListClasses.cardHeader}>
@@ -706,7 +703,7 @@ function SolicitarLocacoesFerramentasPage() {
           </div>
         </div>
       </Modal>
-      </div>
+      </PageStack>
     </MainLayout>
   );
 }

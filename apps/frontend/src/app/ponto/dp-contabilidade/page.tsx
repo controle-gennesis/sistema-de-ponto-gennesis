@@ -44,6 +44,7 @@ import {
   RowActionMenuPortal,
 } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 
 const PAGE_SIZE = 20;
@@ -407,16 +408,11 @@ export default function DpContabilidadePage() {
   return (
     <ProtectedRoute route="/ponto/dp-contabilidade">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Comunicação Contábil
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Canal do Departamento Pessoal com a Contabilidade. As solicitações ficam
-              registradas para consulta e não passam por aprovação.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Comunicação Contábil"
+            description="Canal do Departamento Pessoal com a Contabilidade. As solicitações ficam registradas para consulta e não passam por aprovação."
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <FilterStatCard
@@ -661,7 +657,7 @@ export default function DpContabilidadePage() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={isCreateModalOpen}

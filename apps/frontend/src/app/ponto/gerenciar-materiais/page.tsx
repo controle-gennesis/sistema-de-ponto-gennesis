@@ -10,6 +10,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
+import { ListPageHeader, PageStack, pageStatCardsGrid5Class } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { fixMojibakeFileName } from '@/lib/fixMojibakeFileName';
@@ -875,17 +876,13 @@ export default function GerenciarMateriaisPage() {
         userName={user.name}
         onLogout={handleLogout}
       >
-        <div className="space-y-4">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Requisições de Materiais
-            </h1>
-            <p className="mt-1 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Acompanhe o status das requisições de materiais.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Requisições de Materiais"
+            description="Acompanhe o status das requisições de materiais."
+          />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          <div className={pageStatCardsGrid5Class}>
             {RM_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}
@@ -928,7 +925,7 @@ export default function GerenciarMateriaisPage() {
               })();
             }}
           />
-        </div>
+        </PageStack>
 
         {/* Modal Detalhes */}
         {showDetailsModal && selectedRequest && (() => {

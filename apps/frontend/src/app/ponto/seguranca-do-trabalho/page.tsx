@@ -35,6 +35,7 @@ import { Modal } from '@/components/ui/Modal';
 import { SpreadsheetImportModal } from '@/components/ui/SpreadsheetImportModal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { exportAsoRegistrosToExcel } from '@/lib/asoExport';
@@ -1148,15 +1149,11 @@ export default function SegurancaDoTrabalhoPage() {
           onChange={handleAnexoInputChange}
         />
 
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Segurança do Trabalho
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Controle de ASO (Atestado de Saúde Ocupacional) dos funcionários
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Segurança do Trabalho"
+            description="Controle de ASO (Atestado de Saúde Ocupacional) dos funcionários"
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
             {ASO_STAT_CARDS.map((card) => {
@@ -1880,7 +1877,7 @@ export default function SegurancaDoTrabalhoPage() {
               </Card>
             </div>
           )}
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={showForm}

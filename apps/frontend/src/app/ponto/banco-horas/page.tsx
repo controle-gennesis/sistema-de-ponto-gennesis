@@ -18,6 +18,7 @@ import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const BANK_HOURS_STATUS_OPTIONS = labeledToSelectOptions([
@@ -323,15 +324,11 @@ function BankHoursPageContent() {
       userName={user.name}
       onLogout={handleLogout}
     >
-      <div className="space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-            Controle de Banco de Horas
-          </h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-            Acompanhamento do banco de horas de todos os funcionários
-          </p>
-        </div>
+      <PageStack>
+          <ListPageHeader
+            title="Controle de Banco de Horas"
+            description="Acompanhamento do banco de horas de todos os funcionários"
+          />
 
         <Card className={cadastroListClasses.card}>
           <CardHeader className={cadastroListClasses.cardHeader}>
@@ -664,7 +661,7 @@ function BankHoursPageContent() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </PageStack>
     </MainLayout>
   );
 }

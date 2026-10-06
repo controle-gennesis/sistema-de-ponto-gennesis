@@ -51,6 +51,7 @@ import {
 } from '../gestaoOsTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const TEAM_MEMBER_ROLE_OPTIONS = labeledToSelectOptions([
@@ -521,15 +522,11 @@ export default function GestaoOsEquipesPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/equipes">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Equipes de Serviço
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Monte equipes com seus integrantes e defina as localidades que cada uma atende.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Equipes de Serviço"
+            description="Monte equipes com seus integrantes e defina as localidades que cada uma atende."
+          />
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <FilterStatCard
@@ -750,7 +747,7 @@ export default function GestaoOsEquipesPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

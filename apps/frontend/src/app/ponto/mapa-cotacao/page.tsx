@@ -34,6 +34,7 @@ import {
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   formatUnitPriceBr,
   maskCurrencyInputBrOrEmpty,
@@ -1324,15 +1325,11 @@ export default function MapaCotacaoPage() {
   return (
     <ProtectedRoute route="/ponto/mapa-cotacao">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Mapa de Cotação
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Compare preços entre fornecedores e gere ordens de compra por vencedor.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Mapa de Cotação"
+            description="Compare preços entre fornecedores e gere ordens de compra por vencedor."
+          />
 
           <Card>
             <CardHeader className="border-b-0 pb-1">
@@ -1804,7 +1801,7 @@ export default function MapaCotacaoPage() {
                   )}
                 </CardContent>
               </Card>
-        </div>
+        </PageStack>
 
         {(() => {
           const sid = ocModalSupplierId;

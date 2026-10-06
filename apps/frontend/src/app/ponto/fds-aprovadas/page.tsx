@@ -32,6 +32,7 @@ import {
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
@@ -181,15 +182,11 @@ export default function FdsAprovadasPage() {
   return (
     <ProtectedRoute route="/ponto/fds-aprovadas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Fichas de Demanda
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Consulte e acompanhe as fichas de demanda aprovadas.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Fichas de Demanda"
+            description="Consulte e acompanhe as fichas de demanda aprovadas."
+          />
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
@@ -426,7 +423,7 @@ export default function FdsAprovadasPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <FichaDemandaDetailModal
           isOpen={detailRecord != null}

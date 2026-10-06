@@ -29,6 +29,7 @@ import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import type { GestaoOsServiceCategory } from '../gestaoOsTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 function emptyForm() {
   return { name: '', code: '', description: '', checklistText: '' };
@@ -233,15 +234,11 @@ export default function GestaoOsTiposServicoPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/tipos-servico">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Tipos de Serviço
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Categorias usadas na abertura e classificação de chamados / OS.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Tipos de Serviço"
+            description="Categorias usadas na abertura e classificação de chamados / OS."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -413,7 +410,7 @@ export default function GestaoOsTiposServicoPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

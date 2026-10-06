@@ -51,6 +51,7 @@ import {
 } from '@/lib/dpRequestHistoryModal';
 import { COMPANIES_LIST } from '@/constants/payrollFilters';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -1032,15 +1033,11 @@ export function SolicitacoesGeraisPage() {
   return (
     <ProtectedRoute route="/ponto/solicitacoes-gerais">
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Solicitações Internas
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Crie e acompanhe pedidos para Departamento Pessoal e Administração
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Solicitações Internas"
+            description="Crie e acompanhe pedidos para Departamento Pessoal e Administração"
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
             {DESTINATION_STAT_CARDS.map((card) => (
@@ -1329,7 +1326,7 @@ export function SolicitacoesGeraisPage() {
                 </div>
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={isCreateModalOpen}

@@ -47,6 +47,7 @@ import {
 } from '../gestaoOsTypes';
 import { useGestaoOsCompany } from '../useGestaoOsCompany';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 type Technician = {
   id: string;
@@ -582,16 +583,11 @@ export default function GestaoOsPlanosPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os/planos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Planos de Manutenção
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Programe as manutenções com o Check-List e o Manual de Patrimônio do IFSP e gere os
-              chamados automaticamente na data.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Planos de Manutenção"
+            description="Programe as manutenções com o Check-List e o Manual de Patrimônio do IFSP e gere os chamados automaticamente na data."
+          />
 
           {ifspDocs.length > 0 ? (
             <Card className={cadastroListClasses.card}>
@@ -864,7 +860,7 @@ export default function GestaoOsPlanosPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

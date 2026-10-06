@@ -26,6 +26,7 @@ import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { ListPagination } from '@/components/ui/ListPagination';
 import api from '@/lib/api';
 import type { FormTemplateSummary } from '@/components/forms/formStructureTypes';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -134,15 +135,11 @@ export default function FormulariosPage() {
   return (
     <ProtectedRoute route="/ponto/formularios">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Formulários
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Crie e edite a estrutura de formulários (seções e perguntas).
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Formulários"
+            description="Crie e edite a estrutura de formulários (seções e perguntas)."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -289,7 +286,7 @@ export default function FormulariosPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

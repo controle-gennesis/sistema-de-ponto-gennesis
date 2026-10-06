@@ -30,6 +30,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -1356,17 +1357,13 @@ function LicitacoesPncpPageContent() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-          Portal Nacional de Contratações Públicas
-        </h1>
-        <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-          Consulta pública de contratações publicadas no PNCP.
-        </p>
-      </div>
+    <PageStack>
+      <ListPageHeader
+        title="Portal Nacional de Contratações Públicas"
+        description="Consulta pública de contratações publicadas no PNCP."
+      />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-5">
         {statusCards.map((card) => (
           <FilterStatCard
             key={card.id}
@@ -2526,7 +2523,7 @@ function LicitacoesPncpPageContent() {
           </div>,
           document.body
         )}
-    </div>
+    </PageStack>
   );
 }
 

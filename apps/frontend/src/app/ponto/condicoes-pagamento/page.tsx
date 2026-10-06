@@ -13,6 +13,7 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 const ITEMS_PER_PAGE = 20;
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -272,15 +273,11 @@ export default function CondicoesPagamentoPage() {
   return (
     <ProtectedRoute route="/ponto/condicoes-pagamento">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Condições de Pagamento
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Cadastro usado na criação e edição de ordens de compra (à vista e boleto).
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Condições de Pagamento"
+            description="Cadastro usado na criação e edição de ordens de compra (à vista e boleto)."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -685,7 +682,7 @@ export default function CondicoesPagamentoPage() {
               </div>
             </AppModalOverlay>
           )}
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

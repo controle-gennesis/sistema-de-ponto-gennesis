@@ -39,6 +39,7 @@ import {
 import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { POLO_OPTIONS } from '@/components/suprimentos/materialDeliveryLabels';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { formatPlacaDisplay } from '@/lib/brazilianVehiclePlate';
 import {
@@ -719,15 +720,11 @@ export default function ReservaVeiculosPage() {
   return (
     <ProtectedRoute route="/ponto/reserva-veiculos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Frota
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Solicite o uso de veículos da frota
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Frota"
+            description="Solicite o uso de veículos da frota"
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5">
             {RESERVATION_STAT_CARDS.map((card) => (
@@ -1448,7 +1445,7 @@ export default function ReservaVeiculosPage() {
               </button>
             </div>
           </Modal>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

@@ -22,6 +22,7 @@ import {
 import { OcGlobalSearch } from '@/components/oc/OcGlobalSearch';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 import { OcTotvsUserLinkButton } from '@/components/oc/OcTotvsUserLinkButton';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 export default function OrdemDeCompraPage() {
   const router = useRouter();
@@ -78,18 +79,15 @@ export default function OrdemDeCompraPage() {
   return (
     <ProtectedRoute route="/ponto/ordem-de-compra">
       <MainLayout userRole={displayUser.role || 'EMPLOYEE'} userName={displayUser.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
-              Ordens de Compra
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
-              Acompanhe aprovações, pagamentos e o fluxo completo das OCs em um só lugar.
-            </p>
+        <PageStack>
+          <ListPageHeader
+            title="Ordens de Compra"
+            description="Acompanhe aprovações, pagamentos e o fluxo completo das OCs em um só lugar."
+          >
             <div className="mt-4 flex justify-center">
               <OcTotvsUserLinkButton />
             </div>
-          </div>
+          </ListPageHeader>
 
           <OcGlobalSearch
             searchTerm={searchTerm}
@@ -98,26 +96,23 @@ export default function OrdemDeCompraPage() {
             orders={allOrders}
           />
 
-          <div className="scroll-mt-4">
+          <PageStack className="scroll-mt-4">
             <OcFluxTabsNav
               activeTab={ocTab}
               onActiveTab={setOcTab}
               tabCounts={tabCounts}
               finalizedTotal={finalizedTotal}
             />
-
-            <div className="mt-4">
-              <OcPurchaseOrdersPanel
-                embedded
-                hideTabs
-                hideSearch
-                activeTab={ocTab}
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-              />
-            </div>
-          </div>
-        </div>
+            <OcPurchaseOrdersPanel
+              embedded
+              hideTabs
+              hideSearch
+              activeTab={ocTab}
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+            />
+          </PageStack>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

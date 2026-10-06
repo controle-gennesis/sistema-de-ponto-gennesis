@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -603,17 +604,13 @@ export default function ControleEntregasPageClient() {
   return (
     <ProtectedRoute route="/ponto/controle-entregas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-8">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Controle de Entregas
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Acompanhe entregas de material e confirme o recebimento pela engenharia.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Controle de Entregas"
+            description="Acompanhe entregas de material e confirme o recebimento pela engenharia."
+          />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+          <div className={pageStatCardsGridClass}>
             <FilterStatCard
               label="Em andamento"
               count={summary.total}
@@ -830,7 +827,7 @@ export default function ControleEntregasPageClient() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={Boolean(detailRow)}

@@ -44,6 +44,7 @@ import { SignaturePad } from '@/components/gestao-os/SignaturePad';
 import { GestaoOsAttachmentsField } from '@/components/gestao-os/GestaoOsAttachmentsField';
 import { GestaoOsCommentsSection } from '@/components/gestao-os/GestaoOsCommentsSection';
 import { GestaoOsPartsEditor } from '@/components/gestao-os/GestaoOsPartsEditor';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   GESTAO_OS_FORM_LABEL_CLS,
   GestaoOsAssetHistoryCard,
@@ -998,16 +999,11 @@ export default function SistemaGestaoOsPageClient() {
   return (
     <ProtectedRoute route="/ponto/sistema-gestao-os">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Central de Chamados
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Visão geral operacional: acompanhe todos os chamados por fase, filtre e avance o
-              fluxo.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Central de Chamados"
+            description="Visão geral operacional: acompanhe todos os chamados por fase, filtre e avance o fluxo."
+          />
 
           <div className="scroll-mt-4">
             <div className="bg-transparent px-2">
@@ -1244,7 +1240,7 @@ export default function SistemaGestaoOsPageClient() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={isFiltersModalOpen}

@@ -17,6 +17,7 @@ import api from '@/lib/api';
 import { useEspelhoNfBootstrap } from '@/hooks/useEspelhoNfBootstrap';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 interface BankAccountRow {
   id: string;
@@ -187,15 +188,11 @@ export default function ContasBancariasEspelhoNfPage() {
   return (
     <ProtectedRoute route="/ponto/contas-bancarias">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Contas Bancárias
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Contas usadas em Tomadores de Serviço e no espelho de nota fiscal.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Contas Bancárias"
+            description="Contas usadas em Tomadores de Serviço e no espelho de nota fiscal."
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -335,7 +332,7 @@ export default function ContasBancariasEspelhoNfPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">

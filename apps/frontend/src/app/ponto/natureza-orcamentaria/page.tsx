@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 interface BudgetNature {
   id: string;
@@ -296,11 +297,11 @@ export default function NaturezaOrcamentariaPage() {
   return (
     <ProtectedRoute route="/ponto/natureza-orcamentaria">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Natureza Orçamentária</h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Cadastre as naturezas orçamentárias</p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Natureza Orçamentária"
+            description="Cadastre as naturezas orçamentárias"
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -415,7 +416,7 @@ export default function NaturezaOrcamentariaPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </PageStack>
 
         {/* Form Modal */}
         {showForm && (

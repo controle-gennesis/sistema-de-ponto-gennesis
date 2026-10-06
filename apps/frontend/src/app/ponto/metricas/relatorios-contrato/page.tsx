@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -334,7 +335,7 @@ export default function RelatoriosContratoPage() {
   return (
     <ProtectedRoute route="/ponto/metricas/relatorios-contrato">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
+        <PageStack>
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
               Relatórios de Contrato
@@ -573,7 +574,7 @@ export default function RelatoriosContratoPage() {
           </Card>
             </>
           )}
-        </div>
+        </PageStack>
 
         <Modal
           isOpen={pageTab === 'semanal' && configTargetIds.length > 0}

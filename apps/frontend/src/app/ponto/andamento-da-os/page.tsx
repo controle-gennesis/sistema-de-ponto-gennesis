@@ -16,6 +16,7 @@ import {
 import { OsFluxTabsNav, OS_FLUX_DEFAULT_TAB } from '@/components/os/OsFluxTabsNav';
 import { OsGlobalSearch } from '@/components/os/OsGlobalSearch';
 import { computeOsTabCounts, prepareOsFluxList } from '@/components/os/osFluxUtils';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 export default function AndamentoDaOsPage() {
   const router = useRouter();
@@ -65,15 +66,11 @@ export default function AndamentoDaOsPage() {
   return (
     <ProtectedRoute route="/ponto/andamento-da-os">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">
-              Ordem de Serviço
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 sm:text-base dark:text-gray-400">
-              Acompanhe orçamento, execução, pleitos e faturamento das OS em um só lugar.
-            </p>
-          </div>
+        <PageStack>
+          <ListPageHeader
+            title="Ordem de Serviço"
+            description="Acompanhe orçamento, execução, pleitos e faturamento das OS em um só lugar."
+          />
 
           <OsGlobalSearch
             searchTerm={searchTerm}
@@ -100,7 +97,7 @@ export default function AndamentoDaOsPage() {
               )}
             </div>
           </div>
-        </div>
+        </PageStack>
       </MainLayout>
     </ProtectedRoute>
   );

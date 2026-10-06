@@ -36,6 +36,7 @@ import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -1976,7 +1977,7 @@ export default function EmpreiteirosPage() {
   return (
     <ProtectedRoute route="/ponto/empreiteiros">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="space-y-6">
+        <PageStack>
           <div className="relative flex flex-col items-center gap-4 text-center">
             <div className="min-w-0 w-full">
               {showMedicaoPage || showDetailPage ? (
@@ -2012,7 +2013,7 @@ export default function EmpreiteirosPage() {
                       ? viewingItem?.name || 'Empreita'
                       : 'Empreitas'}
               </h1>
-              <p className="mx-auto mt-1.5 max-w-xl text-sm text-gray-600 dark:text-gray-400">
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
                 {showMedicaoPage
                     ? medicaoFilterContract
                       ? `${medicaoTargetItem?.name || 'Empreita'} · ${medicaoFilterContract.contratoNome}`
@@ -2426,7 +2427,7 @@ export default function EmpreiteirosPage() {
             ) : null}
           </div>
           )}
-        </div>
+        </PageStack>
 
         {showForm ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
