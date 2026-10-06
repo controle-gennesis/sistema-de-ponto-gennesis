@@ -61,6 +61,11 @@ type Props = {
   estiloTitulo?: React.CSSProperties;
   /** Bloqueia edição (orçamento/memorial travados). */
   readOnly?: boolean;
+  /**
+   * Dentro do quadrante do serviço: remove borda/raio externos para não ficar
+   * card-dentro-de-card.
+   */
+  embedded?: boolean;
 };
 
 /**
@@ -290,6 +295,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   removeLinhaMedicao,
   estiloTitulo,
   readOnly = false,
+  embedded = false,
 }: Props) {
   const tipo = tipoUnidade;
   const linhasEfetivas = linhasMedicaoEfetivas(dim);
@@ -1070,11 +1076,19 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   /** Evita borda “dupla” grossa: o contêiner já tem borda; última linha/coluna não repetem border-b/border-r. */
-  const gradeTabelaMemorialBordaCls =
-    '[&_tbody_tr:last-child_td]:!border-b-0 [&_td:last-child]:!border-r-0 [&_thead_th:last-child]:!border-r-0 [&_thead_tr:first-child>th:first-child]:rounded-tl-[calc(0.5rem-1px)] [&_thead_tr:first-child>th:last-child]:rounded-tr-[calc(0.5rem-1px)]';
+  const gradeTabelaMemorialBordaCls = embedded
+    ? // Sem border-b na última linha: o próximo painel embedded já traz border-t (senão a separação fica grossa).
+      '[&_tbody_tr:last-child_td]:!border-b-0 [&_td:last-child]:!border-r-0 [&_thead_th:last-child]:!border-r-0'
+    : '[&_tbody_tr:last-child_td]:!border-b-0 [&_td:last-child]:!border-r-0 [&_thead_th:last-child]:!border-r-0 [&_thead_tr:first-child>th:first-child]:rounded-tl-[calc(0.5rem-1px)] [&_thead_tr:first-child>th:last-child]:rounded-tr-[calc(0.5rem-1px)]';
 
   const tabelaEnvoltorio = (children: React.ReactNode) => (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+    <div
+      className={
+        embedded
+          ? 'overflow-hidden border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+          : 'overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+      }
+    >
       <div className="overflow-x-auto">
       <table
         className={`w-full min-w-[56rem] table-fixed border-separate border-spacing-0 text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}

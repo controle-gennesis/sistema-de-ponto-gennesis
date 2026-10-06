@@ -3050,10 +3050,21 @@ type OrcamentoMeta = {
   };
   /** Id da ficha de demanda enviada para aprovação (quando houver). */
   fichaDemandaApprovalId?: string;
-  /** Cores de título/subtítulo e fonte das tabelas do orçamento. */
+  /** Cores de título/subtítulo e fonte (legado — fallback quando não há aparenciaAbas). */
   aparencia?: AparenciaOrcamento;
+  /** Características visuais por aba (Orçamento / Memória / Analítico). */
+  aparenciaAbas?: AparenciaAbasOrcamento;
   /** Trava edição da aba Orçamento e da Memória de cálculo. */
   gradeTravada?: boolean;
+};
+
+export type AparenciaAbaOrcamento = 'montagem' | 'memorial' | 'analitico' | 'fichaDemanda';
+
+export type AparenciaAbasOrcamento = {
+  montagem?: AparenciaOrcamento;
+  memorial?: AparenciaOrcamento;
+  analitico?: AparenciaOrcamento;
+  fichaDemanda?: AparenciaOrcamento;
 };
 
 export type AparenciaOrcamento = {
@@ -3061,13 +3072,16 @@ export type AparenciaOrcamento = {
   tituloTexto: string;
   subtituloFundo: string;
   subtituloTexto: string;
+  /** Fundo/letra do nº do item na Memória de cálculo. */
+  itemFundo: string;
+  itemTexto: string;
   /** Fundo da linha de composição no Analítico. */
   composicaoFundo: string;
   /** Letra da linha de composição no Analítico. */
   composicaoTexto: string;
-  /** Fundo do cabeçalho das tabelas (todas as abas / Excel). */
+  /** Fundo do cabeçalho das tabelas. */
   headerFundo: string;
-  /** Letra do cabeçalho das tabelas (todas as abas / Excel). */
+  /** Letra do cabeçalho das tabelas. */
   headerTexto: string;
   /** CSS font-family; vazio = fonte padrão do sistema. */
   fonte: string;
@@ -3078,6 +3092,9 @@ const APARENCIA_ORCAMENTO_PADRAO: AparenciaOrcamento = {
   tituloTexto: '#ffffff',
   subtituloFundo: '#e2e8f0',
   subtituloTexto: '#1f2937',
+  /** Badge do item na memória (mesmo vermelho do título por padrão). */
+  itemFundo: '#dc2626',
+  itemTexto: '#ffffff',
   /** Equivale ao `bg-slate-100` usado nas linhas de composição. */
   composicaoFundo: '#f1f5f9',
   composicaoTexto: '#111827',
@@ -3117,6 +3134,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
   const tituloTexto = corHexOrcamento(o.tituloTexto);
   const subtituloFundo = corHexOrcamento(o.subtituloFundo);
   const subtituloTexto = corHexOrcamento(o.subtituloTexto);
+  const itemFundo = corHexOrcamento(o.itemFundo);
+  const itemTexto = corHexOrcamento(o.itemTexto);
   const composicaoFundo = corHexOrcamento(o.composicaoFundo);
   const composicaoTexto = corHexOrcamento(o.composicaoTexto);
   const headerFundo = corHexOrcamento(o.headerFundo);
@@ -3127,6 +3146,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
     !tituloTexto &&
     !subtituloFundo &&
     !subtituloTexto &&
+    !itemFundo &&
+    !itemTexto &&
     !composicaoFundo &&
     !composicaoTexto &&
     !headerFundo &&
@@ -3140,6 +3161,8 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
     tituloTexto: tituloTexto ?? APARENCIA_ORCAMENTO_PADRAO.tituloTexto,
     subtituloFundo: subtituloFundo ?? APARENCIA_ORCAMENTO_PADRAO.subtituloFundo,
     subtituloTexto: subtituloTexto ?? APARENCIA_ORCAMENTO_PADRAO.subtituloTexto,
+    itemFundo: itemFundo ?? APARENCIA_ORCAMENTO_PADRAO.itemFundo,
+    itemTexto: itemTexto ?? APARENCIA_ORCAMENTO_PADRAO.itemTexto,
     composicaoFundo: composicaoFundo ?? APARENCIA_ORCAMENTO_PADRAO.composicaoFundo,
     composicaoTexto: composicaoTexto ?? APARENCIA_ORCAMENTO_PADRAO.composicaoTexto,
     headerFundo: headerFundo ?? APARENCIA_ORCAMENTO_PADRAO.headerFundo,
@@ -3155,12 +3178,137 @@ function aparenciaOrcamentoEhPadrao(a: AparenciaOrcamento): boolean {
     eq(a.tituloTexto, APARENCIA_ORCAMENTO_PADRAO.tituloTexto) &&
     eq(a.subtituloFundo, APARENCIA_ORCAMENTO_PADRAO.subtituloFundo) &&
     eq(a.subtituloTexto, APARENCIA_ORCAMENTO_PADRAO.subtituloTexto) &&
+    eq(a.itemFundo, APARENCIA_ORCAMENTO_PADRAO.itemFundo) &&
+    eq(a.itemTexto, APARENCIA_ORCAMENTO_PADRAO.itemTexto) &&
     eq(a.composicaoFundo, APARENCIA_ORCAMENTO_PADRAO.composicaoFundo) &&
     eq(a.composicaoTexto, APARENCIA_ORCAMENTO_PADRAO.composicaoTexto) &&
     eq(a.headerFundo, APARENCIA_ORCAMENTO_PADRAO.headerFundo) &&
     eq(a.headerTexto, APARENCIA_ORCAMENTO_PADRAO.headerTexto) &&
     !a.fonte.trim()
   );
+}
+
+function parseAparenciaAbasOrcamento(raw: unknown): AparenciaAbasOrcamento | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const montagem = parseAparenciaOrcamento(o.montagem);
+  const memorial = parseAparenciaOrcamento(o.memorial);
+  const analitico = parseAparenciaOrcamento(o.analitico);
+  const fichaDemanda = parseAparenciaOrcamento(o.fichaDemanda);
+  if (!montagem && !memorial && !analitico && !fichaDemanda) return undefined;
+  return { montagem, memorial, analitico, fichaDemanda };
+}
+
+function aparenciaDaAba(
+  meta:
+    | {
+        aparencia?: AparenciaOrcamento;
+        aparenciaAbas?: AparenciaAbasOrcamento;
+      }
+    | undefined
+    | null,
+  aba: AparenciaAbaOrcamento
+): AparenciaOrcamento | undefined {
+  const porAba = meta?.aparenciaAbas?.[aba];
+  if (porAba) return porAba;
+  return meta?.aparencia;
+}
+
+function abaAparenciaFromViewTab(tab: string): AparenciaAbaOrcamento {
+  if (tab === 'memorial') return 'memorial';
+  if (tab === 'analitico') return 'analitico';
+  if (tab === 'planilhaAnalitica') return 'fichaDemanda';
+  return 'montagem';
+}
+
+function normalizeAparenciaAbasForSave(
+  abas: AparenciaAbasOrcamento
+): AparenciaAbasOrcamento | undefined {
+  const out: AparenciaAbasOrcamento = {};
+  for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda'] as const) {
+    const raw = abas[k];
+    if (!raw) continue;
+    const a = aparenciaCamposDaAba(k, raw);
+    if (!aparenciaOrcamentoEhPadrao(a)) out[k] = a;
+  }
+  return out.montagem || out.memorial || out.analitico || out.fichaDemanda ? out : undefined;
+}
+
+const APARENCIA_ABA_OPCOES: Array<{ value: AparenciaAbaOrcamento; label: string }> = [
+  { value: 'montagem', label: 'Orçamento' },
+  { value: 'memorial', label: 'Memória de cálculo' },
+  { value: 'analitico', label: 'Analítico' },
+  { value: 'fichaDemanda', label: 'Ficha de demanda' },
+];
+
+/** Linha de composição com fundo/letra custom: Analítico e Ficha de demanda. */
+function abaAparenciaTemComposicao(aba: AparenciaAbaOrcamento): boolean {
+  return aba === 'analitico' || aba === 'fichaDemanda';
+}
+
+/** Subtítulo custom só nas abas Orçamento / Analítico / Ficha (não na Memória). */
+function abaAparenciaTemSubtitulo(aba: AparenciaAbaOrcamento): boolean {
+  return aba !== 'memorial';
+}
+
+/** Badge do item só na Memória de cálculo. */
+function abaAparenciaTemItem(aba: AparenciaAbaOrcamento): boolean {
+  return aba === 'memorial';
+}
+
+function aparenciaSemComposicaoCustom(a: AparenciaOrcamento): AparenciaOrcamento {
+  return {
+    ...a,
+    composicaoFundo: APARENCIA_ORCAMENTO_PADRAO.composicaoFundo,
+    composicaoTexto: APARENCIA_ORCAMENTO_PADRAO.composicaoTexto,
+  };
+}
+
+function aparenciaSemSubtituloCustom(a: AparenciaOrcamento): AparenciaOrcamento {
+  return {
+    ...a,
+    subtituloFundo: APARENCIA_ORCAMENTO_PADRAO.subtituloFundo,
+    subtituloTexto: APARENCIA_ORCAMENTO_PADRAO.subtituloTexto,
+  };
+}
+
+function aparenciaSemItemCustom(a: AparenciaOrcamento): AparenciaOrcamento {
+  return {
+    ...a,
+    itemFundo: APARENCIA_ORCAMENTO_PADRAO.itemFundo,
+    itemTexto: APARENCIA_ORCAMENTO_PADRAO.itemTexto,
+  };
+}
+
+/** Zera campos que a aba não usa (evita persistir lixo de outras abas). */
+function aparenciaCamposDaAba(
+  aba: AparenciaAbaOrcamento,
+  a: AparenciaOrcamento
+): AparenciaOrcamento {
+  let out = a;
+  if (!abaAparenciaTemComposicao(aba)) out = aparenciaSemComposicaoCustom(out);
+  if (!abaAparenciaTemSubtitulo(aba)) out = aparenciaSemSubtituloCustom(out);
+  if (!abaAparenciaTemItem(aba)) out = aparenciaSemItemCustom(out);
+  return out;
+}
+
+function draftAparenciaAbasFromMeta(meta: {
+  aparencia?: AparenciaOrcamento;
+  aparenciaAbas?: AparenciaAbasOrcamento;
+}): Record<AparenciaAbaOrcamento, AparenciaOrcamento> {
+  const montagem = { ...APARENCIA_ORCAMENTO_PADRAO, ...(aparenciaDaAba(meta, 'montagem') ?? {}) };
+  const memorial = { ...APARENCIA_ORCAMENTO_PADRAO, ...(aparenciaDaAba(meta, 'memorial') ?? {}) };
+  const analitico = { ...APARENCIA_ORCAMENTO_PADRAO, ...(aparenciaDaAba(meta, 'analitico') ?? {}) };
+  const fichaDemanda = {
+    ...APARENCIA_ORCAMENTO_PADRAO,
+    ...(aparenciaDaAba(meta, 'fichaDemanda') ?? {}),
+  };
+  return {
+    montagem: aparenciaCamposDaAba('montagem', montagem),
+    memorial: aparenciaCamposDaAba('memorial', memorial),
+    analitico: aparenciaCamposDaAba('analitico', analitico),
+    fichaDemanda: aparenciaCamposDaAba('fichaDemanda', fichaDemanda),
+  };
 }
 
 const ORC_LINHA_COR_CUSTOM_CLS = '[&_*]:!text-inherit [&>td]:bg-inherit [&>th]:bg-inherit';
@@ -3213,6 +3361,18 @@ function estiloLinhaSubtituloOrc(
   return {
     backgroundColor: corFundoAparenciaOrcDark(ap.subtituloFundo, 'subtitulo'),
     color: corTextoAparenciaOrcDark(ap.subtituloTexto)
+  };
+}
+
+function estiloLinhaItemOrc(
+  ap?: AparenciaOrcamento,
+  isDark = false
+): React.CSSProperties | undefined {
+  if (!ap) return undefined;
+  if (!isDark) return { backgroundColor: ap.itemFundo, color: ap.itemTexto };
+  return {
+    backgroundColor: corFundoAparenciaOrcDark(ap.itemFundo, 'titulo'),
+    color: corTextoAparenciaOrcDark(ap.itemTexto)
   };
 }
 
@@ -3971,6 +4131,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
               ? metaRaw.fichaDemandaApprovalId.trim()
               : undefined,
           aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
+          aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
           gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
@@ -4354,6 +4515,7 @@ function parseOrcamentoDetailRaw(d: {
             ? metaRaw.fichaDemandaApprovalId.trim()
             : undefined,
         aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
+        aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
         gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
@@ -6560,12 +6722,22 @@ export function OrcamentoPageView({
     null
   );
   const [modalAparenciaAberto, setModalAparenciaAberto] = useState(false);
+  const [abaAparenciaAtiva, setAbaAparenciaAtiva] = useState<AparenciaAbaOrcamento>('montagem');
+  const [aparenciaDraftAbas, setAparenciaDraftAbas] = useState<
+    Record<AparenciaAbaOrcamento, AparenciaOrcamento>
+  >(() => draftAparenciaAbasFromMeta({}));
   /** Zoom só das grades Orçamento / Analítico / Ficha de demanda (não afeta o browser). */
   const ORC_GRADE_ZOOM_MIN = 0.55;
   const ORC_GRADE_ZOOM_MAX = 1.25;
   const ORC_GRADE_ZOOM_STEP = 0.1;
   const [orcamentoGradeZoom, setOrcamentoGradeZoom] = useState(1);
-  const [aparenciaDraft, setAparenciaDraft] = useState<AparenciaOrcamento>(APARENCIA_ORCAMENTO_PADRAO);
+  const aparenciaDraft = aparenciaDraftAbas[abaAparenciaAtiva];
+  const patchAparenciaDraft = (patch: Partial<AparenciaOrcamento>) => {
+    setAparenciaDraftAbas((prev) => ({
+      ...prev,
+      [abaAparenciaAtiva]: { ...prev[abaAparenciaAtiva], ...patch },
+    }));
+  };
   const [observacoesPorItem, setObservacoesPorItem] = useState<Record<string, string>>({});
   const [coresLinhaPorKey, setCoresLinhaPorKey] = useState<Record<string, string>>({});
   const [coresCelulaPorKey, setCoresCelulaPorKey] = useState<Record<string, string>>({});
@@ -6985,7 +7157,12 @@ export function OrcamentoPageView({
   };
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
-  const aparenciaOrcamento = meta.aparencia;
+  const aparenciaMontagem = aparenciaDaAba(meta, 'montagem');
+  const aparenciaMemorial = aparenciaDaAba(meta, 'memorial');
+  const aparenciaAnalitico = aparenciaDaAba(meta, 'analitico');
+  const aparenciaFichaDemanda = aparenciaDaAba(meta, 'fichaDemanda');
+  /** Aparência da aba visível (shell / CSS vars / fonte). */
+  const aparenciaOrcamento = aparenciaDaAba(meta, abaAparenciaFromViewTab(orcamentoViewTab));
   const gradeTravada = meta.gradeTravada === true;
   const gradeTravadaRef = useRef(gradeTravada);
   gradeTravadaRef.current = gradeTravada;
@@ -10369,6 +10546,43 @@ export function OrcamentoPageView({
   /** Todos os itens do orçamento na ordem da memória de cálculo (inclui UN e medições dimensionais). */
   const itensMemoriaCalculoLista = useMemo(() => itensCalculados, [itensCalculados]);
 
+  /** Memória: 1 quadrante por serviço → etapas (subtítulos) → composições. */
+  const itensMemoriaCalculoAgrupados = useMemo(() => {
+    type Row = (typeof itensCalculados)[number];
+    type EtapaGrupo = { subtituloNome: string; blocoKey: string; itens: Row[] };
+    type ServicoGrupo = { servicoKey: string; servicoNome: string; etapas: EtapaGrupo[] };
+
+    const servicos: ServicoGrupo[] = [];
+    const servicoIndex = new Map<string, number>();
+    const etapaIndexPorServico = new Map<string, Map<string, number>>();
+
+    for (const row of itensCalculados) {
+      const sKey = normalizarNomeServicoOrcamento(row.servicoNome) || row.servicoNome || row.blocoKey;
+      let si = servicoIndex.get(sKey);
+      if (si === undefined) {
+        si = servicos.length;
+        servicoIndex.set(sKey, si);
+        servicos.push({ servicoKey: sKey, servicoNome: row.servicoNome, etapas: [] });
+        etapaIndexPorServico.set(sKey, new Map());
+      }
+      const servico = servicos[si]!;
+      const etapaMap = etapaIndexPorServico.get(sKey)!;
+      const eKey = row.blocoKey || `${row.servicoNome}\0${row.subtituloNome}`;
+      let ei = etapaMap.get(eKey);
+      if (ei === undefined) {
+        ei = servico.etapas.length;
+        etapaMap.set(eKey, ei);
+        servico.etapas.push({
+          subtituloNome: row.subtituloNome,
+          blocoKey: row.blocoKey,
+          itens: [],
+        });
+      }
+      servico.etapas[ei]!.itens.push(row);
+    }
+    return servicos;
+  }, [itensCalculados]);
+
   const chavesItensMontagemVisiveis = useMemo(
     () => itensCalculados.map(row => row.key),
     [itensCalculados]
@@ -12467,7 +12681,7 @@ export function OrcamentoPageView({
     await downloadOrcamentoBrandedExcel(
       [{ ...sheet, name: 'Orçamento Detalhado' }],
       nomeArquivo,
-      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+      { contrato: nomeContrato, aparencia: aparenciaMontagem },
     );
     toast.success('Orçamento detalhado exportado com sucesso.');
   };
@@ -12641,7 +12855,7 @@ export function OrcamentoPageView({
         rows,
       }],
       nomeArquivoExportOrcamento('Analitico', 'xlsx'),
-      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+      { contrato: nomeContrato, aparencia: aparenciaMontagem },
     );
     toast.success('Analítico exportado com sucesso.');
   };
@@ -12890,7 +13104,7 @@ export function OrcamentoPageView({
     await downloadOrcamentoBrandedExcel(
       [{ ...sheet, name: 'Planilha analítica' }],
       nomeArquivoExportOrcamento('Ficha de demanda', 'xlsx'),
-      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+      { contrato: nomeContrato, aparencia: aparenciaMontagem },
     );
     toast.success('Planilha analítica exportada com sucesso.');
   };
@@ -13034,7 +13248,7 @@ export function OrcamentoPageView({
     const nomeArquivo = nomeArquivoExportOrcamento('Orcamento', 'xlsx');
     await downloadOrcamentoBrandedExcel(sheets, nomeArquivo, {
       contrato: nomeContrato,
-      aparencia: aparenciaOrcamento,
+      aparencia: aparenciaMontagem,
     });
     toast.success('Orçamento exportado (Orçamento, Memória de cálculo, Analítico e Ficha de demanda).');
   };
@@ -13088,7 +13302,7 @@ export function OrcamentoPageView({
         rows,
       }],
       nomeArquivoExportOrcamento('Cronograma', 'xlsx'),
-      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+      { contrato: nomeContrato, aparencia: aparenciaMontagem },
     );
     toast.success('Cronograma exportado com sucesso.');
   };
@@ -13115,7 +13329,7 @@ export function OrcamentoPageView({
       const uploadXlsx = async (sheets: OrcamentoExcelSheetSpec[], fileName: string, kind: 'orcamento' | 'fd') => {
         const buffer = await buildOrcamentoBrandedWorkbook(sheets, {
           contrato: embeddedContractName || nomeContratoBreadcrumb || nomeContratoSafe,
-          aparencia: aparenciaOrcamento,
+          aparencia: aparenciaMontagem,
         });
         const file = orcamentoWorkbookToFile(buffer, fileName);
         const formData = new FormData();
@@ -14163,8 +14377,8 @@ export function OrcamentoPageView({
                                 : 0;
                             if (l.kind === 'tituloServico') {
                               return (
-                                <tr key={l.key} className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}>
+                                <tr key={l.key} className={`${clsTituloOrc(aparenciaAnalitico)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaAnalitico, isDark)}>
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
                                     {l.main}
                                   </td>
@@ -14182,10 +14396,10 @@ export function OrcamentoPageView({
                                 <tr
                                   key={l.key}
                                   className={`${clsSubtituloOrc(
-                                    aparenciaOrcamento,
+                                    aparenciaAnalitico,
                                     linhasAnaliticoOrcamento[idxLinha - 1]?.kind === 'tituloServico'
                                   )} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento, isDark)}
+                                  style={estiloLinhaSubtituloOrc(aparenciaAnalitico, isDark)}
                                 >
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
@@ -14202,8 +14416,8 @@ export function OrcamentoPageView({
                               return (
                                   <tr
                                     key={l.key}
-                                    className={`${clsComposicaoOrc(aparenciaOrcamento)} border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
-                                    style={estiloLinhaComposicaoOrc(aparenciaOrcamento, isDark)}
+                                    className={`${clsComposicaoOrc(aparenciaAnalitico)} border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                                    style={estiloLinhaComposicaoOrc(aparenciaAnalitico, isDark)}
                                   >
                                     <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-50">
                                       {l.item}
@@ -14419,8 +14633,8 @@ export function OrcamentoPageView({
                                     custoReal: 0
                                   };
                                   return (
-                                    <tr key={l.key} className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}>
+                                    <tr key={l.key} className={`${clsTituloOrc(aparenciaFichaDemanda)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaFichaDemanda, isDark)}>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
                                         className={`${itemW} font-bold text-white`}
@@ -14463,10 +14677,10 @@ export function OrcamentoPageView({
                                     <tr
                                       key={l.key}
                                       className={`${clsSubtituloOrc(
-                                        aparenciaOrcamento,
+                                        aparenciaFichaDemanda,
                                         linhasAnaliticoComManuais[idxLinhaFd - 1]?.kind === 'tituloServico'
                                       )} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento, isDark)}
+                                  style={estiloLinhaSubtituloOrc(aparenciaFichaDemanda, isDark)}
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
@@ -14555,7 +14769,8 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
-                                      className={`bg-slate-100/90 dark:bg-gray-800 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                                      className={`${clsComposicaoOrc(aparenciaFichaDemanda)} border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                                      style={estiloLinhaComposicaoOrc(aparenciaFichaDemanda, isDark)}
                                       onContextMenuCapture={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
@@ -15316,52 +15531,108 @@ export function OrcamentoPageView({
                         className={`space-y-5 bg-transparent${gradeTravada ? ' pointer-events-none select-none' : ''}`}
                         aria-disabled={gradeTravada || undefined}
                       >
-                        {itensMemoriaCalculoLista.map((row, rowIdx) => (
-                          <section key={row.key} id={`memorial-medicoes-${row.key}`} className="scroll-mt-4 bg-transparent">
-                            <OrcamentoMedicaoPainel
-                              rowKey={row.key}
-                              tipoUnidade={row.tipoUnidade}
-                              itemRotulo={
-                                rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1)
-                              }
-                              itemDescricao={row.item.descricao || ''}
-                              unidadeMedida={unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade)}
-                              quantidadeUn={row.quantidade}
-                              quantidadeUnReadOnly={gradeTravada}
-                              onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
-                              modoContagemLista={meta.usarMemoriaCalculo === true}
-                              onAddLinhaContagem={apos => addLinhaContagem(row.key, apos)}
-                              onUpdateLinhaContagem={(idx, campo, valor) =>
-                                updateLinhaContagem(row.key, idx, campo, valor)
-                              }
-                              onRemoveLinhaContagem={idx => removeLinhaContagem(row.key, idx)}
-                              dim={(() => {
-                                const raw =
-                                  dimensoesPorItem[row.key] ?? {
-                                    tipoUnidade: row.tipoUnidade,
-                                    linhas: [] as LinhaMedicao[]
-                                  };
-                                return {
-                                  ...raw,
-                                  linhas: linhasMedicaoEfetivas(raw)
-                                };
-                              })()}
-                              ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
-                              updateLinhaMedicao={updateLinhaMedicao}
-                              updateRotuloColunaMedicao={(campo, rotulo) =>
-                                updateRotuloColunaMedicao(row.key, campo, rotulo)
-                              }
-                              updateObservacaoMedicao={texto =>
-                                updateObservacaoMedicao(row.key, texto)
-                              }
-                              addLinhaMedicao={addLinhaMedicao}
-                              addLinhaCabecalhoSecaoMedicao={addLinhaCabecalhoSecaoMedicao}
-                              removeLinhaMedicao={removeLinhaMedicao}
-                              estiloTitulo={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}
-                              readOnly={gradeTravada}
-                            />
-                          </section>
-                        ))}
+                        {(() => {
+                          const idxPorKey = new Map(
+                            itensMemoriaCalculoLista.map((r, i) => [r.key, i] as const)
+                          );
+                          return itensMemoriaCalculoAgrupados.map(servicoGrupo => (
+                            <section
+                              key={servicoGrupo.servicoKey}
+                              id={`memorial-servico-${servicoGrupo.servicoKey}`}
+                              className="scroll-mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+                            >
+                              <div
+                                className={`px-3 py-2.5 text-sm font-bold text-white ${clsTituloOrc(aparenciaMemorial)}`}
+                                style={estiloLinhaTituloOrc(aparenciaMemorial, isDark)}
+                              >
+                                {servicoGrupo.servicoNome || 'Serviço'}
+                              </div>
+                              <div>
+                                {servicoGrupo.etapas.map(etapa => {
+                                  const mesmoTituloSubtitulo =
+                                    servicoGrupo.servicoNome.trim().toLowerCase() ===
+                                    etapa.subtituloNome.trim().toLowerCase();
+                                  return (
+                                    <div key={etapa.blocoKey || etapa.subtituloNome}>
+                                      {!mesmoTituloSubtitulo && etapa.subtituloNome.trim() ? (
+                                        <div className="border-t border-gray-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                          {etapa.subtituloNome}
+                                        </div>
+                                      ) : null}
+                                      {etapa.itens.map(row => {
+                                        const rowIdx = idxPorKey.get(row.key) ?? 0;
+                                        return (
+                                          <div
+                                            key={row.key}
+                                            id={`memorial-medicoes-${row.key}`}
+                                            className="scroll-mt-4"
+                                          >
+                                            <OrcamentoMedicaoPainel
+                                              rowKey={row.key}
+                                              tipoUnidade={row.tipoUnidade}
+                                              itemRotulo={
+                                                rotuloItemComposicaoPorKey.get(row.key) ??
+                                                String(rowIdx + 1)
+                                              }
+                                              itemDescricao={row.item.descricao || ''}
+                                              unidadeMedida={unidadeComposicaoParaExibicao(
+                                                row.unidadeComposicao,
+                                                row.tipoUnidade
+                                              )}
+                                              quantidadeUn={row.quantidade}
+                                              quantidadeUnReadOnly={gradeTravada}
+                                              onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
+                                              modoContagemLista={meta.usarMemoriaCalculo === true}
+                                              onAddLinhaContagem={apos => addLinhaContagem(row.key, apos)}
+                                              onUpdateLinhaContagem={(idx, campo, valor) =>
+                                                updateLinhaContagem(row.key, idx, campo, valor)
+                                              }
+                                              onRemoveLinhaContagem={idx =>
+                                                removeLinhaContagem(row.key, idx)
+                                              }
+                                              dim={(() => {
+                                                const raw =
+                                                  dimensoesPorItem[row.key] ?? {
+                                                    tipoUnidade: row.tipoUnidade,
+                                                    linhas: [] as LinhaMedicao[],
+                                                  };
+                                                return {
+                                                  ...raw,
+                                                  linhas: linhasMedicaoEfetivas(raw),
+                                                };
+                                              })()}
+                                              ehCargaEntulho={ehComposicaoCargaEntulho(
+                                                row.item.descricao
+                                              )}
+                                              updateLinhaMedicao={updateLinhaMedicao}
+                                              updateRotuloColunaMedicao={(campo, rotulo) =>
+                                                updateRotuloColunaMedicao(row.key, campo, rotulo)
+                                              }
+                                              updateObservacaoMedicao={texto =>
+                                                updateObservacaoMedicao(row.key, texto)
+                                              }
+                                              addLinhaMedicao={addLinhaMedicao}
+                                              addLinhaCabecalhoSecaoMedicao={
+                                                addLinhaCabecalhoSecaoMedicao
+                                              }
+                                              removeLinhaMedicao={removeLinhaMedicao}
+                                              estiloTitulo={estiloLinhaItemOrc(
+                                                aparenciaMemorial,
+                                                isDark
+                                              )}
+                                              readOnly={gradeTravada}
+                                              embedded
+                                            />
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </section>
+                          ));
+                        })()}
                       </div>
                     )}
                   </div>
@@ -15525,8 +15796,8 @@ export function OrcamentoPageView({
                           <React.Fragment key={`${main}.${subIdx}:${bloco.servicoNome}\0${bloco.subtituloNome}`}>
                             {mostrarTituloServico && (
                             <tr
-                              className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaTituloOrc(aparenciaOrcamento, isDark)}
+                              className={`${clsTituloOrc(aparenciaMontagem)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaMontagem, isDark)}
                               data-orc-ctx-montagem="tituloServico"
                               data-servico-id={bloco.key.split('|')[0] ?? ''}
                               title="Clique com o botão direito para opções da linha"
@@ -15540,7 +15811,7 @@ export function OrcamentoPageView({
                                     onClick={e => e.stopPropagation()}
                                     ariaLabel={`Selecionar todas as composições de ${bloco.servicoNome}`}
                                     idleBorderColor={corBordaCheckboxPinturaOrc(
-                                      aparenciaOrcamento?.tituloFundo ??
+                                      aparenciaMontagem?.tituloFundo ??
                                         APARENCIA_ORCAMENTO_PADRAO.tituloFundo,
                                       isDark
                                     )}
@@ -15612,8 +15883,8 @@ export function OrcamentoPageView({
                             )}
                             <OrcListaAnimacaoGrupo aberto={!tituloRecolhido}>
                             <tr
-                              className={`${clsSubtituloOrc(aparenciaOrcamento, mostrarTituloServico)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
-                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento, isDark)}
+                              className={`${clsSubtituloOrc(aparenciaMontagem, mostrarTituloServico)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaSubtituloOrc(aparenciaMontagem, isDark)}
                               data-orc-ctx-montagem="subtitulo"
                               data-bloco-key={bloco.key}
                             >
@@ -15626,7 +15897,7 @@ export function OrcamentoPageView({
                                     onClick={e => e.stopPropagation()}
                                     ariaLabel={`Selecionar composições de ${mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}`}
                                     idleBorderColor={corBordaCheckboxPinturaOrc(
-                                      aparenciaOrcamento?.subtituloFundo ??
+                                      aparenciaMontagem?.subtituloFundo ??
                                         APARENCIA_ORCAMENTO_PADRAO.subtituloFundo,
                                       isDark
                                     )}
@@ -16624,89 +16895,191 @@ export function OrcamentoPageView({
             <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
               Características do orçamento
             </h3>
-            <p className="mb-5 text-sm text-gray-600 dark:text-gray-400">
-              Cores do título, subtítulo, composição (Analítico) e cabeçalho das tabelas, e a fonte. O cabeçalho vale para todas as abas deste orçamento.
+            <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+              Cores e fonte valem só para a aba selecionada abaixo.
               {isDark ? ' No tema escuro, as faixas são suavizadas automaticamente.' : ''}
             </p>
+            <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900/60 sm:grid-cols-4">
+              {APARENCIA_ABA_OPCOES.map((opt) => {
+                const ativa = abaAparenciaAtiva === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setAbaAparenciaAtiva(opt.value)}
+                    className={`rounded-md px-2 py-2 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+                      ativa
+                        ? 'bg-white text-red-700 shadow-sm dark:bg-gray-800 dark:text-red-300'
+                        : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
             <div className="mb-5 overflow-hidden rounded-md border border-gray-200 text-xs dark:border-gray-700">
-              <div
-                className="px-3 py-2 font-semibold uppercase tracking-wide"
-                style={{
-                  ...estiloHeaderOrc(aparenciaDraft, isDark),
-                  fontFamily: aparenciaDraft.fonte || undefined
-                }}
-              >
-                Cabeçalho
-              </div>
-              <div
-                className="px-3 py-2 font-bold uppercase tracking-wide"
-                style={{
-                  ...estiloLinhaTituloOrc(aparenciaDraft, isDark),
-                  fontFamily: aparenciaDraft.fonte || undefined
-                }}
-              >
-                Título
-              </div>
-              <div
-                className="px-3 py-2 font-semibold uppercase tracking-wide"
-                style={{
-                  ...estiloLinhaSubtituloOrc(aparenciaDraft, isDark),
-                  fontFamily: aparenciaDraft.fonte || undefined
-                }}
-              >
-                Subtítulo
-              </div>
-              <div
-                className="px-3 py-2 font-semibold tracking-wide"
-                style={{
-                  ...estiloLinhaComposicaoOrc(aparenciaDraft, isDark),
-                  fontFamily: aparenciaDraft.fonte || undefined
-                }}
-              >
-                Composição
-              </div>
+              {abaAparenciaTemItem(abaAparenciaAtiva) ? (
+                <>
+                  <div
+                    className="px-3 py-2 font-bold uppercase tracking-wide"
+                    style={{
+                      ...estiloLinhaTituloOrc(aparenciaDraft, isDark),
+                      fontFamily: aparenciaDraft.fonte || undefined
+                    }}
+                  >
+                    Título
+                  </div>
+                  <div
+                    className="px-3 py-2 font-semibold uppercase tracking-wide"
+                    style={{
+                      ...estiloLinhaItemOrc(aparenciaDraft, isDark),
+                      fontFamily: aparenciaDraft.fonte || undefined
+                    }}
+                  >
+                    Item
+                  </div>
+                  <div
+                    className="px-3 py-2 font-semibold uppercase tracking-wide"
+                    style={{
+                      ...estiloHeaderOrc(aparenciaDraft, isDark),
+                      fontFamily: aparenciaDraft.fonte || undefined
+                    }}
+                  >
+                    Cabeçalho
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="px-3 py-2 font-semibold uppercase tracking-wide"
+                    style={{
+                      ...estiloHeaderOrc(aparenciaDraft, isDark),
+                      fontFamily: aparenciaDraft.fonte || undefined
+                    }}
+                  >
+                    Cabeçalho
+                  </div>
+                  <div
+                    className="px-3 py-2 font-bold uppercase tracking-wide"
+                    style={{
+                      ...estiloLinhaTituloOrc(aparenciaDraft, isDark),
+                      fontFamily: aparenciaDraft.fonte || undefined
+                    }}
+                  >
+                    Título
+                  </div>
+                  {abaAparenciaTemSubtitulo(abaAparenciaAtiva) && (
+                    <div
+                      className="px-3 py-2 font-semibold uppercase tracking-wide"
+                      style={{
+                        ...estiloLinhaSubtituloOrc(aparenciaDraft, isDark),
+                        fontFamily: aparenciaDraft.fonte || undefined
+                      }}
+                    >
+                      Subtítulo
+                    </div>
+                  )}
+                  {abaAparenciaTemComposicao(abaAparenciaAtiva) && (
+                    <div
+                      className="px-3 py-2 font-semibold uppercase tracking-wide"
+                      style={{
+                        ...estiloLinhaComposicaoOrc(aparenciaDraft, isDark),
+                        fontFamily: aparenciaDraft.fonte || undefined
+                      }}
+                    >
+                      Composição
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <CampoCorOrcamento
-                label="Fundo do cabeçalho"
-                value={aparenciaDraft.headerFundo}
-                onChange={(headerFundo) => setAparenciaDraft((p) => ({ ...p, headerFundo }))}
-              />
-              <CampoCorOrcamento
-                label="Letra do cabeçalho"
-                value={aparenciaDraft.headerTexto}
-                onChange={(headerTexto) => setAparenciaDraft((p) => ({ ...p, headerTexto }))}
-              />
-              <CampoCorOrcamento
-                label="Fundo do título"
-                value={aparenciaDraft.tituloFundo}
-                onChange={(tituloFundo) => setAparenciaDraft((p) => ({ ...p, tituloFundo }))}
-              />
-              <CampoCorOrcamento
-                label="Letra do título"
-                value={aparenciaDraft.tituloTexto}
-                onChange={(tituloTexto) => setAparenciaDraft((p) => ({ ...p, tituloTexto }))}
-              />
-              <CampoCorOrcamento
-                label="Fundo do subtítulo"
-                value={aparenciaDraft.subtituloFundo}
-                onChange={(subtituloFundo) => setAparenciaDraft((p) => ({ ...p, subtituloFundo }))}
-              />
-              <CampoCorOrcamento
-                label="Letra do subtítulo"
-                value={aparenciaDraft.subtituloTexto}
-                onChange={(subtituloTexto) => setAparenciaDraft((p) => ({ ...p, subtituloTexto }))}
-              />
-              <CampoCorOrcamento
-                label="Fundo da composição"
-                value={aparenciaDraft.composicaoFundo}
-                onChange={(composicaoFundo) => setAparenciaDraft((p) => ({ ...p, composicaoFundo }))}
-              />
-              <CampoCorOrcamento
-                label="Letra da composição"
-                value={aparenciaDraft.composicaoTexto}
-                onChange={(composicaoTexto) => setAparenciaDraft((p) => ({ ...p, composicaoTexto }))}
-              />
+              {abaAparenciaTemItem(abaAparenciaAtiva) ? (
+                <>
+                  <CampoCorOrcamento
+                    label="Fundo do título"
+                    value={aparenciaDraft.tituloFundo}
+                    onChange={(tituloFundo) => patchAparenciaDraft({ tituloFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do título"
+                    value={aparenciaDraft.tituloTexto}
+                    onChange={(tituloTexto) => patchAparenciaDraft({ tituloTexto })}
+                  />
+                  <CampoCorOrcamento
+                    label="Fundo do item"
+                    value={aparenciaDraft.itemFundo}
+                    onChange={(itemFundo) => patchAparenciaDraft({ itemFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do item"
+                    value={aparenciaDraft.itemTexto}
+                    onChange={(itemTexto) => patchAparenciaDraft({ itemTexto })}
+                  />
+                  <CampoCorOrcamento
+                    label="Fundo do cabeçalho"
+                    value={aparenciaDraft.headerFundo}
+                    onChange={(headerFundo) => patchAparenciaDraft({ headerFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do cabeçalho"
+                    value={aparenciaDraft.headerTexto}
+                    onChange={(headerTexto) => patchAparenciaDraft({ headerTexto })}
+                  />
+                </>
+              ) : (
+                <>
+                  <CampoCorOrcamento
+                    label="Fundo do cabeçalho"
+                    value={aparenciaDraft.headerFundo}
+                    onChange={(headerFundo) => patchAparenciaDraft({ headerFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do cabeçalho"
+                    value={aparenciaDraft.headerTexto}
+                    onChange={(headerTexto) => patchAparenciaDraft({ headerTexto })}
+                  />
+                  <CampoCorOrcamento
+                    label="Fundo do título"
+                    value={aparenciaDraft.tituloFundo}
+                    onChange={(tituloFundo) => patchAparenciaDraft({ tituloFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do título"
+                    value={aparenciaDraft.tituloTexto}
+                    onChange={(tituloTexto) => patchAparenciaDraft({ tituloTexto })}
+                  />
+                  {abaAparenciaTemSubtitulo(abaAparenciaAtiva) && (
+                    <>
+                      <CampoCorOrcamento
+                        label="Fundo do subtítulo"
+                        value={aparenciaDraft.subtituloFundo}
+                        onChange={(subtituloFundo) => patchAparenciaDraft({ subtituloFundo })}
+                      />
+                      <CampoCorOrcamento
+                        label="Letra do subtítulo"
+                        value={aparenciaDraft.subtituloTexto}
+                        onChange={(subtituloTexto) => patchAparenciaDraft({ subtituloTexto })}
+                      />
+                    </>
+                  )}
+                  {abaAparenciaTemComposicao(abaAparenciaAtiva) && (
+                    <>
+                      <CampoCorOrcamento
+                        label="Fundo da composição"
+                        value={aparenciaDraft.composicaoFundo}
+                        onChange={(composicaoFundo) => patchAparenciaDraft({ composicaoFundo })}
+                      />
+                      <CampoCorOrcamento
+                        label="Letra da composição"
+                        value={aparenciaDraft.composicaoTexto}
+                        onChange={(composicaoTexto) => patchAparenciaDraft({ composicaoTexto })}
+                      />
+                    </>
+                  )}
+                </>
+              )}
             </div>
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -16715,7 +17088,7 @@ export function OrcamentoPageView({
               <StringSingleSelectDropdown
                 value={aparenciaDraft.fonte || 'sistema'}
                 onChange={(fonte) =>
-                  setAparenciaDraft((p) => ({ ...p, fonte: fonte === 'sistema' ? '' : fonte }))
+                  patchAparenciaDraft({ fonte: fonte === 'sistema' ? '' : fonte })
                 }
                 options={FONTES_ORCAMENTO.map((f) => ({
                   value: f.value || 'sistema',
@@ -16730,7 +17103,12 @@ export function OrcamentoPageView({
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => setAparenciaDraft({ ...APARENCIA_ORCAMENTO_PADRAO })}
+                onClick={() =>
+                  setAparenciaDraftAbas((prev) => ({
+                    ...prev,
+                    [abaAparenciaAtiva]: { ...APARENCIA_ORCAMENTO_PADRAO },
+                  }))
+                }
                 className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
               >
                 Restaurar padrão
@@ -16746,10 +17124,16 @@ export function OrcamentoPageView({
                 <button
                   type="button"
                   onClick={() => {
-                    const next = parseAparenciaOrcamento(aparenciaDraft);
+                    const nextAbas: AparenciaAbasOrcamento = {};
+                    for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda'] as const) {
+                      const parsed = parseAparenciaOrcamento(
+                        aparenciaCamposDaAba(k, aparenciaDraftAbas[k])
+                      );
+                      if (parsed && !aparenciaOrcamentoEhPadrao(parsed)) nextAbas[k] = parsed;
+                    }
                     setMeta((m) => ({
                       ...m,
-                      aparencia: next && !aparenciaOrcamentoEhPadrao(next) ? next : undefined
+                      aparenciaAbas: normalizeAparenciaAbasForSave(nextAbas),
                     }));
                     setModalAparenciaAberto(false);
                   }}
@@ -18157,10 +18541,8 @@ export function OrcamentoPageView({
                 type="button"
                 onClick={() => {
                   setMenuAcoesGrade(null);
-                  setAparenciaDraft({
-                    ...APARENCIA_ORCAMENTO_PADRAO,
-                    ...(meta.aparencia ?? {}),
-                  });
+                  setAparenciaDraftAbas(draftAparenciaAbasFromMeta(meta));
+                  setAbaAparenciaAtiva(abaAparenciaFromViewTab(orcamentoViewTab));
                   setModalAparenciaAberto(true);
                 }}
                 className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
