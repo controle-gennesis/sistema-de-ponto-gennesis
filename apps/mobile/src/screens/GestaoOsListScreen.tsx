@@ -107,7 +107,7 @@ export default function GestaoOsListScreen() {
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { canSeeGestaoOs, isLoading: permissionsLoading } = usePermissions();
 
@@ -339,7 +339,7 @@ export default function GestaoOsListScreen() {
         style={styles.container}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerOffset + 8, paddingBottom: 28 },
+          { paddingTop: headerOffset + 8, paddingBottom: bottomContentInset },
         ]}
         {...chromeScroll}
         refreshControl={

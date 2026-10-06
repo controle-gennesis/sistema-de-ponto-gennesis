@@ -1,41 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import {
-  ClipboardList,
-  Fuel,
-  FileText,
-  Package,
-  ShoppingCart,
-  Ruler,
-} from 'lucide-react-native';
+import { BadgeCheck, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { usePermissions } from '../hooks/usePermissions';
-import {
-  fetchApprovalNotificationCounts,
-} from '../services/approvals';
-import {
-  fetchPendingApprovalsForTab,
-  type ApprovalListItem,
-  type ApprovalTabId,
-} from '../lib/approvalsHome';
-import ApprovalActionSheet from './approvals/ApprovalActionSheet';
-
-const MAX_ITEMS = 5;
-
-type TabDef = {
-  id: ApprovalTabId;
-  label: string;
-  icon: typeof ClipboardList;
-  countKey?: 'dp' | 'fuel' | 'fd' | 'rm' | 'oc';
-};
+import { fetchApprovalNotificationCounts } from '../services/approvals';
+import ApprovalsSheet from './ApprovalsSheet';
 
 export default function HomeAprovacoesCard() {
   const { colors, isDark } = useTheme();
@@ -47,344 +17,286 @@ export default function HomeAprovacoesCard() {
     canApproveFd,
     canApproveMaterialRequests,
     canApproveOc,
-    canApproveOcCompras,
-    canApproveOcDiretoria,
-    canApproveOcGestor,
     canApproveEmpreiteiroDaily,
     isLoading: permissionsLoading,
   } = usePermissions();
 
-  const tabs = useMemo(() => {
-    const list: TabDef[] = [];
-    if (canAccessDpApproverPages) {
-      list.push({ id: 'dp', label: 'Internas', icon: ClipboardList, countKey: 'dp' });
-    }
-    if (canApproveFuel) {
-      list.push({ id: 'fuel', label: 'Combustível', icon: Fuel, countKey: 'fuel' });
-    }
-    if (canApproveFd) {
-      list.push({ id: 'fd', label: 'FD', icon: FileText, countKey: 'fd' });
-    }
-    if (canApproveMaterialRequests) {
-      list.push({ id: 'rm', label: 'RM', icon: Package, countKey: 'rm' });
-    }
-    if (canApproveOc) {
-      list.push({ id: 'oc', label: 'OC', icon: ShoppingCart, countKey: 'oc' });
-    }
-    if (canApproveEmpreiteiroDaily) {
-      list.push({ id: 'medicao', label: 'Medições', icon: Ruler });
-    }
-    return list;
+  const hasAnyQueue =
+    canAccessDpApproverPages ||
+    canApproveFuel ||
+    canApproveFd ||
+    canApproveMaterialRequests ||
+    canApproveOc ||
+    canApproveEmpreiteiroDaily;
+
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const countsQuery = useQuery({
+    queryKey: ['approvals', 'notification-counts'],
+    enabled: canSeeAprovacoes && hasAnyQueue,
+    queryFn: fetchApprovalNotificationCounts,
+    refetchInterval: 60_000,
+  });
+
+  const data = countsQuery.data;
+  const total = Number(data?.total || 0);
+  const hasPending = total > 0;
+
+  const breakdownParts = useMemo(() => {
+    if (!data) return [] as string[];
+    const parts: string[] = [];
+    if (canAccessDpApproverPages && data.dp > 0) parts.push(`Internas ${data.dp}`);
+    if (canApproveFuel && data.fuel > 0) parts.push(`Combustível ${data.fuel}`);
+    if (canApproveFd && data.fd > 0) parts.push(`FD ${data.fd}`);
+    if (canApproveMaterialRequests && data.rm > 0) parts.push(`RM ${data.rm}`);
+    if (canApproveOc && data.oc > 0) parts.push(`OC ${data.oc}`);
+    return parts.slice(0, 3);
   }, [
+    data,
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
     canApproveMaterialRequests,
     canApproveOc,
-    canApproveEmpreiteiroDaily,
   ]);
 
-  const [tab, setTab] = useState<ApprovalTabId | null>(null);
-  const activeTab = tab && tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? null;
-  const [selected, setSelected] = useState<ApprovalListItem | null>(null);
-
-  const ocFlags = useMemo(
-    () => ({
-      canCompras: canApproveOcCompras,
-      canGestor: canApproveOcGestor,
-      canDiretoria: canApproveOcDiretoria,
-    }),
-    [canApproveOcCompras, canApproveOcGestor, canApproveOcDiretoria],
-  );
-
-  const countsQuery = useQuery({
-    queryKey: ['approvals', 'notification-counts'],
-    enabled: canSeeAprovacoes,
-    queryFn: fetchApprovalNotificationCounts,
-    refetchInterval: 60_000,
-  });
-
-  const listQuery = useQuery({
-    queryKey: [
-      'approvals',
-      'home-pending',
-      activeTab,
-      ocFlags.canCompras,
-      ocFlags.canGestor,
-      ocFlags.canDiretoria,
-    ],
-    enabled: !!activeTab && canSeeAprovacoes,
-    queryFn: () => fetchPendingApprovalsForTab(activeTab!, ocFlags),
-    staleTime: 30_000,
-  });
-
-  if (permissionsLoading || !canSeeAprovacoes || tabs.length === 0) {
+  if (permissionsLoading || !canSeeAprovacoes || !hasAnyQueue) {
     return null;
   }
 
-  const counts = countsQuery.data || { dp: 0, fuel: 0, fd: 0, rm: 0, oc: 0, total: 0 };
-  const items = listQuery.data || [];
-  const visible = items.slice(0, MAX_ITEMS);
-  const totalBadge = Number(counts.total || 0);
-
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.iconWrap}>
-            <ClipboardList size={20} color={colors.primary} strokeWidth={2.2} />
-          </View>
-          <View style={styles.headerText}>
-            <View style={styles.titleRow}>
-              <Text style={styles.title}>Aprovações</Text>
-              {totalBadge > 0 ? (
-                <View style={styles.totalBadge}>
-                  <Text style={styles.totalBadgeText}>
-                    {totalBadge > 99 ? '99+' : String(totalBadge)}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {listQuery.isLoading
-                ? 'Carregando…'
-                : items.length === 0
-                  ? 'Nada pendente nesta fila'
-                  : `${items.length} pendente${items.length === 1 ? '' : 's'}`}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsRow}
+    <>
+      <TouchableOpacity
+        style={[styles.card, hasPending ? styles.cardPending : null]}
+        onPress={() => setSheetOpen(true)}
+        activeOpacity={0.84}
+        accessibilityRole="button"
+        accessibilityLabel={
+          hasPending
+            ? `Abrir aprovações, ${total} pendentes`
+            : 'Abrir aprovações, nada pendente'
+        }
       >
-        {tabs.map((t) => {
-          const active = t.id === activeTab;
-          const Icon = t.icon;
-          const badge = t.countKey ? Number(counts[t.countKey] || 0) : 0;
-          return (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.chip, active && styles.chipActive]}
-              onPress={() => {
-                setTab(t.id);
-                setSelected(null);
-              }}
-              activeOpacity={0.7}
-            >
-              <Icon
-                size={14}
-                color={active ? '#fff' : colors.textSecondary}
-                strokeWidth={2.2}
-              />
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{t.label}</Text>
-              {badge > 0 ? (
-                <View style={[styles.countBadge, active && styles.countBadgeActive]}>
-                  <Text style={[styles.countBadgeText, active && styles.countBadgeTextActive]}>
-                    {badge > 99 ? '99+' : String(badge)}
-                  </Text>
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {listQuery.isLoading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerDot} />
+            <Text style={styles.kicker}>Aprovações</Text>
+          </View>
+          <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
         </View>
-      ) : items.length === 0 ? (
-        <Text style={styles.empty}>Nada pendente nesta fila</Text>
-      ) : (
-        <View style={styles.list}>
-          {visible.map((item, index) => (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.row, index === 0 && styles.rowFirst]}
-              onPress={() => setSelected(item)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowMain}>
-                <Text style={styles.rowTitle} numberOfLines={1}>
-                  {item.title}
+
+        {countsQuery.isLoading ? (
+          <Text style={styles.loadingText}>Carregando…</Text>
+        ) : hasPending ? (
+          <>
+            <View style={styles.hero}>
+              <Text style={styles.heroCount}>{total > 99 ? '99+' : String(total)}</Text>
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroTitle}>
+                  {total === 1 ? 'pendente' : 'pendentes'}
                 </Text>
-                <Text style={styles.rowSubtitle} numberOfLines={1}>
-                  {item.subtitle}
-                </Text>
+                <Text style={styles.heroSub}>aguardando sua revisão</Text>
               </View>
-              <Text style={styles.rowMeta} numberOfLines={1}>
-                {item.meta}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          {items.length > MAX_ITEMS ? (
-            <Text style={styles.more}>+{items.length - MAX_ITEMS} na fila</Text>
-          ) : null}
-        </View>
-      )}
+            </View>
 
-      <ApprovalActionSheet
-        visible={!!selected}
-        tab={activeTab}
-        item={selected}
-        onClose={() => setSelected(null)}
-      />
-    </View>
+            {breakdownParts.length > 0 ? (
+              <View style={styles.breakdownRow}>
+                {breakdownParts.map((part, index) => (
+                  <React.Fragment key={part}>
+                    {index > 0 ? <View style={styles.breakdownDot} /> : null}
+                    <Text style={styles.breakdownItem}>{part}</Text>
+                  </React.Fragment>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.cta}>
+              <Text style={styles.ctaText}>Revisar agora</Text>
+            </View>
+          </>
+        ) : (
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <BadgeCheck size={24} color={colors.primary} strokeWidth={2.1} />
+            </View>
+            <View style={styles.emptyCopy}>
+              <Text style={styles.emptyTitle}>Tudo em dia</Text>
+              <Text style={styles.emptySub}>Nenhuma aprovação pendente</Text>
+            </View>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <ApprovalsSheet visible={sheetOpen} onClose={() => setSheetOpen(false)} />
+    </>
   );
 }
 
 const getStyles = (colors: any, isDark: boolean) =>
   StyleSheet.create({
     card: {
+      position: 'relative',
+      overflow: 'hidden',
       backgroundColor: colors.surface,
-      borderRadius: 16,
+      borderRadius: 20,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      padding: 16,
+      paddingHorizontal: 18,
+      paddingTop: 16,
+      paddingBottom: 16,
       marginBottom: 16,
+      gap: 16,
+      ...Platform.select({
+        ios: {
+          shadowColor: '#0f172a',
+          shadowOpacity: isDark ? 0 : 0.07,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+        },
+        android: { elevation: isDark ? 0 : 3 },
+        default: {},
+      }),
+    },
+    cardPending: {
+      borderColor: isDark ? 'rgba(239,68,68,0.28)' : 'rgba(206,55,54,0.16)',
     },
     header: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       justifyContent: 'space-between',
-      gap: 12,
-      marginBottom: 12,
+      zIndex: 1,
     },
     headerLeft: {
-      flex: 1,
-      minWidth: 0,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    iconWrap: {
-      width: 42,
-      height: 42,
-      borderRadius: 12,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: `${colors.primary}14`,
-    },
-    headerText: { flex: 1, minWidth: 0 },
-    titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
     },
-    title: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.text,
-      letterSpacing: -0.3,
-    },
-    totalBadge: {
-      minWidth: 20,
-      height: 20,
-      borderRadius: 6,
-      paddingHorizontal: 6,
-      alignItems: 'center',
-      justifyContent: 'center',
+    headerDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
       backgroundColor: colors.primary,
     },
-    totalBadgeText: {
-      fontSize: 11,
+    kicker: {
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: colors.textSecondary,
+    },
+    loadingText: {
+      fontSize: 15,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      paddingVertical: 10,
+      zIndex: 1,
+    },
+    hero: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 22,
+      zIndex: 1,
+    },
+    heroCount: {
+      fontSize: 64,
+      fontWeight: '800',
+      letterSpacing: -2.2,
+      color: colors.primary,
+      fontVariant: ['tabular-nums'],
+      lineHeight: 64,
+      includeFontPadding: false,
+      textAlignVertical: 'center',
+      // Números grandes ficam opticamente mais altos que o bloco de texto ao lado
+      transform: [{ translateY: 3 }],
+    },
+    heroCopy: {
+      flex: 1,
+      minWidth: 0,
+      justifyContent: 'center',
+      gap: 2,
+      paddingRight: 4,
+      paddingBottom: 1,
+    },
+    heroTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      letterSpacing: -0.5,
+      color: colors.text,
+      lineHeight: 26,
+    },
+    heroSub: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      lineHeight: 19,
+    },
+    breakdownRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 8,
+      zIndex: 1,
+    },
+    breakdownItem: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(15,23,42,0.48)',
+      letterSpacing: -0.1,
+    },
+    breakdownDot: {
+      width: 3,
+      height: 3,
+      borderRadius: 2,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(15,23,42,0.22)',
+    },
+    cta: {
+      marginTop: 2,
+      minHeight: 46,
+      borderRadius: 14,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+      zIndex: 1,
+    },
+    ctaText: {
+      fontSize: 15,
       fontWeight: '700',
       color: '#fff',
+      letterSpacing: -0.2,
     },
-    subtitle: {
-      marginTop: 2,
+    empty: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 6,
+      zIndex: 1,
+    },
+    emptyIcon: {
+      width: 52,
+      height: 52,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(239,68,68,0.16)' : '#fde8e8',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: isDark ? 'rgba(239,68,68,0.24)' : 'rgba(206,55,54,0.12)',
+    },
+    emptyCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      letterSpacing: -0.35,
+      color: colors.text,
+    },
+    emptySub: {
       fontSize: 13,
       fontWeight: '500',
       color: colors.textSecondary,
-    },
-    chipsRow: {
-      gap: 8,
-      paddingBottom: 10,
-    },
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.screenRoot,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
-    },
-    chipActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    chipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
-    chipTextActive: { color: '#fff' },
-    countBadge: {
-      minWidth: 18,
-      height: 18,
-      borderRadius: 6,
-      paddingHorizontal: 5,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.primary,
-    },
-    countBadgeActive: { backgroundColor: 'rgba(255,255,255,0.28)' },
-    countBadgeText: { fontSize: 10, fontWeight: '700', color: '#fff' },
-    countBadgeTextActive: { color: '#fff' },
-    loadingWrap: {
-      paddingVertical: 12,
-      alignItems: 'flex-start',
-    },
-    empty: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.textSecondary,
-      lineHeight: 20,
-    },
-    list: {},
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingVertical: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.border,
-    },
-    rowFirst: {
-      borderTopWidth: 0,
-      paddingTop: 2,
-    },
-    rowMain: {
-      flex: 1,
-      minWidth: 0,
-      gap: 2,
-    },
-    rowTitle: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.text,
-      lineHeight: 19,
-    },
-    rowSubtitle: {
-      fontSize: 12,
-      fontWeight: '500',
-      color: colors.textSecondary,
-    },
-    rowMeta: {
-      fontSize: 11,
-      fontWeight: '500',
-      fontVariant: ['tabular-nums'],
-      color: colors.textSecondary,
-      maxWidth: '36%',
-      textAlign: 'right',
-    },
-    more: {
-      marginTop: 8,
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSecondary,
+      lineHeight: 18,
     },
   });

@@ -16,6 +16,8 @@ import {
   Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getTabBarHeight } from './tabBarLayout';
 
 type ScrollHandlers = {
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
@@ -221,9 +223,13 @@ export function useChromeVisibility() {
   return useContext(ChromeVisibilityContext);
 }
 
+/** Folga visual entre o fim do conteúdo e a chrome (igual ao gap sob a navbar). */
+export const CHROME_CONTENT_GAP = 16;
+
 export function useChromeScroll() {
   const chrome = useContext(ChromeVisibilityContext);
   const reveal = chrome?.reveal;
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(
     useCallback(() => {
@@ -231,8 +237,15 @@ export function useChromeScroll() {
     }, [reveal]),
   );
 
+  // iOS: tab bar nativa sobrepõe a cena — precisa de inset no scroll.
+  // Android: BottomTabNavigator já aplica sceneContainerStyle.paddingBottom.
+  const tabBarOffset = Platform.OS === 'ios' ? getTabBarHeight(insets.bottom) : 0;
+
   return {
     scrollProps: chrome?.scrollHandlers ?? {},
     headerOffset: chrome?.headerHeight ?? CHROME_HEADER_FALLBACK,
+    tabBarOffset,
+    /** paddingBottom recomendado pro conteúdo das abas (tab bar + folga). */
+    bottomContentInset: tabBarOffset + CHROME_CONTENT_GAP,
   };
 }

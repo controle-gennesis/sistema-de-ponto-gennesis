@@ -1,4 +1,4 @@
-import { DP_TYPE_LABELS } from '../services/dpRequests';
+import { DP_TYPE_LABELS, URGENCY_LABELS, type DpUrgency } from '../services/dpRequests';
 import {
   fetchDpApprovals,
   fetchFdApprovals,
@@ -24,6 +24,26 @@ export type ApprovalListItem = {
   statusLabel: string;
   pending: boolean;
   raw: unknown;
+  /** Nome da pessoa (solicitante / motorista). */
+  person?: string | null;
+  /** Local / contrato / centro de custo. */
+  place?: string | null;
+  urgencyLabel?: string | null;
+  urgencyTone?: 'normal' | 'high' | 'urgent' | null;
+};
+
+export type ApprovalListItemWithTab = ApprovalListItem & {
+  tab: ApprovalTabId;
+  categoryLabel: string;
+};
+
+const APPROVAL_TAB_LABELS: Record<ApprovalTabId, string> = {
+  dp: 'Solicitações Internas',
+  fuel: 'Combustível',
+  fd: 'FD',
+  rm: 'RM',
+  oc: 'OC',
+  medicao: 'Medições',
 };
 
 export type OcPermissionFlags = {
@@ -73,26 +93,33 @@ export async function fetchPendingApprovalsForTab(
 ): Promise<ApprovalListItem[]> {
   if (tab === 'dp') {
     const rows = await fetchDpApprovals('PENDING');
-    return rows.map((row) => ({
-      id: row.id,
-      title: DP_TYPE_LABELS[row.requestType] || row.requestType,
-      subtitle:
-        row.contract?.name ||
-        row.costCenter?.name ||
-        row.employee?.user?.name ||
-        '—',
-      meta: `#${row.displayNumber ?? '—'} · ${formatApprovalDate(row.createdAt)}`,
-      statusLabel: 'Pendente',
-      pending: true,
-      raw: row,
-    }));
+    return rows.map((row) => {
+      const urgency = row.urgency as DpUrgency | undefined;
+      const urgencyTone =
+        urgency === 'URGENT' ? 'urgent' : urgency === 'HIGH' ? 'high' : 'normal';
+      return {
+        id: row.id,
+        title: DP_TYPE_LABELS[row.requestType] || row.requestType,
+        person: row.employee?.user?.name || null,
+        place: row.costCenter?.name || row.contract?.name || null,
+        subtitle: row.costCenter?.name || row.contract?.name || row.employee?.user?.name || '—',
+        meta: `#${row.displayNumber ?? '—'} · ${formatApprovalDate(row.createdAt)}`,
+        statusLabel: 'Pendente',
+        urgencyLabel: urgency ? URGENCY_LABELS[urgency] : null,
+        urgencyTone,
+        pending: true,
+        raw: row,
+      };
+    });
   }
 
   if (tab === 'fuel') {
     const rows = await fetchFuelApprovals('PENDING');
     return rows.map((row: FuelApprovalRow) => ({
       id: row.id,
-      title: `${row.vehiclePlate || 'Veículo'} · ${row.driverName || '—'}`,
+      title: row.driverName || row.requester?.name || '—',
+      person: row.driverName || row.requester?.name || null,
+      place: row.contract?.name || row.costCenter || row.route || null,
       subtitle: row.contract?.name || row.costCenter || row.route || '—',
       meta: `#${row.displayNumber ?? '—'} · ${formatApprovalDate(row.refuelDate || row.requestedAt)}`,
       statusLabel: 'Pendente',
@@ -106,6 +133,8 @@ export async function fetchPendingApprovalsForTab(
     return rows.map((row: FdApprovalRow) => ({
       id: row.id,
       title: row.title?.trim() || `Ficha #${row.displayNumber ?? '—'}`,
+      person: row.requester?.name || null,
+      place: row.contract?.name || row.costCenter?.name || null,
       subtitle: row.contract?.name || row.costCenter?.name || row.requester?.name || '—',
       meta: `#${row.displayNumber ?? '—'} · ${formatApprovalDate(row.createdAt)}`,
       statusLabel: 'Pendente',
@@ -119,6 +148,8 @@ export async function fetchPendingApprovalsForTab(
     return rows.map((row: RmApprovalRow) => ({
       id: row.id,
       title: `RM #${row.displayNumber ?? '—'}`,
+      person: row.requester?.name || null,
+      place: row.costCenter?.name || row.contract?.name || null,
       subtitle: row.costCenter?.name || row.contract?.name || row.requester?.name || '—',
       meta: formatApprovalDate(row.createdAt),
       statusLabel: 'Pendente',
@@ -135,6 +166,11 @@ export async function fetchPendingApprovalsForTab(
       .map((row: OcApprovalRow) => ({
         id: row.id,
         title: `OC #${row.displayNumber ?? '—'}`,
+        person: row.materialRequest?.requester?.name || null,
+        place:
+          row.supplierName ||
+          row.materialRequest?.costCenter?.name ||
+          null,
         subtitle:
           row.supplierName ||
           row.materialRequest?.costCenter?.name ||
@@ -154,6 +190,8 @@ export async function fetchPendingApprovalsForTab(
       .map((row: MedicaoApprovalRow) => ({
         id: row.id,
         title: row.empreiteiro?.name || 'Medição',
+        person: row.empreiteiro?.name || null,
+        place: row.contratoNome || row.empreiteiro?.contratoNome || null,
         subtitle:
           row.contratoNome ||
           row.empreiteiro?.contratoNome ||
@@ -166,4 +204,34 @@ export async function fetchPendingApprovalsForTab(
   }
 
   return [];
+}
+
+/** Todas as filas pendentes em uma lista só (Home / modal unificado). */
+export async function fetchAllPendingApprovals(
+  tabs: ApprovalTabId[],
+  ocFlags: OcPermissionFlags,
+): Promise<ApprovalListItemWithTab[]> {
+  const unique = Array.from(new Set(tabs));
+  const batches = await Promise.all(
+    unique.map(async (tab) => {
+      const rows = await fetchPendingApprovalsForTab(tab, ocFlags);
+      const categoryLabel = APPROVAL_TAB_LABELS[tab];
+      return rows.map((row) => ({
+        ...row,
+        id: `${tab}:${row.id}`,
+        tab,
+        categoryLabel,
+      }));
+    }),
+  );
+  return batches.flat();
+}
+
+/** Id da API (sem prefixo `tab:`). */
+export function approvalApiId(item: ApprovalListItemWithTab | ApprovalListItem): string {
+  const rawId = (item.raw as { id?: string } | null)?.id;
+  if (rawId) return String(rawId);
+  const s = String(item.id);
+  const i = s.indexOf(':');
+  return i >= 0 ? s.slice(i + 1) : s;
 }

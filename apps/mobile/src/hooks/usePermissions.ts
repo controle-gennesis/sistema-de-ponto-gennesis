@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
@@ -34,10 +35,13 @@ function moduleReady(isFetched: boolean, isPending: boolean) {
 export function usePermissions() {
   const { user, isAuthenticated } = useAuth();
 
-  const { data, isPending, isFetched } = useQuery({
+  const { data, isPending, isFetched, refetch } = useQuery({
     queryKey: ['me-permissions', user?.id ?? 'anonymous'],
     enabled: isAuthenticated && !!user?.id,
-    staleTime: 5 * 60 * 1000,
+    // Permissões mudam no web; não manter cache longo no mobile.
+    staleTime: 30_000,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
     queryFn: async (): Promise<PermissionsMeData> => {
       const res = await api.get('/api/permissions/me');
       const json = await res.json();
@@ -47,6 +51,15 @@ export function usePermissions() {
       return (json?.data ?? json) as PermissionsMeData;
     },
   });
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active') void refetch();
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [isAuthenticated, user?.id, refetch]);
 
   const isAdministrator = user?.employee?.position === 'Administrador';
   const isElevated = isAdministrator || !!data?.isAdmin;

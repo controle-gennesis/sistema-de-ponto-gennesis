@@ -8,7 +8,7 @@ import {
   RefreshControl,
   PanResponder,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -35,7 +35,7 @@ export default function HomeScreen() {
   const { colors, isDark } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
   const chrome = useChromeVisibility();
   const openMenu = chrome?.openMenu;
 
@@ -68,6 +68,7 @@ export default function HomeScreen() {
     setRefreshing(true);
     try {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['me-permissions'] }),
         queryClient.invalidateQueries({ queryKey: ['planner-events'] }),
         queryClient.invalidateQueries({ queryKey: ['planner-task-lists'] }),
         queryClient.invalidateQueries({ queryKey: ['approvals'] }),
@@ -77,11 +78,20 @@ export default function HomeScreen() {
     }
   }, [queryClient]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
+    }, [queryClient]),
+  );
+
   return (
     <View style={styles.safeArea}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 16 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: headerOffset + 16, paddingBottom: bottomContentInset },
+        ]}
         showsVerticalScrollIndicator={false}
         {...chromeScroll}
         refreshControl={
@@ -135,7 +145,6 @@ const getStyles = (colors: any, isDark: boolean) =>
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 8,
-      paddingBottom: 28,
     },
     greetingRow: {
       flexDirection: 'row',

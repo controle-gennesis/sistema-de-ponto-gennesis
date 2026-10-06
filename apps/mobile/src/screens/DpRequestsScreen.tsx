@@ -393,7 +393,7 @@ export default function DpRequestsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
   const myEmployeeId = user?.employee?.id || '';
   const isDepartamentoPessoal = !!user?.employee?.department
@@ -956,7 +956,7 @@ export default function DpRequestsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
-          isTabScreen && { paddingBottom: 28 },
+          isTabScreen && { paddingBottom: bottomContentInset },
         ]}
         {...chromeScroll}
         refreshControl={

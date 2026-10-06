@@ -421,7 +421,7 @@ export default function VehicleReservationsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
   const [rows, setRows] = useState<VehicleReservation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -925,7 +925,7 @@ export default function VehicleReservationsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: headerOffset + 8 },
-          isTabScreen && { paddingBottom: 28 },
+          isTabScreen && { paddingBottom: bottomContentInset },
         ]}
         {...chromeScroll}
         refreshControl={

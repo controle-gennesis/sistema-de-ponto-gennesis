@@ -12,20 +12,27 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, X, XCircle } from 'lucide-react-native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { X } from 'lucide-react-native';
 import { showAppToast } from '../AppToast';
 import { useTheme } from '../../context/ThemeContext';
-import type { DpRequest } from '../../services/dpRequests';
+import { formatDpRequestDetails } from '../../lib/formatDpRequestDetails';
 import {
-  approveDpRequest,
+  destinationLabel,
+  DP_TYPE_LABELS,
+  fetchPayrollEmployees,
+  STATUS_LABELS,
+  URGENCY_LABELS,
+  type DpRequest,
+  type DpRequestStatus,
+} from '../../services/dpRequests';
+import {
   approveFdRequest,
   approveFuelRequest,
   approveMedicao,
   approveOcRequest,
   approveRmRequest,
   nextOcApproveStatus,
-  rejectDpRequest,
   rejectFdRequest,
   rejectFuelRequest,
   rejectOcRequest,
@@ -46,31 +53,77 @@ type Props = {
   tab: ApprovalTabId | null;
   item: ApprovalListItem | null;
   onClose: () => void;
+  /** Quando true, renderiza overlay (sem Modal) — evita ficar atrás de outro Modal. */
+  embedded?: boolean;
 };
 
-function DetailLine({
+function statusColor(status: DpRequestStatus, colors: any) {
+  if (status === 'CONCLUDED') return colors.success;
+  if (status === 'CANCELLED') return colors.error;
+  if (status === 'WAITING_RETURN') return colors.warning;
+  if (status.startsWith('WAITING_')) return '#f97316';
+  if (status === 'IN_FINANCEIRO') return '#6366f1';
+  return colors.warning;
+}
+
+function DetailField({
   label,
   value,
+  valueColor,
   styles,
 }: {
   label: string;
   value: string;
+  valueColor?: string;
   styles: ReturnType<typeof getStyles>;
 }) {
   return (
-    <View style={styles.detailLine}>
+    <View style={styles.detailField}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
+      <Text style={[styles.detailValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
     </View>
   );
 }
 
-export default function ApprovalActionSheet({ visible, tab, item, onClose }: Props) {
+export default function ApprovalActionSheet({
+  visible,
+  tab,
+  item,
+  onClose,
+  embedded = false,
+}: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
   const [medicaoAmount, setMedicaoAmount] = useState('');
+
+  const dpRaw = tab === 'dp' && item ? (item.raw as DpRequest) : null;
+  const fuelRaw = tab === 'fuel' && item ? (item.raw as FuelApprovalRow) : null;
+
+  const employeesQuery = useQuery({
+    queryKey: ['payroll-employees'],
+    queryFn: fetchPayrollEmployees,
+    enabled: visible && !!dpRaw,
+    staleTime: 60_000,
+  });
+
+  const employeeNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const emp of employeesQuery.data || []) {
+      if (emp.id) map.set(emp.id, emp.name || emp.id);
+    }
+    return map;
+  }, [employeesQuery.data]);
+
+  const detailPreview = useMemo(() => {
+    if (!dpRaw) return null;
+    return formatDpRequestDetails(
+      dpRaw.requestType,
+      dpRaw.details ?? null,
+      employeeNameById,
+    );
+  }, [dpRaw, employeeNameById]);
 
   useEffect(() => {
     if (!visible || !item) {
@@ -94,11 +147,6 @@ export default function ApprovalActionSheet({ visible, tab, item, onClose }: Pro
       if (!item || !tab) throw new Error('Item inválido');
       const { action } = opts;
 
-      if (tab === 'dp') {
-        if (action === 'approve') await approveDpRequest(item.id, comment);
-        else await rejectDpRequest(item.id, comment.trim() || 'Recusado pelo gestor');
-        return;
-      }
       if (tab === 'fuel') {
         if (action === 'approve') await approveFuelRequest(item.id, comment);
         else await rejectFuelRequest(item.id, comment.trim() || 'Recusado pelo gestor');
@@ -178,200 +226,346 @@ export default function ApprovalActionSheet({ visible, tab, item, onClose }: Pro
     );
   };
 
-  const dpRaw = tab === 'dp' && item ? (item.raw as DpRequest) : null;
-  const fuelRaw = tab === 'fuel' && item ? (item.raw as FuelApprovalRow) : null;
+  if (!visible || !item) return null;
+
+  const showMedicaoActions = tab === 'medicao' && item.pending;
+  const headerTitle = dpRaw
+    ? `Solicitação #${dpRaw.displayNumber ?? dpRaw.id.slice(0, 8)}`
+    : item.title;
+  const headerSubtitle = dpRaw
+    ? STATUS_LABELS[dpRaw.status] || dpRaw.status
+    : item.subtitle;
+
+  const sheet = (
+    <View style={[styles.detailSheet, { backgroundColor: colors.card }]}>
+      <View style={styles.detailSheetHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.detailSheetTitle} numberOfLines={2}>
+            {headerTitle}
+          </Text>
+          <Text style={styles.detailSheetSubtitle} numberOfLines={2}>
+            {headerSubtitle}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={6}>
+          <X size={18} color={colors.text} strokeWidth={2.2} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {dpRaw ? (
+          <>
+            <View style={styles.detailGrid}>
+              <DetailField
+                styles={styles}
+                label="Status"
+                value={STATUS_LABELS[dpRaw.status] || dpRaw.status}
+                valueColor={statusColor(dpRaw.status, colors)}
+              />
+              <DetailField
+                styles={styles}
+                label="Tipo"
+                value={DP_TYPE_LABELS[dpRaw.requestType] || dpRaw.requestType}
+              />
+              <DetailField
+                styles={styles}
+                label="Destino"
+                value={destinationLabel(dpRaw.requestType)}
+              />
+              <DetailField
+                styles={styles}
+                label="Urgência"
+                value={URGENCY_LABELS[dpRaw.urgency] || dpRaw.urgency}
+              />
+              <DetailField
+                styles={styles}
+                label="Solicitante"
+                value={dpRaw.employee?.user?.name || '—'}
+              />
+              <DetailField
+                styles={styles}
+                label="Contrato"
+                value={dpRaw.costCenter?.name || dpRaw.contract?.name || '—'}
+              />
+              <DetailField styles={styles} label="Empresa" value={dpRaw.company || '—'} />
+              <DetailField styles={styles} label="Polo" value={dpRaw.polo || '—'} />
+              {dpRaw.dpFeedback ? (
+                <DetailField styles={styles} label="Feedback" value={dpRaw.dpFeedback} />
+              ) : null}
+              {dpRaw.requesterReturnComment ? (
+                <DetailField
+                  styles={styles}
+                  label="Resposta do solicitante"
+                  value={dpRaw.requesterReturnComment}
+                />
+              ) : null}
+            </View>
+
+            {detailPreview && detailPreview.items.length > 0 ? (
+              <View style={styles.detailsSection}>
+                <Text style={styles.detailsSectionTitle}>{detailPreview.sectionTitle}</Text>
+                {detailPreview.items.map((row, index) => (
+                  <View
+                    key={`${row.title}-${index}`}
+                    style={[
+                      styles.detailsItem,
+                      {
+                        borderLeftColor: isDark
+                          ? 'rgba(255,255,255,0.18)'
+                          : 'rgba(15,23,42,0.12)',
+                      },
+                    ]}
+                  >
+                    <Text style={styles.detailsItemTitle}>{row.title}</Text>
+                    <Text style={styles.detailsItemSubtitle}>{row.subtitle}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {fuelRaw ? (
+          <View style={styles.detailGrid}>
+            <DetailField styles={styles} label="Motorista" value={fuelRaw.driverName || '—'} />
+            <DetailField styles={styles} label="Rota" value={fuelRaw.route || '—'} />
+            <DetailField
+              styles={styles}
+              label="Solicitante"
+              value={fuelRaw.requester?.name || '—'}
+            />
+            <DetailField
+              styles={styles}
+              label="Observações"
+              value={fuelRaw.observations || '—'}
+            />
+            {item.meta ? (
+              <DetailField styles={styles} label="Info" value={item.meta} />
+            ) : null}
+          </View>
+        ) : null}
+
+        {!dpRaw && !fuelRaw ? (
+          <View style={styles.detailGrid}>
+            {item.subtitle ? (
+              <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
+            ) : null}
+            {item.meta ? <DetailField styles={styles} label="Info" value={item.meta} /> : null}
+            {item.statusLabel ? (
+              <DetailField styles={styles} label="Status" value={item.statusLabel} />
+            ) : null}
+          </View>
+        ) : null}
+
+        {showMedicaoActions ? (
+          <>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Valor aprovado</Text>
+              <TextInput
+                value={medicaoAmount}
+                onChangeText={setMedicaoAmount}
+                keyboardType="decimal-pad"
+                placeholder="0,00"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Motivo da devolução</Text>
+              <TextInput
+                value={comment}
+                onChangeText={setComment}
+                placeholder="Obrigatório ao devolver"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.input, styles.inputMultiline]}
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+          </>
+        ) : null}
+      </ScrollView>
+
+      {showMedicaoActions ? (
+        <View style={styles.sheetActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.rejectBtn]}
+            disabled={actionMutation.isPending}
+            onPress={() => confirmAction('reject')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.actionBtnText}>Devolver</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.approveBtn]}
+            disabled={actionMutation.isPending}
+            onPress={() => confirmAction('approve')}
+            activeOpacity={0.8}
+          >
+            {actionMutation.isPending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.actionBtnText}>Aprovar</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  if (embedded) {
+    return (
+      <View style={layout.embeddedRoot}>
+        <TouchableOpacity style={layout.modalBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={layout.embeddedSheetWrap} pointerEvents="box-none">
+          {sheet}
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <Modal visible={visible && !!item} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
       <KeyboardAvoidingView
-        style={styles.modalRoot}
+        style={layout.detailOverlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle} numberOfLines={2}>
-              {item?.title}
-            </Text>
-            <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <X size={20} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sheetSubtitle}>{item?.subtitle}</Text>
-            <Text style={styles.sheetMeta}>{item?.meta}</Text>
-
-            {dpRaw ? (
-              <View style={styles.detailBlock}>
-                <DetailLine
-                  styles={styles}
-                  label="Solicitante"
-                  value={dpRaw.employee?.user?.name || '—'}
-                />
-                <DetailLine styles={styles} label="Contrato" value={dpRaw.contract?.name || '—'} />
-                <DetailLine
-                  styles={styles}
-                  label="Centro de custo"
-                  value={dpRaw.costCenter?.name || '—'}
-                />
-                <DetailLine styles={styles} label="Empresa" value={dpRaw.company || '—'} />
-              </View>
-            ) : null}
-
-            {fuelRaw ? (
-              <View style={styles.detailBlock}>
-                <DetailLine styles={styles} label="Motorista" value={fuelRaw.driverName || '—'} />
-                <DetailLine styles={styles} label="Placa" value={fuelRaw.vehiclePlate || '—'} />
-                <DetailLine styles={styles} label="Rota" value={fuelRaw.route || '—'} />
-                <DetailLine
-                  styles={styles}
-                  label="Solicitante"
-                  value={fuelRaw.requester?.name || '—'}
-                />
-                <DetailLine
-                  styles={styles}
-                  label="Observações"
-                  value={fuelRaw.observations || '—'}
-                />
-              </View>
-            ) : null}
-
-            {tab === 'medicao' && item?.pending ? (
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>Valor aprovado</Text>
-                <TextInput
-                  value={medicaoAmount}
-                  onChangeText={setMedicaoAmount}
-                  keyboardType="decimal-pad"
-                  placeholder="0,00"
-                  placeholderTextColor={colors.textSecondary}
-                  style={styles.input}
-                />
-              </View>
-            ) : null}
-
-            {item?.pending ? (
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>
-                  {tab === 'medicao' ? 'Motivo da devolução' : 'Comentário (opcional)'}
-                </Text>
-                <TextInput
-                  value={comment}
-                  onChangeText={setComment}
-                  placeholder={
-                    tab === 'medicao'
-                      ? 'Obrigatório ao devolver'
-                      : 'Observação para o solicitante'
-                  }
-                  placeholderTextColor={colors.textSecondary}
-                  style={[styles.input, styles.inputMultiline]}
-                  multiline
-                  textAlignVertical="top"
-                />
-              </View>
-            ) : null}
-          </ScrollView>
-
-          {item?.pending ? (
-            <View style={styles.sheetActions}>
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.rejectBtn]}
-                disabled={actionMutation.isPending}
-                onPress={() => confirmAction('reject')}
-                activeOpacity={0.8}
-              >
-                <XCircle size={18} color="#fff" />
-                <Text style={styles.actionBtnText}>
-                  {tab === 'medicao' ? 'Devolver' : 'Recusar'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.approveBtn]}
-                disabled={actionMutation.isPending}
-                onPress={() => confirmAction('approve')}
-                activeOpacity={0.8}
-              >
-                {actionMutation.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <CheckCircle2 size={18} color="#fff" />
-                    <Text style={styles.actionBtnText}>Aprovar</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        {sheet}
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
+// Layout fora do useMemo: o Fast Refresh preserva o memo e deixaria chaves novas undefined.
+const layout = StyleSheet.create({
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+    padding: 16,
+    paddingBottom: 28,
+  },
+  embeddedRoot: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1100,
+    elevation: 1100,
+  },
+  embeddedSheetWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+    padding: 16,
+    paddingBottom: 28,
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+});
+
 function getStyles(colors: any, isDark: boolean) {
   return StyleSheet.create({
-    modalRoot: { flex: 1, justifyContent: 'flex-end' },
-    modalBackdrop: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-    },
-    sheet: {
-      maxHeight: '82%',
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      backgroundColor: isDark ? colors.card : '#fff',
-      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
-    },
-    sheetHandle: {
-      alignSelf: 'center',
-      width: 40,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-      marginTop: 10,
-      marginBottom: 8,
-    },
-    sheetHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
+    detailSheet: {
+      borderRadius: 20,
+      padding: 18,
       gap: 12,
-      paddingHorizontal: 20,
-      paddingBottom: 8,
+      maxHeight: '88%',
     },
-    sheetTitle: {
-      flex: 1,
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.text,
-    },
-    sheetBody: {
-      paddingHorizontal: 20,
-      paddingBottom: 16,
-      gap: 10,
-    },
-    sheetSubtitle: {
-      fontSize: 14,
-      color: colors.textSecondary,
-      lineHeight: 20,
-    },
-    sheetMeta: {
-      fontSize: 12,
-      color: colors.textSecondary,
+    detailSheetHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
       marginBottom: 4,
     },
-    detailBlock: { gap: 8, marginTop: 4 },
-    detailLine: { gap: 2 },
+    detailSheetTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      letterSpacing: -0.3,
+      color: colors.text,
+    },
+    detailSheetSubtitle: {
+      fontSize: 13,
+      fontWeight: '500',
+      marginTop: 2,
+      color: colors.textSecondary,
+    },
+    closeBtn: {
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    scroll: { maxHeight: 520 },
+    detailGrid: { gap: 12 },
+    detailField: { gap: 2 },
     detailLabel: {
       fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSecondary,
+      fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0.3,
+      color: colors.textSecondary,
     },
-    detailValue: { fontSize: 14, color: colors.text, lineHeight: 20 },
-    fieldBlock: { gap: 6, marginTop: 8 },
+    detailValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      lineHeight: 20,
+      color: colors.text,
+    },
+    detailsSection: {
+      marginTop: 14,
+      borderRadius: 14,
+      padding: 12,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
+      gap: 10,
+    },
+    detailsSectionTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      letterSpacing: -0.2,
+      color: colors.text,
+    },
+    detailsItem: {
+      borderLeftWidth: 2,
+      paddingLeft: 10,
+      paddingVertical: 2,
+      gap: 2,
+    },
+    detailsItemTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      letterSpacing: -0.2,
+      color: colors.text,
+    },
+    detailsItemSubtitle: {
+      fontSize: 13,
+      fontWeight: '500',
+      lineHeight: 18,
+      color: colors.textSecondary,
+    },
+    fieldBlock: { gap: 6, marginTop: 12 },
     fieldLabel: { fontSize: 13, fontWeight: '600', color: colors.text },
     input: {
       borderWidth: StyleSheet.hairlineWidth * 1.5,
@@ -387,20 +581,17 @@ function getStyles(colors: any, isDark: boolean) {
     sheetActions: {
       flexDirection: 'row',
       gap: 10,
-      paddingHorizontal: 20,
-      paddingTop: 8,
+      paddingTop: 4,
     },
     actionBtn: {
       flex: 1,
       height: 48,
       borderRadius: 14,
-      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 8,
     },
-    rejectBtn: { backgroundColor: '#6b7280' },
-    approveBtn: { backgroundColor: colors.primary },
+    rejectBtn: { backgroundColor: isDark ? '#b91c1c' : '#dc2626' },
+    approveBtn: { backgroundColor: isDark ? '#15803d' : '#16a34a' },
     actionBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   });
 }

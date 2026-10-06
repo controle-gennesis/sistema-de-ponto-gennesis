@@ -2238,7 +2238,8 @@ export function UserPermissionsEditor({
                                   </div>
                                 </td>
                                 <td className="py-3.5 pl-4 pr-2 text-right align-top">
-                                  <div className="inline-flex justify-end">
+                                  {/* h-9 = altura do ícone à esquerda — centra o Liberado na 1ª linha */}
+                                  <div className="inline-flex h-9 items-center justify-end">
                                     <PermissionMatrixCheckbox
                                       checked={liberado}
                                       onCheckedChange={(next) => {

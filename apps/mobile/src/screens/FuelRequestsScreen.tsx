@@ -398,7 +398,7 @@ export default function FuelRequestsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
   const [rows, setRows] = useState<FuelRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -986,7 +986,7 @@ export default function FuelRequestsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
-          isTabScreen && { paddingBottom: 28 },
+          isTabScreen && { paddingBottom: bottomContentInset },
         ]}
         {...chromeScroll}
         refreshControl={
