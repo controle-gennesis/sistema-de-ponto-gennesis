@@ -3845,10 +3845,18 @@ interface SessaoOrcamentoPersist {
   /** Colunas ocultas na aba Orçamento (ids de `ORC_COLUNAS_MONTAGEM_TOGGLE`). */
   colunasOcultasMontagem?: string[];
   /**
-   * Override manual de MO/MAT unitário.
-   * `null` = valor apagado (força 0); número = valor digitado; ausente = cálculo automático.
+   * Override manual de valores da grade Orçamento (MO/MAT e demais colunas monetárias).
+   * Número = valor digitado; `null` (legado) = força 0; campo ausente = cálculo automático.
    */
-  moMatManualPorItem?: Record<string, { mo?: number | null; mat?: number | null }>;
+  moMatManualPorItem?: Record<
+    string,
+    Partial<
+      Record<
+        'mo' | 'mat' | 'pu' | 'puBdi' | 'subMo' | 'subMat' | 'total' | 'totalBdi',
+        number | null
+      >
+    >
+  >;
   /** Observações da Ficha de demanda (chave da linha). */
   fichaDemandaObservacoes?: Record<string, string>;
   /** Insumos manuais adicionados na Ficha de demanda, por chave da composição pai. */
@@ -4011,22 +4019,191 @@ function parseCoresMap(raw: unknown): Record<string, string> {
   return out;
 }
 
-function parseMoMatManualPorItem(
-  raw: unknown
-): Record<string, { mo?: number | null; mat?: number | null }> {
+/** Campos da grade Orçamento com override manual (editável; apagar = volta ao automático). */
+type ValoresManuaisCampoOrc =
+  | 'mo'
+  | 'mat'
+  | 'pu'
+  | 'puBdi'
+  | 'subMo'
+  | 'subMat'
+  | 'total'
+  | 'totalBdi';
+
+type ValoresManuaisLinhaOrc = Partial<Record<ValoresManuaisCampoOrc, number | null>>;
+
+const VALORES_MANUAIS_CAMPOS_ORC: ValoresManuaisCampoOrc[] = [
+  'mo',
+  'mat',
+  'pu',
+  'puBdi',
+  'subMo',
+  'subMat',
+  'total',
+  'totalBdi',
+];
+
+function parseMoMatManualPorItem(raw: unknown): Record<string, ValoresManuaisLinhaOrc> {
   if (!raw || typeof raw !== 'object') return {};
-  const out: Record<string, { mo?: number | null; mat?: number | null }> = {};
+  const out: Record<string, ValoresManuaisLinhaOrc> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (!v || typeof v !== 'object') continue;
-    const row = v as { mo?: unknown; mat?: unknown };
-    const entry: { mo?: number | null; mat?: number | null } = {};
-    if (row.mo === null) entry.mo = null;
-    else if (typeof row.mo === 'number' && Number.isFinite(row.mo)) entry.mo = row.mo;
-    if (row.mat === null) entry.mat = null;
-    else if (typeof row.mat === 'number' && Number.isFinite(row.mat)) entry.mat = row.mat;
-    if (entry.mo !== undefined || entry.mat !== undefined) out[k] = entry;
+    const row = v as Record<string, unknown>;
+    const entry: ValoresManuaisLinhaOrc = {};
+    for (const campo of VALORES_MANUAIS_CAMPOS_ORC) {
+      const val = row[campo];
+      if (val === null) entry[campo] = null;
+      else if (typeof val === 'number' && Number.isFinite(val)) entry[campo] = val;
+    }
+    if (Object.keys(entry).length > 0) out[k] = entry;
   }
   return out;
+}
+
+function valorManualOuAuto(
+  manual: ValoresManuaisLinhaOrc | undefined,
+  campo: ValoresManuaisCampoOrc,
+  auto: number
+): number {
+  if (!manual || !Object.prototype.hasOwnProperty.call(manual, campo)) return auto;
+  const v = manual[campo];
+  if (v == null) return 0;
+  return Number(v) || 0;
+}
+
+function temValorManual(
+  manual: ValoresManuaisLinhaOrc | undefined,
+  campo: ValoresManuaisCampoOrc
+): boolean {
+  return !!manual && Object.prototype.hasOwnProperty.call(manual, campo);
+}
+
+type FonteCalculoOrc =
+  | ValoresManuaisCampoOrc
+  | 'qtd';
+
+type RowValoresOrcFormula = {
+  maoDeObraUnitario: number;
+  materialUnitario: number;
+  precoUnitario: number;
+  quantidade: number;
+  subMaoDeObra: number;
+  subMaterial: number;
+  total: number;
+};
+
+const EPS_MOEDA_ORC = 0.005;
+
+/** Valor automático do campo (ignorando override do próprio campo). */
+function valorAutoCampoOrc(
+  campo: ValoresManuaisCampoOrc,
+  row: RowValoresOrcFormula,
+  bdiFator: number,
+  manuais?: ValoresManuaisLinhaOrc
+): number | null {
+  const mo = Number(row.maoDeObraUnitario) || 0;
+  const mat = Number(row.materialUnitario) || 0;
+  const qtd = Number(row.quantidade) || 0;
+  const pu = Number(row.precoUnitario) || 0;
+  const subMo = Number(row.subMaoDeObra) || 0;
+  const subMat = Number(row.subMaterial) || 0;
+  const total = Number(row.total) || 0;
+  switch (campo) {
+    case 'mo':
+    case 'mat':
+      return null;
+    case 'pu':
+      return mo + mat > 0 ? mo + mat : null;
+    case 'puBdi':
+      return pu > 0 ? pu * (1 + bdiFator) : null;
+    case 'subMo':
+      return mo * qtd;
+    case 'subMat':
+      return mat * qtd;
+    case 'total':
+      if (mo + mat > 0 && !temValorManual(manuais, 'pu')) {
+        return subMo + subMat;
+      }
+      return pu * qtd;
+    case 'totalBdi':
+      return total > 0 ? total * (1 + bdiFator) : null;
+    default:
+      return null;
+  }
+}
+
+/** Fórmula e células de origem ao focar um valor derivado na grade Orçamento. */
+function formulaEFontesCelulaOrc(
+  campo: ValoresManuaisCampoOrc,
+  row: RowValoresOrcFormula,
+  /** Fator BDI (ex.: 0,25 para 25%). */
+  bdiFator: number,
+  manuais?: ValoresManuaisLinhaOrc
+): { fontes: FonteCalculoOrc[]; formula: string | null } {
+  const fmt = formatarMoedaCampoOrc;
+  const fmtQtd = (n: number) =>
+    Number(n || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
+  const mo = Number(row.maoDeObraUnitario) || 0;
+  const mat = Number(row.materialUnitario) || 0;
+  const pu = Number(row.precoUnitario) || 0;
+  const qtd = Number(row.quantidade) || 0;
+  const subMo = Number(row.subMaoDeObra) || 0;
+  const subMat = Number(row.subMaterial) || 0;
+  const total = Number(row.total) || 0;
+  const bdiFatorLabel = Number(bdiFator || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+
+  // Override manual “de verdade”: só esconde fórmula se o valor diverge do automático.
+  // (Clique+blur/apagar costumava gravar 0 ou o mesmo valor do auto e quebrava o recurso.)
+  if (temValorManual(manuais, campo)) {
+    const auto = valorAutoCampoOrc(campo, row, bdiFator, manuais);
+    const manualVal = valorManualOuAuto(manuais, campo, 0);
+    const zeroAcidental =
+      auto != null && auto > EPS_MOEDA_ORC && Math.abs(manualVal) < EPS_MOEDA_ORC;
+    if (
+      !zeroAcidental &&
+      (auto == null || Math.abs(manualVal - auto) >= EPS_MOEDA_ORC)
+    ) {
+      return { fontes: [], formula: null };
+    }
+  }
+
+  switch (campo) {
+    case 'pu':
+      if (mo > 0 || mat > 0) {
+        return { fontes: ['mo', 'mat'], formula: `=${fmt(mo)}+${fmt(mat)}` };
+      }
+      return { fontes: [], formula: null };
+    case 'puBdi':
+      return {
+        fontes: ['pu'],
+        formula: `=${fmt(pu)}*(1+${bdiFatorLabel})`,
+      };
+    case 'subMo':
+      return { fontes: ['mo', 'qtd'], formula: `=${fmt(mo)}*${fmtQtd(qtd)}` };
+    case 'subMat':
+      return { fontes: ['mat', 'qtd'], formula: `=${fmt(mat)}*${fmtQtd(qtd)}` };
+    case 'total':
+      if (mo + mat > 0 && !temValorManual(manuais, 'pu')) {
+        return {
+          fontes: ['subMo', 'subMat'],
+          formula: `=${fmt(subMo)}+${fmt(subMat)}`,
+        };
+      }
+      return { fontes: ['pu', 'qtd'], formula: `=${fmt(pu)}*${fmtQtd(qtd)}` };
+    case 'totalBdi':
+      return {
+        fontes: ['total'],
+        formula: `=${fmt(total)}*(1+${bdiFatorLabel})`,
+      };
+    default:
+      return { fontes: [], formula: null };
+  }
 }
 
 function sessaoVazia(): SessaoOrcamentoPersist {
@@ -6406,6 +6583,7 @@ const FD_CAMPO_COMMIT_MS = 120;
  * Com `commitOnChange` (padrão), totais atualizam ao digitar — sem precisar sair do campo.
  */
 const FdCampoLocal = memo(function FdCampoLocal({
+  id,
   draftKey,
   committedValue,
   /** Ao focar: mostra isto (ex. fórmula =4+7) em vez do valor formatado. */
@@ -6413,6 +6591,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
   /** Após blur/Enter: texto a exibir (ex. resultado da fórmula). */
   displayAfterCommit,
   onCommit,
+  onFocusExtra,
+  onBlurExtra,
   className,
   placeholder,
   title,
@@ -6421,11 +6601,15 @@ const FdCampoLocal = memo(function FdCampoLocal({
   commitOnChange = true,
   disabled = false,
 }: {
+  id?: string;
   draftKey?: string;
   committedValue: string;
   editValueOnFocus?: string;
   displayAfterCommit?: (raw: string) => string | null;
   onCommit: (raw: string) => void;
+  /** Extra ao focar (ex.: destacar células de origem do cálculo). */
+  onFocusExtra?: () => void;
+  onBlurExtra?: () => void;
   className?: string;
   placeholder?: string;
   title?: string;
@@ -6442,6 +6626,10 @@ const FdCampoLocal = memo(function FdCampoLocal({
   localRef.current = local;
   const onCommitRef = useRef(onCommit);
   onCommitRef.current = onCommit;
+  const onFocusExtraRef = useRef(onFocusExtra);
+  onFocusExtraRef.current = onFocusExtra;
+  const onBlurExtraRef = useRef(onBlurExtra);
+  onBlurExtraRef.current = onBlurExtra;
   const draftKeyRef = useRef(draftKey);
   draftKeyRef.current = draftKey;
   const editOnFocusRef = useRef(editValueOnFocus);
@@ -6502,6 +6690,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
 
   return (
     <input
+      id={id}
       type="text"
       inputMode={inputMode}
       size={1}
@@ -6520,6 +6709,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
           setLocal(edit);
           if (draftKey) fdCampoDrafts.set(draftKey, edit);
         }
+        onFocusExtraRef.current?.();
       }}
       onChange={(e) => {
         if (disabled) return;
@@ -6534,6 +6724,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onBlur={(e) => {
         focusedRef.current = false;
+        onBlurExtraRef.current?.();
         if (disabled) return;
         const raw = e.target.value;
         applyValue(raw, 'blur');
@@ -6755,8 +6946,14 @@ export function OrcamentoPageView({
   } | null>(null);
   const btnAcoesGradeRef = useRef<HTMLButtonElement>(null);
   const [moMatManualPorItem, setMoMatManualPorItem] = useState<
-    Record<string, { mo?: number | null; mat?: number | null }>
+    Record<string, ValoresManuaisLinhaOrc>
   >({});
+  /** Células de origem destacadas ao focar valor derivado (ex.: PU = MO + MAT). */
+  const [destaqueCalculoOrc, setDestaqueCalculoOrc] = useState<{
+    itemKey: string;
+    fontes: FonteCalculoOrc[];
+  } | null>(null);
+  const destaqueCalculoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nomesOrcafascioSnapRef = useRef<{
     orcamentoId: string;
     titulos: Record<string, string>;
@@ -9602,6 +9799,7 @@ export function OrcamentoPageView({
       const ocultosNext = remapearListaChavesOrcamento(itensOcultosNoOrcamento, chaveParaNovaKey);
       const insumosOcultosNext = remapearListaChavesOrcamento(insumosAnaliticoOcultos, chaveParaNovaKey);
       const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
+      const valoresManuaisNext = remapearRegistroPorChave(moMatManualPorItem, chaveParaNovaKey);
 
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
       const orcafascioDadosRefresh =
@@ -9634,6 +9832,7 @@ export function OrcamentoPageView({
         observacoesPorItem: observacoesOrcNext,
         fichaDemandaObservacoes: observacoesNext,
         insumosAnaliticoManuais: manuaisNext,
+        moMatManualPorItem: valoresManuaisNext,
         itensOcultosNoOrcamento: ocultosNext,
         insumosAnaliticoOcultos: insumosOcultosNext,
         meta: nextMeta,
@@ -9661,6 +9860,7 @@ export function OrcamentoPageView({
       setItensOcultosNoOrcamento(ocultosNext);
       setInsumosAnaliticoOcultos(insumosOcultosNext);
       setInsumosAnaliticoManuais(manuaisNext);
+      setMoMatManualPorItem(valoresManuaisNext);
       setMeta(nextMeta);
 
       const partes: string[] = [];
@@ -10406,38 +10606,36 @@ export function OrcamentoPageView({
         }
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao, qtd);
-        const moMatManual = moMatManualPorItem[itemKey];
-        const maoDeObraUnitario =
-          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mo')
-            ? moMatManual.mo == null
-              ? 0
-              : Number(moMatManual.mo) || 0
-            : maoDeObraUnitarioAuto;
-        const materialUnitario =
-          moMatManual && Object.prototype.hasOwnProperty.call(moMatManual, 'mat')
-            ? moMatManual.mat == null
-              ? 0
-              : Number(moMatManual.mat) || 0
-            : materialUnitarioAuto;
-        const moUnit = maoDeObraUnitario;
-        const matUnit = materialUnitario;
+        const valoresManuais = moMatManualPorItem[itemKey];
+        const moUnit = valorManualOuAuto(valoresManuais, 'mo', maoDeObraUnitarioAuto);
+        const matUnit = valorManualOuAuto(valoresManuais, 'mat', materialUnitarioAuto);
         const somaMoMatUnit = moUnit + matUnit;
         // PU = MO + MAT quando houver split; senão preço de catálogo/importação.
-        const preco = somaMoMatUnit > 0 ? somaMoMatUnit : precoCatalogo;
+        let preco = somaMoMatUnit > 0 ? somaMoMatUnit : precoCatalogo;
+        preco = valorManualOuAuto(valoresManuais, 'pu', preco);
         // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
-        const precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
+        let precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
+        precoComBdi = valorManualOuAuto(valoresManuais, 'puBdi', precoComBdi);
         const modoArred = meta.modoArredondamento;
         const subMoRaw = moUnit * qtd;
         const subMatRaw = matUnit * qtd;
-        const subMaoDeObra = aplicarModoArredondamento(subMoRaw, modoArred);
-        const subMaterial = aplicarModoArredondamento(subMatRaw, modoArred);
+        let subMaoDeObra = aplicarModoArredondamento(subMoRaw, modoArred);
+        let subMaterial = aplicarModoArredondamento(subMatRaw, modoArred);
+        subMaoDeObra = valorManualOuAuto(valoresManuais, 'subMo', subMaoDeObra);
+        subMaterial = valorManualOuAuto(valoresManuais, 'subMat', subMaterial);
         const subMatMaisMo = aplicarModoArredondamento(subMoRaw + subMatRaw, modoArred);
+        const puManual = temValorManual(valoresManuais, 'pu');
+        const subManual =
+          temValorManual(valoresManuais, 'subMo') || temValorManual(valoresManuais, 'subMat');
 
         // Com split MO/MAT: total = Sub MO + Sub MAT (mesma base das colunas de cálculo).
         // Sem split: mantém total importado (escalado pela qtd) ou PU × qtd.
+        // Override de PU ou de sub totais altera a base do total automático.
         let totalItem: number;
-        if (somaMoMatUnit > 0) {
-          totalItem = subMatMaisMo;
+        if (temValorManual(valoresManuais, 'total')) {
+          totalItem = valorManualOuAuto(valoresManuais, 'total', 0);
+        } else if (somaMoMatUnit > 0 && !puManual) {
+          totalItem = subManual ? subMaoDeObra + subMaterial : subMatMaisMo;
         } else {
           const qOrig = Number(i.quantidadeImportada);
           const temTotaisImportados =
@@ -10448,7 +10646,7 @@ export function OrcamentoPageView({
             temTotaisImportados && qOrig > 0 && Number.isFinite(qOrig)
               ? qtd / qOrig
               : 1;
-          if (temTotaisImportados) {
+          if (temTotaisImportados && !puManual) {
             const semImp = Number(i.totalSemBdiImportado);
             totalItem =
               Number.isFinite(semImp) && semImp !== 0
@@ -10458,7 +10656,8 @@ export function OrcamentoPageView({
             totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
           }
         }
-        const totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
+        let totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
+        totalComBdiItem = valorManualOuAuto(valoresManuais, 'totalBdi', totalComBdiItem);
         const precisaDecodeDesc =
           typeof i.descricao === 'string' && i.descricao.includes('&');
         const precisaDecodeAnalitico =
@@ -12342,16 +12541,26 @@ export function OrcamentoPageView({
     []
   );
 
-  const setMoMatManualCampo = useCallback(
-    (itemKey: string, campo: 'mo' | 'mat', valor: number | null) => {
+  /**
+   * Define override manual de coluna monetária.
+   * `undefined` = remove o override (volta ao cálculo automático).
+   */
+  const setValorManualCampo = useCallback(
+    (itemKey: string, campo: ValoresManuaisCampoOrc, valor: number | undefined) => {
       if (gradeTravadaRef.current) return;
       setMoMatManualPorItem((prev) => {
-        const atual = prev[itemKey] ?? {};
-        if (Object.prototype.hasOwnProperty.call(atual, campo) && atual[campo] === valor) {
-          return prev;
+        const atual = { ...(prev[itemKey] ?? {}) };
+        const tinha = Object.prototype.hasOwnProperty.call(atual, campo);
+        if (valor === undefined) {
+          if (!tinha) return prev;
+          delete atual[campo];
+        } else {
+          if (tinha && atual[campo] === valor) return prev;
+          atual[campo] = valor;
         }
-        const nextEntry = { ...atual, [campo]: valor };
-        const next = { ...prev, [itemKey]: nextEntry };
+        const next: Record<string, ValoresManuaisLinhaOrc> = { ...prev };
+        if (Object.keys(atual).length === 0) delete next[itemKey];
+        else next[itemKey] = atual;
         // Sincroniza na hora: o autosave/leave leem sessaoRef antes do próximo effect.
         sessaoRef.current = { ...sessaoRef.current, moMatManualPorItem: next };
         return next;
@@ -12359,6 +12568,45 @@ export function OrcamentoPageView({
     },
     []
   );
+
+  const commitValorManualCampo = useCallback(
+    (itemKey: string, campo: ValoresManuaisCampoOrc, raw: string) => {
+      if (!raw.trim()) {
+        setValorManualCampo(itemKey, campo, undefined);
+        return;
+      }
+      setValorManualCampo(itemKey, campo, Math.max(0, parseCurrencyToNumber(raw)));
+    },
+    [setValorManualCampo]
+  );
+
+  const ativarDestaqueCalculoOrc = useCallback(
+    (itemKey: string, fontes: FonteCalculoOrc[]) => {
+      if (destaqueCalculoClearTimerRef.current) {
+        clearTimeout(destaqueCalculoClearTimerRef.current);
+        destaqueCalculoClearTimerRef.current = null;
+      }
+      // Adia o setState para não remount/reconciliar a célula no meio do onFocus.
+      window.requestAnimationFrame(() => {
+        if (fontes.length === 0) {
+          setDestaqueCalculoOrc(null);
+          return;
+        }
+        setDestaqueCalculoOrc({ itemKey, fontes });
+      });
+    },
+    []
+  );
+
+  const limparDestaqueCalculoOrc = useCallback(() => {
+    if (destaqueCalculoClearTimerRef.current) {
+      clearTimeout(destaqueCalculoClearTimerRef.current);
+    }
+    destaqueCalculoClearTimerRef.current = setTimeout(() => {
+      destaqueCalculoClearTimerRef.current = null;
+      setDestaqueCalculoOrc(null);
+    }, 0);
+  }, []);
 
   const novoInsumoManualAnaliticoVazio = (parentKey: string): InsumoAnaliticoManual => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -15976,6 +16224,34 @@ export function OrcamentoPageView({
                                     const tipoAuto = inferirTipoUnidadePorDimensao(dim.linhas);
                                     const pesoPctOrcamento =
                                       totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0;
+                                    const bdiFatorLinha = parsePercentualMeta(meta.bdiPercentual);
+                                    const manuaisLinha = moMatManualPorItem[row.key];
+                                    const fontesDestacadasLinha =
+                                      destaqueCalculoOrc?.itemKey === row.key
+                                        ? destaqueCalculoOrc.fontes
+                                        : null;
+                                    const estiloCelulaComDestaqueFonte = (
+                                      colId: string,
+                                      fonte: FonteCalculoOrc
+                                    ): React.CSSProperties | undefined => {
+                                      const pintura = estiloFundoPinturaOrc(
+                                        row.key,
+                                        colId,
+                                        coresLinhaPorKey,
+                                        coresCelulaPorKey,
+                                        isDark
+                                      );
+                                      if (!fontesDestacadasLinha?.includes(fonte)) return pintura;
+                                      return {
+                                        ...pintura,
+                                        boxShadow: isDark
+                                          ? 'inset 0 0 0 2px rgba(245, 158, 11, 0.9)'
+                                          : 'inset 0 0 0 2px rgba(217, 119, 6, 0.95)',
+                                        backgroundColor: isDark
+                                          ? 'rgba(180, 83, 9, 0.4)'
+                                          : 'rgba(254, 243, 199, 0.95)',
+                                      };
+                                    };
                                     return (
                                     <React.Fragment key={row.key}>
                                     <tr
@@ -16036,7 +16312,11 @@ export function OrcamentoPageView({
                                           )}
                                         </span>
                                       </td>
-                                      <td data-orc-col="qtd" style={estiloFundoPinturaOrc(row.key, 'qtd', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700">
+                                      <td
+                                        data-orc-col="qtd"
+                                        style={estiloCelulaComDestaqueFonte('qtd', 'qtd')}
+                                        className="p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700"
+                                      >
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
                                             committedValue={
@@ -16085,96 +16365,215 @@ export function OrcamentoPageView({
                                             className={`${inputGradeCls} text-center tabular-nums`}
                                           />
                                       </td>
+                                      {(
+                                        [
+                                          {
+                                            col: 'mo',
+                                            campo: 'mo' as const,
+                                            valor: row.maoDeObraUnitario,
+                                            label: 'Mão de obra unitária',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'mat',
+                                            campo: 'mat' as const,
+                                            valor: row.materialUnitario,
+                                            label: 'Material unitário',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'pu',
+                                            campo: 'pu' as const,
+                                            valor: row.precoUnitario,
+                                            label: 'Valor unitário sem BDI',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'puBdi',
+                                            campo: 'puBdi' as const,
+                                            valor: row.precoUnitarioComBdi,
+                                            label: 'Valor unitário com BDI',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'subMo',
+                                            campo: 'subMo' as const,
+                                            valor: row.subMaoDeObra,
+                                            label: 'Sub mão de obra',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'subMat',
+                                            campo: 'subMat' as const,
+                                            valor: row.subMaterial,
+                                            label: 'Sub material',
+                                            strong: false,
+                                          },
+                                          {
+                                            col: 'total',
+                                            campo: 'total' as const,
+                                            valor: row.total,
+                                            label: 'Valor total sem BDI',
+                                            strong: true,
+                                          },
+                                          {
+                                            col: 'totalBdi',
+                                            campo: 'totalBdi' as const,
+                                            valor: row.totalComBdi,
+                                            label: 'Valor total com BDI',
+                                            strong: true,
+                                          },
+                                        ] as const
+                                      ).map((colDef) => {
+                                        const calcInfo = formulaEFontesCelulaOrc(
+                                          colDef.campo,
+                                          row,
+                                          bdiFatorLinha,
+                                          manuaisLinha
+                                        );
+                                        const formulaFoco = calcInfo.formula ?? undefined;
+                                        const autoCampo = valorAutoCampoOrc(
+                                          colDef.campo,
+                                          row,
+                                          bdiFatorLinha,
+                                          manuaisLinha
+                                        );
+                                        const inputId = `orc-campo-${colDef.campo}-${String(row.key).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                                        return (
                                       <td
-                                        data-orc-col="mo"
-                                        style={estiloFundoPinturaOrc(row.key, 'mo', coresLinhaPorKey, coresCelulaPorKey, isDark)}
-                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700"
+                                        key={colDef.col}
+                                        data-orc-col={colDef.col}
+                                        style={estiloCelulaComDestaqueFonte(colDef.col, colDef.campo)}
+                                        className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                          colDef.strong
+                                            ? 'font-semibold text-gray-900 dark:text-gray-50'
+                                            : 'text-gray-900 dark:text-gray-100'
+                                        }`}
                                         onClick={(e) => e.stopPropagation()}
-                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => {
+                                          e.stopPropagation();
+                                          if (gradeTravada) return;
+                                          const alvo = e.target as HTMLElement | null;
+                                          if (alvo?.closest('input')) return;
+                                          const input = document.getElementById(
+                                            inputId
+                                          ) as HTMLInputElement | null;
+                                          if (input && document.activeElement !== input) {
+                                            e.preventDefault();
+                                            input.focus();
+                                          }
+                                        }}
                                       >
-                                        <div className="flex w-full items-baseline justify-between gap-1.5 px-0.5 tabular-nums text-sm">
+                                        <div
+                                          className={`flex w-full cursor-text items-baseline justify-between gap-1.5 px-0.5 tabular-nums text-sm ${
+                                            colDef.strong ? 'font-semibold' : ''
+                                          }`}
+                                        >
                                           <span className="shrink-0 opacity-80">R$</span>
                                           <FdCampoLocal
-                                            draftKey={`orc-mo:${row.key}`}
-                                            committedValue={formatarMoedaCampoOrc(row.maoDeObraUnitario)}
+                                            id={inputId}
+                                            draftKey={`orc-${colDef.campo}:${row.key}`}
+                                            committedValue={formatarMoedaCampoOrc(colDef.valor)}
+                                            editValueOnFocus={formulaFoco}
                                             commitOnChange={false}
                                             disabled={gradeTravada}
-                                            mask={currencyDigitsToFormatted}
-                                            displayAfterCommit={raw =>
-                                              formatarMoedaCampoOrc(parseCurrencyToNumber(raw))
+                                            mask={(raw) =>
+                                              String(raw ?? '').trimStart().startsWith('=')
+                                                ? raw
+                                                : currencyDigitsToFormatted(raw)
                                             }
-                                            onCommit={raw => {
-                                              setMoMatManualCampo(
-                                                row.key,
-                                                'mo',
-                                                Math.max(0, parseCurrencyToNumber(raw))
-                                              );
+                                            displayAfterCommit={(raw) => {
+                                              const t = String(raw ?? '').trim();
+                                              const exibirAuto = () =>
+                                                formatarMoedaCampoOrc(
+                                                  autoCampo != null && Number.isFinite(autoCampo)
+                                                    ? autoCampo
+                                                    : colDef.valor
+                                                );
+                                              // Campo vazio = voltar ao automático (não mostrar 0,00).
+                                              if (!t) return exibirAuto();
+                                              if (t.startsWith('=')) {
+                                                if (formulaFoco && t === formulaFoco) {
+                                                  return exibirAuto();
+                                                }
+                                                const n = parseMedicaoBlurNumber(t);
+                                                if (n !== null) return formatarMoedaCampoOrc(n);
+                                                return exibirAuto();
+                                              }
+                                              return formatarMoedaCampoOrc(parseCurrencyToNumber(raw));
                                             }}
-                                            inputMode="numeric"
+                                            onCommit={(raw) => {
+                                              const t = String(raw ?? '').trim();
+                                              // Apagar / fórmula intacta → remove override e volta ao cálculo.
+                                              if (!t || (formulaFoco && t === formulaFoco)) {
+                                                setValorManualCampo(row.key, colDef.campo, undefined);
+                                                return;
+                                              }
+                                              let n: number | null = null;
+                                              if (t.startsWith('=')) {
+                                                n = parseMedicaoBlurNumber(t);
+                                              } else {
+                                                n = parseCurrencyToNumber(t);
+                                              }
+                                              if (n === null || !Number.isFinite(n)) return;
+                                              n = Math.max(0, n);
+                                              // Sem mudança real / igual ao automático → não cria override.
+                                              if (
+                                                Math.abs(n - colDef.valor) < EPS_MOEDA_ORC ||
+                                                (autoCampo != null &&
+                                                  Math.abs(n - autoCampo) < EPS_MOEDA_ORC)
+                                              ) {
+                                                setValorManualCampo(
+                                                  row.key,
+                                                  colDef.campo,
+                                                  undefined
+                                                );
+                                                return;
+                                              }
+                                              setValorManualCampo(row.key, colDef.campo, n);
+                                            }}
+                                            onFocusExtra={() => {
+                                              // Remove override 0,00 acidental e restaura o cálculo automático.
+                                              if (
+                                                temValorManual(manuaisLinha, colDef.campo) &&
+                                                autoCampo != null &&
+                                                autoCampo > EPS_MOEDA_ORC &&
+                                                Math.abs(
+                                                  valorManualOuAuto(
+                                                    manuaisLinha,
+                                                    colDef.campo,
+                                                    0
+                                                  )
+                                                ) < EPS_MOEDA_ORC
+                                              ) {
+                                                setValorManualCampo(
+                                                  row.key,
+                                                  colDef.campo,
+                                                  undefined
+                                                );
+                                              }
+                                              ativarDestaqueCalculoOrc(row.key, calcInfo.fontes);
+                                            }}
+                                            onBlurExtra={limparDestaqueCalculoOrc}
+                                            inputMode={formulaFoco ? 'text' : 'numeric'}
                                             placeholder="0,00"
                                             title={
                                               gradeTravada
                                                 ? 'Orçamento travado — não é possível editar'
-                                                : 'Mão de obra unitária (apague para zerar)'
+                                                : formulaFoco
+                                                  ? `${colDef.label} — ${formulaFoco} (apague para voltar ao automático)`
+                                                  : `${colDef.label} (apague para voltar ao cálculo automático)`
                                             }
-                                            className="min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm tabular-nums text-gray-900 caret-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-100 dark:caret-gray-100 dark:placeholder:text-gray-500"
+                                            className={`min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm tabular-nums caret-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:caret-gray-100 dark:placeholder:text-gray-500 ${
+                                              colDef.strong
+                                                ? 'font-semibold text-gray-900 dark:text-gray-50'
+                                                : 'text-gray-900 dark:text-gray-100'
+                                            }`}
                                           />
                                         </div>
                                       </td>
-                                      <td
-                                        data-orc-col="mat"
-                                        style={estiloFundoPinturaOrc(row.key, 'mat', coresLinhaPorKey, coresCelulaPorKey, isDark)}
-                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700"
-                                        onClick={(e) => e.stopPropagation()}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                      >
-                                        <div className="flex w-full items-baseline justify-between gap-1.5 px-0.5 tabular-nums text-sm">
-                                          <span className="shrink-0 opacity-80">R$</span>
-                                          <FdCampoLocal
-                                            draftKey={`orc-mat:${row.key}`}
-                                            committedValue={formatarMoedaCampoOrc(row.materialUnitario)}
-                                            commitOnChange={false}
-                                            disabled={gradeTravada}
-                                            mask={currencyDigitsToFormatted}
-                                            displayAfterCommit={raw =>
-                                              formatarMoedaCampoOrc(parseCurrencyToNumber(raw))
-                                            }
-                                            onCommit={raw => {
-                                              setMoMatManualCampo(
-                                                row.key,
-                                                'mat',
-                                                Math.max(0, parseCurrencyToNumber(raw))
-                                              );
-                                            }}
-                                            inputMode="numeric"
-                                            placeholder="0,00"
-                                            title={
-                                              gradeTravada
-                                                ? 'Orçamento travado — não é possível editar'
-                                                : 'Material unitário (apague para zerar)'
-                                            }
-                                            className="min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm tabular-nums text-gray-900 caret-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-100 dark:caret-gray-100 dark:placeholder:text-gray-500"
-                                          />
-                                        </div>
-                                      </td>
-                                      <td data-orc-col="pu" style={estiloFundoPinturaOrc(row.key, 'pu', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.precoUnitario} className="text-sm" />
-                                      </td>
-                                      <td data-orc-col="puBdi" style={estiloFundoPinturaOrc(row.key, 'puBdi', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.precoUnitarioComBdi} className="text-sm" />
-                                      </td>
-                                      <td data-orc-col="subMo" style={estiloFundoPinturaOrc(row.key, 'subMo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.subMaoDeObra} className="text-sm" />
-                                      </td>
-                                      <td data-orc-col="subMat" style={estiloFundoPinturaOrc(row.key, 'subMat', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.subMaterial} className="text-sm" />
-                                      </td>
-                                      <td data-orc-col="total" style={estiloFundoPinturaOrc(row.key, 'total', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.total} className="text-sm font-semibold" valorClassName="font-semibold" />
-                                      </td>
-                                      <td data-orc-col="totalBdi" style={estiloFundoPinturaOrc(row.key, 'totalBdi', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
-                                        <MoedaCelula valor={row.totalComBdi} className="text-sm font-semibold" valorClassName="font-semibold" />
-                                      </td>
+                                        );
+                                      })}
                                       <td data-orc-col="peso" style={estiloFundoPinturaOrc(row.key, 'peso', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                       </td>

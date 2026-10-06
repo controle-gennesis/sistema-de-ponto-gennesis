@@ -1,6 +1,7 @@
 import { User } from '@/types';
 import { API_BASE_URL } from './apiBaseUrl';
 import { serializeLoginIdentifier } from './cpf';
+import { safeSetItem } from './safeStorage';
 
 export interface LoginCredentials {
   identifier: string;
@@ -208,9 +209,9 @@ class AuthService {
     localStorage.removeItem(this.tokenKey);
     sessionStorage.removeItem(this.tokenKey);
     if (rememberMe) {
-      localStorage.setItem(this.tokenKey, token);
+      safeSetItem(localStorage, this.tokenKey, token);
     } else {
-      sessionStorage.setItem(this.tokenKey, token);
+      safeSetItem(sessionStorage, this.tokenKey, token);
     }
   }
 
@@ -224,9 +225,9 @@ class AuthService {
     sessionStorage.removeItem(this.userKey);
     const serialized = JSON.stringify(user);
     if (rememberMe) {
-      localStorage.setItem(this.userKey, serialized);
+      safeSetItem(localStorage, this.userKey, serialized);
     } else {
-      sessionStorage.setItem(this.userKey, serialized);
+      safeSetItem(sessionStorage, this.userKey, serialized);
     }
   }
 
