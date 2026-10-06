@@ -34,7 +34,6 @@ import {
   maskCurrencyInputBrOrEmpty,
   parseCurrencyInputBr,
 } from '@/lib/maskCurrencyBr';
-import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import {
   CURRENT_STATUS_OPTIONS,
   DELIVERY_TYPE_OPTIONS,
@@ -1140,19 +1139,6 @@ export default function ControleEntregasPageClient() {
             }}
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium mb-1">Polo *</label>
-                <div className="flex gap-2">
-                  {POLO_OPTIONS.map((o) => (
-                    <ButtonSeg
-                      key={o.value}
-                      active={form.polo === o.value}
-                      onClick={() => setForm((f) => ({ ...f, polo: o.value }))}
-                      label={o.label}
-                    />
-                  ))}
-                </div>
-              </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium mb-1">Contrato</label>
                 <SingleSelectSearchDropdown

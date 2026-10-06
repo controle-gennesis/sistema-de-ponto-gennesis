@@ -325,14 +325,14 @@ export class SupplierController {
             }
           }
 
-          const created = await prisma.supplier.create({
+          const rowCreated = await prisma.supplier.create({
             data: {
               code: finalCode,
               ...parsed
             }
           });
           await prisma.$executeRaw`
-            UPDATE suppliers SET origin = 'LOCAL' WHERE id = ${created.id}
+            UPDATE suppliers SET origin = 'LOCAL' WHERE id = ${rowCreated.id}
           `;
 
           created += 1;
