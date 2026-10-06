@@ -82,6 +82,22 @@ export default function CondicoesPagamentoPage() {
     }
   });
 
+  const { mutate: runTotvsSync } = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/payment-conditions/sync-totvs');
+      return (res.data?.data || {}) as { created?: number; updated?: number };
+    },
+    onSuccess: (result) => {
+      if ((result.created ?? 0) > 0 || (result.updated ?? 0) > 0) {
+        queryClient.invalidateQueries({ queryKey: ['payment-conditions'] });
+      }
+    }
+  });
+
+  useEffect(() => {
+    runTotvsSync();
+  }, [runTotvsSync]);
+
   const filtered = useMemo(() => {
     return (listData || []).filter((r) => {
       if (!searchTerm.trim()) return true;
@@ -276,7 +292,7 @@ export default function CondicoesPagamentoPage() {
         <PageStack>
           <ListPageHeader
             title="Condições de Pagamento"
-            description="Cadastro usado na criação e edição de ordens de compra (à vista e boleto)."
+            description="Consulte e gerencie as condições de pagamento"
           />
 
           <Card className={cadastroListClasses.card}>
@@ -288,10 +304,10 @@ export default function CondicoesPagamentoPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Condições de pagamento
+                      Condições de Pagamento
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Gerencie condições à vista e boleto para ordens de compra
+                      Lista de condições cadastradas
                     </p>
                   </div>
                 </div>

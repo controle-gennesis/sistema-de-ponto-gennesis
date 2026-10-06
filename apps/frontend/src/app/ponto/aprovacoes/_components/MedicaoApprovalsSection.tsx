@@ -581,7 +581,7 @@ export function MedicaoApprovalsSection() {
         ) : null}
       </Modal>
 
-      <Modal isOpen={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filtro — Medições de entrega" size="sm">
+      <Modal isOpen={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filtro — Medições de Entrega" size="sm">
         <div className="space-y-4">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
           <StringSingleSelectDropdown

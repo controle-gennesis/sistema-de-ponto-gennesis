@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { syncPaymentConditionsFromTotvs } from '../services/PaymentConditionTotvsSync';
 
 const DEFAULTS: Array<{
   code: string;
@@ -107,6 +108,17 @@ function generateCodeFromLabel(label: string): string {
 }
 
 export class PaymentConditionController {
+  async syncTotvs(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const force = req.query.force === 'true' || req.body?.force === true;
+      const result = await syncPaymentConditionsFromTotvs({ force });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      next(createError(`Não foi possível sincronizar com o TOTVS: ${message}`, 502));
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await ensureDefaultPaymentConditions();

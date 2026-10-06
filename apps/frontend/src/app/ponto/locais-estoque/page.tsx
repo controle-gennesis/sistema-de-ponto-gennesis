@@ -124,6 +124,23 @@ export default function LocaisEstoquePage() {
     },
   });
 
+  const { mutate: runSync } = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/stock-locations/sync-totvs');
+      return (res.data?.data || {}) as { created?: number; updated?: number };
+    },
+    onSuccess: (result) => {
+      if ((result.created ?? 0) > 0 || (result.updated ?? 0) > 0) {
+        queryClient.invalidateQueries({ queryKey: ['stock-locations-admin'] });
+        queryClient.invalidateQueries({ queryKey: ['stock-locations'] });
+      }
+    },
+  });
+
+  useEffect(() => {
+    runSync();
+  }, [runSync]);
+
   const createMutation = useMutation({
     mutationFn: async (data: StockLocationForm) => {
       const res = await api.post('/stock-locations', {
@@ -268,8 +285,8 @@ export default function LocaisEstoquePage() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Gerenciar Locais de Estoque"
-            description="Cadastre os locais de estoque no mesmo padrão do TOTVS (CODLOC)"
+            title="Locais de Estoque"
+            description="Consulte e gerencie os locais de estoque"
           />
 
           <StockLocationFormModal

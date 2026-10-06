@@ -136,6 +136,8 @@ import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarS
 import { startBirthdayGreetingScheduler } from './services/BirthdayGreetingScheduler';
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
+import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
+import { startPaymentConditionTotvsSyncScheduler } from './services/PaymentConditionTotvsSync';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -707,6 +709,18 @@ try {
         startSupplierTotvsSyncScheduler();
       } catch (e) {
         console.error('[supplier-totvs] falha ao agendar:', e);
+      }
+
+      try {
+        startStockLocationTotvsSyncScheduler();
+      } catch (e) {
+        console.error('[stock-locations-sync] falha ao agendar:', e);
+      }
+
+      try {
+        startPaymentConditionTotvsSyncScheduler();
+      } catch (e) {
+        console.error('[payment-conditions-sync] falha ao agendar:', e);
       }
     })();
 

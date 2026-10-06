@@ -631,7 +631,7 @@ function AprovacoesPage() {
     if (canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro) {
       tabs.push({
         id: 'medicao',
-        label: 'Medições de entrega',
+        label: 'Medições de Entrega',
         count: approvalCounts.medicao,
       });
     }

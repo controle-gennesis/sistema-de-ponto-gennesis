@@ -8,6 +8,7 @@ const stockLocationController = new StockLocationController();
 router.use(authenticate);
 
 router.get('/', (req, res, next) => stockLocationController.getAll(req, res, next));
+router.post('/sync-totvs', (req, res, next) => stockLocationController.syncTotvs(req, res, next));
 router.get('/:id', (req, res, next) => stockLocationController.getById(req, res, next));
 router.post('/', (req, res, next) => stockLocationController.create(req, res, next));
 router.patch('/:id', (req, res, next) => stockLocationController.update(req, res, next));
