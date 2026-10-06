@@ -38,7 +38,7 @@ import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 
-import { errorHandler } from './middleware/errorHandler';
+import { createError, errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { backendUploadsRoot } from './lib/uploads';
 import { persistentUploadsS3Fallback } from './lib/persistentUpload';
@@ -130,6 +130,15 @@ import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
 import { LicitacaoController } from './controllers/LicitacaoController';
+import {
+  createLicitacaoHabilitacaoPendente,
+  deleteLicitacaoHabilitacaoPendente,
+  listLicitacaoHabilitacoesPendentes,
+  readHabilitacaoQuantidade,
+  readHabilitacaoUnidade,
+  updateLicitacaoHabilitacaoPendente,
+  type HabilitacaoPendenteStatus,
+} from './services/licitacaoHabilitacaoPendenteStore';
 import { authenticate, AuthRequest } from './middleware/auth';
 import { removeOrphanUserPermissions, ensureDefaultEmployeeAccessPermissions } from './lib/permissionRegistrySync';
 import { getPrismaPoolConfig, prisma } from './lib/prisma';
@@ -529,6 +538,9 @@ app.delete('/api/licitacoes/planilha-regioes/aceites', authenticate, (req, res, 
 app.post('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.createManualRegiao(req as AuthRequest, res, next)
 );
+app.patch('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.updateManualRegiao(req as AuthRequest, res, next)
+);
 app.delete('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.deleteManualRegiao(req as AuthRequest, res, next)
 );
@@ -547,6 +559,91 @@ app.get('/api/licitacoes/orcamento-line-template', authenticate, (req, res, next
 app.put('/api/licitacoes/orcamento-line-template', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.updateOrcamentoLineTemplate(req as AuthRequest, res, next)
 );
+
+function readHabilitacaoText(value: unknown, label: string, max: number): string {
+  const text =
+    typeof value === 'string'
+      ? value.trim().replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')
+      : '';
+  if (text.length < 2) throw createError(`Informe ${label}.`, 400);
+  if (text.length > max) throw createError(`${label} deve ter no máximo ${max} caracteres.`, 400);
+  return text;
+}
+
+app.get('/api/licitacoes/habilitacoes-pendentes', authenticate, async (_req, res, next) => {
+  try {
+    const data = await listLicitacaoHabilitacoesPendentes();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+app.post('/api/licitacoes/habilitacoes-pendentes', authenticate, async (req, res, next) => {
+  try {
+    const authReq = req as AuthRequest;
+    const userId = authReq.user?.id;
+    if (!userId) throw createError('Não autenticado', 401);
+    const titulo = readHabilitacaoText(req.body?.titulo, 'a descrição', 300);
+    const acaoSugerida = readHabilitacaoText(req.body?.acaoSugerida, 'a ação sugerida', 2000);
+    const quantidade = readHabilitacaoQuantidade(req.body?.quantidade);
+    const unidadeMedida = readHabilitacaoUnidade(req.body?.unidadeMedida);
+    const data = await createLicitacaoHabilitacaoPendente({
+      titulo,
+      acaoSugerida,
+      quantidade,
+      unidadeMedida,
+      createdBy: userId,
+    });
+    res.status(201).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+app.patch('/api/licitacoes/habilitacoes-pendentes/:id', authenticate, async (req, res, next) => {
+  try {
+    const authReq = req as AuthRequest;
+    const userId = authReq.user?.id;
+    if (!userId) throw createError('Não autenticado', 401);
+    const body = req.body ?? {};
+    const hasTitulo = Object.prototype.hasOwnProperty.call(body, 'titulo');
+    const hasAcao = Object.prototype.hasOwnProperty.call(body, 'acaoSugerida');
+    const hasQuantidade = Object.prototype.hasOwnProperty.call(body, 'quantidade');
+    const hasUnidade = Object.prototype.hasOwnProperty.call(body, 'unidadeMedida');
+    const hasStatus = Object.prototype.hasOwnProperty.call(body, 'status');
+    if (!hasTitulo && !hasAcao && !hasQuantidade && !hasUnidade && !hasStatus) {
+      throw createError('Nenhuma alteração informada.', 400);
+    }
+    const status = hasStatus ? body.status : undefined;
+    if (status != null && status !== 'PENDENTE' && status !== 'ADQUIRIDA') {
+      throw createError('Status inválido.', 400);
+    }
+    const data = await updateLicitacaoHabilitacaoPendente({
+      id: req.params.id,
+      titulo: hasTitulo ? readHabilitacaoText(body.titulo, 'a descrição', 300) : undefined,
+      acaoSugerida: hasAcao
+        ? readHabilitacaoText(body.acaoSugerida, 'a ação sugerida', 2000)
+        : undefined,
+      quantidade: hasQuantidade ? readHabilitacaoQuantidade(body.quantidade) : undefined,
+      unidadeMedida: hasUnidade ? readHabilitacaoUnidade(body.unidadeMedida) : undefined,
+      status: status as HabilitacaoPendenteStatus | undefined,
+      updatedBy: userId,
+    });
+    if (!data) throw createError('Habilitação não encontrada.', 404);
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+app.delete('/api/licitacoes/habilitacoes-pendentes/:id', authenticate, async (req, res, next) => {
+  try {
+    const removed = await deleteLicitacaoHabilitacaoPendente(req.params.id);
+    if (!removed) throw createError('Habilitação não encontrada.', 404);
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use('/api/licitacoes', licitacoesRoutes);
 app.use('/api/pncp', pncpRoutes);
 

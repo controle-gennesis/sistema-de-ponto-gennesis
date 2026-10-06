@@ -13,6 +13,7 @@ import {
   Flag,
   FolderKanban,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -518,11 +519,43 @@ function isoDateToBr(iso: string): string {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
+function brDateToIso(value: string): string {
+  const trimmed = value.trim();
+  const br = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  return '';
+}
+
 function normalizeLinkInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '';
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+function fieldsFromSheetRow(
+  headers: string[],
+  sheetHeaders: string[],
+  cells: string[]
+): Record<string, string> {
+  const snapshot = buildRowSnapshot(sheetHeaders, cells);
+  const fields = emptyFormFields(headers);
+  for (const header of headers) {
+    const direct = snapshot[header] ?? snapshot[header.trim()] ?? '';
+    const value =
+      direct ||
+      Object.entries(snapshot).find(([key]) => key.trim() === header.trim())?.[1] ||
+      '';
+    if (!value || value === '—' || value === '-' || value === '?') {
+      fields[header] = '';
+    } else if (isPeriodoHeader(header)) {
+      fields[header] = brDateToIso(value);
+    } else {
+      fields[header] = value;
+    }
+  }
+  return fields;
 }
 
 function prepareCreateFields(
@@ -652,6 +685,7 @@ export function LicitacoesRegiaoPanel({
   const [page, setPage] = useState(1);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [createFields, setCreateFields] = useState<Record<string, string>>({});
   const [showRecebidoFilter, setShowRecebidoFilter] = useState(false);
   const [recebidoDe, setRecebidoDe] = useState('');
@@ -701,7 +735,14 @@ export function LicitacoesRegiaoPanel({
   }, [sheet?.headers, activeTab?.key, regiaoKey]);
 
   const openCreateModal = () => {
+    setEditingRowKey(null);
     setCreateFields(emptyFormFields(formHeaders));
+    setCreateModalOpen(true);
+  };
+
+  const openEditModal = (row: VisibleRow) => {
+    setEditingRowKey(row.rowKey);
+    setCreateFields(fieldsFromSheetRow(formHeaders, sheet?.headers ?? formHeaders, row.cells));
     setCreateModalOpen(true);
   };
 
@@ -1253,6 +1294,30 @@ export function LicitacoesRegiaoPanel({
     },
   });
 
+  const updateManualMutation = useMutation({
+    mutationFn: async (input: { rowKey: string; fields: Record<string, string> }) => {
+      if (!activeTab) throw new Error('Região indisponível.');
+      const res = await api.patch('/licitacoes/planilha-regioes/manuais', {
+        regiaoKey: activeTab.key,
+        rowKey: input.rowKey,
+        headers: formHeaders,
+        fields: input.fields,
+      });
+      return res.data as { message?: string };
+    },
+    onSuccess: async (payload) => {
+      toast.success(payload?.message ?? 'Licitação atualizada.');
+      setCreateModalOpen(false);
+      setEditingRowKey(null);
+      setCreateFields({});
+      await queryClient.invalidateQueries({ queryKey: ['licitacoes-planilha-regiao', activeTab?.key] });
+      await refetch();
+    },
+    onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
+      toast.error(err.response?.data?.message ?? err.message ?? 'Erro ao atualizar licitação.');
+    },
+  });
+
   const deleteManualMutation = useMutation({
     mutationFn: async (rowKeys: string[]) => {
       if (!sheet || !activeTab) throw new Error('Dados indisponíveis.');
@@ -1294,7 +1359,8 @@ export function LicitacoesRegiaoPanel({
     desfazerAceiteMutation.isPending ||
     rejeitarMutation.isPending ||
     desfazerRejeiteMutation.isPending;
-  const isManualBusy = createManualMutation.isPending || deleteManualMutation.isPending;
+  const savingManualForm = createManualMutation.isPending || updateManualMutation.isPending;
+  const isManualBusy = savingManualForm || deleteManualMutation.isPending;
 
   const toggleRowSelection = (rowKey: string) => {
     if (!rowKey) return;
@@ -2046,6 +2112,14 @@ export function LicitacoesRegiaoPanel({
                     ...(rowForActionMenu.isManual
                       ? [
                           {
+                            label: 'Editar',
+                            disabled: isManualBusy || !rowForActionMenu.rowKey,
+                            onClick: () => openEditModal(rowForActionMenu),
+                            icon: (
+                              <Pencil className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+                            ),
+                          },
+                          {
                             label: 'Excluir',
                             disabled: isManualBusy || !rowForActionMenu.rowKey,
                             onClick: () => {
@@ -2147,22 +2221,29 @@ export function LicitacoesRegiaoPanel({
       <Modal
         isOpen={createModalOpen}
         onClose={() => {
-          if (createManualMutation.isPending) return;
+          if (createManualMutation.isPending || updateManualMutation.isPending) return;
           setCreateModalOpen(false);
+          setEditingRowKey(null);
         }}
-        title={`Nova licitação — ${activeTab?.label ?? 'Região'}`}
+        title={`${editingRowKey ? 'Editar licitação' : 'Nova licitação'} — ${activeTab?.label ?? 'Região'}`}
         size="xl"
       >
         <form
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            createManualMutation.mutate(prepareCreateFields(formHeaders, createFields));
+            const fields = prepareCreateFields(formHeaders, createFields);
+            if (editingRowKey) {
+              updateManualMutation.mutate({ rowKey: editingRowKey, fields });
+              return;
+            }
+            createManualMutation.mutate(fields);
           }}
         >
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Preencha os mesmos campos da planilha. A licitação será adicionada apenas à lista do
-            sistema e não será gravada na planilha Google.
+            {editingRowKey
+              ? 'Altere os dados desta licitação criada no sistema. A planilha Google não é modificada.'
+              : 'Preencha os mesmos campos da planilha. A licitação será adicionada apenas à lista do sistema e não será gravada na planilha Google.'}
           </p>
           <div className="grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
             {formHeaders.map((header) => {
@@ -2182,7 +2263,7 @@ export function LicitacoesRegiaoPanel({
                       onChange={(e) =>
                         setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                       }
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     >
                       <option value="">Selecione o estado</option>
@@ -2213,7 +2294,7 @@ export function LicitacoesRegiaoPanel({
                         }))
                       }
                       placeholder="R$ 0,00"
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     />
                   </label>
@@ -2232,7 +2313,7 @@ export function LicitacoesRegiaoPanel({
                       onChange={(e) =>
                         setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                       }
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     />
                   </label>
@@ -2251,7 +2332,7 @@ export function LicitacoesRegiaoPanel({
                       onChange={(e) =>
                         setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                       }
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     />
                   </label>
@@ -2275,7 +2356,7 @@ export function LicitacoesRegiaoPanel({
                         }))
                       }
                       placeholder="0,00%"
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     />
                   </label>
@@ -2295,7 +2376,7 @@ export function LicitacoesRegiaoPanel({
                         setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                       }
                       placeholder="https://"
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className={fieldClass}
                     />
                   </label>
@@ -2317,7 +2398,7 @@ export function LicitacoesRegiaoPanel({
                         setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                       }
                       rows={3}
-                      disabled={createManualMutation.isPending}
+                      disabled={savingManualForm}
                       className="w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
                     />
                   </label>
@@ -2335,7 +2416,7 @@ export function LicitacoesRegiaoPanel({
                     onChange={(e) =>
                       setCreateFields((prev) => ({ ...prev, [header]: e.target.value }))
                     }
-                    disabled={createManualMutation.isPending}
+                    disabled={savingManualForm}
                     className={fieldClass}
                   />
                 </label>
@@ -2345,23 +2426,28 @@ export function LicitacoesRegiaoPanel({
           <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
             <button
               type="button"
-              onClick={() => setCreateModalOpen(false)}
-              disabled={createManualMutation.isPending}
+              onClick={() => {
+                setCreateModalOpen(false);
+                setEditingRowKey(null);
+              }}
+              disabled={savingManualForm}
               className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={createManualMutation.isPending}
+              disabled={savingManualForm}
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
-              {createManualMutation.isPending ? (
+              {savingManualForm ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : editingRowKey ? (
+                <Pencil className="h-4 w-4" aria-hidden />
               ) : (
                 <Plus className="h-4 w-4" aria-hidden />
               )}
-              Criar licitação
+              {editingRowKey ? 'Salvar alterações' : 'Criar licitação'}
             </button>
           </div>
         </form>

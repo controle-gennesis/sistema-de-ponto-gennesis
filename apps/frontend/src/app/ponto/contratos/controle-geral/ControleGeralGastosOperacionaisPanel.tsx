@@ -74,6 +74,7 @@ import {
 import {
   getAllCatalogContractKeys,
   getContractLocality,
+  getGastosContractAggregateKey,
   getLocalityLabel,
   GASTOS_OPERACIONAIS_CONTRACT_ORDER,
   inferContractLocalityFromHints,
@@ -1348,7 +1349,7 @@ export function ControleGeralGastosOperacionaisPanel({
           allowedContracts?.length ? undefined : extraContracts
         );
     const aggregated = aggregateGastosDetailRows(filtered);
-    return mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities, {
+    const merged = mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities, {
       spreadsheetContracts: allSpreadsheetContracts,
       excludedContractKeys: enableRowExclusion ? Array.from(excludedContracts) : [],
       resolveExcludedLabel: (key) =>
@@ -1357,6 +1358,32 @@ export function ControleGeralGastosOperacionaisPanel({
       localitiesCatalog,
       allowedContracts,
       extraContracts: allowedContracts?.length ? undefined : extraContracts
+    });
+    const selectedContractKeys = new Set(
+      filters.contracts.map((name) => getGastosContractAggregateKey(name))
+    );
+    return merged.filter((row) => {
+      if (
+        selectedContractKeys.size > 0 &&
+        !selectedContractKeys.has(getGastosContractAggregateKey(row.contract))
+      ) {
+        return false;
+      }
+      if (readOnlyPoloColumn) {
+        if (filters.polos.length && !filters.polos.includes((row.polo ?? '').trim() || '—')) {
+          return false;
+        }
+      } else if (
+        filters.localities.length &&
+        !contractMatchesLocalitiesWithOverrides(
+          row.contract,
+          filters.localities,
+          inferredLocalityOverrides
+        )
+      ) {
+        return false;
+      }
+      return true;
     });
   }, [
     scopedDetailRows,
@@ -3464,8 +3491,12 @@ export function ControleGeralGastosOperacionaisPanel({
         onRetry={onRetry}
         localityGroups={localityGroups}
         year={
-          getSingleYearFromPeriod(filters.periodFrom, filters.periodTo) ??
+          getSingleCalendarMonthFromPeriod(filters.periodFrom, filters.periodTo)?.year ??
           new Date().getFullYear()
+        }
+        month={
+          getSingleCalendarMonthFromPeriod(filters.periodFrom, filters.periodTo)?.month ??
+          new Date().getMonth() + 1
         }
       />
     ) : null}

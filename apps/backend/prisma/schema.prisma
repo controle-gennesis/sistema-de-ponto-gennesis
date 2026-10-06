@@ -3902,6 +3902,27 @@ model LicitacaoDocumento {
   @@map("licitacao_documentos")
 }
 
+/// Habilitações que a empresa ainda não possui e a ação sugerida para obtê-las.
+model LicitacaoHabilitacaoPendente {
+  id            String    @id @default(cuid())
+  /// Descrição da habilitação que a empresa ainda não possui.
+  titulo        String
+  acaoSugerida  String    @db.Text
+  quantidade    Decimal?  @db.Decimal(14, 4)
+  unidadeMedida String?
+  /// PENDENTE | ADQUIRIDA
+  status        String    @default("PENDENTE")
+  adquiridaEm  DateTime?
+  createdBy    String
+  updatedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("licitacao_habilitacoes_pendentes")
+}
+
 /// Cadastro de responsÃ¡veis tÃ©cnicos (CREA) para o mÃ³dulo de LicitaÃ§Ãµes.
 model ResponsavelTecnico {
   id             String    @id @default(cuid())
