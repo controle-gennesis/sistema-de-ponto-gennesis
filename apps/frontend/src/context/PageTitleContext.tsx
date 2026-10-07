@@ -37,9 +37,19 @@ const PageTitleContext = createContext<PageTitleContextValue | null>(null);
 
 function sameEntities(a: BreadcrumbItem[], b: BreadcrumbItem[]): boolean {
   if (a.length !== b.length) return false;
-  return a.every(
-    (item, i) => item.label === b[i]?.label && (item.href ?? '') === (b[i]?.href ?? ''),
-  );
+  return a.every((item, i) => {
+    const other = b[i];
+    if (!other) return false;
+    if (item.label !== other.label) return false;
+    if ((item.href ?? '') !== (other.href ?? '')) return false;
+    if ((item.badge ?? '') !== (other.badge ?? '')) return false;
+    const am = item.badgeMenu ?? [];
+    const bm = other.badgeMenu ?? [];
+    if (am.length !== bm.length) return false;
+    return am.every(
+      (m, j) => m.href === bm[j]?.href && m.label === bm[j]?.label && !!m.current === !!bm[j]?.current
+    );
+  });
 }
 
 function mergeLayers(layers: Map<string, Layer>): BreadcrumbItem[] {

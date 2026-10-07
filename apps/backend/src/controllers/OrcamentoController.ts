@@ -74,6 +74,31 @@ export class OrcamentoController {
     }
   }
 
+  async createVersao(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { centroCustoId, orcamentoId } = req.params;
+      if (!centroCustoId || !orcamentoId) {
+        return res.status(400).json({ message: 'centroCustoId e orcamentoId são obrigatórios' });
+      }
+      const entry = await orcamentoService.createVersao(centroCustoId, orcamentoId);
+      return res.status(201).json(entry);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      const msg = e?.message || '';
+      if (msg === 'Orçamento não encontrado') {
+        return res.status(404).json({ message: msg });
+      }
+      if (
+        msg.includes('congelada') ||
+        msg.includes('versão atual') ||
+        msg.includes('ID de orçamento inválido')
+      ) {
+        return res.status(400).json({ message: msg });
+      }
+      return next(err);
+    }
+  }
+
   async getOrcamento(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { centroCustoId, orcamentoId } = req.params;
@@ -125,7 +150,11 @@ export class OrcamentoController {
       }
       await Promise.all(persistTasks);
       return res.json({ success: true });
-    } catch (err) {
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      if (e?.message?.includes('congelado')) {
+        return res.status(400).json({ message: e.message });
+      }
       return next(err);
     }
   }

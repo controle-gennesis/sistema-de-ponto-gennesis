@@ -12,6 +12,10 @@ function normalizeEntities(
     .map((item) => ({
       label: item.label?.trim() ?? '',
       href: item.href,
+      ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
+      ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
+        ? { badgeMenu: item.badgeMenu }
+        : {}),
     }))
     .filter((item) => item.label.length > 0);
 }
@@ -38,7 +42,14 @@ export function useBreadcrumbEntity(
   const enabled = options?.enabled !== false;
   const priority = options?.priority ?? 0;
   const normalized = normalizeEntities(entity);
-  const key = normalized.map((e) => `${e.label}|${e.href ?? ''}`).join('>');
+  const key = normalized
+    .map(
+      (e) =>
+        `${e.label}|${e.href ?? ''}|${e.badge ?? ''}|${(e.badgeMenu ?? [])
+          .map((m) => m.href)
+          .join(',')}`
+    )
+    .join('>');
 
   useLayoutEffect(() => {
     if (!enabled) {

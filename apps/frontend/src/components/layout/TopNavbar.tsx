@@ -27,6 +27,7 @@ import { NotificationsDropdown } from '@/components/layout/NotificationsDropdown
 import { NavSearch } from '@/components/layout/NavSearch';
 import { dispatchOpenMobileSidebar, dispatchCloseMobileSidebar, LAYOUT_CHROME } from '@/lib/layoutChrome';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { OrcamentoRevisaoBadge } from '@/components/orcamento/OrcamentoRevisaoBadge';
 
 interface TopNavbarProps {
   userName: string;
@@ -292,11 +293,22 @@ export function TopNavbar({
                       ) : null}
                       {isLast ? (
                         <span
-                          className="truncate font-semibold text-gray-900 dark:text-gray-100"
+                          className="flex min-w-0 max-w-full items-center gap-2"
                           title={crumb.label}
                           aria-current="page"
                         >
-                          {crumb.label}
+                          <span className="min-w-0 truncate font-semibold text-gray-900 dark:text-gray-100">
+                            {crumb.label}
+                          </span>
+                          {crumb.badge ? (
+                            <span className="shrink-0">
+                              <OrcamentoRevisaoBadge
+                                label={crumb.badge}
+                                options={crumb.badgeMenu}
+                                size="sm"
+                              />
+                            </span>
+                          ) : null}
                         </span>
                       ) : crumb.href ? (
                         <Link

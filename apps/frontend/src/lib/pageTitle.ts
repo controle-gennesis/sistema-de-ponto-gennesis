@@ -110,10 +110,21 @@ function breadcrumbModuleLabel(module: { name: string; href: string }): string {
   return module.name;
 }
 
+export type BreadcrumbBadgeMenuItem = {
+  label: string;
+  href: string;
+  current?: boolean;
+  congelada?: boolean;
+};
+
 export type BreadcrumbItem = {
   label: string;
   /** Se definido, o crumb é clicável (exceto o último). */
   href?: string;
+  /** Badge opcional ao lado do rótulo (ex.: revisão R01). */
+  badge?: string;
+  /** Menu do badge (trocar entre revisões). */
+  badgeMenu?: BreadcrumbBadgeMenuItem[];
 };
 
 /** Resolve o nome da página a partir da rota (ex.: `/ponto/kanban` → `Tasks`). */
@@ -240,6 +251,10 @@ export function appendBreadcrumbEntity(
     .map((item) => ({
       label: item.label?.trim() ?? '',
       href: item.href,
+      ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
+      ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
+        ? { badgeMenu: item.badgeMenu }
+        : {}),
     }))
     .filter((item) => item.label.length > 0);
 

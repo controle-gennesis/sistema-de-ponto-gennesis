@@ -70,7 +70,8 @@ export default function OrcamentoListaGlobalDetalhePage() {
   };
 
   if (!contractId || !orcamentoId || loadingUser || loadingPerms) {
-    return <Loading message="Carregando..." fullScreen size="lg" />;
+    // Dentro do shell de /ponto — sem overlay fixed que “pisca” a navbar/sidebar.
+    return <Loading message="Carregando..." size="lg" />;
   }
 
   if (loadingContract) {
@@ -130,7 +131,7 @@ export default function OrcamentoListaGlobalDetalhePage() {
   }
 
   return (
-    <Suspense fallback={<Loading message="Carregando orçamento..." fullScreen size="lg" />}>
+    <Suspense fallback={<Loading message="Carregando orçamento..." size="lg" />}>
       <OrcamentoPageView
         lockedCostCenterId={contract.costCenterId}
         embeddedContractId={contractId}

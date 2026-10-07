@@ -32,6 +32,36 @@ export interface OrcamentoIndexEntry {
   cronogramaTotalEtapas?: number;
   /** Etapas atrasadas no cronograma. */
   cronogramaAtrasado?: number;
+  /** Id da 1ª versão da linhagem (orçamentos antigos: igual ao próprio id). */
+  familiaId?: string;
+  /** Número da versão (1, 2, 3…). */
+  versao?: number;
+  /** Versões anteriores ficam congeladas (somente leitura). */
+  congelado?: boolean;
+  /** Id da versão de onde esta foi clonada. */
+  origemVersaoId?: string;
+}
+
+/** Normaliza campos de versão no índice (compat com orçamentos antigos). */
+export function normalizeOrcamentoVersionFields(entry: OrcamentoIndexEntry): OrcamentoIndexEntry {
+  const familiaId =
+    typeof entry.familiaId === 'string' && entry.familiaId.trim()
+      ? entry.familiaId.trim()
+      : entry.id;
+  const versaoRaw = Number(entry.versao);
+  const versao = Number.isFinite(versaoRaw) && versaoRaw >= 1 ? Math.floor(versaoRaw) : 1;
+  const congelado = entry.congelado === true;
+  const origemVersaoId =
+    typeof entry.origemVersaoId === 'string' && entry.origemVersaoId.trim()
+      ? entry.origemVersaoId.trim()
+      : undefined;
+  return {
+    ...entry,
+    familiaId,
+    versao,
+    congelado,
+    ...(origemVersaoId ? { origemVersaoId } : {}),
+  };
 }
 
 export interface OrcamentoIndex {
@@ -340,9 +370,12 @@ export class OrcamentoService {
         if (!fs.existsSync(p)) return null;
         const raw = fs.readFileSync(p, 'utf-8');
         const idx = JSON.parse(raw) as OrcamentoIndex;
+        const orcamentos = (Array.isArray(idx.orcamentos) ? idx.orcamentos : []).map(
+          normalizeOrcamentoVersionFields
+        );
         return {
           ultimoOrcamentoId: idx.ultimoOrcamentoId,
-          orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : [],
+          orcamentos,
           ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
         };
       }
@@ -355,9 +388,12 @@ export class OrcamentoService {
       if (!result.Body) return null;
       const body = await s3BodyToString(result.Body);
       const idx = JSON.parse(body) as OrcamentoIndex;
+      const orcamentos = (Array.isArray(idx.orcamentos) ? idx.orcamentos : []).map(
+        normalizeOrcamentoVersionFields
+      );
       return {
         ultimoOrcamentoId: idx.ultimoOrcamentoId,
-        orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : [],
+        orcamentos,
         ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
       };
     } catch (err: unknown) {
@@ -471,6 +507,37 @@ export class OrcamentoService {
         ContentType: 'application/json'
       })
     );
+  }
+
+  private async writeOrcamentoFileRaw(
+    centroCustoId: string,
+    orcamentoId: string,
+    data: OrcamentoData | Record<string, unknown>
+  ): Promise<void> {
+    const body = JSON.stringify(data);
+    if (this.useLocal || !this.s3) {
+      const dir = this.localDir(centroCustoId);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.localOrcamentoPath(centroCustoId, orcamentoId), body, 'utf-8');
+      return;
+    }
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId),
+        Body: body,
+        ContentType: 'application/json',
+      })
+    );
+  }
+
+  private isOrcamentoCongelado(
+    indexEntry: OrcamentoIndexEntry | undefined,
+    file: Partial<OrcamentoData> | null | undefined
+  ): boolean {
+    if (indexEntry?.congelado === true) return true;
+    const meta = (file?.sessaoOrcamento as { meta?: Record<string, unknown> } | undefined)?.meta;
+    return meta?.congelado === true;
   }
 
   /** Lê arquivo JSON do orçamento (sem merge com serviços do contrato). */
@@ -735,34 +802,39 @@ export class OrcamentoService {
   ): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
     const index = await this.getIndex(centroCustoId);
-    const exists = index.orcamentos.some(o => o.id === orcamentoId);
-    if (!exists) throw new Error('Orçamento não encontrado no índice');
+    const indexEntry = index.orcamentos.find(o => o.id === orcamentoId);
+    if (!indexEntry) throw new Error('Orçamento não encontrado no índice');
 
     const existing: Partial<OrcamentoData> =
       (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
-    const nextSessao =
+    const indexNorm = normalizeOrcamentoVersionFields(indexEntry);
+    if (this.isOrcamentoCongelado(indexNorm, existing)) {
+      throw new Error('Orçamento congelado: crie uma nova versão para editar');
+    }
+    let nextSessao =
       patch.sessaoOrcamento !== undefined ? patch.sessaoOrcamento : existing.sessaoOrcamento;
     const nextServicos = patch.servicos !== undefined ? patch.servicos : existing.servicos;
+
+    // Garante que família/versão não se percam se o cliente omitir os campos na meta.
+    if (nextSessao && typeof nextSessao === 'object' && !Array.isArray(nextSessao)) {
+      const sessaoObj = { ...(nextSessao as Record<string, unknown>) };
+      const metaObj =
+        sessaoObj.meta && typeof sessaoObj.meta === 'object' && !Array.isArray(sessaoObj.meta)
+          ? { ...(sessaoObj.meta as Record<string, unknown>) }
+          : {};
+      metaObj.familiaId = indexNorm.familiaId;
+      metaObj.versao = indexNorm.versao;
+      metaObj.congelado = false;
+      if (indexNorm.origemVersaoId) metaObj.origemVersaoId = indexNorm.origemVersaoId;
+      sessaoObj.meta = metaObj;
+      nextSessao = sessaoObj;
+    }
 
     const payload: Record<string, unknown> = {};
     if (nextSessao !== undefined) payload.sessaoOrcamento = nextSessao;
     if (nextServicos !== undefined) payload.servicos = nextServicos;
 
-    const body = JSON.stringify(payload);
-    if (this.useLocal || !this.s3) {
-      const dir = this.localDir(centroCustoId);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.localOrcamentoPath(centroCustoId, orcamentoId), body, 'utf-8');
-    } else {
-      await this.s3!.send(
-        new PutObjectCommand({
-          Bucket: this.bucketName,
-          Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId),
-          Body: body,
-          ContentType: 'application/json'
-        })
-      );
-    }
+    await this.writeOrcamentoFileRaw(centroCustoId, orcamentoId, payload);
     const updatedAt = new Date().toISOString();
     const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
     const statusFromMeta = (() => {
@@ -869,27 +941,173 @@ export class OrcamentoService {
     const index = await this.getIndex(centroCustoId);
     const n = (nome && nome.trim()) || `Orçamento ${index.orcamentos.length + 1}`;
     const updatedAt = new Date().toISOString();
-    const entry: OrcamentoIndexEntry = { id, nome: n, updatedAt };
-    const body = JSON.stringify({});
-    if (this.useLocal || !this.s3) {
-      const dir = this.localDir(centroCustoId);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.localOrcamentoPath(centroCustoId, id), body, 'utf-8');
-    } else {
-      await this.s3!.send(
-        new PutObjectCommand({
-          Bucket: this.bucketName,
-          Key: this.getOrcamentoDataKey(centroCustoId, id),
-          Body: body,
-          ContentType: 'application/json'
-        })
-      );
-    }
+    const entry = normalizeOrcamentoVersionFields({
+      id,
+      nome: n,
+      updatedAt,
+      familiaId: id,
+      versao: 1,
+      congelado: false,
+      statusAprovacao: 'rascunho',
+    });
+    await this.writeOrcamentoFileRaw(centroCustoId, id, {
+      sessaoOrcamento: {
+        meta: {
+          familiaId: id,
+          versao: 1,
+          congelado: false,
+          revisaoCount: 1,
+          statusAprovacao: 'rascunho',
+        },
+      },
+    });
     await this.writeIndex(centroCustoId, {
       ultimoOrcamentoId: id,
-      orcamentos: [entry, ...index.orcamentos]
+      orcamentos: [entry, ...index.orcamentos.map(normalizeOrcamentoVersionFields)],
+      ...(typeof index.listaFinVersion === 'number'
+        ? { listaFinVersion: index.listaFinVersion }
+        : {}),
     });
     return entry;
+  }
+
+  /**
+   * Congela a versão atual e cria uma cópia editável (V+1) na mesma família.
+   */
+  async createVersao(centroCustoId: string, orcamentoId: string): Promise<OrcamentoIndexEntry> {
+    if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
+    const index = await this.getIndex(centroCustoId);
+    const origem = index.orcamentos.find((o) => o.id === orcamentoId);
+    if (!origem) throw new Error('Orçamento não encontrado');
+
+    const origemNorm = normalizeOrcamentoVersionFields(origem);
+    if (origemNorm.congelado) {
+      throw new Error('Esta versão já está congelada. Abra a versão atual da família para criar outra.');
+    }
+
+    const familiaId = origemNorm.familiaId || origemNorm.id;
+    const irmaos = index.orcamentos
+      .map(normalizeOrcamentoVersionFields)
+      .filter((o) => (o.familiaId || o.id) === familiaId);
+    const maxVersao = irmaos.reduce((m, o) => Math.max(m, o.versao ?? 1), 1);
+    if ((origemNorm.versao ?? 1) < maxVersao) {
+      throw new Error('Só é possível versionar a versão atual (mais recente) da família.');
+    }
+
+    const sourceFile = (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {
+      servicos: [],
+      composicoes: [],
+      imports: [],
+    };
+    const sourceSessao =
+      sourceFile.sessaoOrcamento && typeof sourceFile.sessaoOrcamento === 'object'
+        ? ({ ...(sourceFile.sessaoOrcamento as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const sourceMeta =
+      sourceSessao.meta && typeof sourceSessao.meta === 'object' && !Array.isArray(sourceSessao.meta)
+        ? ({ ...(sourceSessao.meta as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+
+    const statusOrigem =
+      typeof sourceMeta.statusAprovacao === 'string' ? sourceMeta.statusAprovacao.trim() : '';
+    const statusNova = statusOrigem === 'em_correcao' ? 'em_correcao' : 'rascunho';
+    const novaVersao = maxVersao + 1;
+    const newId = randomUUID();
+    const updatedAt = new Date().toISOString();
+
+    // Congela origem (arquivo + índice)
+    const origemSessaoCongelada = {
+      ...sourceSessao,
+      meta: {
+        ...sourceMeta,
+        familiaId,
+        versao: origemNorm.versao ?? 1,
+        congelado: true,
+        origemVersaoId: origemNorm.origemVersaoId,
+        revisaoCount: origemNorm.versao ?? 1,
+      },
+    };
+    await this.writeOrcamentoFileRaw(centroCustoId, orcamentoId, {
+      servicos: Array.isArray(sourceFile.servicos) ? sourceFile.servicos : [],
+      composicoes: Array.isArray(sourceFile.composicoes) ? sourceFile.composicoes : [],
+      imports: Array.isArray(sourceFile.imports) ? sourceFile.imports : [],
+      sessaoOrcamento: origemSessaoCongelada,
+    });
+
+    const novaSessao = {
+      ...sourceSessao,
+      meta: {
+        ...sourceMeta,
+        familiaId,
+        versao: novaVersao,
+        congelado: false,
+        origemVersaoId: orcamentoId,
+        revisaoCount: novaVersao,
+        statusAprovacao: statusNova,
+        fichaDemandaApprovalId: undefined,
+      },
+    };
+    // Remove id de FD pendente de vez (undefined no spread pode persistir)
+    delete (novaSessao.meta as Record<string, unknown>).fichaDemandaApprovalId;
+
+    await this.writeOrcamentoFileRaw(centroCustoId, newId, {
+      servicos: Array.isArray(sourceFile.servicos)
+        ? JSON.parse(JSON.stringify(sourceFile.servicos))
+        : [],
+      composicoes: Array.isArray(sourceFile.composicoes)
+        ? JSON.parse(JSON.stringify(sourceFile.composicoes))
+        : [],
+      imports: Array.isArray(sourceFile.imports)
+        ? JSON.parse(JSON.stringify(sourceFile.imports))
+        : [],
+      sessaoOrcamento: JSON.parse(JSON.stringify(novaSessao)),
+    });
+
+    const newEntry = normalizeOrcamentoVersionFields({
+      id: newId,
+      nome: origemNorm.nome,
+      updatedAt,
+      familiaId,
+      versao: novaVersao,
+      congelado: false,
+      origemVersaoId: orcamentoId,
+      statusAprovacao: statusNova,
+      fichaDemandaPct: origemNorm.fichaDemandaPct,
+      bdiPercentual: origemNorm.bdiPercentual,
+      totalComBdi: origemNorm.totalComBdi,
+      cronogramaProgressoFisico: origemNorm.cronogramaProgressoFisico,
+      cronogramaConcluido: origemNorm.cronogramaConcluido,
+      cronogramaTotalEtapas: origemNorm.cronogramaTotalEtapas,
+      cronogramaAtrasado: origemNorm.cronogramaAtrasado,
+    });
+
+    const nextOrcamentos = [
+      newEntry,
+      ...index.orcamentos.map((o) => {
+        const n = normalizeOrcamentoVersionFields(o);
+        if (n.id === orcamentoId) {
+          return {
+            ...n,
+            congelado: true,
+            familiaId,
+            versao: origemNorm.versao ?? 1,
+            updatedAt,
+          };
+        }
+        return n;
+      }),
+    ];
+
+    await this.writeIndex(centroCustoId, {
+      ultimoOrcamentoId: newId,
+      orcamentos: nextOrcamentos,
+      ...(typeof index.listaFinVersion === 'number'
+        ? { listaFinVersion: index.listaFinVersion }
+        : {}),
+    });
+    this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
+    this.invalidateOrcamentoCache(centroCustoId, newId);
+    return newEntry;
   }
 
   async renameOrcamento(centroCustoId: string, orcamentoId: string, nome: string): Promise<void> {

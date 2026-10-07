@@ -45,6 +45,7 @@ import {
   Columns3,
   LayoutGrid,
   Undo2,
+  CopyPlus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -56,6 +57,11 @@ import * as XLSX from 'xlsx';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import {
+  formatOrcamentoRevisao,
+  OrcamentoRevisaoBadge,
+  type OrcamentoRevisaoOption,
+} from '@/components/orcamento/OrcamentoRevisaoBadge';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
@@ -2942,7 +2948,54 @@ type OrcamentoListaEntry = {
   /** BDI em pontos percentuais (ex.: 28.35). */
   bdiPercentual?: number;
   totalComBdi?: number;
+  familiaId?: string;
+  versao?: number;
+  congelado?: boolean;
+  origemVersaoId?: string;
 };
+
+function normalizeListaVersaoFields(entry: OrcamentoListaEntry): OrcamentoListaEntry {
+  const familiaId =
+    typeof entry.familiaId === 'string' && entry.familiaId.trim()
+      ? entry.familiaId.trim()
+      : entry.id;
+  const versaoRaw = Number(entry.versao);
+  const versao = Number.isFinite(versaoRaw) && versaoRaw >= 1 ? Math.floor(versaoRaw) : 1;
+  return {
+    ...entry,
+    familiaId,
+    versao,
+    congelado: entry.congelado === true,
+    ...(typeof entry.origemVersaoId === 'string' && entry.origemVersaoId.trim()
+      ? { origemVersaoId: entry.origemVersaoId.trim() }
+      : {}),
+  };
+}
+
+function parseVersaoMetaFromRaw(metaRaw: Record<string, unknown> | null | undefined): {
+  familiaId?: string;
+  versao?: number;
+  congelado?: boolean;
+  origemVersaoId?: string;
+} {
+  if (!metaRaw || typeof metaRaw !== 'object') return {};
+  const familiaId =
+    typeof metaRaw.familiaId === 'string' && metaRaw.familiaId.trim()
+      ? metaRaw.familiaId.trim()
+      : undefined;
+  const versaoRaw = Number(metaRaw.versao);
+  const versao = Number.isFinite(versaoRaw) && versaoRaw >= 1 ? Math.floor(versaoRaw) : undefined;
+  const origemVersaoId =
+    typeof metaRaw.origemVersaoId === 'string' && metaRaw.origemVersaoId.trim()
+      ? metaRaw.origemVersaoId.trim()
+      : undefined;
+  return {
+    ...(familiaId ? { familiaId } : {}),
+    ...(versao != null ? { versao } : {}),
+    ...(metaRaw.congelado === true ? { congelado: true } : {}),
+    ...(origemVersaoId ? { origemVersaoId } : {}),
+  };
+}
 
 const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   rascunho: 'Rascunho',
@@ -3009,6 +3062,14 @@ type OrcamentoMeta = {
   bdiPercentual: string; // ex.: "28,35"
   reajustes: Array<{ nome: string; percentual: string }>; // percentual em %
   revisaoCount: number; // 0 = sem revisão; ao salvar vira 1 => R01
+  /** Id da 1ª versão da linhagem. */
+  familiaId?: string;
+  /** Número da versão (1, 2, 3…). */
+  versao?: number;
+  /** Versão anterior congelada (somente leitura). */
+  congelado?: boolean;
+  /** Id da versão de origem ao clonar. */
+  origemVersaoId?: string;
   /** Orçamento criado pela importação da planilha: quantidades vêm da planilha; memória de cálculo oculta. */
   importadoPlanilha?: boolean;
   /**
@@ -4237,6 +4298,8 @@ function sessaoVazia(): SessaoOrcamentoPersist {
       bdiPercentual: '28,35',
       reajustes: ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
       revisaoCount: 0,
+      versao: 1,
+      congelado: false,
       statusAprovacao: 'rascunho'
     }
   };
@@ -4273,6 +4336,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
             : ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
           revisaoCount:
             typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
+          ...parseVersaoMetaFromRaw(metaRaw as Record<string, unknown>),
           importadoPlanilha: metaRaw.importadoPlanilha === true,
           usarMemoriaCalculo:
             typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
@@ -4560,8 +4624,11 @@ async function fetchOrcamentosLista(centroCustoId: string): Promise<{
 }> {
   const res = await api.get(`/orcamento/${centroCustoId}`, { timeout: 60000 });
   const d = res.data;
+  const orcamentos = (Array.isArray(d?.orcamentos) ? d.orcamentos : []).map((o: OrcamentoListaEntry) =>
+    normalizeListaVersaoFields(o)
+  );
   return {
-    orcamentos: Array.isArray(d?.orcamentos) ? d.orcamentos : [],
+    orcamentos,
     ultimoOrcamentoId: d?.ultimoOrcamentoId ?? null
   };
 }
@@ -4658,6 +4725,7 @@ function parseOrcamentoDetailRaw(d: {
           : ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
         revisaoCount:
           typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
+        ...parseVersaoMetaFromRaw(metaRaw as Record<string, unknown>),
         importadoPlanilha: metaRaw.importadoPlanilha === true,
         usarMemoriaCalculo:
           typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
@@ -4866,11 +4934,11 @@ async function saveOrcamentoToApi(
 async function criarOrcamentoApi(
   centroCustoId: string,
   nome?: string
-): Promise<{ id: string; nome: string; updatedAt: string }> {
+): Promise<OrcamentoListaEntry> {
   const res = await api.post(`/orcamento/${centroCustoId}/orcamentos`, { nome }, {
     timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
   });
-  return res.data;
+  return normalizeListaVersaoFields(res.data as OrcamentoListaEntry);
 }
 
 async function excluirOrcamentoApi(centroCustoId: string, orcamentoId: string): Promise<void> {
@@ -4878,6 +4946,18 @@ async function excluirOrcamentoApi(centroCustoId: string, orcamentoId: string): 
     timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
   });
   invalidateOrcamentoDetailCache(centroCustoId, orcamentoId);
+}
+
+async function criarVersaoOrcamentoApi(
+  centroCustoId: string,
+  orcamentoId: string
+): Promise<OrcamentoListaEntry> {
+  const res = await api.post(
+    `/orcamento/${centroCustoId}/orcamentos/${orcamentoId}/versoes`,
+    {},
+    { timeout: 120000 }
+  );
+  return normalizeListaVersaoFields(res.data as OrcamentoListaEntry);
 }
 
 async function renomearOrcamentoApi(centroCustoId: string, orcamentoId: string, nome: string): Promise<void> {
@@ -7130,6 +7210,8 @@ export function OrcamentoPageView({
     id: string;
     nome: string;
   } | null>(null);
+  const [novaVersaoConfirmOpen, setNovaVersaoConfirmOpen] = useState(false);
+  const [criandoVersao, setCriandoVersao] = useState(false);
   const [excluindoOrcamento, setExcluindoOrcamento] = useState(false);
   /** Chaves `t:<servicoId>` / `s:<blocoKey>` das linhas de título/subtítulo recolhidas na montagem. */
   const [linhasListaRecolhidas, setLinhasListaRecolhidas] = useState<Set<string>>(() => new Set());
@@ -7181,6 +7263,7 @@ export function OrcamentoPageView({
 
     const { servicos: s, imports: i } = servicosImportsRef.current;
     const sessaoAtual = sessaoRef.current;
+    if (sessaoAtual?.meta?.congelado === true) return;
 
     try {
       localStorage.setItem(storageKey(cc, 'sessao', oid), JSON.stringify(sessaoAtual));
@@ -7260,9 +7343,63 @@ export function OrcamentoPageView({
 
   const filteredListaOrcamentos = useMemo(() => {
     const q = orcamentosSearch.trim().toLowerCase();
-    if (!q) return listaOrcamentos;
-    return listaOrcamentos.filter((o) => (o.nome || '').toLowerCase().includes(q));
+    const base = !q
+      ? listaOrcamentos
+      : listaOrcamentos.filter((o) => (o.nome || '').toLowerCase().includes(q));
+    // Agrupa por família: só a revisão atual (maior número).
+    const byFamilia = new Map<string, OrcamentoListaEntry[]>();
+    for (const o of base) {
+      const n = normalizeListaVersaoFields(o);
+      const fid = n.familiaId || n.id;
+      const arr = byFamilia.get(fid) ?? [];
+      arr.push(n);
+      byFamilia.set(fid, arr);
+    }
+    const rows: OrcamentoListaEntry[] = [];
+    for (const versoes of byFamilia.values()) {
+      versoes.sort((a, b) => (b.versao ?? 1) - (a.versao ?? 1));
+      const atual = versoes[0];
+      if (atual) rows.push(atual);
+    }
+    return rows;
   }, [listaOrcamentos, orcamentosSearch]);
+
+  /** Todas as revisões por família (para o seletor do badge). */
+  const revisoesPorFamilia = useMemo(() => {
+    const map = new Map<string, OrcamentoListaEntry[]>();
+    for (const o of listaOrcamentos) {
+      const n = normalizeListaVersaoFields(o);
+      const fid = n.familiaId || n.id;
+      const arr = map.get(fid) ?? [];
+      arr.push(n);
+      map.set(fid, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => (b.versao ?? 1) - (a.versao ?? 1));
+    }
+    return map;
+  }, [listaOrcamentos]);
+
+  const hrefOrcamentoRevisao = useCallback(
+    (id: string) => {
+      if (embeddedOrcamentoBasePath) return `${embeddedOrcamentoBasePath}/${id}`;
+      return `/ponto/orcamentos`;
+    },
+    [embeddedOrcamentoBasePath]
+  );
+
+  const opcoesRevisaoFamilia = useCallback(
+    (familiaId: string, currentId?: string | null): OrcamentoRevisaoOption[] => {
+      const versoes = revisoesPorFamilia.get(familiaId) ?? [];
+      return versoes.map((o) => ({
+        label: formatOrcamentoRevisao(o.versao),
+        href: hrefOrcamentoRevisao(o.id),
+        current: !!currentId && o.id === currentId,
+        congelada: o.congelado === true,
+      }));
+    },
+    [revisoesPorFamilia, hrefOrcamentoRevisao]
+  );
 
   const historicoOrcamentoPerfeito = useMemo(
     () => imports.filter((imp) => imp.origem === 'orcamento-perfeito'),
@@ -7360,12 +7497,18 @@ export function OrcamentoPageView({
   const aparenciaFichaDemanda = aparenciaDaAba(meta, 'fichaDemanda');
   /** Aparência da aba visível (shell / CSS vars / fonte). */
   const aparenciaOrcamento = aparenciaDaAba(meta, abaAparenciaFromViewTab(orcamentoViewTab));
-  const gradeTravada = meta.gradeTravada === true;
+  const versaoCongelada = meta.congelado === true;
+  const versaoNumero = meta.versao && meta.versao >= 1 ? meta.versao : 1;
+  const gradeTravada = meta.gradeTravada === true || versaoCongelada;
   const gradeTravadaRef = useRef(gradeTravada);
   gradeTravadaRef.current = gradeTravada;
 
   const alternarGradeTravada = useCallback(() => {
-    const next = !gradeTravadaRef.current;
+    if (versaoCongelada) {
+      toast.error('Esta revisão está congelada. Crie uma nova revisão para editar.');
+      return;
+    }
+    const next = !(meta.gradeTravada === true);
     if (typeof document !== 'undefined') {
       const ae = document.activeElement;
       if (ae instanceof HTMLElement) ae.blur();
@@ -7378,7 +7521,7 @@ export function OrcamentoPageView({
     setMeta((m) => ({ ...m, gradeTravada: next ? true : undefined }));
     if (next) toast.success('Orçamento e memória travados.');
     else toast.success('Orçamento e memória liberados.');
-  }, []);
+  }, [versaoCongelada, meta.gradeTravada]);
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
 
   const dataFimOrcamento = useMemo(
@@ -8153,10 +8296,16 @@ export function OrcamentoPageView({
     sessaoOverride?: SessaoOrcamentoPersist | null
   ) => {
     if (!centroCustoId || !orcamentoAtivoId) return;
+    if (versaoCongelada || meta.congelado === true) return;
     const sessao =
       (sessaoOverride !== undefined ? sessaoOverride : sessaoRef.current) ?? sessaoVazia();
     saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, montarPayloadSalvarOrcamento(s, i, sessao)).catch(err => {
       console.warn('Erro ao salvar orçamento no servidor:', err);
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      if (apiMsg && /congelado/i.test(apiMsg)) {
+        toast.error(apiMsg);
+        return;
+      }
       toast.error('Não foi possível salvar o orçamento no servidor. Verifique a conexão e tente de novo.');
     });
   };
@@ -8309,19 +8458,26 @@ export function OrcamentoPageView({
     }
     try {
       setIsCreatingOrcamento(true);
-      const entry = await criarOrcamentoApi(centroCustoId, nomeTrim);
+      const entry = normalizeListaVersaoFields(await criarOrcamentoApi(centroCustoId, nomeTrim));
       setListaOrcamentos(prev => [entry, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
-      setMeta({ ...d, revisaoCount: 0 });
-      // salva imediatamente os metadados (a revisão continua "Sem revisão" até o primeiro salvar)
+      const metaInicial: OrcamentoMeta = {
+        ...d,
+        revisaoCount: 1,
+        familiaId: entry.familiaId || entry.id,
+        versao: entry.versao ?? 1,
+        congelado: false,
+      };
+      setMeta(metaInicial);
+      // salva imediatamente os metadados (preserva campos de versão do backend)
       await saveOrcamentoToApi(centroCustoId, entry.id, {
         servicos: [],
         imports: [],
         sessaoOrcamento: {
           ...sessaoVazia(),
-          meta: { ...d, revisaoCount: 0 }
+          meta: metaInicial,
         }
       });
       setNovoOrcamentoMetaOpen(false);
@@ -8358,6 +8514,43 @@ export function OrcamentoPageView({
 
   const pedirExclusaoOrcamento = (id: string, nome: string) => {
     setOrcamentoExcluirConfirm({ id, nome });
+  };
+
+  const confirmarNovaVersao = async () => {
+    if (!centroCustoId || !orcamentoAtivoId || criandoVersao || versaoCongelada) return;
+    setCriandoVersao(true);
+    try {
+      // Salva o estado atual antes de congelar/clonar.
+      const sessao = sessaoRef.current ?? sessaoVazia();
+      try {
+        await saveOrcamentoToApi(
+          centroCustoId,
+          orcamentoAtivoId,
+          montarPayloadSalvarOrcamento(servicos, imports, sessao)
+        );
+      } catch {
+        /* segue mesmo assim — o servidor lê o arquivo atual */
+      }
+      const entry = await criarVersaoOrcamentoApi(centroCustoId, orcamentoAtivoId);
+      setListaOrcamentos((prev) => {
+        const marked = prev.map((o) =>
+          o.id === orcamentoAtivoId ? { ...normalizeListaVersaoFields(o), congelado: true } : o
+        );
+        return [entry, ...marked.filter((o) => o.id !== entry.id)];
+      });
+      orcamentosListaCache.delete(centroCustoId);
+      setNovaVersaoConfirmOpen(false);
+      toast.success(`Revisão ${formatOrcamentoRevisao(entry.versao ?? versaoNumero + 1)} criada.`);
+      setOrcamentoViewTab('montagem');
+      setNomeOrcamentoRascunho(entry.nome);
+      setOrcamentoAtivoId(entry.id);
+      navigateEmbeddedOrcamentoPath(entry.id);
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(apiMsg || 'Não foi possível criar a nova revisão.');
+    } finally {
+      setCriandoVersao(false);
+    }
   };
 
   const confirmarExclusaoOrcamento = async () => {
@@ -9275,7 +9468,11 @@ export function OrcamentoPageView({
         reajustes: [],
         importadoPlanilha: true,
         usarMemoriaCalculo: parsed.temMemorial,
-        temAnalitico: temAnaliticoImport
+        temAnalitico: temAnaliticoImport,
+        familiaId: entry.familiaId || entry.id,
+        versao: entry.versao ?? 1,
+        congelado: false,
+        revisaoCount: 1,
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -9501,6 +9698,10 @@ export function OrcamentoPageView({
               },
             }
           : {}),
+        familiaId: entry.familiaId || entry.id,
+        versao: entry.versao ?? 1,
+        congelado: false,
+        revisaoCount: 1,
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -11301,13 +11502,45 @@ export function OrcamentoPageView({
     }
     if (!embeddedContractId) return null;
     const listHref = cronogramaOnly ? '/ponto/cronogramas' : '/ponto/orcamentos';
-    const crumbs: { label: string; href?: string }[] = [];
+    const crumbs: {
+      label: string;
+      href?: string;
+      badge?: string;
+      badgeMenu?: OrcamentoRevisaoOption[];
+    }[] = [];
+    const revisaoBadge =
+      orcamentoIdNaRota && !cronogramaOnly
+        ? formatOrcamentoRevisao(versaoNumero)
+        : undefined;
+    const familiaIdAtiva =
+      meta.familiaId ||
+      (orcamentoIdNaRota
+        ? normalizeListaVersaoFields(
+            listaOrcamentos.find((o) => o.id === orcamentoIdNaRota) ?? {
+              id: orcamentoIdNaRota,
+              nome: '',
+              updatedAt: '',
+            }
+          ).familiaId
+        : undefined) ||
+      orcamentoIdNaRota ||
+      undefined;
+    const revisaoBadgeMenu =
+      revisaoBadge && familiaIdAtiva
+        ? opcoesRevisaoFamilia(familiaIdAtiva, orcamentoIdNaRota)
+        : undefined;
 
     // Lista global / Cronogramas: a rota já traz «Orçamentos»/«Cronograma» — só o nome do item.
     if (cronogramaOnly || listaGlobalEntry) {
       // Não usar fallback genérico — colide com o crumb da rota e some do breadcrumb.
       if (orcamentoIdNaRota && nomeOrcamentoSemCodigo) {
-        crumbs.push({ label: nomeOrcamentoSemCodigo });
+        crumbs.push({
+          label: nomeOrcamentoSemCodigo,
+          ...(revisaoBadge ? { badge: revisaoBadge } : {}),
+          ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
+            ? { badgeMenu: revisaoBadgeMenu }
+            : {}),
+        });
       }
       return crumbs;
     }
@@ -11318,7 +11551,13 @@ export function OrcamentoPageView({
     }
     crumbs.push({ label: 'Orçamentos', href: listHref });
     if (orcamentoIdNaRota) {
-      crumbs.push({ label: nomeOrcamentoSemCodigo || 'Orçamento' });
+      crumbs.push({
+        label: nomeOrcamentoSemCodigo || 'Orçamento',
+        ...(revisaoBadge ? { badge: revisaoBadge } : {}),
+        ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
+          ? { badgeMenu: revisaoBadgeMenu }
+          : {}),
+      });
     }
 
     return crumbs;
@@ -11331,6 +11570,10 @@ export function OrcamentoPageView({
     listaGlobalEntry,
     fichaDemandaOnly,
     fichaDemandaRecord?.codFichaDemanda,
+    versaoNumero,
+    meta.familiaId,
+    listaOrcamentos,
+    opcoesRevisaoFamilia,
   ]);
 
   useBreadcrumbEntity(breadcrumbOrcamentoTrail, { priority: 1 });
@@ -11869,6 +12112,13 @@ export function OrcamentoPageView({
     }
     return m;
   }, [linhasAnaliticoOrcamento]);
+
+  // O wrapper de entrada da página (`page-enter`) anima com `transform`, o que prende
+  // `position: fixed` ao conteúdo; o rodapé de abas vai para o body via portal.
+  const [footerPortalReady, setFooterPortalReady] = useState(false);
+  useEffect(() => {
+    setFooterPortalReady(true);
+  }, []);
 
   useEffect(() => {
     if (!orcamentoAtivoId || subtitulosAdicionados.length === 0) return;
@@ -14120,7 +14370,7 @@ export function OrcamentoPageView({
                         ) : (
                           <Plus className="h-4 w-4 shrink-0" aria-hidden />
                         )}
-                        Novo orçamento
+                        Novo Orçamento
                       </button>
                     </div>
                   </div>
@@ -14152,22 +14402,25 @@ export function OrcamentoPageView({
                         <table className="w-full table-fixed text-sm">
                           <thead className="border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-3 sm:px-6 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%] min-w-[5.5rem]">
+                              <th className="px-3 sm:px-4 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[10%] min-w-[5rem]">
                                 Código
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-left bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[36%] min-w-[14rem]">
                                 Descrição
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
+                              <th className="px-3 sm:px-3 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[8%]">
+                                Revisão
+                              </th>
+                              <th className="px-3 sm:px-4 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[11%]">
                                 Status
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
+                              <th className="px-3 sm:px-4 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[9%]">
                                 BDI
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[14%]">
+                              <th className="px-3 sm:px-4 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
                                 Total
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[14%]">
+                              <th className="px-3 sm:px-4 py-4 text-center bg-[var(--orc-header-bg,#f9fafb)] text-xs font-medium text-[var(--orc-header-fg,#6b7280)] uppercase tracking-wider w-[12%]">
                                 Atualizado
                               </th>
                               <th className={listTableRowClasses.actionTh}>Ação</th>
@@ -14176,12 +14429,13 @@ export function OrcamentoPageView({
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredListaOrcamentos.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                   Nenhum orçamento encontrado para essa busca.
                                 </td>
                               </tr>
                             ) : (
                               filteredListaOrcamentos.map((o) => {
+                                const oNorm = normalizeListaVersaoFields(o);
                                 const codigoLista = codigoFromNomeOrcamento(o.nome);
                                 const nomeLista = nomeOrcamentoSemCodigoSufixo(o.nome) || o.nome;
                                 const statusLista = normalizarStatusAprovacaoOrcamento(o.statusAprovacao);
@@ -14204,15 +14458,27 @@ export function OrcamentoPageView({
                                     if (centroCustoId) prefetchOrcamentoDetail(centroCustoId, o.id);
                                   }}
                                   className={getListTableRowClassName(true)}
-                                  aria-label={`Abrir orçamento ${nomeLista}`}
+                                  aria-label={`Abrir orçamento ${nomeLista} ${formatOrcamentoRevisao(oNorm.versao)}`}
                                 >
-                                  <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                                  <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-4">
                                     {formatCadastroListId(codigoLista || null)}
                                   </td>
-                                  <td className="max-w-0 px-3 py-3 align-middle sm:px-6">
-                                    <ListRowNavigableLabel className="block truncate font-medium">
+                                  <td className="min-w-[14rem] px-3 py-3 align-middle sm:px-6">
+                                    <ListRowNavigableLabel className="block font-medium whitespace-normal break-words">
                                       {nomeLista}
                                     </ListRowNavigableLabel>
+                                  </td>
+                                  <td
+                                    className="whitespace-nowrap px-3 py-3 text-center sm:px-3"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <OrcamentoRevisaoBadge
+                                      versao={oNorm.versao}
+                                      options={opcoesRevisaoFamilia(
+                                        oNorm.familiaId || oNorm.id,
+                                        oNorm.id
+                                      )}
+                                    />
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-3 text-center sm:px-6">
                                     <span className={orcamentoStatusBadgeClass(statusLista)}>
@@ -14446,9 +14712,21 @@ export function OrcamentoPageView({
                           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 break-words">
                             {nomeOrcamentoRascunho || 'Orçamento sem nome'}
                           </h3>
+                          <OrcamentoRevisaoBadge
+                            versao={versaoNumero}
+                            options={opcoesRevisaoFamilia(
+                              meta.familiaId || orcamentoAtivoId || '',
+                              orcamentoAtivoId
+                            )}
+                          />
                           <span className={orcamentoStatusBadgeClass(statusAprovacaoAtivo)}>
                             {ORCAMENTO_STATUS_LABELS[statusAprovacaoAtivo]}
                           </span>
+                          {versaoCongelada ? (
+                            <span className="inline-flex items-center justify-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                              Somente leitura
+                            </span>
+                          ) : null}
                           {orcamentoVeioOrcafascio && orcafascioDadosExibicao?.exempt != null ? (
                             <span
                               className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
@@ -14461,16 +14739,56 @@ export function OrcamentoPageView({
                             </span>
                           ) : null}
                         </div>
-                        <button
-                          type="button"
-                          onClick={abrirEdicaoDados}
-                          className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
-                          aria-label="Editar dados"
-                          title="Editar dados"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {!versaoCongelada ? (
+                            <button
+                              type="button"
+                              onClick={() => setNovaVersaoConfirmOpen(true)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                              title="Congela esta versão e abre uma cópia editável"
+                            >
+                              <CopyPlus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              Nova revisão
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={abrirEdicaoDados}
+                            disabled={versaoCongelada}
+                            className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:pointer-events-none disabled:opacity-40"
+                            aria-label="Editar dados"
+                            title={versaoCongelada ? 'Versão congelada — somente leitura' : 'Editar dados'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
+                      {versaoCongelada ? (
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                          <span>
+                            Revisão {formatOrcamentoRevisao(versaoNumero)} congelada (somente leitura).
+                            Edite pela revisão atual da família.
+                          </span>
+                          {(() => {
+                            const fid = meta.familiaId || orcamentoAtivoId;
+                            if (!fid) return null;
+                            const atual = listaOrcamentos
+                              .map(normalizeListaVersaoFields)
+                              .filter((o) => (o.familiaId || o.id) === fid && !o.congelado)
+                              .sort((a, b) => (b.versao ?? 1) - (a.versao ?? 1))[0];
+                            if (!atual || atual.id === orcamentoAtivoId) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => abrirOrcamentoDaLista(atual.id)}
+                                className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100 dark:hover:bg-amber-900"
+                              >
+                                Abrir {formatOrcamentoRevisao(atual.versao)}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="px-4 sm:px-5 py-5 space-y-6">
@@ -16781,7 +17099,7 @@ export function OrcamentoPageView({
 
         </div>
 
-        {orcamentoAtivoId && !cronogramaOnly && (
+        {orcamentoAtivoId && !cronogramaOnly && footerPortalReady && createPortal(
           <>
             <div
               className="fixed bottom-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 left-0 lg:left-[var(--orc-footer-left,5rem)]"
@@ -16965,7 +17283,8 @@ export function OrcamentoPageView({
                 </div>
               </div>
             </div>
-          </>
+          </>,
+          document.body
         )}
       </MainLayout>
       ) : null}
@@ -17180,6 +17499,51 @@ export function OrcamentoPageView({
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
               >
                 Apagar
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {novaVersaoConfirmOpen && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (criandoVersao) return;
+              setNovaVersaoConfirmOpen(false);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+              <CopyPlus className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Criar nova revisão?
+            </h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              A revisão atual{' '}
+              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero)}</span> será
+              congelada (somente leitura) e uma cópia editável{' '}
+              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero + 1)}</span> será
+              aberta.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setNovaVersaoConfirmOpen(false)}
+                disabled={criandoVersao}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmarNovaVersao()}
+                disabled={criandoVersao}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {criandoVersao ? 'Criando...' : 'Criar revisão'}
               </button>
             </div>
           </div>
@@ -18907,24 +19271,43 @@ export function OrcamentoPageView({
             >
               <ZoomIn className="h-5 w-5 shrink-0" aria-hidden />
             </button>
+            {!fichaDemandaOnly && !versaoCongelada && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  setNovaVersaoConfirmOpen(true);
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                title="Nova revisão do orçamento"
+                aria-label="Nova revisão do orçamento"
+              >
+                <CopyPlus className="h-5 w-5 shrink-0" aria-hidden />
+              </button>
+            )}
             {!fichaDemandaOnly && (
               <button
                 type="button"
                 onClick={alternarGradeTravada}
-                className={`inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                disabled={versaoCongelada}
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-40 ${
                   gradeTravada
                     ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50'
                     : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
                 }`}
                 title={
-                  gradeTravada
-                    ? 'Destravar orçamento e memória de cálculo'
-                    : 'Travar orçamento e memória de cálculo'
+                  versaoCongelada
+                    ? 'Versão congelada — somente leitura'
+                    : gradeTravada
+                      ? 'Destravar orçamento e memória de cálculo'
+                      : 'Travar orçamento e memória de cálculo'
                 }
                 aria-label={
-                  gradeTravada
-                    ? 'Destravar orçamento e memória de cálculo'
-                    : 'Travar orçamento e memória de cálculo'
+                  versaoCongelada
+                    ? 'Versão congelada'
+                    : gradeTravada
+                      ? 'Destravar orçamento e memória de cálculo'
+                      : 'Travar orçamento e memória de cálculo'
                 }
                 aria-pressed={gradeTravada}
               >

@@ -11,6 +11,9 @@ router.get('/composicoes/geral', (req, res, next) => controller.getComposicoesGe
 router.put('/composicoes/geral', (req, res, next) => controller.saveComposicoesGeral(req as any, res, next));
 
 router.post('/:centroCustoId/orcamentos', (req, res, next) => controller.createOrcamento(req as any, res, next));
+router.post('/:centroCustoId/orcamentos/:orcamentoId/versoes', (req, res, next) =>
+  controller.createVersao(req as any, res, next)
+);
 router.patch('/:centroCustoId/orcamentos/:orcamentoId', (req, res, next) =>
   controller.renameOrcamento(req as any, res, next)
 );

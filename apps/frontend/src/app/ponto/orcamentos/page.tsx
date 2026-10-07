@@ -28,6 +28,10 @@ import {
   ListRowNavigableLabel,
 } from '@/components/ui/listTableUi';
 import { OrcamentoPageView } from '@/app/ponto/orcamento/OrcamentoPageView';
+import {
+  formatOrcamentoRevisao,
+  OrcamentoRevisaoBadge,
+} from '@/components/orcamento/OrcamentoRevisaoBadge';
 
 type ContractRow = {
   id: string;
@@ -51,6 +55,9 @@ type OrcamentoListaRow = {
   statusAprovacao?: string;
   bdiPercentual?: number;
   totalComBdi?: number;
+  familiaId?: string;
+  versao?: number;
+  congelado?: boolean;
 };
 
 type OrcamentoListItem = {
@@ -65,6 +72,9 @@ type OrcamentoListItem = {
   status: OrcamentoStatusAprovacao;
   bdiPercentual?: number;
   totalComBdi?: number;
+  familiaId: string;
+  versao: number;
+  congelado: boolean;
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -228,8 +238,12 @@ export default function OrcamentosPage() {
           const orcs = (Array.isArray(res.data?.orcamentos)
             ? res.data.orcamentos
             : []) as OrcamentoListaRow[];
-          return orcs.map(
-            (o): OrcamentoListItem => ({
+          return orcs.map((o): OrcamentoListItem => {
+            const versaoRaw = Number(o.versao);
+            const versao = Number.isFinite(versaoRaw) && versaoRaw >= 1 ? Math.floor(versaoRaw) : 1;
+            const familiaId =
+              typeof o.familiaId === 'string' && o.familiaId.trim() ? o.familiaId.trim() : o.id;
+            return {
               id: `${c.id}-${o.id}`,
               contractId: c.id,
               costCenterId: String(c.costCenterId),
@@ -247,8 +261,11 @@ export default function OrcamentosPage() {
                 typeof o.totalComBdi === 'number' && Number.isFinite(o.totalComBdi)
                   ? o.totalComBdi
                   : undefined,
-            })
-          );
+              familiaId,
+              versao,
+              congelado: o.congelado === true,
+            };
+          });
         })
       );
       const items: OrcamentoListItem[] = [];
@@ -274,7 +291,7 @@ export default function OrcamentosPage() {
     enabled: !loadingContracts && !loadingPermissions && contractsComOrcamento.length > 0,
   });
 
-  const orcamentos = useMemo(() => {
+  const orcamentosFiltrados = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const q = searchTerm.trim().toLowerCase();
     return list.filter((o) => {
@@ -289,6 +306,38 @@ export default function OrcamentosPage() {
       );
     });
   }, [orcamentosData, searchTerm, contratoFiltro]);
+
+  /** Todas as revisões por família (seletor do badge; ignora busca textual). */
+  const revisoesPorFamilia = useMemo(() => {
+    const list = Array.isArray(orcamentosData) ? orcamentosData : [];
+    const map = new Map<string, OrcamentoListItem[]>();
+    for (const o of list) {
+      if (contratoFiltro && o.contractId !== contratoFiltro) continue;
+      const key = `${o.costCenterId}::${o.familiaId}`;
+      const arr = map.get(key) ?? [];
+      arr.push(o);
+      map.set(key, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => b.versao - a.versao);
+    }
+    return map;
+  }, [orcamentosData, contratoFiltro]);
+
+  /** Uma linha por família — só a revisão atual (maior número). */
+  const orcamentos = useMemo(() => {
+    const rows: OrcamentoListItem[] = [];
+    for (const versoes of revisoesPorFamilia.values()) {
+      const atual = versoes[0];
+      if (atual) rows.push(atual);
+    }
+    rows.sort((a, b) => {
+      const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return rows;
+  }, [revisoesPorFamilia]);
 
   const totalFiltered = orcamentos.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
@@ -476,7 +525,7 @@ export default function OrcamentosPage() {
                     className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 active:bg-red-200/80 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 dark:active:bg-red-900/55"
                   >
                     <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                    Novo orçamento
+                    Novo Orçamento
                   </button>
                 </div>
               </div>
@@ -502,25 +551,28 @@ export default function OrcamentosPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="w-[10%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[9%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Código
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="min-w-[14rem] w-[32%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Descrição
                           </th>
-                          <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[7%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
+                            Revisão
+                          </th>
+                          <th className="w-[12%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Contrato
                           </th>
-                          <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                          <th className="w-[11%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
                             Status
                           </th>
-                          <th className="w-[10%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                          <th className="w-[7%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
                             BDI
                           </th>
-                          <th className="w-[14%] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[12%] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Total
                           </th>
-                          <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[12%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Atualizado
                           </th>
                           <th className={cadastroListClasses.thRight}>Ações</th>
@@ -532,17 +584,33 @@ export default function OrcamentosPage() {
                             key={o.id}
                             onClick={() => abrirOrcamento(o)}
                             className={getListTableRowClassName(true)}
-                            aria-label={`Abrir orçamento ${o.nome}`}
+                            aria-label={`Abrir orçamento ${o.nome} ${formatOrcamentoRevisao(o.versao)}`}
                           >
-                            <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-4">
                               {formatCadastroListId(o.codigo || null)}
                             </td>
-                            <td className="max-w-0 px-3 py-3 sm:px-6">
-                              <ListRowNavigableLabel className="block truncate font-medium">
+                            <td className="min-w-[14rem] px-3 py-3 sm:px-6">
+                              <ListRowNavigableLabel className="block font-medium whitespace-normal break-words">
                                 {o.nome}
                               </ListRowNavigableLabel>
                             </td>
-                            <td className="max-w-0 px-3 py-3 text-center sm:px-6">
+                            <td
+                              className="whitespace-nowrap px-3 py-3 text-center sm:px-3"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <OrcamentoRevisaoBadge
+                                versao={o.versao}
+                                options={(
+                                  revisoesPorFamilia.get(`${o.costCenterId}::${o.familiaId}`) ?? [o]
+                                ).map((v) => ({
+                                  label: formatOrcamentoRevisao(v.versao),
+                                  href: `/ponto/orcamentos/${v.contractId}/${v.orcamentoId}`,
+                                  current: v.orcamentoId === o.orcamentoId,
+                                  congelada: v.congelado,
+                                }))}
+                              />
+                            </td>
+                            <td className="max-w-[10rem] px-3 py-3 text-center sm:px-4">
                               <span className="block truncate text-sm text-gray-700 dark:text-gray-300">
                                 {o.contractName}
                               </span>
@@ -651,7 +719,7 @@ export default function OrcamentosPage() {
           <Modal
             isOpen={contratoActionModal != null}
             onClose={() => setContratoActionModal(null)}
-            title="Novo orçamento"
+            title="Novo Orçamento"
             size="md"
           >
             <div className="space-y-4">

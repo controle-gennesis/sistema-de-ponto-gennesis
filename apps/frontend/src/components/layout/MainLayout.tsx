@@ -174,21 +174,26 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
     router.replace(isLinkedEmpreiteiro ? EMPREITEIROS_PATH : '/ponto/home');
   }, [permissionsLoading, canAccessCollaborationTools, isLinkedEmpreiteiro, pathname, router]);
 
+  const resetShellScroll = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    if (shell.scrollTop !== 0) shell.scrollTop = 0;
+    if (shell.scrollLeft !== 0) shell.scrollLeft = 0;
+  }, []);
+
   useLayoutEffect(() => {
     setIsCollapsed(resolveClientSidebarCollapsed(pathname));
     setLayoutSynced(true);
     // Garante que a sidebar não fique bloqueada se um overlay ficou preso no DOM.
     syncModalOpenClass();
-  }, [pathname]);
+    // Troca de rota (ex.: abrir/trocar revisão) pode fazer o browser rolar o shell
+    // horizontalmente se a coluna principal estourar a largura — corrige no mesmo frame.
+    resetShellScroll();
+  }, [pathname, resetShellScroll]);
 
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell) return;
-
-    const resetShellScroll = () => {
-      if (shell.scrollTop !== 0) shell.scrollTop = 0;
-      if (shell.scrollLeft !== 0) shell.scrollLeft = 0;
-    };
 
     const onFocusIn = () => {
       resetShellScroll();
@@ -197,7 +202,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
 
     shell.addEventListener('focusin', onFocusIn, true);
     return () => shell.removeEventListener('focusin', onFocusIn, true);
-  }, []);
+  }, [resetShellScroll]);
 
   const handleMenuToggle = useCallback((collapsed: boolean) => {
     setIsCollapsed((prev) => (prev === collapsed ? prev : collapsed));
@@ -224,7 +229,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
       <NativeCallProvider value={nativeCall}>
         <div
           ref={shellRef}
-          className="app-theme-bg h-[100dvh] max-h-[100dvh] max-w-[100vw] overflow-hidden"
+          className="app-theme-bg h-[100dvh] max-h-[100dvh] max-w-[100vw] overflow-x-clip overflow-y-hidden"
           // Foco em elemento fora da área visível pode rolar este container mesmo com
           // overflow hidden, escondendo a topbar e cortando a página.
           onScroll={(event) => {
@@ -241,11 +246,18 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
             onOpenChangePassword={handleOpenChangePassword}
           />
 
-          {/* Main Content — mesma duração/easing do painel tier 2 da sidebar */}
+          {/* Main Content — width calc evita (100% + margin-left) estourar o shell e
+              “puxar” a sidebar/navbar para a esquerda ao abrir orçamento/trocar revisão. */}
           <div
-            className={`flex h-full min-h-0 min-w-0 max-w-full flex-col ${
-              layoutSynced ? `transition-[margin-left] ${SIDEBAR_TRANSITION_CLASS}` : ''
-            } ${isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'}`}
+            className={`flex h-full min-h-0 min-w-0 flex-col ${
+              layoutSynced
+                ? `transition-[margin-left,width] ${SIDEBAR_TRANSITION_CLASS}`
+                : ''
+            } ${
+              isCollapsed
+                ? 'lg:ml-20 lg:w-[calc(100%-5rem)]'
+                : 'lg:ml-[23rem] lg:w-[calc(100%-23rem)]'
+            }`}
           >
             <TopNavbar
               userName={displayName}
