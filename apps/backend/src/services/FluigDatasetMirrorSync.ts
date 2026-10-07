@@ -6,7 +6,15 @@ import { FluigService, type FluigDatasetValues } from './FluigService';
 const fluigForMirror = new FluigService();
 
 /** Datasets espelhados no Postgres e servidos pela API sem hit no Fluig a cada request. */
-export const FLUIG_MIRRORED_DATASET_IDS = ['G5-Relatorio-DF-GO-DP'] as const;
+export const FLUIG_MIRRORED_DATASET_IDS = [
+  'G5-Relatorio-DF-GO-DP',
+  'Processos_Workflow_Aprovacao_G3',
+  'Processos_Workflow_Aprovacao_G5',
+  'DataSet_G3FollowUp',
+  'DataSet_G4FollowUp',
+  'G5-Relatorio-DF-GO-TODOS-SETORES',
+  'G5-Relatorio-DF-GO-JURIDICO',
+] as const;
 
 export type FluigMirroredDatasetId = (typeof FLUIG_MIRRORED_DATASET_IDS)[number];
 
@@ -72,47 +80,71 @@ function normalizeColumns(
   return [...set];
 }
 
+/** Postgres JSON/text não aceita \u0000 — remove de strings no payload. */
+function sanitizeJsonForPostgres(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.includes('\u0000') ? value.replace(/\u0000/g, '') : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonForPostgres(item));
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeJsonForPostgres(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 async function replaceMirrorSnapshot(
   datasetId: string,
   data: FluigDatasetValues
 ): Promise<FluigDatasetMirrorSyncResult> {
-  const values = Array.isArray(data.content?.values)
+  const rawValues = Array.isArray(data.content?.values)
     ? (data.content!.values as Record<string, unknown>[])
     : [];
+  const values = rawValues.map(
+    (row) => sanitizeJsonForPostgres(row) as Record<string, unknown>
+  );
   const columns = normalizeColumns(data.content?.columns, values);
   const syncedAt = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.fluigDatasetMirrorRow.deleteMany({ where: { datasetId } });
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.fluigDatasetMirrorRow.deleteMany({ where: { datasetId } });
 
-    for (let i = 0; i < values.length; i += BATCH_SIZE) {
-      const slice = values.slice(i, i + BATCH_SIZE);
-      await tx.fluigDatasetMirrorRow.createMany({
-        data: slice.map((row, offset) => ({
+      for (let i = 0; i < values.length; i += BATCH_SIZE) {
+        const slice = values.slice(i, i + BATCH_SIZE);
+        await tx.fluigDatasetMirrorRow.createMany({
+          data: slice.map((row, offset) => ({
+            datasetId,
+            externalKey: String(pickExternalKey(row, i + offset)).replace(/\u0000/g, ''),
+            payload: row as object,
+            syncedAt,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      await tx.fluigDatasetMirrorMeta.upsert({
+        where: { datasetId },
+        create: {
           datasetId,
-          externalKey: pickExternalKey(row, i + offset),
-          payload: row as object,
+          columns,
+          rowCount: values.length,
           syncedAt,
-        })),
-        skipDuplicates: true,
+        },
+        update: {
+          columns,
+          rowCount: values.length,
+          syncedAt,
+        },
       });
-    }
-
-    await tx.fluigDatasetMirrorMeta.upsert({
-      where: { datasetId },
-      create: {
-        datasetId,
-        columns,
-        rowCount: values.length,
-        syncedAt,
-      },
-      update: {
-        columns,
-        rowCount: values.length,
-        syncedAt,
-      },
-    });
-  });
+    },
+    { timeout: 180_000, maxWait: 30_000 }
+  );
 
   return {
     datasetId,

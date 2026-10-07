@@ -1,9 +1,24 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock, ExternalLink, FileText, Filter, HelpCircle, RotateCcw, Search, X, type LucideIcon } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  FileText,
+  Filter,
+  HelpCircle,
+  Info,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -193,6 +208,7 @@ export function FluigWorkflowAprovacoesPage() {
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [syncingMirror, setSyncingMirror] = useState(false);
 
   const { data: userData } = useQuery({
     queryKey: ['user'],
@@ -230,6 +246,49 @@ export function FluigWorkflowAprovacoesPage() {
   const content = activeQuery?.data?.data?.content;
   const values = (content?.values ?? []) as Record<string, unknown>[];
   const columns = (content?.columns ?? (values[0] ? Object.keys(values[0]) : [])) as string[];
+
+  const mirrorSyncedAt = activeQuery?.data?.mirror?.syncedAt as string | null | undefined;
+  const mirrorSyncedLabel = useMemo(() => {
+    if (!mirrorSyncedAt) return null;
+    const d = new Date(mirrorSyncedAt);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [mirrorSyncedAt]);
+
+  const handleMirrorSync = useCallback(async () => {
+    if (!datasetId || syncingMirror) return;
+    setSyncingMirror(true);
+    const toastId = toast.loading('Sincronizando com o Fluig…');
+    try {
+      const res = await api.post(
+        `/fluig/datasets/${encodeURIComponent(datasetId)}/mirror/sync`,
+        {},
+        { timeout: 180000 }
+      );
+      const rowCount = Number(res.data?.data?.rowCount ?? 0);
+      await queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval', datasetId] });
+      toast.success(
+        rowCount > 0
+          ? `Espelho atualizado · ${rowCount.toLocaleString('pt-BR')} registro(s)`
+          : 'Espelho atualizado (sem registros no Fluig)',
+        { id: toastId }
+      );
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (err as Error)?.message ||
+        'Falha ao sincronizar';
+      toast.error(msg, { id: toastId });
+    } finally {
+      setSyncingMirror(false);
+    }
+  }, [datasetId, queryClient, syncingMirror]);
 
   const { rows } = useMemo(
     () => parseWorkflowApprovalRows(values, columns, datasetId),
@@ -472,6 +531,39 @@ export function FluigWorkflowAprovacoesPage() {
                       </div>
                     </div>
                     <div className={cadastroListClasses.cardToolbar}>
+                      <span className="group/fluig-mirror-info relative shrink-0">
+                        <button
+                          type="button"
+                          aria-label="Última atualização do espelho"
+                          aria-describedby="fluig-aprovacoes-mirror-status-hint"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                        >
+                          <Info className="h-4 w-4" aria-hidden />
+                        </button>
+                        <span
+                          id="fluig-aprovacoes-mirror-status-hint"
+                          role="tooltip"
+                          className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-max max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left text-xs leading-relaxed text-gray-700 shadow-xl transition-opacity duration-150 invisible opacity-0 group-hover/fluig-mirror-info:visible group-hover/fluig-mirror-info:opacity-100 group-focus-within/fluig-mirror-info:visible group-focus-within/fluig-mirror-info:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                        >
+                          {mirrorSyncedLabel
+                            ? `Última atualização do espelho: ${mirrorSyncedLabel}`
+                            : 'Espelho ainda não sincronizado'}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleMirrorSync()}
+                        disabled={syncingMirror || isLoading || !datasetId}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                        aria-label="Sincronizar espelho Fluig agora"
+                        title="Sincronizar agora"
+                      >
+                        {syncingMirror ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </button>
                       <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input

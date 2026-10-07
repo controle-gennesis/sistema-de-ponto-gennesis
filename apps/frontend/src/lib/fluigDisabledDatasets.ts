@@ -14,6 +14,12 @@ export const FLUIG_DISABLE_ALL_DATASET_FETCHES = true;
 const FLUIG_FETCH_ALWAYS_ALLOWED = new Set<string>([
   'DS_DownloadDocumento',
   'G5-Relatorio-DF-GO-DP',
+  'Processos_Workflow_Aprovacao_G3',
+  'Processos_Workflow_Aprovacao_G5',
+  'DataSet_G3FollowUp',
+  'DataSet_G4FollowUp',
+  'G5-Relatorio-DF-GO-TODOS-SETORES',
+  'G5-Relatorio-DF-GO-JURIDICO',
 ]);
 
 /** Ids conhecidos que costumamos puxar (referência / desativação seletiva). */

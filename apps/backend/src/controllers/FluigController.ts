@@ -3,6 +3,7 @@ import { FluigService } from '../services/FluigService';
 import {
   getFluigDatasetMirrorPayload,
   isFluigMirroredDataset,
+  syncFluigDatasetMirror,
 } from '../services/FluigDatasetMirrorSync';
 
 export const fluigService = new FluigService();
@@ -87,6 +88,45 @@ export async function getDatasetData(req: Request, res: Response) {
   } catch (error: unknown) {
     console.error('Fluig getDatasetData error:', error);
     const { status, message } = fluigErrorResponse(error, 'Erro ao buscar dados');
+    return res.status(status).json({ success: false, message });
+  }
+}
+
+/** Força sync do espelho Postgres a partir do Fluig (antes do intervalo de 30 min). */
+export async function syncDatasetMirror(req: Request, res: Response) {
+  try {
+    const { datasetId } = req.params;
+    if (!datasetId) {
+      return res.status(400).json({ success: false, message: 'datasetId é obrigatório' });
+    }
+    if (!isFluigMirroredDataset(datasetId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Este dataset não possui espelho local configurado.',
+      });
+    }
+
+    const result = await syncFluigDatasetMirror(datasetId, { force: true });
+    if (result.error) {
+      return res.status(502).json({
+        success: false,
+        message: result.error,
+        data: result,
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        datasetId: result.datasetId,
+        rowCount: result.rowCount,
+        syncedAt: result.syncedAt,
+        skipped: result.skipped ?? false,
+      },
+    });
+  } catch (error: unknown) {
+    console.error('Fluig syncDatasetMirror error:', error);
+    const { status, message } = fluigErrorResponse(error, 'Erro ao sincronizar espelho');
     return res.status(status).json({ success: false, message });
   }
 }

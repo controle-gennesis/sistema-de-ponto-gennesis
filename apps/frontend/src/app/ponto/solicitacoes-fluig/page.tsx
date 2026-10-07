@@ -9,8 +9,7 @@ export default function SolicitacoesFluigDpPage() {
       <FluigSolicitacoesPage
         config={{
           title: 'Solicitações - Fluig',
-          subtitle:
-            'Solicitações do Departamento Pessoal no Fluig (espelho local atualizado a cada 30 min)',
+          subtitle: 'Solicitações do Departamento Pessoal no Fluig',
           datasets: ['G5-Relatorio-DF-GO-DP'],
           datasetTabLabels: {
             'G5-Relatorio-DF-GO-DP': 'DP',
@@ -22,6 +21,7 @@ export default function SolicitacoesFluigDpPage() {
           showProcessCard: false,
           useEmployeeListLayout: true,
           showExportButton: true,
+          showMirrorSyncButton: true,
           leadTimeColumn: 'START_DATE',
           naturezaOrcamentariaColumn: 'natureza',
           responsavelColumn: 'responsavel_solicitacao',

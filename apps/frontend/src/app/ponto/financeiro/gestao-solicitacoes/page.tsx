@@ -24,6 +24,7 @@ export default function GestaoSolicitacoesFinanceiroPage() {
           showProcessCard: true,
           useEmployeeListLayout: true,
           showExportButton: true,
+          showMirrorSyncButton: true,
           leadTimeColumn: 'Início Data',
         }}
       />
