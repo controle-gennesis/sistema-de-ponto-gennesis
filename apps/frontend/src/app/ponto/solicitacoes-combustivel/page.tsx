@@ -29,14 +29,6 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import {
-  DetailInfoActions,
-  DetailInfoNote,
-  DetailInfoRows,
-  DetailInfoTabs,
-  type DetailInfoField,
-  type DetailInfoTabItem,
-} from '@/components/ui/DetailInfoLayout';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ListPageHeader, PageStack, pageStatCardsGrid5Class } from '@/components/ui/pageLayout';
@@ -412,13 +404,6 @@ const STATUS_BADGE: Record<FuelRefuelStatus, string> = {
 
 const ITEMS_PER_PAGE = 20;
 
-type FuelDetailTab =
-  | 'resumo'
-  | 'operacao'
-  | 'aprovacoes'
-  | 'cancelamento'
-  | 'anexos'
-  | 'abastecimento';
 
 function extractContractDisplayName(label: string): string {
   const trimmed = label.trim();
@@ -507,7 +492,8 @@ function SolicitacoesCombustivelPageContent() {
   const [isQuotaConfigOpen, setIsQuotaConfigOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<FuelRefuelRequest | null>(null);
-  const [detailTab, setDetailTab] = useState<FuelDetailTab>('resumo');
+  const [adminEditing, setAdminEditing] = useState(false);
+  const [editContractId, setEditContractId] = useState('');
   const [suppliesComment, setSuppliesComment] = useState('');
   const [approveGasStationId, setApproveGasStationId] = useState('');
   const [releasedAmountInput, setReleasedAmountInput] = useState('');
@@ -635,6 +621,29 @@ function SolicitacoesCombustivelPageContent() {
     },
   });
 
+  const adminUpdateMutation = useMutation({
+    mutationFn: async ({ id, contractId }: { id: string; contractId: string }) => {
+      const res = await api.put(`/fuel-refuel-requests/${id}/admin-update`, { contractId });
+      return res.data?.data as FuelRefuelRequest;
+    },
+    onSuccess: (updated) => {
+      toast.success('Solicitação atualizada');
+      setSelected(updated);
+      setAdminEditing(false);
+      setApproveGasStationId('');
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-gas-stations-by-contract'] });
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          'Erro ao atualizar solicitação',
+      );
+    },
+  });
+
   const cancelMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await api.post(`/fuel-refuel-requests/${id}/cancel`);
@@ -712,6 +721,30 @@ function SolicitacoesCombustivelPageContent() {
 
   const contractId = selected?.contract?.id;
   const costCenterLabel = selected?.costCenter || selected?.contract?.name || '';
+
+  const canAdminEditSelected =
+    isAdministrator &&
+    (selected?.status === 'PENDING_SUPPLIES' || selected?.status === 'PENDING_MANAGER');
+
+  const { data: contractsRes } = useQuery({
+    queryKey: ['contracts-for-fuel-admin-edit'],
+    queryFn: async () =>
+      (await api.get('/fuel-refuel-requests/contracts')).data,
+    enabled: adminEditing && canAdminEditSelected,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const contractEditOptions = useMemo(
+    () =>
+      ((contractsRes?.data ?? []) as Array<{ id: string; name: string; number?: string }>).map(
+        (c) => ({
+          value: c.id,
+          label: c.name,
+          searchText: `${c.name} ${c.number ?? ''}`,
+        }),
+      ),
+    [contractsRes],
+  );
 
   const { data: gasStations = [], isLoading: loadingGasStations } = useQuery({
     queryKey: ['fuel-gas-stations-by-contract', contractId, costCenterLabel],
@@ -793,7 +826,8 @@ function SolicitacoesCombustivelPageContent() {
   ) => {
     setActionMenu(null);
     setSelected(row);
-    setDetailTab(opts?.replaceReceipt ? 'anexos' : 'resumo');
+    setAdminEditing(false);
+    setEditContractId('');
     setShowRejectForm(!!opts?.reject);
     setShowCancelConfirm(!!opts?.cancel);
     if (!opts?.reject) setRejectReason('');
@@ -1339,537 +1373,475 @@ function SolicitacoesCombustivelPageContent() {
           isOpen={!!selected}
           onClose={() => {
             setSelected(null);
-            setDetailTab('resumo');
             setSuppliesComment('');
             setApproveGasStationId('');
             setReleasedAmountInput('');
             setRejectReason('');
             setShowRejectForm(false);
             setShowCancelConfirm(false);
+            setAdminEditing(false);
+            setEditContractId('');
             setIsReplacingReceipt(false);
             setReceiptReplacePhoto('');
           }}
           title={`Solicitação #${selected?.displayNumber ?? ''}`}
           size="lg"
-          headerClassName="!border-b-0 !pb-2"
-          contentClassName="!pt-0"
         >
-          {selected && (() => {
-            const hasPanelPhoto = hasFuelStoredPhoto(
-              selected.dashboardPhotoUrl,
-              selected.dashboardPhotoKey,
-            );
-            const hasReceiptPhoto = hasFuelStoredPhoto(
-              selected.receiptPhotoUrl,
-              selected.receiptPhotoKey,
-            );
-            const showAnexosTab =
-              hasPanelPhoto || hasReceiptPhoto || selected.status === 'COMPLETED';
-            const showAbastecimentoTab = selected.status === 'COMPLETED';
-            const isCancelled =
-              selected.status === 'CANCELLED' || selected.status === 'REJECTED';
-            const detailTabs: DetailInfoTabItem<FuelDetailTab>[] = [
-              { id: 'resumo', label: 'Resumo' },
-              { id: 'operacao', label: 'Operação' },
-              ...(isCancelled
-                ? [{ id: 'cancelamento' as const, label: 'Cancelamento' }]
-                : [{ id: 'aprovacoes' as const, label: 'Aprovações' }]),
-              ...(showAbastecimentoTab
-                ? [{ id: 'abastecimento' as const, label: 'Abastecimento' }]
-                : []),
-              ...(showAnexosTab ? [{ id: 'anexos' as const, label: 'Anexos' }] : []),
-            ];
-            const activeTab = detailTabs.some((t) => t.id === detailTab)
-              ? detailTab
-              : 'resumo';
-
-            const resumoFields: DetailInfoField[] = [
-              {
-                label: 'Status',
-                value: (
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[selected.status]}`}
-                  >
-                    {STATUS_LABELS[selected.status]}
+          {selected && (
+            <div className="space-y-4 text-sm">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Solicitante</span>
+                  <p className="text-gray-900 dark:text-gray-100">{selected.requester.name}</p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Solicitado em</span>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {format(new Date(selected.requestedAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Data para abastecer
                   </span>
-                ),
-              },
-              { label: 'Solicitante', value: selected.requester.name },
-              {
-                label: 'Solicitado em',
-                value: format(new Date(selected.requestedAt), 'dd/MM/yyyy HH:mm', {
-                  locale: ptBR,
-                }),
-              },
-              {
-                label: 'Data para abastecer',
-                value: format(new Date(selected.refuelDate), 'dd/MM/yyyy', { locale: ptBR }),
-              },
-              { label: 'Rota', value: selected.route },
-              {
-                label: 'Região administrativa',
-                value: selected.administrativeRegion
-                  ? `${selected.administrativeRegion.name}${
-                      selected.administrativeRegion.stateCode
-                        ? ` (${selected.administrativeRegion.stateCode})`
-                        : ''
-                    }`
-                  : '—',
-              },
-            ];
-            if (selected.refuelDeadlineAt || selected.refuelDeadlineAmount) {
-              resumoFields.push({
-                label: 'Prazo para abastecer',
-                value: formatRefuelDeadline(
-                  selected.refuelDeadlineAmount,
-                  selected.refuelDeadlineUnit,
-                  selected.refuelDeadlineAt,
-                ),
-              });
-            }
-            if (selected.gasStation) {
-              resumoFields.push({
-                label: 'Posto liberado',
-                value: `${selected.gasStation.name}${
-                  selected.gasStation.address ? ` — ${selected.gasStation.address}` : ''
-                }`,
-                stacked: true,
-              });
-            }
-            if (selected.observations?.trim()) {
-              resumoFields.push({
-                label: 'Observações',
-                value: (
-                  <span className="whitespace-pre-wrap leading-relaxed">
-                    {selected.observations}
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {format(new Date(selected.refuelDate), 'dd/MM/yyyy', { locale: ptBR })}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Status</span>
+                  <p className="mt-1">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[selected.status]}`}
+                    >
+                      {STATUS_LABELS[selected.status]}
+                    </span>
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Rota</span>
+                  <p className="text-gray-900 dark:text-gray-100">{selected.route}</p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Região administrativa
                   </span>
-                ),
-                stacked: true,
-              });
-            }
-
-            const operacaoFields: DetailInfoField[] = [
-              {
-                label: 'Contrato',
-                value: fuelContractLabel(selected),
-              },
-              { label: 'Condutor', value: selected.driverName },
-              {
-                label: 'Veículo',
-                value: `${selected.vehiclePlate}${
-                  selected.vehicleDescription ? ` — ${selected.vehicleDescription}` : ''
-                }`,
-              },
-            ];
-            if (selected.vehicleType) {
-              operacaoFields.push({
-                label: 'Tipo',
-                value: VEHICLE_TYPE_LABELS[selected.vehicleType],
-              });
-            }
-
-            const gestorQuando = selected.managerApprovedAt
-              ? ` — ${format(new Date(selected.managerApprovedAt), 'dd/MM/yyyy HH:mm', {
-                  locale: ptBR,
-                })}`
-              : '';
-            const gestorNome = selected.managerApprover?.name?.trim() || '';
-            const gestorAprovacaoValue =
-              selected.status === 'PENDING_MANAGER'
-                ? 'Aguardando aprovação'
-                : selected.status === 'REJECTED' ||
-                    (selected.status === 'CANCELLED' && !!selected.managerRejectionReason)
-                  ? gestorNome
-                    ? `Cancelada por ${gestorNome}${gestorQuando}`
-                    : 'Cancelada pelo gestor'
-                  : selected.status === 'CANCELLED'
-                    ? '—'
-                    : gestorNome
-                      ? `${gestorNome}${gestorQuando}`
-                      : '—';
-
-            const liberacaoValue = selected.suppliesRejectionReason
-              ? selected.suppliesApprover?.name
-                ? `Cancelada por ${selected.suppliesApprover.name}${
-                    selected.suppliesApprovedAt
-                      ? ` — ${format(new Date(selected.suppliesApprovedAt), 'dd/MM/yyyy HH:mm', {
-                          locale: ptBR,
-                        })}`
-                      : ''
-                  }`
-                : 'Cancelada pelo Suprimentos'
-              : selected.suppliesApprover
-                ? `${selected.suppliesApprover.name}${
-                    selected.suppliesApprovedAt
-                      ? ` — ${format(new Date(selected.suppliesApprovedAt), 'dd/MM/yyyy HH:mm', {
-                          locale: ptBR,
-                        })}`
-                      : ''
-                  }${
-                    selected.releasedAmountReais != null
-                      ? ` · ${formatReais(Number(selected.releasedAmountReais))}`
-                      : ''
-                  }`
-                : selected.status === 'PENDING_SUPPLIES' || selected.status === 'APPROVED'
-                  ? 'Aguardando liberação do Suprimentos'
-                  : selected.status === 'PENDING_MANAGER'
-                    ? 'Aguardando aprovação do gestor'
-                    : selected.status === 'CANCELLED' || selected.status === 'REJECTED'
-                      ? '—'
-                      : '—';
-
-            const aprovacaoFields: DetailInfoField[] = [
-              {
-                label: 'Aprovação do gestor',
-                value: gestorAprovacaoValue,
-              },
-              {
-                label: 'Liberação do posto',
-                value: liberacaoValue,
-              },
-            ];
-
-            const canceladoPorGestor =
-              selected.status === 'REJECTED' ||
-              (selected.status === 'CANCELLED' && !!selected.managerRejectionReason?.trim());
-            const canceladoPorSuprimentos = !!selected.suppliesRejectionReason?.trim();
-            const autoCancelMatch =
-              selected.suppliesApprovalComment?.match(
-                /\[Cancelamento automático\]\s*([\s\S]+)$/i,
-              ) ?? null;
-            const cancelamentoMotivo =
-              selected.managerRejectionReason?.trim() ||
-              selected.suppliesRejectionReason?.trim() ||
-              autoCancelMatch?.[1]?.trim() ||
-              '';
-            const cancelamentoQuandoRaw = canceladoPorGestor
-              ? selected.managerApprovedAt
-              : canceladoPorSuprimentos
-                ? selected.suppliesApprovedAt
-                : null;
-            const cancelamentoPor = canceladoPorGestor
-              ? selected.managerApprover?.name?.trim() || 'Gestor'
-              : canceladoPorSuprimentos
-                ? selected.suppliesApprover?.name?.trim() || 'Suprimentos'
-                : autoCancelMatch
-                  ? 'Sistema'
-                  : selected.status === 'CANCELLED' && selected.suppliesApprover
-                    ? selected.suppliesApprover.name?.trim() || 'Suprimentos'
-                    : selected.status === 'CANCELLED'
-                      ? selected.requester?.name?.trim() || 'Solicitante'
-                      : '—';
-            const cancelamentoFields: DetailInfoField[] = [
-              {
-                label: 'Status',
-                value: (
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[selected.status]}`}
-                  >
-                    {STATUS_LABELS[selected.status]}
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {selected.administrativeRegion
+                      ? `${selected.administrativeRegion.name}${
+                          selected.administrativeRegion.stateCode
+                            ? ` (${selected.administrativeRegion.stateCode})`
+                            : ''
+                        }`
+                      : '—'}
+                  </p>
+                </div>
+                {selected.gasStation ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      Posto liberado
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.gasStation.name}
+                      {selected.gasStation.address ? ` — ${selected.gasStation.address}` : ''}
+                    </p>
+                  </div>
+                ) : null}
+                {selected.refuelDeadlineAt || selected.refuelDeadlineAmount ? (
+                  <div className="sm:col-span-2">
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      Prazo para abastecer
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {formatRefuelDeadline(
+                        selected.refuelDeadlineAmount,
+                        selected.refuelDeadlineUnit,
+                        selected.refuelDeadlineAt,
+                      )}
+                    </p>
+                  </div>
+                ) : null}
+                <div className="sm:col-span-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-500 dark:text-gray-400">Contrato</span>
+                    {canAdminEditSelected && !adminEditing ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditContractId(selected.contract?.id || '');
+                          setAdminEditing(true);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                    ) : null}
+                  </div>
+                  {adminEditing && canAdminEditSelected ? (
+                    <div className="space-y-2">
+                      <SingleSelectSearchDropdown
+                        value={editContractId}
+                        onChange={setEditContractId}
+                        options={contractEditOptions}
+                        allowEmpty={false}
+                        placeholder="Selecionar contrato..."
+                        searchPlaceholder="Pesquisar contrato..."
+                        disabled={adminUpdateMutation.isPending}
+                        noFocusRing
+                      />
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={adminUpdateMutation.isPending}
+                          onClick={() => {
+                            setAdminEditing(false);
+                            setEditContractId(selected.contract?.id || '');
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={
+                            adminUpdateMutation.isPending ||
+                            !editContractId ||
+                            editContractId === selected.contract?.id
+                          }
+                          onClick={() =>
+                            adminUpdateMutation.mutate({
+                              id: selected.id,
+                              contractId: editContractId,
+                            })
+                          }
+                        >
+                          {adminUpdateMutation.isPending ? 'Salvando…' : 'Salvar contrato'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {fuelContractLabel(selected)}
+                    </p>
+                  )}
+                  {quotaBalance ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {quotaBalance.unlimited
+                        ? 'Cota semanal: sem limite'
+                        : `Restante da cota semanal: ${formatReais(quotaBalance.remainingReais)}`}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Condutor</span>
+                  <p className="text-gray-900 dark:text-gray-100">{selected.driverName}</p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Veículo</span>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {selected.vehiclePlate}
+                    {selected.vehicleDescription ? ` — ${selected.vehicleDescription}` : ''}
+                  </p>
+                </div>
+                {selected.vehicleType ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">Tipo</span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {VEHICLE_TYPE_LABELS[selected.vehicleType]}
+                    </p>
+                  </div>
+                ) : null}
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Aprovação do gestor
                   </span>
-                ),
-              },
-              { label: 'Cancelado por', value: cancelamentoPor },
-              {
-                label: 'Data',
-                value: cancelamentoQuandoRaw
-                  ? format(new Date(cancelamentoQuandoRaw), 'dd/MM/yyyy HH:mm', {
-                      locale: ptBR,
-                    })
-                  : '—',
-              },
-            ];
-            if (cancelamentoMotivo) {
-              cancelamentoFields.push({
-                label: 'Motivo',
-                value: (
-                  <span className="whitespace-pre-wrap leading-relaxed">
-                    {cancelamentoMotivo}
+                  {selected.status === 'PENDING_MANAGER' ? (
+                    <p className="text-gray-900 dark:text-gray-100">Aguardando aprovação</p>
+                  ) : selected.managerApprover ? (
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.managerApprover.name}
+                      {selected.managerApprovedAt
+                        ? ` — ${format(new Date(selected.managerApprovedAt), 'dd/MM/yyyy HH:mm', {
+                            locale: ptBR,
+                          })}`
+                        : ''}
+                    </p>
+                  ) : (
+                    <p className="text-gray-900 dark:text-gray-100">—</p>
+                  )}
+                </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Liberação do posto
                   </span>
-                ),
-                stacked: true,
-              });
-            }
-
-            const abastecimentoFields: DetailInfoField[] = [];
-            if (selected.odometerKm != null) {
-              abastecimentoFields.push({
-                label: 'Hodômetro',
-                value: `${selected.odometerKm.toLocaleString('pt-BR')} km`,
-              });
-            }
-            if (selected.tankLevelAfter) {
-              abastecimentoFields.push({
-                label: 'Tanque após abastecimento',
-                value: TANK_LEVEL_LABELS[selected.tankLevelAfter],
-              });
-            }
-            if (selected.litersRefueled != null) {
-              abastecimentoFields.push({
-                label: 'Litros',
-                value: Number(selected.litersRefueled).toLocaleString('pt-BR', {
-                  minimumFractionDigits: 3,
-                  maximumFractionDigits: 3,
-                }),
-              });
-            }
-            if (selected.pricePerLiter != null) {
-              abastecimentoFields.push({
-                label: 'Valor por litro',
-                value: Number(selected.pricePerLiter).toLocaleString('pt-BR', {
-                  style: 'currency',
-                  currency: 'BRL',
-                }),
-              });
-            }
-            const totalAbastecimento = fuelRefuelTotalValue(
-              selected.litersRefueled,
-              selected.pricePerLiter,
-            );
-            if (totalAbastecimento != null) {
-              abastecimentoFields.push({
-                label: 'Valor total',
-                value: (
-                  <span className="font-semibold">
-                    {totalAbastecimento.toLocaleString('pt-BR', {
-                      style: 'currency',
-                      currency: 'BRL',
-                    })}
-                  </span>
-                ),
-              });
-            }
-            if (selected.refuelReportObservations?.trim()) {
-              abastecimentoFields.push({
-                label: 'Observações do abastecimento',
-                value: (
-                  <span className="whitespace-pre-wrap leading-relaxed">
-                    {selected.refuelReportObservations}
-                  </span>
-                ),
-                stacked: true,
-              });
-            }
-
-            const panelPhotoUrl = hasPanelPhoto
-              ? resolveFuelPhotoSrc(selected.dashboardPhotoViewUrl, selected.dashboardPhotoUrl)
-              : null;
-            const receiptPhotoUrl = hasReceiptPhoto
-              ? resolveFuelPhotoSrc(selected.receiptPhotoViewUrl, selected.receiptPhotoUrl)
-              : null;
-
-            return (
-            <div className="space-y-4">
-              <div className="-mx-6">
-                <DetailInfoTabs
-                  tabs={detailTabs}
-                  active={activeTab}
-                  onChange={setDetailTab}
-                  ariaLabel="Seções da solicitação"
-                  className="px-6"
-                />
+                  {selected.suppliesApprover ? (
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.suppliesApprover.name}
+                      {selected.suppliesApprovedAt
+                        ? ` — ${format(new Date(selected.suppliesApprovedAt), 'dd/MM/yyyy HH:mm', {
+                            locale: ptBR,
+                          })}`
+                        : ''}
+                      {selected.releasedAmountReais != null
+                        ? ` · ${formatReais(Number(selected.releasedAmountReais))}`
+                        : ''}
+                    </p>
+                  ) : selected.status === 'PENDING_SUPPLIES' || selected.status === 'APPROVED' ? (
+                    <p className="text-gray-900 dark:text-gray-100">
+                      Aguardando liberação do Suprimentos
+                    </p>
+                  ) : selected.status === 'PENDING_MANAGER' ? (
+                    <p className="text-gray-900 dark:text-gray-100">
+                      Aguardando aprovação do gestor
+                    </p>
+                  ) : (
+                    <p className="text-gray-900 dark:text-gray-100">—</p>
+                  )}
+                </div>
+                {selected.observations ? (
+                  <div className="sm:col-span-2">
+                    <span className="font-medium text-gray-500 dark:text-gray-400">Observações</span>
+                    <p className="text-gray-900 dark:text-gray-100">{selected.observations}</p>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="text-sm">
-                {activeTab === 'resumo' ? <DetailInfoRows fields={resumoFields} /> : null}
+              {hasFuelStoredPhoto(selected.dashboardPhotoUrl, selected.dashboardPhotoKey) ? (() => {
+                const panelPhotoUrl = resolveFuelPhotoSrc(
+                  selected.dashboardPhotoViewUrl,
+                  selected.dashboardPhotoUrl,
+                );
+                if (!panelPhotoUrl) return null;
+                return (
+                  <FuelRequestPhoto
+                    src={panelPhotoUrl}
+                    alt={selected.dashboardPhotoName || 'Painel'}
+                    label="Foto do painel"
+                    fileName={selected.dashboardPhotoName}
+                  />
+                );
+              })() : null}
 
-                {activeTab === 'operacao' ? (
-                  <DetailInfoRows fields={operacaoFields} />
-                ) : null}
+              {selected.managerApprovalComment || selected.managerRejectionReason ? (
+                <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-800">
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Parecer do gestor
+                  </span>
+                  <p className="mt-1 text-gray-900 dark:text-gray-100">
+                    {selected.managerApprovalComment || selected.managerRejectionReason}
+                  </p>
+                </div>
+              ) : null}
 
-                {activeTab === 'aprovacoes' ? (
-                  <div>
-                    <DetailInfoRows fields={aprovacaoFields} />
-                    {selected.managerApprovalComment ? (
-                      <div className="border-t border-gray-200 dark:border-gray-700">
-                        <DetailInfoNote title="Parecer do gestor">
-                          {selected.managerApprovalComment}
-                        </DetailInfoNote>
+              {selected.suppliesApprovalComment || selected.suppliesRejectionReason ? (
+                <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-800">
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Parecer do Suprimentos
+                  </span>
+                  <p className="mt-1 text-gray-900 dark:text-gray-100">
+                    {selected.suppliesApprovalComment || selected.suppliesRejectionReason}
+                  </p>
+                </div>
+              ) : null}
+
+              {selected.status === 'COMPLETED' ? (
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800/50 dark:bg-green-950/20">
+                  <span className="font-medium text-green-800 dark:text-green-200">
+                    Dados do abastecimento
+                  </span>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {selected.odometerKm != null ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Hodômetro</span>
+                        <p>{selected.odometerKm.toLocaleString('pt-BR')} km</p>
                       </div>
                     ) : null}
-                    {selected.suppliesApprovalComment ? (
-                      <div className="border-t border-gray-200 dark:border-gray-700">
-                        <DetailInfoNote title="Parecer do Suprimentos">
-                          {selected.suppliesApprovalComment}
-                        </DetailInfoNote>
+                    {selected.tankLevelAfter ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Tanque após abastecimento</span>
+                        <p>{TANK_LEVEL_LABELS[selected.tankLevelAfter]}</p>
+                      </div>
+                    ) : null}
+                    {selected.litersRefueled != null ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Litros</span>
+                        <p>
+                          {Number(selected.litersRefueled).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 3,
+                            maximumFractionDigits: 3,
+                          })}
+                        </p>
+                      </div>
+                    ) : null}
+                    {selected.pricePerLiter != null ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Valor por litro</span>
+                        <p>
+                          {Number(selected.pricePerLiter).toLocaleString('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL',
+                          })}
+                        </p>
+                      </div>
+                    ) : null}
+                    {fuelRefuelTotalValue(selected.litersRefueled, selected.pricePerLiter) != null ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Valor total</span>
+                        <p className="font-semibold text-gray-900 dark:text-gray-100">
+                          {fuelRefuelTotalValue(
+                            selected.litersRefueled,
+                            selected.pricePerLiter,
+                          )!.toLocaleString('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL',
+                          })}
+                        </p>
                       </div>
                     ) : null}
                   </div>
-                ) : null}
-
-                {activeTab === 'cancelamento' ? (
-                  <DetailInfoRows fields={cancelamentoFields} />
-                ) : null}
-
-                {activeTab === 'abastecimento' ? (
-                  <DetailInfoRows fields={abastecimentoFields} />
-                ) : null}
-
-                {activeTab === 'anexos' ? (
-                  <div className="py-1">
-                    {isReplacingReceipt ? (
-                      <div className="space-y-3">
-                        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                          Cupom fiscal
-                        </p>
-                        <VehicleReturnPhotoField
-                          value={receiptReplacePhoto}
-                          onChange={setReceiptReplacePhoto}
-                          emptyLabel="Clique para enviar o novo cupom fiscal"
-                          photoAlt="Novo cupom fiscal"
+                  {selected.refuelReportObservations ? (
+                    <p className="mt-2 text-sm">{selected.refuelReportObservations}</p>
+                  ) : null}
+                  {isReplacingReceipt ? (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Nova foto do cupom fiscal
+                      </p>
+                      <VehicleReturnPhotoField
+                        value={receiptReplacePhoto}
+                        onChange={setReceiptReplacePhoto}
+                        emptyLabel="Clique para enviar o novo cupom fiscal"
+                        photoAlt="Novo cupom fiscal"
+                        disabled={receiptPhotoMutation.isPending}
+                      />
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
                           disabled={receiptPhotoMutation.isPending}
-                        />
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={receiptPhotoMutation.isPending}
-                            onClick={() => {
-                              setIsReplacingReceipt(false);
-                              setReceiptReplacePhoto('');
-                            }}
-                          >
-                            Cancelar
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            loading={receiptPhotoMutation.isPending}
-                            disabled={receiptPhotoMutation.isPending}
-                            onClick={() => {
-                              if (isBlankVehiclePhoto(receiptReplacePhoto)) {
-                                toast.error('Envie a nova foto do cupom fiscal');
-                                return;
-                              }
-                              receiptPhotoMutation.mutate({
-                                id: selected.id,
-                                receiptPhotoBase64: receiptReplacePhoto,
-                              });
-                            }}
-                          >
-                            Salvar foto
-                          </Button>
-                        </div>
+                          onClick={() => {
+                            setIsReplacingReceipt(false);
+                            setReceiptReplacePhoto('');
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={receiptPhotoMutation.isPending}
+                          disabled={receiptPhotoMutation.isPending}
+                          onClick={() => {
+                            if (isBlankVehiclePhoto(receiptReplacePhoto)) {
+                              toast.error('Envie a nova foto do cupom fiscal');
+                              return;
+                            }
+                            receiptPhotoMutation.mutate({
+                              id: selected.id,
+                              receiptPhotoBase64: receiptReplacePhoto,
+                            });
+                          }}
+                        >
+                          Salvar foto
+                        </Button>
                       </div>
-                    ) : (
-                      <>
-                        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                          {panelPhotoUrl ? (
-                            <FuelRequestPhoto
-                              src={panelPhotoUrl}
-                              alt={selected.dashboardPhotoName || 'Painel'}
-                              label="Foto do painel"
-                              fileName={selected.dashboardPhotoName}
-                            />
-                          ) : null}
-
-                          {selected.status === 'COMPLETED' || hasReceiptPhoto ? (
-                            receiptPhotoUrl ? (
+                    </div>
+                  ) : (
+                    <>
+                      {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey)
+                        ? (() => {
+                            const receiptPhotoUrl = resolveFuelPhotoSrc(
+                              selected.receiptPhotoViewUrl,
+                              selected.receiptPhotoUrl,
+                            );
+                            if (!receiptPhotoUrl) return null;
+                            return (
                               <FuelRequestPhoto
                                 src={receiptPhotoUrl}
                                 alt={selected.receiptPhotoName || 'Cupom fiscal'}
                                 label="Cupom fiscal"
                                 fileName={selected.receiptPhotoName}
-                                labelAction={
-                                  <button
-                                    type="button"
-                                    className="rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                                    title={hasReceiptPhoto ? 'Alterar foto' : 'Adicionar foto'}
-                                    aria-label={hasReceiptPhoto ? 'Alterar foto' : 'Adicionar foto'}
-                                    onClick={() => {
-                                      setReceiptReplacePhoto('');
-                                      setIsReplacingReceipt(true);
-                                    }}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                }
+                                compact
                               />
-                            ) : (
-                              <div>
-                                <div className="mb-2 flex items-center gap-1.5">
-                                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                    Cupom fiscal
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                                    title="Adicionar foto"
-                                    aria-label="Adicionar foto"
-                                    onClick={() => {
-                                      setReceiptReplacePhoto('');
-                                      setIsReplacingReceipt(true);
-                                    }}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                  Nenhuma foto de cupom cadastrada.
-                                </p>
-                              </div>
-                            )
-                          ) : null}
-                        </div>
-
-                        {!panelPhotoUrl &&
-                        !(selected.status === 'COMPLETED' || hasReceiptPhoto) ? (
-                          <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                            Nenhum anexo disponível.
+                            );
+                          })()
+                        : (
+                          <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                            Nenhuma foto de cupom cadastrada.
                           </p>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ) : null}
-              </div>
+                        )}
+                      <div className="mt-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          icon={<Pencil className="h-3.5 w-3.5" />}
+                          onClick={() => {
+                            setReceiptReplacePhoto('');
+                            setIsReplacingReceipt(true);
+                          }}
+                        >
+                          {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey)
+                            ? 'Alterar foto'
+                            : 'Adicionar foto'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
 
               {selected.status === 'AWAITING_REFUEL' ? (
-                !showCancelConfirm ? (
-                  <DetailInfoActions>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setShowCancelConfirm(true)}
-                      disabled={cancelMutation.isPending || reportMutation.isPending}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => openReportForm(selected)}
-                      disabled={cancelMutation.isPending || reportMutation.isPending}
-                    >
-                      Informar abastecimento
-                    </Button>
-                  </DetailInfoActions>
-                ) : (
-                  <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Cancelar esta solicitação liberada? O colaborador não poderá mais
-                      abastecer neste posto.
-                    </p>
+                <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  {!showCancelConfirm ? (
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => setShowCancelConfirm(false)}
-                        disabled={cancelMutation.isPending}
+                        onClick={() => setShowCancelConfirm(true)}
+                        disabled={cancelMutation.isPending || reportMutation.isPending}
                       >
-                        Voltar
+                        Cancelar
                       </Button>
                       <Button
                         type="button"
-                        variant="error"
-                        onClick={() => cancelMutation.mutate(selected.id)}
-                        disabled={cancelMutation.isPending}
+                        onClick={() => openReportForm(selected)}
+                        disabled={cancelMutation.isPending || reportMutation.isPending}
                       >
-                        {cancelMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}
+                        Informar abastecimento
                       </Button>
                     </div>
-                  </div>
-                )
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Cancelar esta solicitação liberada? O colaborador não poderá mais
+                        abastecer neste posto.
+                      </p>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowCancelConfirm(false)}
+                          disabled={cancelMutation.isPending}
+                        >
+                          Voltar
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="error"
+                          onClick={() => cancelMutation.mutate(selected.id)}
+                          disabled={cancelMutation.isPending}
+                        >
+                          {cancelMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : null}
 
               {selected.status === 'PENDING_SUPPLIES' ? (
@@ -1899,7 +1871,7 @@ function SolicitacoesCombustivelPageContent() {
                                 Restante:{' '}
                                 <span
                                   className={
-                                    (quotaBalance.remainingReais ?? 0) <= -0.01
+                                    (quotaBalance.remainingReais ?? 0) < 0
                                       ? 'font-medium text-red-600 dark:text-red-400'
                                       : 'font-medium'
                                   }
@@ -1969,8 +1941,12 @@ function SolicitacoesCombustivelPageContent() {
                           noFocusRing
                         />
                       </div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-200">
+                        <span className="font-medium">Prazo para abastecer:</span> até 22:00 do dia
+                        da data de abastecimento
+                      </div>
                       <Input
-                        label="Observação"
+                        label="Observação (opcional)"
                         value={suppliesComment}
                         onChange={(e) => setSuppliesComment(e.target.value)}
                         placeholder="Mensagem enviada ao colaborador no WhatsApp"
@@ -2042,8 +2018,7 @@ function SolicitacoesCombustivelPageContent() {
                 </div>
               ) : null}
             </div>
-            );
-          })()}
+          )}
         </Modal>
 
         <Modal
