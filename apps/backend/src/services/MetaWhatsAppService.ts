@@ -118,7 +118,7 @@ export class MetaWhatsAppService {
   /**
    * Envia mensagem via template aprovado (Meta Business Manager). Diferente de `sendText`,
    * funciona mesmo fora da janela de 24h — é o único jeito de a empresa iniciar uma conversa
-   * (avisos automáticos tipo "nova solicitação pendente" ou "feliz aniversário").
+   * (avisos automáticos tipo lembrete de abastecimento).
    * `bodyParams` preenche {{1}}, {{2}}... do corpo do template, na ordem.
    */
   async sendTemplate(
