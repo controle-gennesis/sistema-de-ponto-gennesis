@@ -9,7 +9,6 @@ import type { SendAction } from './WhatsAppBotService';
 
 export type WhatsAppVehicleReservationFlowStatus =
   | 'VR_ASK_DRIVER_CPF'
-  | 'VR_ASK_DRIVER_NAME'
   | 'VR_ASK_ATIVIDADE'
   | 'VR_ASK_DESTINO'
   | 'VR_ASK_START_DATE'
@@ -31,7 +30,6 @@ type ContractOptionPayload = {
 const YES_WORDS = /^(sim|s|confirmar|confirmo|ok|pode|yes)$/i;
 const NO_WORDS = /^(n[aã]o|nao|n|cancelar|cancela)$/i;
 const SKIP_WORDS = /^(n[aã]o|nao|nenhuma|nenhum|-|pular|skip)$/i;
-const NAME_INSTEAD_ID = 'vr_driver_by_name';
 const DATE_TODAY_ID = 'vr_date_today';
 const DATE_SAME_ID = 'vr_date_same';
 const POLO_DF_ID = 'vr_polo_df';
@@ -282,14 +280,7 @@ export async function processWhatsAppVehicleReservationFlow(params: {
 
   if (startingFromMenu) {
     return {
-      sendAction: waButtons(
-        'Vamos reservar um veículo.\n\nQual o CPF do motorista?\n(Se não souber o CPF, toque em «Informar nome».)',
-        [
-          { id: NAME_INSTEAD_ID, title: 'Informar nome' },
-          { id: 'MENU', title: 'Menu' },
-          { id: 'END', title: 'Encerrar' },
-        ],
-      ),
+      sendAction: waButtons('Vamos reservar um veículo.\n\nQual o CPF do motorista?'),
       newStatus: 'VR_ASK_DRIVER_CPF',
       newPayload,
     };
@@ -297,25 +288,10 @@ export async function processWhatsAppVehicleReservationFlow(params: {
 
   switch (newStatus) {
     case 'VR_ASK_DRIVER_CPF': {
-      if (content === NAME_INSTEAD_ID || content === 'informar_nome' || /^nome$/i.test(textRaw.trim())) {
-        return {
-          sendAction: waButtons('Qual o nome completo do motorista?'),
-          newStatus: 'VR_ASK_DRIVER_NAME',
-          newPayload,
-        };
-      }
-
       const cpfDigits = onlyDigits(textRaw);
       if (!cpfDigits || !isValidCpf(cpfDigits)) {
         return {
-          sendAction: waButtons(
-            'CPF inválido. Envie o CPF do motorista ou toque em «Informar nome».',
-            [
-              { id: NAME_INSTEAD_ID, title: 'Informar nome' },
-              { id: 'MENU', title: 'Menu' },
-              { id: 'END', title: 'Encerrar' },
-            ],
-          ),
+          sendAction: waButtons('CPF inválido. Envie o CPF do motorista (com ou sem pontuação).'),
           newStatus,
           newPayload,
         };
@@ -325,10 +301,10 @@ export async function processWhatsAppVehicleReservationFlow(params: {
       if (!employee) {
         return {
           sendAction: waButtons(
-            'Não encontrei colaborador com esse CPF. Informe o nome completo do motorista:',
+            'Não encontrei colaborador cadastrado com esse CPF. Verifique o número e envie novamente.',
           ),
-          newStatus: 'VR_ASK_DRIVER_NAME',
-          newPayload: { ...newPayload, driverCpfDigits: cpfDigits },
+          newStatus,
+          newPayload,
         };
       }
 
@@ -336,26 +312,6 @@ export async function processWhatsAppVehicleReservationFlow(params: {
       newPayload.solicitante = employee.name;
       newPayload.driverCpfMasked = employee.cpfMasked;
       newPayload.createdById = employee.userId;
-      return {
-        sendAction: waButtons(
-          `Motorista: ${employee.name}.\n\nQual a atividade / motivo da reserva?`,
-        ),
-        newStatus: 'VR_ASK_ATIVIDADE',
-        newPayload,
-      };
-    }
-
-    case 'VR_ASK_DRIVER_NAME': {
-      const name = textRaw.trim();
-      if (name.length < 3) {
-        return {
-          sendAction: waButtons('Informe o nome completo do motorista (mínimo 3 caracteres).'),
-          newStatus,
-          newPayload,
-        };
-      }
-      newPayload.motorista = name;
-      newPayload.solicitante = name;
       return {
         sendAction: waButtons('Qual a atividade / motivo da reserva?'),
         newStatus: 'VR_ASK_ATIVIDADE',
@@ -702,14 +658,7 @@ export async function processWhatsAppVehicleReservationFlow(params: {
     case 'VR_COMPLETE': {
       if (isWhatsAppVehicleReservationMenuSelection(content)) {
         return {
-          sendAction: waButtons(
-            'Vamos reservar um veículo.\n\nQual o CPF do motorista?\n(Se não souber o CPF, toque em «Informar nome».)',
-            [
-              { id: NAME_INSTEAD_ID, title: 'Informar nome' },
-              { id: 'MENU', title: 'Menu' },
-              { id: 'END', title: 'Encerrar' },
-            ],
-          ),
+          sendAction: waButtons('Vamos reservar um veículo.\n\nQual o CPF do motorista?'),
           newStatus: 'VR_ASK_DRIVER_CPF',
           newPayload: { flow: 'VEHICLE_RESERVATION' },
           newConversationStatus: 'PENDING',
