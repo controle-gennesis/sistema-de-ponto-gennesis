@@ -18,8 +18,12 @@ import {
   Eye,
   Trash2,
   RefreshCw,
+  Ban,
+  Layers,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { pageStatCardsGrid3Class } from '@/components/ui/pageLayout';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -51,6 +55,37 @@ const MATERIAL_ACTIVE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'true', label: 'Ativos' },
   { value: 'false', label: 'Inativos' },
 ]);
+
+type AvgPaidSortDir = 'none' | 'asc' | 'desc';
+
+function getMaterialListHeader(filter: string) {
+  switch (filter) {
+    case 'true':
+      return {
+        Icon: CheckCircle,
+        iconBg: 'bg-green-100 dark:bg-green-900/30',
+        iconColor: 'text-green-600 dark:text-green-400',
+        title: 'Materiais Ativos',
+        subtitle: 'Materiais e serviços ativos',
+      };
+    case 'false':
+      return {
+        Icon: Ban,
+        iconBg: 'bg-gray-100 dark:bg-gray-700/60',
+        iconColor: 'text-gray-600 dark:text-gray-300',
+        title: 'Materiais Inativos',
+        subtitle: 'Materiais e serviços inativos',
+      };
+    default:
+      return {
+        Icon: Layers,
+        iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+        iconColor: 'text-blue-600 dark:text-blue-400',
+        title: 'Todos os Materiais',
+        subtitle: 'Lista completa de materiais e serviços',
+      };
+  }
+}
 
 type ProductTypeKind = 'Produto' | 'Serviço' | '';
 
@@ -494,6 +529,7 @@ export default function MateriaisConstrucaoPage() {
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
   const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
+  const [avgPaidSortDir, setAvgPaidSortDir] = useState<AvgPaidSortDir>('none');
   const [customUnits, setCustomUnits] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -528,19 +564,50 @@ export default function MateriaisConstrucaoPage() {
 
   // Buscar materiais
   const { data: materialsData, isLoading: loadingMaterials } = useQuery({
-    queryKey: ['construction-materials', searchTerm, materialActiveFilter, currentPage, itemsPerPage],
+    queryKey: [
+      'construction-materials',
+      searchTerm,
+      materialActiveFilter,
+      currentPage,
+      itemsPerPage,
+      avgPaidSortDir,
+    ],
     queryFn: async () => {
       const res = await api.get('/construction-materials', {
         params: {
           search: searchTerm || undefined,
           isActive: materialActiveFilter !== 'all' ? materialActiveFilter : undefined,
           page: currentPage,
-          limit: itemsPerPage
+          limit: itemsPerPage,
+          ...(avgPaidSortDir !== 'none'
+            ? { sortBy: 'avgPaid', sortDir: avgPaidSortDir }
+            : {}),
         }
       });
       return res.data;
     }
   });
+
+  const materialSummary = {
+    total: Number(materialsData?.summary?.total ?? 0),
+    active: Number(materialsData?.summary?.active ?? 0),
+    inactive: Number(materialsData?.summary?.inactive ?? 0),
+  };
+
+  const cycleAvgPaidSort = () => {
+    setAvgPaidSortDir((prev) => {
+      if (prev === 'none') return 'desc';
+      if (prev === 'desc') return 'asc';
+      return 'none';
+    });
+  };
+
+  const avgPaidSortLabel =
+    avgPaidSortDir === 'desc'
+      ? 'Ordenado: maior → menor média paga'
+      : avgPaidSortDir === 'asc'
+        ? 'Ordenado: menor → maior média paga'
+        : 'Ordenar por média paga';
 
   const { data: nextCodeData } = useQuery({
     queryKey: ['construction-materials-next-code'],
@@ -1197,7 +1264,7 @@ export default function MateriaisConstrucaoPage() {
   // Resetar página quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, materialActiveFilter]);
+  }, [searchTerm, materialActiveFilter, avgPaidSortDir]);
 
   // Como a busca já é feita no backend, não precisamos filtrar no frontend
   const filteredMaterials = useMemo(() => {
@@ -1251,6 +1318,9 @@ export default function MateriaisConstrucaoPage() {
     role: 'EMPLOYEE'
   };
 
+  const listHeader = getMaterialListHeader(materialActiveFilter);
+  const ListHeaderIcon = listHeader.Icon;
+
   if (loadingUser) {
     return (
       <ProtectedRoute route="/ponto/materiais-construcao">
@@ -1297,6 +1367,39 @@ export default function MateriaisConstrucaoPage() {
                 Gerencie o cadastro de materiais e serviços
               </p>
             </div>
+          </div>
+
+          <div className={pageStatCardsGrid3Class}>
+            <FilterStatCard
+              label="Todos"
+              count={materialSummary.total}
+              icon={Layers}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              isActive={materialActiveFilter === 'all'}
+              loading={loadingMaterials && !materialsData}
+              onClick={() => setMaterialActiveFilter('all')}
+            />
+            <FilterStatCard
+              label="Ativos"
+              count={materialSummary.active}
+              icon={CheckCircle}
+              iconBg="bg-green-100 dark:bg-green-900/30"
+              iconColor="text-green-600 dark:text-green-400"
+              isActive={materialActiveFilter === 'true'}
+              loading={loadingMaterials && !materialsData}
+              onClick={() => setMaterialActiveFilter('true')}
+            />
+            <FilterStatCard
+              label="Inativos"
+              count={materialSummary.inactive}
+              icon={Ban}
+              iconBg="bg-gray-100 dark:bg-gray-700/60"
+              iconColor="text-gray-600 dark:text-gray-300"
+              isActive={materialActiveFilter === 'false'}
+              loading={loadingMaterials && !materialsData}
+              onClick={() => setMaterialActiveFilter('false')}
+            />
           </div>
 
           <MaterialFormModal
@@ -1357,15 +1460,17 @@ export default function MateriaisConstrucaoPage() {
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                    <Package className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon
+                      className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`}
+                    />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Materiais e Serviços
+                      {listHeader.title}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Lista de materiais e serviços cadastrados
+                      {listHeader.subtitle}
                     </p>
                   </div>
                 </div>
@@ -1516,7 +1621,15 @@ export default function MateriaisConstrucaoPage() {
                         scope="col"
                         className="px-1 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-2 sm:py-4"
                       >
-                        Média paga
+                        <button
+                          type="button"
+                          onClick={cycleAvgPaidSort}
+                          title={avgPaidSortLabel}
+                          aria-label={avgPaidSortLabel}
+                          className="cursor-pointer bg-transparent p-0 font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400"
+                        >
+                          Média paga
+                        </button>
                       </th>
                       <th
                         scope="col"

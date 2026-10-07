@@ -494,7 +494,7 @@ export class ConstructionMaterialController {
 
   async getAllMaterials(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive, page = 1, limit = 20 } = req.query;
+      const { search, isActive, page = 1, limit = 20, sortBy, sortDir } = req.query;
 
       const limitNum = Math.min(Number(limit), 100);
       const skip = (Number(page) - 1) * limitNum;
@@ -502,17 +502,31 @@ export class ConstructionMaterialController {
       const activeFilter = isActive !== undefined ? String(isActive) : undefined;
       const whereSql = await this.buildMaterialsWhereSql(searchTerm, activeFilter);
 
-      const [idRows, countRows] = await Promise.all([
+      const sortByKey = String(sortBy || '').trim();
+      const sortDirKey = String(sortDir || '').trim().toLowerCase();
+      const sortAvgPaid = sortByKey === 'avgPaid' && (sortDirKey === 'asc' || sortDirKey === 'desc');
+      const orderParts = sortAvgPaid
+        ? [
+            Prisma.sql`CASE WHEN cm."totvsAvgPaidUnitPrice" IS NULL THEN 1 ELSE 0 END ASC`,
+            sortDirKey === 'desc'
+              ? Prisma.sql`cm."totvsAvgPaidUnitPrice" DESC`
+              : Prisma.sql`cm."totvsAvgPaidUnitPrice" ASC`,
+            Prisma.sql`cm.name ASC`,
+          ]
+        : [
+            Prisma.sql`CASE WHEN cm.code ~ '^[0-9]+$' THEN 0 ELSE 1 END`,
+            Prisma.sql`CASE WHEN cm.code ~ '^[0-9]+$' THEN CAST(cm.code AS INTEGER) END ASC NULLS LAST`,
+            Prisma.sql`cm.code ASC NULLS LAST`,
+            Prisma.sql`cm.name ASC`,
+          ];
+
+      const [idRows, countRows, summaryRows] = await Promise.all([
         prisma.$queryRaw<Array<{ id: string }>>`
           SELECT cm.id
           FROM construction_materials cm
           LEFT JOIN budget_natures bn ON bn.id = cm."budgetNatureId"
           WHERE ${whereSql}
-          ORDER BY
-            CASE WHEN cm.code ~ '^[0-9]+$' THEN 0 ELSE 1 END,
-            CASE WHEN cm.code ~ '^[0-9]+$' THEN CAST(cm.code AS INTEGER) END ASC NULLS LAST,
-            cm.code ASC NULLS LAST,
-            cm.name ASC
+          ORDER BY ${Prisma.join(orderParts)}
           LIMIT ${limitNum} OFFSET ${skip}
         `,
         prisma.$queryRaw<Array<{ count: bigint }>>`
@@ -520,11 +534,23 @@ export class ConstructionMaterialController {
           FROM construction_materials cm
           LEFT JOIN budget_natures bn ON bn.id = cm."budgetNatureId"
           WHERE ${whereSql}
-        `
+        `,
+        prisma.$queryRaw<Array<{ total: bigint; active: bigint; inactive: bigint }>>`
+          SELECT
+            COUNT(*)::bigint AS total,
+            COUNT(*) FILTER (WHERE cm."isActive" = true)::bigint AS active,
+            COUNT(*) FILTER (WHERE cm."isActive" = false)::bigint AS inactive
+          FROM construction_materials cm
+        `,
       ]);
 
       const total = Number(countRows[0]?.count ?? 0);
       const ids = idRows.map((row) => row.id);
+      const summary = {
+        total: Number(summaryRows[0]?.total ?? 0),
+        active: Number(summaryRows[0]?.active ?? 0),
+        inactive: Number(summaryRows[0]?.inactive ?? 0),
+      };
 
       let materials: Awaited<ReturnType<typeof prisma.constructionMaterial.findMany>> = [];
       if (ids.length > 0) {
@@ -560,6 +586,7 @@ export class ConstructionMaterialController {
           };
         }),
         nextCode,
+        summary,
         pagination: {
           page: Number(page),
           limit: limitNum,

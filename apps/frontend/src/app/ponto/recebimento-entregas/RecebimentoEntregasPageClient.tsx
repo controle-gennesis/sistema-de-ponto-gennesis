@@ -14,6 +14,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { FileDropZone } from '@/components/ui/FileDropZone';
+import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { GestaoOsRequiredMark } from '@/components/gestao-os/GestaoOsModalUi';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
@@ -22,7 +23,8 @@ import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
-import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { toPersonSelectOptions } from '@/lib/personSelectOptions';
+import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import toast from 'react-hot-toast';
 import {
   CURRENT_STATUS_OPTIONS,
@@ -301,15 +303,22 @@ export default function RecebimentoEntregasPageClient() {
     },
   });
 
-  const { data: stockLocationsRes } = useQuery({
-    queryKey: ['stock-locations-recebimento'],
+  const confirmContractId = confirmRow?.contractRecord?.id || '';
+
+  const { data: obrasRes } = useQuery({
+    queryKey: ['obras-recebimento', confirmContractId],
     queryFn: async () => {
-      const res = await api.get('/stock-locations', {
-        params: { isActive: 'true', page: 1, limit: 2000 },
+      const res = await api.get('/obras', {
+        params: {
+          isActive: 'true',
+          contratoId: confirmContractId,
+          page: 1,
+          limit: 500,
+        },
       });
       return res.data;
     },
-    enabled: Boolean(confirmRow),
+    enabled: Boolean(confirmRow && confirmContractId),
   });
 
   const { data: employeeOptions = [] } = useQuery({
@@ -319,27 +328,30 @@ export default function RecebimentoEntregasPageClient() {
   });
 
   const receiptLocationOptions = useMemo(() => {
-    const rows = (stockLocationsRes?.data || []) as Array<{
-      code?: string | null;
+    const rows = (obrasRes?.data || []) as Array<{
+      id?: string | null;
       name?: string | null;
     }>;
     return rows
-      .map((loc) => {
-        const code = String(loc.code || '').trim();
-        const name = String(loc.name || '').trim();
-        const label = code && name && code !== name ? `${code} — ${name}` : name || code;
-        return label ? { value: label, label } : null;
+      .map((obra) => {
+        const name = String(obra.name || '').trim();
+        return name ? { value: name, label: name } : null;
       })
       .filter((o): o is { value: string; label: string } => Boolean(o))
       .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  }, [stockLocationsRes]);
+  }, [obrasRes]);
 
   const responsibleOptions = useMemo(
     () =>
-      employeeOptions.map((e) => ({
-        value: e.name,
-        label: e.name,
-      })),
+      toPersonSelectOptions(
+        employeeOptions.map((e) => ({
+          value: e.name,
+          name: e.name,
+          cpf: e.cpf,
+          profilePhotoUrl: e.profilePhotoUrl,
+          extraSearchText: e.position || undefined,
+        }))
+      ),
     [employeeOptions]
   );
 
@@ -922,23 +934,15 @@ export default function RecebimentoEntregasPageClient() {
           isOpen={Boolean(confirmRow)}
           onClose={closeConfirmReceipt}
           confirmBeforeClose={false}
-          title="Confirmar recebimento"
+          title={
+            confirmRow
+              ? `Confirmar recebimento #${confirmRow.deliveryNumber}`
+              : 'Confirmar recebimento'
+          }
           size="lg"
         >
           {confirmRow ? (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Preencha os dados do recebimento da entrega{' '}
-                <strong>#{confirmRow.deliveryNumber}</strong>
-                {supplierLabel(confirmRow) !== '—' ? (
-                  <>
-                    {' '}
-                    — <span className="font-medium text-gray-800 dark:text-gray-200">{supplierLabel(confirmRow)}</span>
-                  </>
-                ) : null}
-                .
-              </p>
-
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -950,7 +954,16 @@ export default function RecebimentoEntregasPageClient() {
                     onChange={(receiptLocation) => patchConfirmForm({ receiptLocation })}
                     options={receiptLocationOptions}
                     allowEmpty={false}
-                    placeholder="Selecionar local de recebimento..."
+                    placeholder={
+                      confirmContractId
+                        ? 'Selecionar obra do contrato...'
+                        : 'Entrega sem contrato vinculado'
+                    }
+                    emptyOptionsMessage={
+                      confirmContractId
+                        ? 'Nenhuma obra cadastrada neste contrato.'
+                        : 'Vincule um contrato à entrega para listar as obras.'
+                    }
                     noFocusRing
                   />
                 </div>
@@ -968,6 +981,7 @@ export default function RecebimentoEntregasPageClient() {
                     options={responsibleOptions}
                     allowEmpty={false}
                     placeholder="Selecionar responsável..."
+                    searchPlaceholder="Pesquisar por nome ou CPF…"
                     noFocusRing
                   />
                 </div>
@@ -987,7 +1001,7 @@ export default function RecebimentoEntregasPageClient() {
                             receiptType: confirmForm.receiptType === o.value ? '' : o.value,
                           })
                         }
-                        label={o.label.toUpperCase()}
+                        label={o.label}
                       />
                     ))}
                   </div>
@@ -995,13 +1009,14 @@ export default function RecebimentoEntregasPageClient() {
 
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Data e Hora do Recebimento
+                    Data e hora do recebimento
                   </label>
-                  <input
-                    type="datetime-local"
+                  <DateTimePickerField
                     value={confirmForm.receivedAt}
-                    onChange={(e) => patchConfirmForm({ receivedAt: e.target.value })}
-                    className={FORM_FIELD_INPUT_CLS}
+                    onChange={(receivedAt) => patchConfirmForm({ receivedAt })}
+                    placeholder="dd/mm/aaaa hh:mm"
+                    noFocusRing
+                    aria-label="Data e hora do recebimento"
                   />
                 </div>
 
