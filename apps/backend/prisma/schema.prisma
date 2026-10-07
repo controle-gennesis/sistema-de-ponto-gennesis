@@ -2750,6 +2750,8 @@ model ConstructionMaterial {
   unit             String // Unidade de medida (kg, m, mÂ², un, etc.)
   /// Identificador do produto no TOTVS RM (EstPrdDataBR.IDPRD)
   totvsIdPrd       Int?
+  /// Média unitária das últimas OCs no TOTVS (fallback quando não há média local)
+  totvsAvgPaidUnitPrice Decimal? @db.Decimal(12, 2)
   budgetNatureId   String?
   budgetNature     BudgetNature? @relation(fields: [budgetNatureId], references: [id], onDelete: SetNull)
   isActive         Boolean       @default(true) // Se estÃ¡ ativo

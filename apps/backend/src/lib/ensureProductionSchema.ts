@@ -2911,6 +2911,17 @@ export async function ensureConstructionMaterialTotvsIdPrd(prisma: PrismaClient)
   `);
 }
 
+/** Média OC TOTVS (últimas 10) — fallback da média paga local. */
+export async function ensureConstructionMaterialTotvsAvgPaid(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'construction_materials'))) return;
+  if (await columnExists(prisma, 'construction_materials', 'totvsAvgPaidUnitPrice')) return;
+  console.warn('[Schema] Coluna totvsAvgPaidUnitPrice em construction_materials ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "construction_materials"
+      ADD COLUMN IF NOT EXISTS "totvsAvgPaidUnitPrice" DECIMAL(12, 2);
+  `);
+}
+
 /** Coluna origin em suppliers: LOCAL (Conecta) vs TOTVS (RM). */
 export async function ensureSupplierOriginColumn(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
@@ -2977,6 +2988,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePurchaseOrderTotvsFields(prisma);
     await ensureUserTotvsCredentialsTable(prisma);
     await ensureConstructionMaterialTotvsIdPrd(prisma);
+    await ensureConstructionMaterialTotvsAvgPaid(prisma);
     await ensureStockLocationsTable(prisma);
     await ensureSupplierOriginColumn(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);

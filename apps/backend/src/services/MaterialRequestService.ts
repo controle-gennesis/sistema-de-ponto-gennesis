@@ -537,6 +537,7 @@ export class MaterialRequestService {
       code?: string | null;
       productType?: string | null;
       category?: string | null;
+      totvsAvgPaidUnitPrice?: unknown;
     }>
   ): Promise<RmDropdownMaterial[]> {
     if (constructionMaterials.length === 0) {
@@ -583,8 +584,15 @@ export class MaterialRequestService {
     });
 
     const avgByEng = await this.avgPaidByEngineeringMaterialIds(mapped.map((m) => m.id));
+    const totvsAvgByEngId = new Map<string, number>();
+    for (const cm of constructionMaterials) {
+      const n = cm.totvsAvgPaidUnitPrice != null ? Number(cm.totvsAvgPaidUnitPrice) : NaN;
+      if (!Number.isFinite(n) || n <= 0) continue;
+      const eng = engByCode.get(`CM-${cm.id}`);
+      if (eng) totvsAvgByEngId.set(eng.id, n);
+    }
     for (const m of mapped) {
-      m.avgPaidUnitPrice = avgByEng.get(m.id) ?? null;
+      m.avgPaidUnitPrice = avgByEng.get(m.id) ?? totvsAvgByEngId.get(m.id) ?? null;
     }
 
     mapped.sort((a, b) => (a.name || '').localeCompare(b.name || ''));

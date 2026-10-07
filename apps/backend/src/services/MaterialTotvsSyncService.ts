@@ -1,6 +1,9 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
-import { ensureConstructionMaterialTotvsIdPrd } from '../lib/ensureProductionSchema';
+import {
+  ensureConstructionMaterialTotvsAvgPaid,
+  ensureConstructionMaterialTotvsIdPrd,
+} from '../lib/ensureProductionSchema';
 import { getTotvsRmRelatorioFinService } from './TotvsRmRelatorioFinService';
 
 /** A cada 6h — catálogo muda pouco; evita sobrecarregar o RM. */
@@ -34,6 +37,10 @@ type MappedProduct = {
   isActive: boolean;
   budgetNatureCode: string | null;
   budgetNatureName: string | null;
+  /** Média unitária das últimas OCs no RM (0/null = sem histórico). */
+  totvsAvgPaidUnitPrice: number | null;
+  /** Quantidade de OCs usadas na média (para preferir linha de coligada com mais histórico). */
+  totvsAvgPaidOcCount: number;
 };
 
 type LocalMaterial = {
@@ -46,6 +53,7 @@ type LocalMaterial = {
   totvsIdPrd: number | null;
   isActive: boolean;
   budgetNatureId: string | null;
+  totvsAvgPaidUnitPrice: number | null;
 };
 
 function envBool(key: string, fallback = false): boolean {
@@ -139,6 +147,52 @@ function parseIdPrd(raw: unknown): number | null {
   return Math.trunc(n);
 }
 
+function parseMoney(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return Math.round(raw * 100) / 100;
+  }
+  const s = String(raw)
+    .trim()
+    .replace(/\s/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(',', '.');
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function parseNonNegInt(raw: unknown): number {
+  if (raw === null || raw === undefined || raw === '') return 0;
+  const n = Number(String(raw).trim().replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.trunc(n);
+}
+
+function preferAvgPaid(
+  prev: MappedProduct,
+  next: MappedProduct
+): { totvsAvgPaidUnitPrice: number | null; totvsAvgPaidOcCount: number } {
+  // Preferir a linha (coligada) com mais OCs; se empatar, a que tem média > 0.
+  if (next.totvsAvgPaidOcCount > prev.totvsAvgPaidOcCount) {
+    return {
+      totvsAvgPaidUnitPrice: next.totvsAvgPaidUnitPrice ?? prev.totvsAvgPaidUnitPrice,
+      totvsAvgPaidOcCount: next.totvsAvgPaidOcCount,
+    };
+  }
+  if (prev.totvsAvgPaidOcCount > next.totvsAvgPaidOcCount) {
+    return {
+      totvsAvgPaidUnitPrice: prev.totvsAvgPaidUnitPrice ?? next.totvsAvgPaidUnitPrice,
+      totvsAvgPaidOcCount: prev.totvsAvgPaidOcCount,
+    };
+  }
+  return {
+    totvsAvgPaidUnitPrice: prev.totvsAvgPaidUnitPrice ?? next.totvsAvgPaidUnitPrice,
+    totvsAvgPaidOcCount: Math.max(prev.totvsAvgPaidOcCount, next.totvsAvgPaidOcCount),
+  };
+}
+
 function preferUnit(prev: MappedProduct, next: MappedProduct): string {
   if (next.unitFromTotvs && prev.unitFromTotvs) {
     const prevGeneric = !prev.unit || prev.unit.toUpperCase() === 'UN';
@@ -152,6 +206,7 @@ function preferUnit(prev: MappedProduct, next: MappedProduct): string {
 }
 
 function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedProduct {
+  const avg = preferAvgPaid(prev, next);
   return {
     ...next,
     unit: preferUnit(prev, next),
@@ -163,6 +218,8 @@ function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedPro
     budgetNatureName: prev.budgetNatureCode
       ? prev.budgetNatureName
       : next.budgetNatureName ?? prev.budgetNatureName,
+    totvsAvgPaidUnitPrice: avg.totvsAvgPaidUnitPrice,
+    totvsAvgPaidOcCount: avg.totvsAvgPaidOcCount,
   };
 }
 
@@ -216,6 +273,19 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
   const budgetNatureName = cell(
     pickRow(row, 'NATUREZA ORCAMENTARIA', 'NATUREZA ORÇAMENTÁRIA', 'DESCNATORCAMENTARIA')
   );
+  const totvsAvgPaidUnitPrice = parseMoney(
+    pickRow(
+      row,
+      'MEDIA OC (ULT. 10)',
+      'MEDIA OC (ULT 10)',
+      'MEDIA OC',
+      'MEDIA_OC',
+      'MEDIAOC'
+    )
+  );
+  const totvsAvgPaidOcCount = parseNonNegInt(
+    pickRow(row, 'QTD OCS CONSIDERADAS', 'QTD_OCS', 'QTDOCS')
+  );
 
   return {
     code,
@@ -227,6 +297,8 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
     isActive: parseProdutoAtivo(row),
     budgetNatureCode,
     budgetNatureName: budgetNatureCode ? budgetNatureName : null,
+    totvsAvgPaidUnitPrice,
+    totvsAvgPaidOcCount,
   };
 }
 
@@ -305,16 +377,26 @@ async function syncEngineeringMaterial(material: {
   });
 }
 
+function toNumberOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function needsUpdate(
   existing: LocalMaterial,
   m: MappedProduct,
   nextCode: string | null,
   nextIdPrd: number | null,
-  nextBudgetNatureId: string | null
+  nextBudgetNatureId: string | null,
+  nextTotvsAvg: number | null
 ): boolean {
   const unitChanged =
     m.unitFromTotvs &&
     (existing.unit || '').toUpperCase() !== (m.unit || '').toUpperCase();
+  const avgChanged =
+    nextTotvsAvg != null &&
+    toNumberOrNull(existing.totvsAvgPaidUnitPrice) !== nextTotvsAvg;
   return (
     (existing.code || null) !== (nextCode || null) ||
     existing.name !== m.name ||
@@ -322,7 +404,8 @@ function needsUpdate(
     (existing.productType || null) !== m.productType ||
     existing.totvsIdPrd !== nextIdPrd ||
     existing.isActive !== m.isActive ||
-    (existing.budgetNatureId || null) !== (nextBudgetNatureId || null)
+    (existing.budgetNatureId || null) !== (nextBudgetNatureId || null) ||
+    avgChanged
   );
 }
 
@@ -357,6 +440,7 @@ export async function runMaterialTotvsSync(
 
   try {
     await ensureConstructionMaterialTotvsIdPrd(prisma);
+    await ensureConstructionMaterialTotvsAvgPaid(prisma);
     console.log(`[material-totvs] iniciando sync (${trigger})…`);
 
     const rows = await rm.fetchProdutosAtivosRows();
@@ -406,8 +490,13 @@ export async function runMaterialTotvsSync(
         totvsIdPrd: true,
         isActive: true,
         budgetNatureId: true,
+        totvsAvgPaidUnitPrice: true,
       },
-    })) as LocalMaterial[];
+    })) as unknown as LocalMaterial[];
+
+    for (const mat of existing) {
+      mat.totvsAvgPaidUnitPrice = toNumberOrNull(mat.totvsAvgPaidUnitPrice);
+    }
 
     const budgetNatureIdByCode = await resolveBudgetNatureIds(mapped);
 
@@ -434,6 +523,7 @@ export async function runMaterialTotvsSync(
       totvsIdPrd: number | null;
       isActive: boolean;
       budgetNatureId: string | null;
+      totvsAvgPaidUnitPrice: number | null;
     };
     type UpdateRow = {
       id: string;
@@ -447,6 +537,7 @@ export async function runMaterialTotvsSync(
         totvsIdPrd: number | null;
         isActive: boolean;
         budgetNatureId: string | null;
+        totvsAvgPaidUnitPrice: number | null;
       };
     };
 
@@ -499,6 +590,7 @@ export async function runMaterialTotvsSync(
           totvsIdPrd: m.idPrd,
           isActive: true,
           budgetNatureId: rmBudgetNatureId,
+          totvsAvgPaidUnitPrice: m.totvsAvgPaidUnitPrice,
         });
         const placeholder: LocalMaterial = {
           id: `__new_${codeKey}`,
@@ -510,6 +602,7 @@ export async function runMaterialTotvsSync(
           totvsIdPrd: m.idPrd,
           isActive: true,
           budgetNatureId: rmBudgetNatureId,
+          totvsAvgPaidUnitPrice: m.totvsAvgPaidUnitPrice,
         };
         byCode.set(codeKey, placeholder);
         if (m.idPrd != null) byIdPrd.set(m.idPrd, placeholder);
@@ -539,9 +632,11 @@ export async function runMaterialTotvsSync(
 
       // RM manda quando informa natureza; sem natureza no RM, mantém a local.
       const nextBudgetNatureId = rmBudgetNatureId ?? target.budgetNatureId;
+      // Média TOTVS: grava quando o RM manda valor > 0; se vier 0, mantém a salva.
+      const nextTotvsAvg = m.totvsAvgPaidUnitPrice ?? target.totvsAvgPaidUnitPrice;
 
       const mappedForUpdate: MappedProduct = { ...m, isActive: effectiveActive };
-      if (!needsUpdate(target, mappedForUpdate, nextCode, nextIdPrd, nextBudgetNatureId)) {
+      if (!needsUpdate(target, mappedForUpdate, nextCode, nextIdPrd, nextBudgetNatureId, nextTotvsAvg)) {
         skipped += 1;
         continue;
       }
@@ -558,6 +653,7 @@ export async function runMaterialTotvsSync(
           totvsIdPrd: nextIdPrd,
           isActive: effectiveActive,
           budgetNatureId: nextBudgetNatureId,
+          totvsAvgPaidUnitPrice: nextTotvsAvg,
         },
       });
 
@@ -593,6 +689,7 @@ export async function runMaterialTotvsSync(
           totvsIdPrd: e.totvsIdPrd,
           isActive: false,
           budgetNatureId: e.budgetNatureId,
+          totvsAvgPaidUnitPrice: e.totvsAvgPaidUnitPrice,
         },
       });
     }
@@ -611,6 +708,7 @@ export async function runMaterialTotvsSync(
             totvsIdPrd: data.totvsIdPrd,
             isActive: data.isActive,
             budgetNatureId: data.budgetNatureId,
+            totvsAvgPaidUnitPrice: data.totvsAvgPaidUnitPrice,
           },
         });
         try {

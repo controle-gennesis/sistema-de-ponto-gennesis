@@ -549,10 +549,16 @@ export class ConstructionMaterialController {
 
       res.json({
         success: true,
-        data: materials.map((m) => ({
-          ...this.mapMaterial(m),
-          avgPaidUnitPrice: avgById.get(m.id) ?? null
-        })),
+        data: materials.map((m) => {
+          const localAvg = avgById.get(m.id) ?? null;
+          const totvsAvg = m.totvsAvgPaidUnitPrice != null ? Number(m.totvsAvgPaidUnitPrice) : null;
+          return {
+            ...this.mapMaterial(m),
+            // Preferência: média das OCs locais; senão média TOTVS (últimas 10 OCs).
+            avgPaidUnitPrice:
+              localAvg ?? (Number.isFinite(totvsAvg as number) && (totvsAvg as number) > 0 ? totvsAvg : null)
+          };
+        }),
         nextCode,
         pagination: {
           page: Number(page),
@@ -615,12 +621,16 @@ export class ConstructionMaterialController {
 
       const { avgPaidUnitPrice, history } = await this.purchaseHistoryForConstructionMaterial(id);
       const [withIdPrd] = await this.attachTotvsIdPrd([material]);
+      const totvsAvg =
+        material.totvsAvgPaidUnitPrice != null ? Number(material.totvsAvgPaidUnitPrice) : null;
 
       res.json({
         success: true,
         data: {
           ...this.mapMaterial(withIdPrd),
-          avgPaidUnitPrice,
+          avgPaidUnitPrice:
+            avgPaidUnitPrice ??
+            (Number.isFinite(totvsAvg as number) && (totvsAvg as number) > 0 ? totvsAvg : null),
           purchaseHistory: history
         }
       });
@@ -634,16 +644,23 @@ export class ConstructionMaterialController {
       const { id } = req.params;
       const material = await prisma.constructionMaterial.findUnique({
         where: { id },
-        select: { id: true }
+        select: { id: true, totvsAvgPaidUnitPrice: true }
       });
       if (!material) {
         throw createError('Material não encontrado', 404);
       }
 
       const { avgPaidUnitPrice, history } = await this.purchaseHistoryForConstructionMaterial(id);
+      const totvsAvg =
+        material.totvsAvgPaidUnitPrice != null ? Number(material.totvsAvgPaidUnitPrice) : null;
       res.json({
         success: true,
-        data: { avgPaidUnitPrice, history }
+        data: {
+          avgPaidUnitPrice:
+            avgPaidUnitPrice ??
+            (Number.isFinite(totvsAvg as number) && (totvsAvg as number) > 0 ? totvsAvg : null),
+          history
+        }
       });
     } catch (error) {
       next(error);
