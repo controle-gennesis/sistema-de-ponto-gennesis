@@ -561,6 +561,8 @@ function AprovacoesPage() {
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
+    espelhoNfApprovalCostCenterIds,
+    espelhoNfApprovalSeesAll,
     canApproveOc,
     canApproveFuel,
     canApproveMaterialRequests,
@@ -621,12 +623,22 @@ function AprovacoesPage() {
     staleTime: 30_000,
   });
   const { data: espelhoResp, isLoading: loadingEspelhoApprovals } = useQuery({
-    queryKey: ['approvals', 'espelho-nf'],
+    queryKey: [
+      'approvals',
+      'espelho-nf',
+      espelhoNfApprovalSeesAll,
+      espelhoNfApprovalCostCenterIds,
+    ],
     enabled: !loadingUser && canApproveEspelhoNf && activeTab === 'espelho',
     queryFn: async () => {
       const res = await api.get('/espelho-nf/bootstrap');
       const data = res.data?.data || {};
       const mirrors = Array.isArray(data.mirrors) ? data.mirrors : [];
+      const allowedCostCenters = new Set(espelhoNfApprovalCostCenterIds);
+      const visibleMirrors = mirrors.filter((m: { costCenterId?: string | null }) => {
+        if (espelhoNfApprovalSeesAll) return true;
+        return allowedCostCenters.has(String(m.costCenterId ?? ''));
+      });
       const providers = Array.isArray(data.providers) ? data.providers : [];
       const takers = Array.isArray(data.takers) ? data.takers : [];
       const bankAccounts = Array.isArray(data.bankAccounts) ? data.bankAccounts : [];
@@ -637,7 +649,7 @@ function AprovacoesPage() {
           String(t.corporateName || t.name || '').trim()
         ])
       );
-      const parsed: EspelhoApprovalItem[] = mirrors.map((m: any) => ({
+      const parsed: EspelhoApprovalItem[] = visibleMirrors.map((m: any) => ({
         id: String(m.id ?? ''),
         takerName: String(m.takerName || takerById.get(String(m.takerId ?? '')) || '').trim(),
         measurementRef: String(m.measurementRef ?? ''),
@@ -948,6 +960,16 @@ function AprovacoesPage() {
     status: EspelhoApprovalStatus,
     successMessage: string
   ) => {
+    const target = espelhoApprovals.find((item) => item.id === mirrorId);
+    const targetCostCenterId = String(target?.mirror?.costCenterId ?? '');
+    if (
+      target &&
+      !espelhoNfApprovalSeesAll &&
+      !espelhoNfApprovalCostCenterIds.includes(targetCostCenterId)
+    ) {
+      toast.error('Você não tem permissão para decidir espelhos deste centro de custo.');
+      return;
+    }
     updateEspelhoApprovalStatus(mirrorId, status);
     toast.success(successMessage);
     await queryClient.invalidateQueries({ queryKey: ['approvals', 'espelho-nf'] });
@@ -1379,7 +1401,11 @@ function AprovacoesPage() {
               ) : espelhoFiltered.length === 0 ? (
                 <div className="py-8 text-center">
                   <FileText className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" aria-hidden />
-                  <p className="text-gray-500 dark:text-gray-400">Nenhum espelho neste filtro.</p>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    {!espelhoNfApprovalSeesAll && espelhoNfApprovalCostCenterIds.length === 0
+                      ? 'Nenhum centro de custo liberado para aprovar espelhos da nota fiscal.'
+                      : 'Nenhum espelho neste filtro.'}
+                  </p>
                 </div>
               ) : (
                 <>

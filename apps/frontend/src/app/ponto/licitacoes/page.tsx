@@ -329,6 +329,9 @@ type Licitacao = {
   updatedAt: string;
 };
 
+/** Referência estável: `data = []` no useQuery cria um array novo a cada render. */
+const EMPTY_LICITACAO_LIST: Licitacao[] = [];
+
 function formatDateOnly(iso: string) {
   try {
     return new Date(iso).toLocaleDateString('pt-BR');
@@ -652,7 +655,7 @@ export default function LicitacoesPage() {
       ? 'preliminar'
       : 'em_analise';
 
-  const { data: listRaw = [], isLoading: loadingList } = useQuery({
+  const { data: listRaw = EMPTY_LICITACAO_LIST, isLoading: loadingList } = useQuery({
     queryKey: [
       'licitacoes',
       isArquivadasView ? 'arquivadas' : listAnaliseEtapa ?? 'ativas',
@@ -800,6 +803,9 @@ export default function LicitacoesPage() {
   ]);
 
   useEffect(() => {
+    // Fora da análise a query da lista fica desligada. Sem este retorno, o efeito
+    // disparava setState em todo render e a página não respondia ao menu.
+    if (!showAnaliseLayout) return;
     if (!selectedId) {
       hasUserEditedRef.current = false;
       setHasUnsavedChanges(false);
@@ -862,7 +868,7 @@ export default function LicitacoesPage() {
     setAnalisePreliminar(
       parseAnalisePreliminar(selected.analiseJson?.analisePreliminar, fallbackCabecalho)
     );
-  }, [selectedId, selected, checklistSections, list]);
+  }, [showAnaliseLayout, selectedId, selected, checklistSections, list]);
 
   useEffect(() => {
     if (!selectedId) {

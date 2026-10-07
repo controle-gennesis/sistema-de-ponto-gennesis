@@ -1510,10 +1510,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Nota Fiscal'
           },
           {
-            name: 'Códigos Tributários',
+            name: 'Regras Tributárias',
             href: '/ponto/codigos-tributarios',
             icon: Percent,
-            description: 'Parâmetros por município para espelho de nota fiscal',
+            description: 'Regras por município para espelho de nota fiscal',
             permission:
               isAdministrator ||
               can(pk('/ponto/espelho-nf/codigos-tributarios')),

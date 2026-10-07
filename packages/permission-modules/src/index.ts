@@ -296,7 +296,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   {
     key: pathToModuleKey('/ponto/espelho-nf/codigos-tributarios'),
-    name: 'Códigos Tributários',
+    name: 'Regras Tributárias',
     href: '/ponto/codigos-tributarios',
     category: 'Cadastros',
   },

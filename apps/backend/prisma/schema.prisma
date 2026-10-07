@@ -79,6 +79,8 @@ model User {
   updatedFuelApprovalContracts              UserFuelApprovalContract[]           @relation("UserFuelApprovalContractUpdatedBy")
   userDpRequestViewCostCenters              UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUser")
   updatedDpRequestViewCostCenters           UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUpdatedBy")
+  userEspelhoNfApprovalCostCenters          UserEspelhoNfApprovalCostCenter[]    @relation("UserEspelhoNfApprovalCostCenterUser")
+  updatedEspelhoNfApprovalCostCenters       UserEspelhoNfApprovalCostCenter[]    @relation("UserEspelhoNfApprovalCostCenterUpdatedBy")
   stockMovements                            StockMovement[]
   stockShortfallsResolved                   StockShortfall[]                     @relation("StockShortfallResolver")
   driveFolders                              DriveFolder[]                        @relation("DriveFolderOwner")
@@ -1195,6 +1197,7 @@ model CostCenter {
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
   restrictedDpApprovalUsers UserRestrictedDpApprovalCostCenter[]
   dpRequestViewUsers        UserDpRequestViewCostCenter[]
+  espelhoNfApprovalUsers    UserEspelhoNfApprovalCostCenter[]
 
   @@index([code])
   @@index([isActive])
@@ -2740,6 +2743,25 @@ model UserDpRequestViewCostCenter {
   @@map("user_dp_request_view_cost_centers")
 }
 
+/// Centros de custo cujos espelhos da nota fiscal o usuário pode aprovar.
+model UserEspelhoNfApprovalCostCenter {
+  id           String   @id @default(cuid())
+  userId       String
+  costCenterId String
+  updatedBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation("UserEspelhoNfApprovalCostCenterUser", fields: [userId], references: [id], onDelete: Cascade)
+  costCenter CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+  updater    User?      @relation("UserEspelhoNfApprovalCostCenterUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, costCenterId])
+  @@index([userId])
+  @@index([costCenterId])
+  @@map("user_espelho_nf_approval_cost_centers")
+}
+
 /// UsuÃ¡rios autorizados a ver a pÃ¡gina de um aprovador especÃ­fico no Fluig (fluxos G3/G5).
 model FluigWorkflowApproverViewer {
   id              String   @id @default(cuid())
@@ -2774,6 +2796,7 @@ model PositionPermissionTemplate {
   fdApprovalContractIds             Json     @default("[]")
   fuelApprovalContractIds           Json     @default("[]")
   dpRequestViewCostCenterIds        Json     @default("[]")
+  espelhoNfApprovalCostCenterIds    Json     @default("[]")
   /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal, recebimentoEntregas }
   contractModuleFlags               Json     @default("{}")
   updatedAt                         DateTime @updatedAt
