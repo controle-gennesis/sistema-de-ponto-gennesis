@@ -1285,12 +1285,7 @@ export class ToolRentalRequestController {
         kind,
       });
 
-      const note =
-        kind === 'payment'
-          ? 'Comprovante de pagamento anexado'
-          : kind === 'oc'
-            ? 'Ordem de compra anexada'
-            : 'Anexo adicionado';
+      const note = kind === 'oc' ? 'Ordem de compra anexada' : 'Anexo adicionado';
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
