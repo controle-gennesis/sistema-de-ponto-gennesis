@@ -135,6 +135,7 @@ import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
+import { startMaterialTotvsSyncScheduler } from './services/MaterialTotvsSyncService';
 import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
 import { startPaymentConditionTotvsSyncScheduler } from './services/PaymentConditionTotvsSync';
 import { startFluigDatasetMirrorScheduler } from './services/FluigDatasetMirrorSync';
@@ -800,6 +801,12 @@ try {
         startSupplierTotvsSyncScheduler();
       } catch (e) {
         console.error('[supplier-totvs] falha ao agendar:', e);
+      }
+
+      try {
+        startMaterialTotvsSyncScheduler();
+      } catch (e) {
+        console.error('[material-totvs] falha ao agendar:', e);
       }
 
       try {

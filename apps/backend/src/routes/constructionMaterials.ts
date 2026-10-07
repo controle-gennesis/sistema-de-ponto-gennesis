@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import { ConstructionMaterialController } from '../controllers/ConstructionMaterialController';
 import { authenticate } from '../middleware/auth';
@@ -69,6 +69,11 @@ router.post('/delete-many', (req, res, next) =>
 // Produtos ativos do TOTVS RM (consulta PRODUTOSATIVOS)
 router.get('/totvs/produtos-ativos', (req, res, next) =>
   constructionMaterialController.getTotvsProdutosAtivos(req, res, next)
+);
+
+// Upsert materiais a partir do PRODUTOSATIVOS (não apaga cadastros locais / não quebra OCs)
+router.post('/sync-totvs', (req, res, next) =>
+  constructionMaterialController.syncFromTotvs(req, res, next)
 );
 
 router.get('/next-code', (req, res, next) =>

@@ -16,7 +16,8 @@ import {
   FileSpreadsheet,
   CheckCircle,
   Eye,
-  Trash2
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
@@ -475,6 +476,7 @@ export default function MateriaisConstrucaoPage() {
   const [showImportJson, setShowImportJson] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingTotvs, setIsDownloadingTotvs] = useState(false);
+  const [isSyncingTotvs, setIsSyncingTotvs] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
   const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
@@ -990,6 +992,51 @@ export default function MateriaisConstrucaoPage() {
     }
   };
 
+  const handleSyncTotvs = async () => {
+    try {
+      setIsSyncingTotvs(true);
+      const res = await api.post(
+        '/construction-materials/sync-totvs?force=1',
+        {},
+        {
+          timeout: 300_000,
+        }
+      );
+      if (res.data?.success === false) {
+        toast.error(String(res.data?.message || 'Falha ao sincronizar materiais do TOTVS'));
+        return;
+      }
+      const data = res.data?.data;
+      if (data && typeof data.created === 'number') {
+        const conflicts =
+          typeof data.conflicts === 'number' && data.conflicts > 0
+            ? ` · ${data.conflicts} conflito(s)`
+            : '';
+        toast.success(
+          `TOTVS: ${data.created} criado(s), ${data.updated} atualizado(s)${conflicts}`
+        );
+      } else {
+        toast.success(res.data?.message || 'Sincronização TOTVS concluída');
+      }
+      await queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      await queryClient.invalidateQueries({ queryKey: ['construction-materials-next-code'] });
+      await queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
+    } catch (error: unknown) {
+      const err = error as {
+        response?: { data?: { error?: string; message?: string } };
+        message?: string;
+      };
+      toast.error(
+        err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'Erro ao sincronizar materiais do TOTVS'
+      );
+    } finally {
+      setIsSyncingTotvs(false);
+    }
+  };
+
   const handleDownloadTotvsProdutos = async () => {
     try {
       setIsDownloadingTotvs(true);
@@ -1002,7 +1049,7 @@ export default function MateriaisConstrucaoPage() {
         const msg = String(res.data?.message || 'Erro ao consultar TOTVS RM');
         toast.error(
           msg.includes('401') || /n[aã]o autorizado/i.test(msg)
-            ? 'TOTVS RM recusou a autenticação. Verifique TOTVS_RM_USER/TOTVS_RM_PASSWORD no backend ou o caminho TOTVS_RM_PRODUTOSATIVOS_PATH.'
+            ? 'TOTVS RM recusou a autenticação. Verifique TOTVS_RM_USER/TOTVS_RM_PASSWORD no backend ou o caminho TOTVS_RM_PRODUTOS_PATH.'
             : msg
         );
         return;
@@ -1218,9 +1265,9 @@ export default function MateriaisConstrucaoPage() {
                 aria-label={
                   isDownloadingTotvs
                     ? 'Baixando planilha TOTVS...'
-                    : 'Baixar planilha PRODUTOSATIVOS do TOTVS RM'
+                    : 'Baixar planilha PRODUTOS do TOTVS RM'
                 }
-                title="Baixar planilha PRODUTOSATIVOS do TOTVS RM"
+                title="Baixar planilha PRODUTOS do TOTVS RM"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <Download
@@ -1304,8 +1351,7 @@ export default function MateriaisConstrucaoPage() {
                       Materiais e Serviços
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {pagination.total}{' '}
-                      {pagination.total === 1 ? 'cadastro' : 'cadastros'}
+                      Lista de materiais e serviços cadastrados
                     </p>
                   </div>
                 </div>
@@ -1358,30 +1404,20 @@ export default function MateriaisConstrucaoPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void handleExport()}
-                    disabled={isExporting || loadingMaterials}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    onClick={() => void handleSyncTotvs()}
+                    disabled={isSyncingTotvs}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label={
+                      isSyncingTotvs
+                        ? 'Sincronizando materiais do TOTVS...'
+                        : 'Atualizar agora com o TOTVS'
+                    }
+                    title="Atualizar agora com o TOTVS (sem apagar nem duplicar)"
                   >
-                    <Download className="h-4 w-4 shrink-0" />
-                    <span>{isExporting ? 'Exportando...' : 'Exportar'}</span>
+                    <RefreshCw
+                      className={`h-4 w-4 shrink-0 ${isSyncingTotvs ? 'animate-spin' : ''}`}
+                    />
                   </button>
-                  {canCreate && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowImportModal(true);
-                      setImportData('');
-                      setImportFileName('');
-                      setImportRowCount(0);
-                      setIsImportDragging(false);
-                      setShowImportJson(false);
-                    }}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <Upload className="h-4 w-4 shrink-0" />
-                    <span>Importar</span>
-                  </button>
-                  )}
                   {canCreate && (
                   <button
                     type="button"
@@ -1391,7 +1427,7 @@ export default function MateriaisConstrucaoPage() {
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
-                    <span>Novo cadastro</span>
+                    <span>Novo Cadastro</span>
                   </button>
                   )}
                 </div>
