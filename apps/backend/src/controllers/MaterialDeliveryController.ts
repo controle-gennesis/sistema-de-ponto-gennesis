@@ -4,6 +4,7 @@ import {
   MaterialDeliveryFinalStatus,
   MaterialDeliveryPaymentStatus,
   MaterialDeliveryPolo,
+  MaterialDeliveryReceiptType,
   MaterialDeliveryStockShortfallType,
   Prisma,
 } from '@prisma/client';
@@ -177,28 +178,53 @@ function buildDeliveryData(body: Record<string, unknown>, partial = false) {
     if (body.paymentStatus) data.paymentStatus = body.paymentStatus as MaterialDeliveryPaymentStatus;
   }
 
+  if (!partial || body.stockShortfallType !== undefined) {
+    if (body.stockShortfallType == null || body.stockShortfallType === '') {
+      data.stockShortfallType = null;
+    } else {
+      const parsed =
+        parseGeralShortfallLabel(body.stockShortfallType) ??
+        (typeof body.stockShortfallType === 'string' &&
+        body.stockShortfallType in MaterialDeliveryStockShortfallType
+          ? (body.stockShortfallType as MaterialDeliveryStockShortfallType)
+          : null);
+      if (!parsed) {
+        throw createError('Tipo de furo de estoque inválido (Normal, Correção ou Cancelado)', 400);
+      }
+      data.stockShortfallType = parsed;
+    }
+  }
+
   if (!partial || body.orderValue !== undefined) data.orderValue = parseDecimal(body.orderValue);
   if (!partial || body.totalPaid !== undefined) data.totalPaid = parseDecimal(body.totalPaid);
   if (!partial || body.expectedDelivery !== undefined) {
     data.expectedDelivery = parseDate(body.expectedDelivery);
   }
 
+  // Em create, relação vazia = omitir. Em update, vazia = disconnect.
+  // Prisma rejeita `disconnect` em create.
   if (!partial || body.supplierId !== undefined) {
-    data.supplier = body.supplierId
-      ? { connect: { id: String(body.supplierId) } }
-      : { disconnect: true };
+    if (body.supplierId) {
+      data.supplier = { connect: { id: String(body.supplierId) } };
+    } else if (partial) {
+      data.supplier = { disconnect: true };
+    }
   }
 
   if (!partial || body.purchaseOrderId !== undefined) {
-    data.purchaseOrder = body.purchaseOrderId
-      ? { connect: { id: String(body.purchaseOrderId) } }
-      : { disconnect: true };
+    if (body.purchaseOrderId) {
+      data.purchaseOrder = { connect: { id: String(body.purchaseOrderId) } };
+    } else if (partial) {
+      data.purchaseOrder = { disconnect: true };
+    }
   }
 
   if (!partial || body.contractId !== undefined) {
-    data.contractRecord = body.contractId
-      ? { connect: { id: String(body.contractId) } }
-      : { disconnect: true };
+    if (body.contractId) {
+      data.contractRecord = { connect: { id: String(body.contractId) } };
+    } else if (partial) {
+      data.contractRecord = { disconnect: true };
+    }
   }
 
   return data;
@@ -404,7 +430,9 @@ export class MaterialDeliveryController {
       if (!userId) throw createError('Usuário não autenticado', 401);
 
       const data = buildDeliveryData(req.body) as Prisma.MaterialDeliveryUpdateInput;
-      await applyAutoStockShortfallType(data, req.body);
+      if (req.body.stockShortfallType === undefined) {
+        await applyAutoStockShortfallType(data, req.body);
+      }
       const deliveryNumber = await generateDeliveryNumber();
 
       const item = await prisma.materialDelivery.create({
@@ -434,11 +462,13 @@ export class MaterialDeliveryController {
       if (!existing) throw createError('Entrega não encontrada', 404);
 
       const data = buildDeliveryData(req.body, true);
-      await applyAutoStockShortfallType(data, req.body, {
-        paymentStatus: existing.paymentStatus,
-        movementId: existing.movementId,
-        purchaseOrderId: existing.purchaseOrderId,
-      });
+      if (req.body.stockShortfallType === undefined) {
+        await applyAutoStockShortfallType(data, req.body, {
+          paymentStatus: existing.paymentStatus,
+          movementId: existing.movementId,
+          purchaseOrderId: existing.purchaseOrderId,
+        });
+      }
 
       const item = await prisma.materialDelivery.update({
         where: { id: req.params.id },
@@ -467,16 +497,66 @@ export class MaterialDeliveryController {
         await assertRecebimentoEntregasOnContract(req, existing.contractId);
       }
 
+      const body = (req.body || {}) as Record<string, unknown>;
+      const receiptLocation =
+        body.receiptLocation != null && String(body.receiptLocation).trim() !== ''
+          ? String(body.receiptLocation).trim()
+          : null;
+      const receiptResponsibleName =
+        body.receiptResponsibleName != null && String(body.receiptResponsibleName).trim() !== ''
+          ? String(body.receiptResponsibleName).trim()
+          : null;
+      const receiptTypeRaw = body.receiptType != null ? String(body.receiptType).trim().toUpperCase() : '';
+      const receiptType =
+        receiptTypeRaw === 'TOTAL' || receiptTypeRaw === 'PARCIAL'
+          ? (receiptTypeRaw as MaterialDeliveryReceiptType)
+          : null;
+
+      if (!receiptLocation) throw createError('Local de recebimento é obrigatório', 400);
+      if (!receiptResponsibleName) throw createError('Responsável pelo recebimento é obrigatório', 400);
+      if (!receiptType) throw createError('Informe se o recebimento é Total ou Parcial', 400);
+
+      let receivedAt = new Date();
+      if (body.receivedAt != null && String(body.receivedAt).trim() !== '') {
+        const parsed = new Date(String(body.receivedAt));
+        if (Number.isNaN(parsed.getTime())) {
+          throw createError('Data e hora do recebimento inválidas', 400);
+        }
+        receivedAt = parsed;
+      }
+
+      const receiptPdfUrl =
+        body.receiptPdfUrl != null && String(body.receiptPdfUrl).trim() !== ''
+          ? String(body.receiptPdfUrl).trim()
+          : null;
+      const receiptPhotoUrl =
+        body.receiptPhotoUrl != null && String(body.receiptPhotoUrl).trim() !== ''
+          ? String(body.receiptPhotoUrl).trim()
+          : null;
+      const receiptNotes =
+        body.receiptNotes != null && String(body.receiptNotes).trim() !== ''
+          ? String(body.receiptNotes).trim()
+          : null;
+
       const item = await prisma.materialDelivery.update({
         where: { id: req.params.id },
         data: {
           receivedByEngineering: true,
           receivedByUser: { connect: { id: userId } },
-          receivedAt: new Date(),
+          receivedAt,
+          receiptLocation,
+          receiptResponsibleName,
+          receiptType,
+          receiptPdfUrl,
+          receiptPhotoUrl,
+          receiptNotes,
           currentStatus: MaterialDeliveryCurrentStatus.ENTREGUE,
-          finalStatus: MaterialDeliveryFinalStatus.CONCLUIDO,
-          actualDelivery: existing.actualDelivery ?? new Date(),
-        },
+          finalStatus:
+            receiptType === MaterialDeliveryReceiptType.PARCIAL
+              ? MaterialDeliveryFinalStatus.PENDENTE
+              : MaterialDeliveryFinalStatus.CONCLUIDO,
+          actualDelivery: existing.actualDelivery ?? receivedAt,
+        } as Prisma.MaterialDeliveryUpdateInput,
         include: deliveryInclude,
       });
 

@@ -27,12 +27,11 @@ import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
-import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
@@ -43,6 +42,7 @@ import {
   DELIVERY_TYPE_OPTIONS,
   PAYMENT_STATUS_OPTIONS,
   POLO_OPTIONS,
+  STOCK_SHORTFALL_TYPE_OPTIONS,
   formatCurrency,
   formatDate,
   isDeliveryDateOverdue,
@@ -103,6 +103,7 @@ type FormState = {
   totalPaid: string;
   rmNumber: string;
   deliveryType: string;
+  stockShortfallType: StockShortfallTypeValue | '';
   observations: string;
 };
 
@@ -121,6 +122,7 @@ const EMPTY_FORM: FormState = {
   totalPaid: '',
   rmNumber: '',
   deliveryType: '',
+  stockShortfallType: 'NORMAL',
   observations: '',
 };
 
@@ -197,14 +199,14 @@ function rowToForm(row: MaterialDeliveryRow): FormState {
     currentStatus: row.currentStatus,
     paymentStatus: row.paymentStatus,
     supplierId: row.supplierId ?? '',
-    supplierName:
-      (row.supplier ? getOcSupplierLabel(row.supplier) : '') || row.supplierName || '',
+    supplierName: row.supplier?.name?.trim() || row.supplierName || '',
     purchaseOrderId: row.purchaseOrderId ?? '',
     orderValue: formatCurrencyInputBrFromNumber(row.orderValue),
     expectedDelivery: toInputDate(row.expectedDelivery),
     totalPaid: formatCurrencyInputBrFromNumber(row.totalPaid),
     rmNumber: row.rmNumber ?? '',
     deliveryType: normalizeDeliveryType(row.deliveryType),
+    stockShortfallType: row.stockShortfallType ?? '',
     observations: row.observations ?? '',
   };
 }
@@ -226,7 +228,6 @@ const thCenterClass = `${thBase} text-center`;
 const tdBase = 'px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300';
 const tdLeftClass = `${tdBase} text-left`;
 const tdCenterClass = `${tdBase} text-center`;
-const tdTruncateCenterClass = `${tdCenterClass} truncate`;
 const tdPillClass = `${tdCenterClass}`;
 
 const ENGINEERING_RECEIPT_STATUS = {
@@ -447,9 +448,11 @@ export default function ControleEntregasPageClient() {
         purchaseOrderId: form.purchaseOrderId || null,
         orderValue: parseCurrencyInputBr(form.orderValue),
         totalPaid: parseCurrencyInputBr(form.totalPaid),
+        expectedDelivery: form.expectedDelivery || null,
         rmNumber: form.rmNumber,
+        deliveryType: form.deliveryType || null,
+        stockShortfallType: form.stockShortfallType || null,
         observations: form.observations,
-        // Previsão e tipo de entrega são editados inline na listagem, não pelo modal.
       };
       if (editing) {
         const res = await api.patch(`/material-deliveries/${editing.id}`, payload);
@@ -692,7 +695,7 @@ export default function ControleEntregasPageClient() {
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
-                    Nova entrega
+                    Nova Entrega
                   </button>
                 </div>
               </div>
@@ -707,7 +710,7 @@ export default function ControleEntregasPageClient() {
                   <Clock className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">Nenhuma entrega encontrada</p>
                   <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                    Ajuste os filtros ou clique em Nova entrega para cadastrar manualmente
+                    Ajuste os filtros ou clique em Nova Entrega para cadastrar manualmente
                   </p>
                 </div>
               ) : (
@@ -726,12 +729,13 @@ export default function ControleEntregasPageClient() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className={thLeftClass}>ID</th>
-                          <th className={thCenterClass}>N° RM</th>
-                          <th className={thCenterClass}>ID Mov</th>
-                          <th className={thCenterClass}>Nº Mov</th>
-                          <th className={thCenterClass}>Contrato</th>
-                          <th className={thCenterClass}>Recebimento engenharia</th>
+                          <th className={thLeftClass}>Contrato</th>
+                          <th className={thLeftClass}>Fornecedor</th>
+                          <th className={thCenterClass}>Tipo</th>
+                          <th className={thCenterClass}>Pagamento</th>
+                          <th className={thCenterClass}>Valor total</th>
                           <th className={thCenterClass}>Previsão</th>
+                          <th className={thCenterClass}>Engenharia</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -741,6 +745,11 @@ export default function ControleEntregasPageClient() {
                             row.currentStatus !== 'ENTREGUE' &&
                             row.currentStatus !== 'CANCELADO' &&
                             isDeliveryDateOverdue(row.expectedDelivery);
+                          const supplierLabel =
+                            row.supplier?.name?.trim() || row.supplierName?.trim() || '—';
+                          const receipt = row.receivedByEngineering
+                            ? ENGINEERING_RECEIPT_STATUS.received
+                            : ENGINEERING_RECEIPT_STATUS.pending;
 
                           return (
                             <tr
@@ -764,32 +773,20 @@ export default function ControleEntregasPageClient() {
                                   {row.deliveryNumber}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>
-                                {formatRmListDisplayId(row.rmNumber)}
+                              <td className={`${tdLeftClass} max-w-[180px] truncate font-medium`} title={contractLabel(row)}>
+                                {contractLabel(row)}
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementId || '—'}</td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementNumber || '—'}</td>
-                              <td className={tdCenterClass} title={`${contractLabel(row)} · ${row.polo}`}>
-                                <span className="inline-flex flex-col items-center gap-0.5">
-                                  <span className="max-w-[160px] truncate">{contractLabel(row)}</span>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">{row.polo}</span>
-                                </span>
+                              <td className={tdLeftClass}>{supplierLabel}</td>
+                              <td className={`${tdCenterClass} whitespace-nowrap`}>
+                                {deliveryTypeLabel(row.deliveryType)}
                               </td>
                               <td className={tdPillClass}>
-                                {(() => {
-                                  const receipt = row.receivedByEngineering
-                                    ? ENGINEERING_RECEIPT_STATUS.received
-                                    : ENGINEERING_RECEIPT_STATUS.pending;
-                                  return (
-                                    <div className="flex justify-center">
-                                      <span
-                                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${receipt.className}`}
-                                      >
-                                        {receipt.label}
-                                      </span>
-                                    </div>
-                                  );
-                                })()}
+                                <div className="flex justify-center">
+                                  <StatusPill value={row.paymentStatus} options={PAYMENT_STATUS_OPTIONS} />
+                                </div>
+                              </td>
+                              <td className={`${tdCenterClass} whitespace-nowrap tabular-nums`}>
+                                {formatCurrency(row.totalPaid)}
                               </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>
                                 {row.expectedDelivery ? (
@@ -804,6 +801,15 @@ export default function ControleEntregasPageClient() {
                                 ) : (
                                   <span className="text-xs text-gray-500 dark:text-gray-400">—</span>
                                 )}
+                              </td>
+                              <td className={tdPillClass}>
+                                <div className="flex justify-center">
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${receipt.className}`}
+                                  >
+                                    {receipt.label}
+                                  </span>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -831,7 +837,6 @@ export default function ControleEntregasPageClient() {
           {detailRow ? (
             <div className="space-y-6">
               <DetailSection title="Identificação">
-                <DetailField label="N° RM">{formatRmListDisplayId(detailRow.rmNumber)}</DetailField>
                 <DetailField label="ID Mov">{detailRow.movementId || '—'}</DetailField>
                 <DetailField label="Nº Mov">{detailRow.movementNumber || '—'}</DetailField>
                 <DetailField label="Contrato">{contractLabel(detailRow)}</DetailField>
@@ -1118,7 +1123,7 @@ export default function ControleEntregasPageClient() {
             setShowForm(false);
             setEditing(null);
           }}
-          title={editing ? `Editar ${editing.deliveryNumber}` : 'Nova entrega'}
+          title={editing ? `Editar ${editing.deliveryNumber}` : 'Nova Entrega'}
           size="lg"
         >
           <form
@@ -1129,6 +1134,24 @@ export default function ControleEntregasPageClient() {
             }}
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">ID Mov</label>
+                <input
+                  value={form.movementId}
+                  onChange={(e) => setForm((f) => ({ ...f, movementId: e.target.value }))}
+                  placeholder="Digite o ID da movimentação..."
+                  className={fieldClassName}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Nº Mov</label>
+                <input
+                  value={form.movementNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, movementNumber: e.target.value }))}
+                  placeholder="Digite o número da movimentação..."
+                  className={fieldClassName}
+                />
+              </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium mb-1">Contrato</label>
                 <SingleSelectSearchDropdown
@@ -1141,44 +1164,7 @@ export default function ControleEntregasPageClient() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">N° RM</label>
-                <input
-                  value={form.rmNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, rmNumber: e.target.value }))}
-                  className={fieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">ID Mov</label>
-                <input
-                  value={form.movementId}
-                  onChange={(e) => setForm((f) => ({ ...f, movementId: e.target.value }))}
-                  className={fieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Nº Mov</label>
-                <input
-                  value={form.movementNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, movementNumber: e.target.value }))}
-                  className={fieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Status atual</label>
-                <SingleSelectSearchDropdown
-                  value={form.currentStatus}
-                  onChange={(currentStatus) =>
-                    setForm((f) => ({ ...f, currentStatus: currentStatus as CurrentStatusValue }))
-                  }
-                  options={currentStatusOptions}
-                  allowEmpty={false}
-                  placeholder="Selecionar status..."
-                  noFocusRing
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Pagamento</label>
+                <label className="block text-sm font-medium mb-1">Forma de pagamento</label>
                 <SingleSelectSearchDropdown
                   value={form.paymentStatus}
                   onChange={(paymentStatus) =>
@@ -1186,11 +1172,22 @@ export default function ControleEntregasPageClient() {
                   }
                   options={paymentStatusOptions}
                   allowEmpty={false}
-                  placeholder="Selecionar pagamento..."
+                  placeholder="Selecionar forma de pagamento..."
                   noFocusRing
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium mb-1">Previsão de entrega</label>
+                <DatePickerField
+                  value={form.expectedDelivery}
+                  onChange={(expectedDelivery) => setForm((f) => ({ ...f, expectedDelivery }))}
+                  placeholder="dd/mm/aaaa"
+                  noFocusRing
+                  aria-label="Previsão de entrega"
+                  className="w-full"
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label className="block text-sm font-medium mb-1">Fornecedor</label>
                 <AsyncSearchSelectDropdown
                   value={form.supplierId}
@@ -1198,16 +1195,50 @@ export default function ControleEntregasPageClient() {
                   onChange={handleSupplierChange}
                   searchFn={searchOcSuppliers}
                   getOptionId={(supplier) => supplier.id}
-                  getOptionLabel={getOcSupplierLabel}
+                  getOptionLabel={(supplier) =>
+                    supplier.tradeName?.trim() || supplier.name?.trim() || ''
+                  }
                   queryKeyPrefix="controle-entregas-supplier"
-                  placeholder="Digite para buscar fornecedor..."
-                  searchPlaceholder="Nome, fantasia ou CNPJ..."
+                  placeholder="Selecionar fornecedor..."
+                  searchPlaceholder="Digite o nome ou CNPJ para encontrar..."
                   minSearchLength={0}
                   noFocusRing
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Valor OC</label>
+                <label className="block text-sm font-medium mb-1">Tipo de Entrega</label>
+                <SingleSelectSearchDropdown
+                  value={form.deliveryType}
+                  onChange={(deliveryType) =>
+                    setForm((f) => ({
+                      ...f,
+                      deliveryType: deliveryType as DeliveryTypeValue | '',
+                    }))
+                  }
+                  options={labeledToSelectOptions(DELIVERY_TYPE_OPTIONS)}
+                  allowEmpty={false}
+                  placeholder="Selecionar tipo de entrega..."
+                  noFocusRing
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Furo de estoque</label>
+                <SingleSelectSearchDropdown
+                  value={form.stockShortfallType}
+                  onChange={(stockShortfallType) =>
+                    setForm((f) => ({
+                      ...f,
+                      stockShortfallType: stockShortfallType as StockShortfallTypeValue | '',
+                    }))
+                  }
+                  options={labeledToSelectOptions(STOCK_SHORTFALL_TYPE_OPTIONS)}
+                  allowEmpty={false}
+                  placeholder="Selecionar furo de estoque..."
+                  noFocusRing
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Valor da OC</label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1221,7 +1252,7 @@ export default function ControleEntregasPageClient() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Valor total pago</label>
+                <label className="block text-sm font-medium mb-1">Valor total</label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1240,6 +1271,7 @@ export default function ControleEntregasPageClient() {
                   rows={2}
                   value={form.observations}
                   onChange={(e) => setForm((f) => ({ ...f, observations: e.target.value }))}
+                  placeholder="Digite observações sobre a entrega..."
                   className={fieldClassName}
                 />
               </div>
@@ -1258,7 +1290,7 @@ export default function ControleEntregasPageClient() {
               <button
                 type="submit"
                 disabled={saveMutation.isPending}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Registrar entrega'}
               </button>

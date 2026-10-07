@@ -1081,9 +1081,24 @@ export class TotvsRmRelatorioFinService {
         }
         return '';
       };
-      const codigoPrd = pick('CODIGOPRD', 'CODIGO', 'CODPRD', 'CODPRODUTO', 'CODE');
+      const codigoPrd = pick(
+        'COD - PRODUTO',
+        'CODIGOPRD',
+        'CODIGO',
+        'CODPRD',
+        'CODPRODUTO',
+        'CODE'
+      );
       const idPrd = pick('IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD');
-      const unidade = pick('CODUND', 'UNIDADE', 'CODUM', 'UN');
+      const unidade = pick(
+        'CODUNDCONTROLE',
+        'UNIDADE',
+        'CODUND',
+        'CODUNDCOMPRA',
+        'CODUNDVENDA',
+        'CODUM',
+        'UN'
+      );
       const candidates = [codigoPrd, idPrd].filter(Boolean);
       const matched = candidates.some((c) => {
         if (c.toUpperCase() === wantedUpper) return true;

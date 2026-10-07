@@ -19,6 +19,7 @@ export const PAYMENT_STATUS_OPTIONS = [
 export const STOCK_SHORTFALL_TYPE_OPTIONS = [
   { value: 'NORMAL', label: 'Normal', className: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200' },
   { value: 'CORRECAO', label: 'Correção', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' },
+  { value: 'CANCELADO', label: 'Cancelado', className: 'bg-gray-700 text-white dark:bg-gray-600 dark:text-gray-100' },
 ] as const;
 
 export const FINAL_STATUS_OPTIONS = [
@@ -33,8 +34,8 @@ export const POLO_OPTIONS = [
 ] as const;
 
 export const DELIVERY_TYPE_OPTIONS = [
-  { value: 'CIF', label: 'Entrega Fornecedor - CIF' },
-  { value: 'FOB', label: 'Entrega Logística - FOB' },
+  { value: 'CIF', label: 'CIF' },
+  { value: 'FOB', label: 'FOB' },
 ] as const;
 
 export const RECEIPT_TYPE_OPTIONS = [

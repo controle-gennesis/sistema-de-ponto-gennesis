@@ -867,8 +867,8 @@ export default function CaixinhaPageClient() {
                   getOptionId={(supplier) => supplier.id}
                   getOptionLabel={(supplier) => supplierStoreLabel(supplier as SupplierOption)}
                   queryKeyPrefix="caixinha-supplier"
-                  placeholder="Digite para buscar fornecedor..."
-                  searchPlaceholder="Nome, fantasia ou CNPJ..."
+                  placeholder="Selecionar fornecedor..."
+                  searchPlaceholder="Digite o nome ou CNPJ para encontrar..."
                   minSearchLength={0}
                   noFocusRing
                 />

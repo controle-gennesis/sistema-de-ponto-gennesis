@@ -3667,6 +3667,13 @@ model MaterialDelivery {
   receivedByEngineering Boolean                             @default(false)
   receivedByUserId      String?
   receivedAt            DateTime?
+  /// Local de recebimento (rótulo do local de estoque / obra)
+  receiptLocation       String?
+  /// Nome do responsável pelo recebimento (selecionado no formulário)
+  receiptResponsibleName String?
+  receiptPdfUrl         String?
+  receiptPhotoUrl       String?
+  receiptNotes          String?                             @db.Text
   createdBy             String
   createdAt             DateTime                            @default(now())
   updatedAt             DateTime                            @updatedAt
@@ -3695,6 +3702,7 @@ model MaterialDelivery {
 enum MaterialDeliveryStockShortfallType {
   NORMAL
   CORRECAO
+  CANCELADO
 }
 
 enum MaterialDeliveryPolo {

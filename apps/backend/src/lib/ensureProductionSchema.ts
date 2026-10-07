@@ -477,6 +477,51 @@ async function ensureFinancialControlLancadoStatus(prisma: PrismaClient): Promis
   `);
 }
 
+async function ensureMaterialDeliveryReceiptFields(prisma: PrismaClient): Promise<void> {
+  const cols: Array<{ name: string; sql: string }> = [
+    { name: 'receiptLocation', sql: 'TEXT' },
+    { name: 'receiptResponsibleName', sql: 'TEXT' },
+    { name: 'receiptPdfUrl', sql: 'TEXT' },
+    { name: 'receiptPhotoUrl', sql: 'TEXT' },
+    { name: 'receiptNotes', sql: 'TEXT' },
+  ];
+  for (const col of cols) {
+    if (!(await columnExists(prisma, 'material_deliveries', col.name))) {
+      console.warn(`[Schema] Coluna ${col.name} em material_deliveries ausente — adicionando.`);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "material_deliveries"
+          ADD COLUMN IF NOT EXISTS "${col.name}" ${col.sql};
+      `);
+    }
+  }
+}
+
+async function ensureMaterialDeliveryShortfallCancelado(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'MaterialDeliveryStockShortfallType'
+        AND e.enumlabel = 'CANCELADO'
+    ) AS "exists"
+  `;
+  if (rows[0]?.exists) return;
+
+  console.warn(
+    '[Schema] Enum MaterialDeliveryStockShortfallType sem CANCELADO — adicionando. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy.',
+  );
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TYPE "MaterialDeliveryStockShortfallType" ADD VALUE 'CANCELADO';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensureFinancialControlAttachmentsColumn(prisma: PrismaClient): Promise<void> {
   if (!(await columnExists(prisma, 'financial_control_entries', 'attachments'))) {
     console.warn('[Schema] Coluna attachments em financial_control_entries ausente — adicionando.');
@@ -2936,6 +2981,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureSupplierOriginColumn(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);
     await ensureFinancialControlLancadoStatus(prisma);
+    await ensureMaterialDeliveryShortfallCancelado(prisma);
+    await ensureMaterialDeliveryReceiptFields(prisma);
     await ensureFinancialControlNfNumberColumn(prisma);
     await ensureFinancialControlAttachmentsColumn(prisma);
     await ensureFinancialControlApplicationTypeColumn(prisma);

@@ -15,7 +15,8 @@ import {
   singleSelectTriggerTextClass,
 } from '@/components/ui/singleSelectDropdownUi';
 
-const DEFAULT_MIN_SEARCH_LENGTH = 2;
+/** 0 = lista ao abrir; digite para filtrar o cadastro inteiro (ex.: fornecedores). */
+const DEFAULT_MIN_SEARCH_LENGTH = 0;
 const DEFAULT_SEARCH_DEBOUNCE_MS = 300;
 const LIST_MAX = SINGLE_SELECT_LIST_MAX;
 

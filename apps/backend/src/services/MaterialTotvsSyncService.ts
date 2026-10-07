@@ -28,6 +28,8 @@ type MappedProduct = {
   idPrd: number | null;
   name: string;
   unit: string;
+  /** true quando UNIDADE/CODUNDCONTROLE veio preenchido do RM (não é fallback). */
+  unitFromTotvs: boolean;
   productType: string;
   isActive: boolean;
 };
@@ -96,6 +98,18 @@ function parseProdutoAtivo(row: Record<string, unknown>): boolean {
     if (/inativ|desativ|bloque|cancel/.test(s)) return false;
     if (/ativ|liber/.test(s)) return true;
   }
+
+  const name = cell(pickRow(row, 'NOMEFANTASIA', 'PRODUTO', 'NOME', 'DESCRICAO', 'DESCRIÇÃO'));
+  const description = cell(pickRow(row, 'DESCRICAO', 'DESCRIÇÃO', 'DESCPRODUTO'));
+  const looksInactive = [name, description].some((p) =>
+    String(p || '')
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toUpperCase()
+      .includes('INATIV')
+  );
+  if (looksInactive) return false;
+
   return true;
 }
 
@@ -116,27 +130,68 @@ function parseIdPrd(raw: unknown): number | null {
   return Math.trunc(n);
 }
 
+function preferUnit(prev: MappedProduct, next: MappedProduct): string {
+  if (next.unitFromTotvs && prev.unitFromTotvs) {
+    const prevGeneric = !prev.unit || prev.unit.toUpperCase() === 'UN';
+    const nextGeneric = !next.unit || next.unit.toUpperCase() === 'UN';
+    if (prevGeneric && !nextGeneric) return next.unit;
+    if (!prevGeneric && nextGeneric) return prev.unit;
+    return next.unit;
+  }
+  if (next.unitFromTotvs) return next.unit;
+  return prev.unit;
+}
+
+function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedProduct {
+  return {
+    ...next,
+    unit: preferUnit(prev, next),
+    unitFromTotvs: next.unitFromTotvs || prev.unitFromTotvs,
+    idPrd: next.idPrd ?? prev.idPrd,
+  };
+}
+
 function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
   const code = cell(
-    pickRow(row, 'CODIGOPRD', 'CODIGO', 'CODPRD', 'CODPRODUTO', 'CODE', 'CODIGO PRODUTO')
+    pickRow(
+      row,
+      'COD - PRODUTO',
+      'CODIGOPRD',
+      'CODIGO',
+      'CODPRD',
+      'CODPRODUTO',
+      'CODE',
+      'CODIGO PRODUTO'
+    )
   );
   const name = cell(
     pickRow(
       row,
       'NOMEFANTASIA',
+      'PRODUTO',
       'DESCRICAO',
       'DESCRIÇÃO',
       'NOMEPRD',
       'NOME',
-      'PRODUTO',
       'DESCPRODUTO'
     )
   );
   if (!code || !name) return null;
 
   const idPrd = parseIdPrd(pickRow(row, 'IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD'));
-  const unit =
-    cell(pickRow(row, 'CODUND', 'CODUNDCOMPRA', 'UNIDADE', 'CODUM', 'UN', 'UND')) || 'UN';
+  const unitRaw = cell(
+    pickRow(
+      row,
+      'CODUNDCONTROLE',
+      'UNIDADE',
+      'CODUND',
+      'CODUNDCOMPRA',
+      'CODUNDVENDA',
+      'CODUM',
+      'UN',
+      'UND'
+    )
+  );
   const tipoRaw = cell(pickRow(row, 'TIPOPRODUTO', 'TIPO', 'PRODUCTTYPE'));
   const productType =
     tipoRaw && /servi[cç]o/i.test(tipoRaw) ? 'Serviço' : 'Produto';
@@ -145,7 +200,8 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
     code,
     idPrd,
     name,
-    unit,
+    unit: (unitRaw || 'UN').toUpperCase(),
+    unitFromTotvs: Boolean(unitRaw),
     productType,
     isActive: parseProdutoAtivo(row),
   };
@@ -196,10 +252,13 @@ function needsUpdate(
   nextCode: string | null,
   nextIdPrd: number | null
 ): boolean {
+  const unitChanged =
+    m.unitFromTotvs &&
+    (existing.unit || '').toUpperCase() !== (m.unit || '').toUpperCase();
   return (
     (existing.code || null) !== (nextCode || null) ||
     existing.name !== m.name ||
-    existing.unit !== m.unit ||
+    unitChanged ||
     (existing.productType || null) !== m.productType ||
     existing.totvsIdPrd !== nextIdPrd ||
     existing.isActive !== m.isActive
@@ -256,15 +315,16 @@ export async function runMaterialTotvsSync(
       }
       const codeKey = normalizeCodeKey(m.code);
       if (seenCodes.has(codeKey)) {
+        // PRODUTOSATIVOS pode repetir o código; preferir unidade específica a "UN".
         const idx = mapped.findIndex((x) => normalizeCodeKey(x.code) === codeKey);
-        if (idx >= 0) mapped[idx] = m;
+        if (idx >= 0) mapped[idx] = mergeMappedProduct(mapped[idx], m);
         continue;
       }
       if (m.idPrd != null && seenIdPrd.has(m.idPrd)) {
         const idx = mapped.findIndex((x) => x.idPrd === m.idPrd);
         if (idx >= 0) {
           seenCodes.delete(normalizeCodeKey(mapped[idx].code));
-          mapped[idx] = m;
+          mapped[idx] = mergeMappedProduct(mapped[idx], m);
           seenCodes.add(codeKey);
         }
         continue;
@@ -408,7 +468,7 @@ export async function runMaterialTotvsSync(
           code: nextCode,
           name: m.name,
           description: target.description?.trim() ? target.description : m.name,
-          unit: m.unit,
+          unit: m.unitFromTotvs ? m.unit : target.unit,
           productType: m.productType,
           category: m.productType,
           totvsIdPrd: nextIdPrd,

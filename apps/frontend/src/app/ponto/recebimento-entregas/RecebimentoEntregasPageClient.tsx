@@ -3,29 +3,33 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock, Filter, PackageCheck, Search, X } from 'lucide-react';
+import { CheckCircle2, Clock, Filter, PackageCheck, Search, Trash2, Truck, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
-import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGrid3Class } from '@/components/ui/pageLayout';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
-import api from '@/lib/api';
+import { GestaoOsRequiredMark } from '@/components/gestao-os/GestaoOsModalUi';
+import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { RowActionMenuCell } from '@/components/ui/RowActionMenu';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import toast from 'react-hot-toast';
-import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   CURRENT_STATUS_OPTIONS,
   DELIVERY_TYPE_OPTIONS,
   PAYMENT_STATUS_OPTIONS,
   POLO_OPTIONS,
+  RECEIPT_TYPE_OPTIONS,
   formatCurrency,
   formatDate,
   isDeliveryDateOverdue,
@@ -36,6 +40,7 @@ import {
   type FinalStatusValue,
   type PaymentStatusValue,
   type PoloValue,
+  type ReceiptTypeValue,
   type StockShortfallTypeValue,
 } from '@/components/suprimentos/materialDeliveryLabels';
 
@@ -65,25 +70,35 @@ type MaterialDeliveryRow = {
   contractRecord: { id: string; name: string; number: string } | null;
 };
 
-type ViewTab = 'pending' | 'received';
+type ViewTab = 'all' | 'pending' | 'received';
 
 function getListHeaderConfig(viewTab: ViewTab) {
-  if (viewTab === 'received') {
-    return {
-      Icon: CheckCircle2,
-      iconBg: 'bg-green-100 dark:bg-green-900/30',
-      iconColor: 'text-green-600 dark:text-green-400',
-      title: 'Entregas Recebidas',
-      subtitle: 'Exibindo entregas já confirmadas pela engenharia',
-    };
+  switch (viewTab) {
+    case 'received':
+      return {
+        Icon: CheckCircle2,
+        iconBg: 'bg-green-100 dark:bg-green-900/30',
+        iconColor: 'text-green-600 dark:text-green-400',
+        title: 'Entregas Recebidas',
+        subtitle: 'Exibindo entregas já confirmadas pela engenharia',
+      };
+    case 'pending':
+      return {
+        Icon: PackageCheck,
+        iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+        iconColor: 'text-amber-600 dark:text-amber-400',
+        title: 'Entregas Pendentes',
+        subtitle: 'Exibindo entregas com recebimento de engenharia pendente',
+      };
+    default:
+      return {
+        Icon: Truck,
+        iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+        iconColor: 'text-blue-600 dark:text-blue-400',
+        title: 'Todas as Entregas',
+        subtitle: 'Listagem completa de entregas para recebimento',
+      };
   }
-  return {
-    Icon: PackageCheck,
-    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
-    iconColor: 'text-amber-600 dark:text-amber-400',
-    title: 'Entregas Pendentes',
-    subtitle: 'Exibindo entregas com recebimento de engenharia pendente',
-  };
 }
 
 const ITEMS_PER_PAGE = 12;
@@ -111,12 +126,40 @@ const thCenterClass = `${thBase} text-center`;
 const tdBase = 'px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300';
 const tdLeftClass = `${tdBase} text-left`;
 const tdCenterClass = `${tdBase} text-center`;
-const tdTruncateCenterClass = `${tdCenterClass} truncate`;
 const tdPillClass = `${tdCenterClass}`;
 
 function supplierLabel(row: MaterialDeliveryRow): string {
   return row.supplier?.name ?? row.supplierName ?? '—';
 }
+
+function toDatetimeLocalValue(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+type ConfirmReceiptForm = {
+  receiptLocation: string;
+  receiptResponsibleName: string;
+  receiptType: ReceiptTypeValue | '';
+  receivedAt: string;
+  receiptPdfUrl: string;
+  receiptPdfName: string;
+  receiptPhotoUrl: string;
+  receiptPhotoName: string;
+  receiptNotes: string;
+};
+
+const EMPTY_CONFIRM_FORM: ConfirmReceiptForm = {
+  receiptLocation: '',
+  receiptResponsibleName: '',
+  receiptType: 'TOTAL',
+  receivedAt: '',
+  receiptPdfUrl: '',
+  receiptPdfName: '',
+  receiptPhotoUrl: '',
+  receiptPhotoName: '',
+  receiptNotes: '',
+};
 
 function contractLabel(row: MaterialDeliveryRow): string {
   return row.contractRecord?.name ?? '—';
@@ -187,13 +230,36 @@ export default function RecebimentoEntregasPageClient() {
 
   const [search, setSearch] = useState('');
   const [poloFilter, setPoloFilter] = useState('');
-  const [viewTab, setViewTab] = useState<ViewTab>('pending');
+  const [viewTab, setViewTab] = useState<ViewTab>('all');
   const [listCurrentPage, setListCurrentPage] = useState(1);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [detailRowId, setDetailRowId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<MaterialDeliveryRow | null>(null);
+  const [confirmForm, setConfirmForm] = useState<ConfirmReceiptForm>(EMPTY_CONFIRM_FORM);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const closeDetailModal = () => setDetailRowId(null);
+
+  const openConfirmReceipt = (row: MaterialDeliveryRow) => {
+    setConfirmRow(row);
+    setConfirmForm({
+      ...EMPTY_CONFIRM_FORM,
+      receivedAt: toDatetimeLocalValue(),
+      receiptType: 'TOTAL',
+    });
+  };
+
+  const closeConfirmReceipt = () => {
+    setConfirmRow(null);
+    setConfirmForm(EMPTY_CONFIRM_FORM);
+    setUploadingPdf(false);
+    setUploadingPhoto(false);
+  };
+
+  const patchConfirmForm = (patch: Partial<ConfirmReceiptForm>) => {
+    setConfirmForm((prev) => ({ ...prev, ...patch }));
+  };
 
   const poloSelectOptions = useMemo(
     () => POLO_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
@@ -235,12 +301,54 @@ export default function RecebimentoEntregasPageClient() {
     },
   });
 
+  const { data: stockLocationsRes } = useQuery({
+    queryKey: ['stock-locations-recebimento'],
+    queryFn: async () => {
+      const res = await api.get('/stock-locations', {
+        params: { isActive: 'true', page: 1, limit: 2000 },
+      });
+      return res.data;
+    },
+    enabled: Boolean(confirmRow),
+  });
+
+  const { data: employeeOptions = [] } = useQuery({
+    queryKey: ['employees-recebimento-select'],
+    queryFn: () => fetchEmployeeSelectOptions(),
+    enabled: Boolean(confirmRow),
+  });
+
+  const receiptLocationOptions = useMemo(() => {
+    const rows = (stockLocationsRes?.data || []) as Array<{
+      code?: string | null;
+      name?: string | null;
+    }>;
+    return rows
+      .map((loc) => {
+        const code = String(loc.code || '').trim();
+        const name = String(loc.name || '').trim();
+        const label = code && name && code !== name ? `${code} — ${name}` : name || code;
+        return label ? { value: label, label } : null;
+      })
+      .filter((o): o is { value: string; label: string } => Boolean(o))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [stockLocationsRes]);
+
+  const responsibleOptions = useMemo(
+    () =>
+      employeeOptions.map((e) => ({
+        value: e.name,
+        label: e.name,
+      })),
+    [employeeOptions]
+  );
+
   const items: MaterialDeliveryRow[] = listRes?.data ?? [];
   const detailRow = useMemo(
     () => (detailRowId ? items.find((row) => row.id === detailRowId) ?? null : null),
     [items, detailRowId]
   );
-  const summary = summaryRes?.data ?? { awaitingEngineering: 0, delivered: 0 };
+  const summary = summaryRes?.data ?? { total: 0, awaitingEngineering: 0, delivered: 0 };
   const listHeader = useMemo(() => getListHeaderConfig(viewTab), [viewTab]);
   const ListHeaderIcon = listHeader.Icon;
 
@@ -273,9 +381,60 @@ export default function RecebimentoEntregasPageClient() {
     }
   }, [listCurrentPage, totalPages]);
 
+  const uploadReceiptFile = async (file: File, kind: 'pdf' | 'photo') => {
+    if (kind === 'pdf') setUploadingPdf(true);
+    else setUploadingPhoto(true);
+    try {
+      const data = new FormData();
+      data.append('file', file);
+      const res = await api.post('/material-deliveries/upload-receipt-file', data, {
+        timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
+      });
+      const uploaded = res.data?.data as { url?: string; originalName?: string } | undefined;
+      if (!uploaded?.url) throw new Error('Upload sem URL');
+      if (kind === 'pdf') {
+        patchConfirmForm({
+          receiptPdfUrl: uploaded.url,
+          receiptPdfName: uploaded.originalName || file.name,
+        });
+      } else {
+        patchConfirmForm({
+          receiptPhotoUrl: uploaded.url,
+          receiptPhotoName: uploaded.originalName || file.name,
+        });
+      }
+      toast.success('Arquivo enviado');
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string; error?: string } } };
+      toast.error(ax?.response?.data?.message || ax?.response?.data?.error || 'Falha no upload');
+    } finally {
+      if (kind === 'pdf') setUploadingPdf(false);
+      else setUploadingPhoto(false);
+    }
+  };
+
   const receiveMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await api.patch(`/material-deliveries/${id}/receive`);
+      if (!confirmForm.receiptLocation.trim()) {
+        throw new Error('Selecione o local de recebimento');
+      }
+      if (!confirmForm.receiptResponsibleName.trim()) {
+        throw new Error('Selecione o responsável pelo recebimento');
+      }
+      if (!confirmForm.receiptType) {
+        throw new Error('Informe se o recebimento é Total ou Parcial');
+      }
+      const res = await api.patch(`/material-deliveries/${id}/receive`, {
+        receiptLocation: confirmForm.receiptLocation.trim(),
+        receiptResponsibleName: confirmForm.receiptResponsibleName.trim(),
+        receiptType: confirmForm.receiptType,
+        receivedAt: confirmForm.receivedAt
+          ? new Date(confirmForm.receivedAt).toISOString()
+          : new Date().toISOString(),
+        receiptPdfUrl: confirmForm.receiptPdfUrl || null,
+        receiptPhotoUrl: confirmForm.receiptPhotoUrl || null,
+        receiptNotes: confirmForm.receiptNotes.trim() || null,
+      });
       return res.data;
     },
     onSuccess: () => {
@@ -286,17 +445,26 @@ export default function RecebimentoEntregasPageClient() {
       queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
       toast.success('Recebimento confirmado');
       closeDetailModal();
-      setConfirmRow(null);
+      closeConfirmReceipt();
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Erro ao confirmar recebimento');
+      toast.error(
+        err?.message || err?.response?.data?.message || 'Erro ao confirmar recebimento'
+      );
     },
   });
+
+  const canConfirmReceipt =
+    Boolean(confirmForm.receiptLocation.trim()) &&
+    Boolean(confirmForm.receiptResponsibleName.trim()) &&
+    Boolean(confirmForm.receiptType) &&
+    !uploadingPdf &&
+    !uploadingPhoto;
 
   const clearFilters = () => {
     setPoloFilter('');
     setSearch('');
-    setViewTab('pending');
+    setViewTab('all');
     setListCurrentPage(1);
   };
 
@@ -321,7 +489,16 @@ export default function RecebimentoEntregasPageClient() {
             description="Confirme o recebimento de material na obra. Esta tela é exclusiva para a engenharia."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+          <div className={pageStatCardsGrid3Class}>
+            <FilterStatCard
+              label="Todas"
+              count={summary.total}
+              icon={Truck}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              isActive={viewTab === 'all'}
+              onClick={() => setViewTab('all')}
+            />
             <FilterStatCard
               label="Pendentes"
               count={summary.awaitingEngineering}
@@ -400,7 +577,9 @@ export default function RecebimentoEntregasPageClient() {
                   <p className="text-gray-600 dark:text-gray-400">
                     {viewTab === 'pending'
                       ? 'Nenhuma entrega com recebimento pendente'
-                      : 'Nenhuma entrega recebida encontrada'}
+                      : viewTab === 'received'
+                        ? 'Nenhuma entrega recebida encontrada'
+                        : 'Nenhuma entrega encontrada'}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
                     {viewTab === 'pending'
@@ -424,13 +603,14 @@ export default function RecebimentoEntregasPageClient() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className={thLeftClass}>ID</th>
-                          <th className={thCenterClass}>N° RM</th>
-                          <th className={thCenterClass}>ID Mov</th>
-                          <th className={thCenterClass}>Nº Mov</th>
-                          <th className={thCenterClass}>Contrato</th>
-                          <th className={thCenterClass}>Recebimento engenharia</th>
+                          <th className={thLeftClass}>Contrato</th>
+                          <th className={thLeftClass}>Fornecedor</th>
+                          <th className={thCenterClass}>Tipo</th>
+                          <th className={thCenterClass}>Pagamento</th>
+                          <th className={thCenterClass}>Valor total</th>
                           <th className={thCenterClass}>Previsão</th>
-                          {viewTab === 'pending' ? (
+                          <th className={thCenterClass}>Engenharia</th>
+                          {viewTab !== 'received' ? (
                             <th className={listTableRowClasses.actionTh}>Ação</th>
                           ) : null}
                         </tr>
@@ -468,25 +648,23 @@ export default function RecebimentoEntregasPageClient() {
                                   {row.deliveryNumber}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>
-                                {formatRmListDisplayId(row.rmNumber)}
+                              <td
+                                className={`${tdLeftClass} max-w-[180px] truncate font-medium`}
+                                title={contractLabel(row)}
+                              >
+                                {contractLabel(row)}
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementId ?? '—'}</td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementNumber ?? '—'}</td>
-                              <td className={tdCenterClass} title={`${contractLabel(row)} · ${row.polo}`}>
-                                <span className="inline-flex flex-col items-center gap-0.5">
-                                  <span className="max-w-[160px] truncate">{contractLabel(row)}</span>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">{row.polo}</span>
-                                </span>
+                              <td className={tdLeftClass}>{supplierLabel(row)}</td>
+                              <td className={`${tdCenterClass} whitespace-nowrap`}>
+                                {deliveryTypeLabel(row.deliveryType)}
                               </td>
                               <td className={tdPillClass}>
                                 <div className="flex justify-center">
-                                  <span
-                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${receipt.className}`}
-                                  >
-                                    {receipt.label}
-                                  </span>
+                                  <StatusPill value={row.paymentStatus} options={PAYMENT_STATUS_OPTIONS} />
                                 </div>
+                              </td>
+                              <td className={`${tdCenterClass} whitespace-nowrap tabular-nums`}>
+                                {formatCurrency(row.totalPaid)}
                               </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>
                                 {row.expectedDelivery ? (
@@ -502,7 +680,16 @@ export default function RecebimentoEntregasPageClient() {
                                   <span className="text-xs text-gray-500 dark:text-gray-400">—</span>
                                 )}
                               </td>
-                              {viewTab === 'pending' ? (
+                              <td className={tdPillClass}>
+                                <div className="flex justify-center">
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${receipt.className}`}
+                                  >
+                                    {receipt.label}
+                                  </span>
+                                </div>
+                              </td>
+                              {viewTab !== 'received' ? (
                                 !row.receivedByEngineering ? (
                                   <RowActionMenuCell
                                     align="center"
@@ -526,7 +713,7 @@ export default function RecebimentoEntregasPageClient() {
 
                   {rowActionMenu &&
                     rowForActionMenu &&
-                    viewTab === 'pending' &&
+                    viewTab !== 'received' &&
                     !rowForActionMenu.receivedByEngineering && (
                       <ActionMenuOverlay
                         open
@@ -541,7 +728,7 @@ export default function RecebimentoEntregasPageClient() {
                           onClick={(e) => {
                             e.stopPropagation();
                             closeRowActionMenu();
-                            setConfirmRow(rowForActionMenu);
+                            openConfirmReceipt(rowForActionMenu);
                           }}
                           className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
@@ -566,7 +753,12 @@ export default function RecebimentoEntregasPageClient() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">Situação</label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <ButtonSeg
+                  active={viewTab === 'all'}
+                  onClick={() => setViewTab('all')}
+                  label="Todas"
+                />
                 <ButtonSeg
                   active={viewTab === 'pending'}
                   onClick={() => setViewTab('pending')}
@@ -621,7 +813,6 @@ export default function RecebimentoEntregasPageClient() {
           {detailRow ? (
             <div className="space-y-6">
               <DetailSection title="Identificação">
-                <DetailField label="N° RM">{formatRmListDisplayId(detailRow.rmNumber)}</DetailField>
                 <DetailField label="ID Mov">{detailRow.movementId || '—'}</DetailField>
                 <DetailField label="Nº Mov">{detailRow.movementNumber || '—'}</DetailField>
                 <DetailField label="Contrato">{contractLabel(detailRow)}</DetailField>
@@ -702,14 +893,26 @@ export default function RecebimentoEntregasPageClient() {
                 </p>
               </section>
 
-              <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
+              <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
                   onClick={closeDetailModal}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                 >
                   Fechar
                 </button>
+                {!detailRow.receivedByEngineering ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openConfirmReceipt(detailRow);
+                      closeDetailModal();
+                    }}
+                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+                  >
+                    Confirmar recebimento
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -717,46 +920,189 @@ export default function RecebimentoEntregasPageClient() {
 
         <Modal
           isOpen={Boolean(confirmRow)}
-          onClose={() => setConfirmRow(null)}
+          onClose={closeConfirmReceipt}
           confirmBeforeClose={false}
-      title="Confirmar recebimento"
+          title="Confirmar recebimento"
+          size="lg"
         >
           {confirmRow ? (
             <div className="space-y-4">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Confirma que o material da entrega <strong>#{confirmRow.deliveryNumber}</strong>{' '}
-                foi recebido na obra?
+                Preencha os dados do recebimento da entrega{' '}
+                <strong>#{confirmRow.deliveryNumber}</strong>
+                {supplierLabel(confirmRow) !== '—' ? (
+                  <>
+                    {' '}
+                    — <span className="font-medium text-gray-800 dark:text-gray-200">{supplierLabel(confirmRow)}</span>
+                  </>
+                ) : null}
+                .
               </p>
-              <dl className="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-4 text-sm dark:bg-gray-800/50 sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs text-gray-500 dark:text-gray-400">N° RM</dt>
-                  <dd className="font-medium text-gray-900 dark:text-gray-100">
-                    {formatRmListDisplayId(confirmRow.rmNumber)}
-                  </dd>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Local de Recebimento
+                    <GestaoOsRequiredMark />
+                  </label>
+                  <SingleSelectSearchDropdown
+                    value={confirmForm.receiptLocation}
+                    onChange={(receiptLocation) => patchConfirmForm({ receiptLocation })}
+                    options={receiptLocationOptions}
+                    allowEmpty={false}
+                    placeholder="Selecionar local de recebimento..."
+                    noFocusRing
+                  />
                 </div>
-                <div>
-                  <dt className="text-xs text-gray-500 dark:text-gray-400">ID Mov</dt>
-                  <dd className="font-medium text-gray-900 dark:text-gray-100">
-                    {confirmRow.movementId ?? '—'}
-                  </dd>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Responsável pelo Recebimento
+                    <GestaoOsRequiredMark />
+                  </label>
+                  <SingleSelectSearchDropdown
+                    value={confirmForm.receiptResponsibleName}
+                    onChange={(receiptResponsibleName) =>
+                      patchConfirmForm({ receiptResponsibleName })
+                    }
+                    options={responsibleOptions}
+                    allowEmpty={false}
+                    placeholder="Selecionar responsável..."
+                    noFocusRing
+                  />
                 </div>
-                <div>
-                  <dt className="text-xs text-gray-500 dark:text-gray-400">Contrato</dt>
-                  <dd className="font-medium text-gray-900 dark:text-gray-100">
-                    {contractLabel(confirmRow)} ({confirmRow.polo})
-                  </dd>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Recebimento
+                    <GestaoOsRequiredMark />
+                  </label>
+                  <div className="flex w-full gap-2">
+                    {RECEIPT_TYPE_OPTIONS.map((o) => (
+                      <ButtonSeg
+                        key={o.value}
+                        active={confirmForm.receiptType === o.value}
+                        onClick={() =>
+                          patchConfirmForm({
+                            receiptType: confirmForm.receiptType === o.value ? '' : o.value,
+                          })
+                        }
+                        label={o.label.toUpperCase()}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <dt className="text-xs text-gray-500 dark:text-gray-400">Nº Mov</dt>
-                  <dd className="font-medium text-gray-900 dark:text-gray-100">
-                    {confirmRow.movementNumber ?? '—'}
-                  </dd>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Data e Hora do Recebimento
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={confirmForm.receivedAt}
+                    onChange={(e) => patchConfirmForm({ receivedAt: e.target.value })}
+                    className={FORM_FIELD_INPUT_CLS}
+                  />
                 </div>
-              </dl>
-              <div className="flex justify-end gap-2 pt-2">
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    PDF
+                  </label>
+                  {confirmForm.receiptPdfUrl ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800/50">
+                      <a
+                        href={confirmForm.receiptPdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 flex-1 truncate text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {confirmForm.receiptPdfName || 'PDF anexado'}
+                      </a>
+                      <button
+                        type="button"
+                        disabled={uploadingPdf}
+                        onClick={() =>
+                          patchConfirmForm({ receiptPdfUrl: '', receiptPdfName: '' })
+                        }
+                        className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+                        aria-label="Remover PDF"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <FileDropZone
+                      label="Adicionar PDF"
+                      hint="Clique ou arraste um PDF"
+                      accept="application/pdf,.pdf"
+                      uploading={uploadingPdf}
+                      onFiles={(files) => {
+                        const file = files[0];
+                        if (file) void uploadReceiptFile(file, 'pdf');
+                      }}
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Foto
+                  </label>
+                  {confirmForm.receiptPhotoUrl ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800/50">
+                      <a
+                        href={confirmForm.receiptPhotoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 flex-1 truncate text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {confirmForm.receiptPhotoName || 'Foto anexada'}
+                      </a>
+                      <button
+                        type="button"
+                        disabled={uploadingPhoto}
+                        onClick={() =>
+                          patchConfirmForm({ receiptPhotoUrl: '', receiptPhotoName: '' })
+                        }
+                        className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+                        aria-label="Remover foto"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <FileDropZone
+                      label="Adicionar foto"
+                      hint="Clique ou arraste uma imagem"
+                      accept="image/*"
+                      uploading={uploadingPhoto}
+                      onFiles={(files) => {
+                        const file = files[0];
+                        if (file) void uploadReceiptFile(file, 'photo');
+                      }}
+                    />
+                  )}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Observações
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={confirmForm.receiptNotes}
+                    onChange={(e) => patchConfirmForm({ receiptNotes: e.target.value })}
+                    placeholder="Digite observações do recebimento..."
+                    className={FORM_FIELD_TEXTAREA_CLS}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
-                  onClick={() => setConfirmRow(null)}
+                  onClick={closeConfirmReceipt}
                   className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   Cancelar
@@ -764,8 +1110,8 @@ export default function RecebimentoEntregasPageClient() {
                 <button
                   type="button"
                   onClick={() => receiveMutation.mutate(confirmRow.id)}
-                  disabled={receiveMutation.isPending}
-                  className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                  disabled={receiveMutation.isPending || !canConfirmReceipt}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {receiveMutation.isPending ? 'Confirmando...' : 'Confirmar recebimento'}

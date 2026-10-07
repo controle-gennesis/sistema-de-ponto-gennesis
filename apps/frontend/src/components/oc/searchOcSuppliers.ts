@@ -7,7 +7,8 @@ export async function searchOcSuppliers(query: string): Promise<OcSupplierOption
     params: {
       search: query.trim() || undefined,
       isActive: true,
-      limit: 80,
+      // Sem busca: amostra inicial. Com texto: filtra no cadastro inteiro.
+      limit: query.trim() ? 200 : 100,
       page: 1,
     },
   });

@@ -21,6 +21,7 @@ export function parseGeralShortfallLabel(raw: unknown): MaterialDeliveryStockSho
   if (!normalized) return null;
   if (normalized === 'NORMAL') return MaterialDeliveryStockShortfallType.NORMAL;
   if (normalized === 'CORRECAO') return MaterialDeliveryStockShortfallType.CORRECAO;
+  if (normalized === 'CANCELADO') return MaterialDeliveryStockShortfallType.CANCELADO;
   return null;
 }
 

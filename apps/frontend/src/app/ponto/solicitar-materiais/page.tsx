@@ -2830,6 +2830,7 @@ function SolicitarMateriaisPage() {
                                   getOptionId={(m) => m.id}
                                   getOptionLabel={getRmMaterialLabel}
                                   placeholder="Digite para buscar material..."
+                                  minSearchLength={2}
                                   noFocusRing
                                   queryKeyPrefix="rm-materials-search"
                                 />
@@ -3720,6 +3721,7 @@ function SolicitarMateriaisPage() {
                               getOptionId={(m) => m.id}
                               getOptionLabel={getRmMaterialLabel}
                               placeholder="Digite para buscar material..."
+                              minSearchLength={2}
                               noFocusRing
                               queryKeyPrefix="rm-materials-search"
                             />

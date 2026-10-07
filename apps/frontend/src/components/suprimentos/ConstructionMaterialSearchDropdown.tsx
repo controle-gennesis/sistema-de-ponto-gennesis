@@ -42,6 +42,7 @@ export function ConstructionMaterialSearchDropdown({
       }}
       disabled={disabled}
       placeholder={placeholder}
+      minSearchLength={2}
       noFocusRing={noFocusRing}
       queryKeyPrefix="construction-materials-search"
       stayOpenOnSelect={stayOpenOnSelect}
