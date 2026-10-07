@@ -260,11 +260,20 @@ export class GennecyFuelRefuelReportFlowService {
       }
 
       case 'ASK_TANK': {
-        const asIndex = parseInt(body.trim(), 10);
+        const trimmed = body.trim();
+        const lower = trimmed.toLowerCase();
+        const byLabel = TANK_OPTIONS.find((o) => o.label.toLowerCase() === lower);
+        // Índice só se for número puro — parseInt("1/2…") virava 1 (Reserva).
+        const asIndex = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : NaN;
         const chosen =
-          Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= TANK_OPTIONS.length
+          byLabel ||
+          (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= TANK_OPTIONS.length
             ? TANK_OPTIONS[asIndex - 1]
-            : TANK_OPTIONS.find((o) => o.label.toLowerCase().includes(body.toLowerCase()));
+            : TANK_OPTIONS.find(
+                (o) =>
+                  o.label.toLowerCase().includes(lower) ||
+                  lower.includes(o.label.toLowerCase()),
+              ));
         if (!chosen) {
           const tankLines = TANK_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
           return { handled: true, reply: `Opção inválida.\n${tankLines}` };

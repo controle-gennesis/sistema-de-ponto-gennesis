@@ -75,25 +75,57 @@ function tankListAction(body = 'Qual o nível do tanque após o abastecimento?')
 }
 
 function resolveTankChoice(content: string, textRaw: string): (typeof TANK_OPTIONS)[number] | null {
-  const raw = content.trim() || textRaw.trim();
+  // Preferir textRaw: o bot lowercasa `content`, e os IDs da lista Meta são
+  // `fuel_tank_HALF` — com lowercasing quebrava o match com o enum Prisma.
+  const raw = (textRaw || content || '').trim();
   if (!raw) return null;
 
-  if (raw.startsWith(TANK_OPTION_ID_PREFIX)) {
-    const level = raw.slice(TANK_OPTION_ID_PREFIX.length) as FuelTankLevelAfter;
-    return TANK_OPTIONS.find((o) => o.level === level) ?? null;
-  }
-
-  const asIndex = parseInt(raw, 10);
-  if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= TANK_OPTIONS.length) {
-    return TANK_OPTIONS[asIndex - 1];
-  }
-
   const lower = raw.toLowerCase();
-  return (
-    TANK_OPTIONS.find((o) => o.label.toLowerCase() === lower) ||
-    TANK_OPTIONS.find((o) => o.label.toLowerCase().includes(lower)) ||
-    null
-  );
+
+  if (lower.startsWith(TANK_OPTION_ID_PREFIX)) {
+    const levelToken = lower
+      .slice(TANK_OPTION_ID_PREFIX.length)
+      .toUpperCase()
+      .replace(/-/g, '_');
+    return TANK_OPTIONS.find((o) => o.level === levelToken) ?? null;
+  }
+
+  const byExactLabel = TANK_OPTIONS.find((o) => o.label.toLowerCase() === lower);
+  if (byExactLabel) return byExactLabel;
+
+  // Índice numérico puro (1–5) antes de includes — senão "1" casa em "1/4 do tanque".
+  if (/^\d+$/.test(raw)) {
+    const asIndex = parseInt(raw, 10);
+    if (asIndex >= 1 && asIndex <= TANK_OPTIONS.length) {
+      return TANK_OPTIONS[asIndex - 1];
+    }
+  }
+
+  // Aliases comuns (texto livre / atalho); evitar parseInt("1/2…") → 1 (Reserva).
+  const aliases: Array<{ re: RegExp; level: FuelTankLevelAfter }> = [
+    { re: /^(reserva|reserve)$/i, level: FuelTankLevelAfter.RESERVE },
+    { re: /^(1\s*\/\s*4|1\/4|¼|um\s*quarto|quarto)$/i, level: FuelTankLevelAfter.QUARTER },
+    { re: /^(1\s*\/\s*2|1\/2|½|meio|metade)$/i, level: FuelTankLevelAfter.HALF },
+    {
+      re: /^(3\s*\/\s*4|3\/4|¾|tres\s*quartos|três\s*quartos)$/i,
+      level: FuelTankLevelAfter.THREE_QUARTERS,
+    },
+    { re: /^(cheio|full|tanque\s*cheio)$/i, level: FuelTankLevelAfter.FULL },
+  ];
+  for (const alias of aliases) {
+    const withoutTankSuffix = lower.replace(/\s+do\s+tanque$/, '');
+    if (alias.re.test(lower) || alias.re.test(withoutTankSuffix)) {
+      return TANK_OPTIONS.find((o) => o.level === alias.level) ?? null;
+    }
+  }
+
+  // Includes só com trecho razoável (evita "1" → "1/4…")
+  if (lower.length >= 3) {
+    const byIncludes = TANK_OPTIONS.find((o) => o.label.toLowerCase().includes(lower));
+    if (byIncludes) return byIncludes;
+  }
+
+  return null;
 }
 
 function requestListAction(
