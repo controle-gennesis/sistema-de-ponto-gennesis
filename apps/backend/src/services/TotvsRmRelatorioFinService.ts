@@ -1037,15 +1037,80 @@ export class TotvsRmRelatorioFinService {
     ];
   }
 
+  /** True se a linha já traz unidade (CODUNDCONTROLE / UNIDADE). */
+  private rowHasUnidade(row: Record<string, unknown>): boolean {
+    const keys = Object.keys(row);
+    const wanted = new Set(
+      ['CODUNDCONTROLE', 'UNIDADE', 'CODUND', 'CODUNDCOMPRA', 'CODUNDVENDA', 'CODUM'].map((k) =>
+        k.toUpperCase().replace(/[\s_./-]+/g, '')
+      )
+    );
+    return keys.some((k) => {
+      const norm = k.toUpperCase().replace(/[\s_./-]+/g, '');
+      if (!wanted.has(norm)) return false;
+      const v = row[k];
+      return v != null && String(v).trim() !== '';
+    });
+  }
+
+  private pickProdutoCodigo(row: Record<string, unknown>): string {
+    const keys = Object.keys(row);
+    for (const alias of [
+      'COD - PRODUTO',
+      'CODIGOPRD',
+      'CODIGO',
+      'CODPRD',
+      'CODPRODUTO',
+      'CODE',
+    ]) {
+      const hit = keys.find(
+        (k) =>
+          k.toUpperCase().replace(/[\s_./-]+/g, '') ===
+          alias.toUpperCase().replace(/[\s_./-]+/g, '')
+      );
+      if (hit != null && row[hit] != null && String(row[hit]).trim()) {
+        return String(row[hit]).trim();
+      }
+    }
+    return '';
+  }
+
+  private pickProdutoUnidade(row: Record<string, unknown>): string {
+    const keys = Object.keys(row);
+    for (const alias of [
+      'CODUNDCONTROLE',
+      'UNIDADE',
+      'CODUND',
+      'CODUNDCOMPRA',
+      'CODUNDVENDA',
+      'CODUM',
+    ]) {
+      const hit = keys.find(
+        (k) =>
+          k.toUpperCase().replace(/[\s_./-]+/g, '') ===
+          alias.toUpperCase().replace(/[\s_./-]+/g, '')
+      );
+      if (hit != null && row[hit] != null && String(row[hit]).trim()) {
+        return String(row[hit]).trim();
+      }
+    }
+    return '';
+  }
+
+  /**
+   * Consulta PRODUTOS (catálogo com IDPRD) e, se não vier unidade,
+   * enriquece com UNIDADE de PRODUTOSATIVOS (CODUNDCONTROLE).
+   */
   async fetchProdutosAtivosRows(): Promise<Record<string, unknown>[]> {
     const paths = this.produtosAtivosFallbackPaths();
     let lastError: Error | null = null;
+    let rows: Record<string, unknown>[] | null = null;
 
     for (const pathRel of paths) {
       try {
-        const rows = await this.fetchRowsForPath(pathRel);
+        rows = await this.fetchRowsForPath(pathRel);
         this.pathRowsCache.set(normPathRel(pathRel), { rows, at: Date.now() });
-        return rows;
+        break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         const retryable =
@@ -1056,7 +1121,61 @@ export class TotvsRmRelatorioFinService {
       }
     }
 
-    throw lastError ?? new Error('Falha ao buscar PRODUTOS no TOTVS RM');
+    if (!rows) {
+      throw lastError ?? new Error('Falha ao buscar PRODUTOS no TOTVS RM');
+    }
+
+    const sample = rows.slice(0, 40);
+    const hasUnit = sample.some((r) => r && typeof r === 'object' && this.rowHasUnidade(r));
+    if (hasUnit) return rows;
+
+    const unitPaths = [
+      (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim(),
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T',
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/G',
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/0/F',
+    ].filter(Boolean);
+
+    for (const unitPath of unitPaths) {
+      try {
+        const unitRows = await this.fetchRowsForPath(unitPath);
+        const unitByCode = new Map<string, string>();
+        for (const ur of unitRows) {
+          if (!ur || typeof ur !== 'object') continue;
+          const code = this.pickProdutoCodigo(ur as Record<string, unknown>);
+          const unit = this.pickProdutoUnidade(ur as Record<string, unknown>);
+          if (!code || !unit) continue;
+          const prev = unitByCode.get(code);
+          // Preferir unidade específica a "UN" genérico (linhas duplicadas no RM).
+          if (!prev || (prev.toUpperCase() === 'UN' && unit.toUpperCase() !== 'UN')) {
+            unitByCode.set(code, unit);
+          }
+        }
+        if (unitByCode.size === 0) continue;
+
+        let enriched = 0;
+        const merged = rows.map((row) => {
+          const code = this.pickProdutoCodigo(row);
+          const unit = code ? unitByCode.get(code) : undefined;
+          if (!unit) return row;
+          enriched += 1;
+          return { ...row, UNIDADE: unit, CODUNDCONTROLE: unit };
+        });
+        console.log(
+          `[TOTVS RM] unidades enriquecidas via PRODUTOSATIVOS: ${enriched}/${rows.length} (path=${unitPath})`
+        );
+        this.pathRowsCache.set(normPathRel(paths[0] || unitPath), {
+          rows: merged,
+          at: Date.now(),
+        });
+        return merged;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[TOTVS RM] falha ao enriquecer UNIDADE (${unitPath}): ${message.slice(0, 180)}`);
+      }
+    }
+
+    return rows;
   }
 
   async findProdutoAtivoByCodigo(codigo: string): Promise<{
