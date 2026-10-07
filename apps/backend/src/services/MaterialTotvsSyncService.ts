@@ -32,6 +32,8 @@ type MappedProduct = {
   unitFromTotvs: boolean;
   productType: string;
   isActive: boolean;
+  budgetNatureCode: string | null;
+  budgetNatureName: string | null;
 };
 
 type LocalMaterial = {
@@ -43,6 +45,7 @@ type LocalMaterial = {
   productType: string | null;
   totvsIdPrd: number | null;
   isActive: boolean;
+  budgetNatureId: string | null;
 };
 
 function envBool(key: string, fallback = false): boolean {
@@ -156,6 +159,10 @@ function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedPro
     idPrd: next.idPrd ?? prev.idPrd,
     // Se qualquer linha indicar inativo (texto/flag), mantém inativo.
     isActive: prev.isActive && next.isActive,
+    budgetNatureCode: prev.budgetNatureCode ?? next.budgetNatureCode,
+    budgetNatureName: prev.budgetNatureCode
+      ? prev.budgetNatureName
+      : next.budgetNatureName ?? prev.budgetNatureName,
   };
 }
 
@@ -203,6 +210,12 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
   const tipoRaw = cell(pickRow(row, 'TIPOPRODUTO', 'TIPO', 'PRODUCTTYPE'));
   const productType =
     tipoRaw && /servi[cç]o/i.test(tipoRaw) ? 'Serviço' : 'Produto';
+  const budgetNatureCode = cell(
+    pickRow(row, 'COD NATUREZA ORCAMENTARIA', 'COD NATUREZA ORÇAMENTÁRIA', 'CODNATORCAMENTARIA', 'CODTBORCAMENTO')
+  );
+  const budgetNatureName = cell(
+    pickRow(row, 'NATUREZA ORCAMENTARIA', 'NATUREZA ORÇAMENTÁRIA', 'DESCNATORCAMENTARIA')
+  );
 
   return {
     code,
@@ -212,7 +225,45 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
     unitFromTotvs: Boolean(unitRaw),
     productType,
     isActive: parseProdutoAtivo(row),
+    budgetNatureCode,
+    budgetNatureName: budgetNatureCode ? budgetNatureName : null,
   };
+}
+
+/** Mapa código RM → id da natureza; cria no cadastro as que ainda não existem. */
+async function resolveBudgetNatureIds(mapped: MappedProduct[]): Promise<Map<string, string>> {
+  const wanted = new Map<string, string>();
+  for (const m of mapped) {
+    if (!m.budgetNatureCode) continue;
+    if (!wanted.has(m.budgetNatureCode) || !wanted.get(m.budgetNatureCode)) {
+      wanted.set(m.budgetNatureCode, m.budgetNatureName || '');
+    }
+  }
+
+  const idByCode = new Map<string, string>();
+  if (wanted.size === 0) return idByCode;
+
+  const existing = await prisma.budgetNature.findMany({
+    where: { code: { not: null } },
+    select: { id: true, code: true },
+  });
+  for (const n of existing) {
+    const code = (n.code || '').trim();
+    if (code) idByCode.set(code, n.id);
+  }
+
+  for (const [code, name] of wanted) {
+    if (idByCode.has(code)) continue;
+    const created = await prisma.budgetNature.upsert({
+      where: { code },
+      update: {},
+      create: { code, name: name || code, isActive: true },
+      select: { id: true },
+    });
+    idByCode.set(code, created.id);
+    console.log(`[material-totvs] natureza orçamentária criada: ${code} - ${name || code}`);
+  }
+  return idByCode;
 }
 
 async function syncEngineeringMaterial(material: {
@@ -258,7 +309,8 @@ function needsUpdate(
   existing: LocalMaterial,
   m: MappedProduct,
   nextCode: string | null,
-  nextIdPrd: number | null
+  nextIdPrd: number | null,
+  nextBudgetNatureId: string | null
 ): boolean {
   const unitChanged =
     m.unitFromTotvs &&
@@ -269,12 +321,13 @@ function needsUpdate(
     unitChanged ||
     (existing.productType || null) !== m.productType ||
     existing.totvsIdPrd !== nextIdPrd ||
-    existing.isActive !== m.isActive
+    existing.isActive !== m.isActive ||
+    (existing.budgetNatureId || null) !== (nextBudgetNatureId || null)
   );
 }
 
 /**
- * Busca PRODUTOS no TOTVS RM e faz upsert local:
+ * Busca PRODUTOSATIVOS no TOTVS RM e faz upsert local:
  * 1) por totvsIdPrd (IDPRD)
  * 2) por código (CODIGOPRD)
  * 3) por nome exato único (só para alinhar código sem criar duplicata)
@@ -352,8 +405,11 @@ export async function runMaterialTotvsSync(
         productType: true,
         totvsIdPrd: true,
         isActive: true,
+        budgetNatureId: true,
       },
     })) as LocalMaterial[];
+
+    const budgetNatureIdByCode = await resolveBudgetNatureIds(mapped);
 
     const byIdPrd = new Map<number, LocalMaterial>();
     const byCode = new Map<string, LocalMaterial>();
@@ -377,6 +433,7 @@ export async function runMaterialTotvsSync(
       category: string;
       totvsIdPrd: number | null;
       isActive: boolean;
+      budgetNatureId: string | null;
     };
     type UpdateRow = {
       id: string;
@@ -389,6 +446,7 @@ export async function runMaterialTotvsSync(
         category: string;
         totvsIdPrd: number | null;
         isActive: boolean;
+        budgetNatureId: string | null;
       };
     };
 
@@ -417,6 +475,9 @@ export async function runMaterialTotvsSync(
       // Texto INATIV* no nome → nunca criar/atualizar como ativo.
       const inactiveByText = looksInactiveText(m.name);
       const effectiveActive = m.isActive && !inactiveByText;
+      const rmBudgetNatureId = m.budgetNatureCode
+        ? budgetNatureIdByCode.get(m.budgetNatureCode) ?? null
+        : null;
 
       if (!target) {
         if (byCode.has(codeKey) || (m.idPrd != null && byIdPrd.has(m.idPrd))) {
@@ -437,6 +498,7 @@ export async function runMaterialTotvsSync(
           category: m.productType,
           totvsIdPrd: m.idPrd,
           isActive: true,
+          budgetNatureId: rmBudgetNatureId,
         });
         const placeholder: LocalMaterial = {
           id: `__new_${codeKey}`,
@@ -447,6 +509,7 @@ export async function runMaterialTotvsSync(
           productType: m.productType,
           totvsIdPrd: m.idPrd,
           isActive: true,
+          budgetNatureId: rmBudgetNatureId,
         };
         byCode.set(codeKey, placeholder);
         if (m.idPrd != null) byIdPrd.set(m.idPrd, placeholder);
@@ -474,8 +537,11 @@ export async function runMaterialTotvsSync(
         }
       }
 
+      // RM manda quando informa natureza; sem natureza no RM, mantém a local.
+      const nextBudgetNatureId = rmBudgetNatureId ?? target.budgetNatureId;
+
       const mappedForUpdate: MappedProduct = { ...m, isActive: effectiveActive };
-      if (!needsUpdate(target, mappedForUpdate, nextCode, nextIdPrd)) {
+      if (!needsUpdate(target, mappedForUpdate, nextCode, nextIdPrd, nextBudgetNatureId)) {
         skipped += 1;
         continue;
       }
@@ -491,6 +557,7 @@ export async function runMaterialTotvsSync(
           category: m.productType,
           totvsIdPrd: nextIdPrd,
           isActive: effectiveActive,
+          budgetNatureId: nextBudgetNatureId,
         },
       });
 
@@ -525,6 +592,7 @@ export async function runMaterialTotvsSync(
           category: e.productType || 'Produto',
           totvsIdPrd: e.totvsIdPrd,
           isActive: false,
+          budgetNatureId: e.budgetNatureId,
         },
       });
     }
@@ -542,6 +610,7 @@ export async function runMaterialTotvsSync(
             category: data.category,
             totvsIdPrd: data.totvsIdPrd,
             isActive: data.isActive,
+            budgetNatureId: data.budgetNatureId,
           },
         });
         try {

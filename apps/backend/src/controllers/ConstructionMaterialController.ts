@@ -1034,7 +1034,7 @@ export class ConstructionMaterialController {
         success: false,
         message:
           /JSON|Unexpected token/i.test(message)
-            ? 'TOTVS RM devolveu resposta inválida ao buscar PRODUTOS. Verifique TOTVS_RM_PRODUTOS_PATH e as credenciais.'
+            ? 'TOTVS RM devolveu resposta inválida ao buscar PRODUTOSATIVOS. Verifique TOTVS_RM_PRODUTOSATIVOS_PATH e as credenciais.'
             : message || 'Falha ao sincronizar materiais do TOTVS',
         data: getMaterialTotvsSyncStatus(),
       });

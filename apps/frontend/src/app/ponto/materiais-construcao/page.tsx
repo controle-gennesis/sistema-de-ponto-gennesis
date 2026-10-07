@@ -199,7 +199,7 @@ function analyzeImportRow(
   const inactiveText = [name, description, ativoRaw].some((part) =>
     String(part || '')
       .normalize('NFD')
-      .replace(/\p{M}/gu, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .toUpperCase()
       .includes('INATIV')
   );

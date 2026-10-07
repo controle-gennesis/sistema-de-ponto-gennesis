@@ -1013,44 +1013,35 @@ export class TotvsRmRelatorioFinService {
     return this.fetchRowsForPath(this.defaultRelatorioPath());
   }
 
-  /** Consulta padrão de produtos no RM (dataset PRODUTOS). */
+  /** Consulta padrão de produtos no RM (dataset PRODUTOSATIVOS: código, unidade, natureza, status). */
   defaultProdutosAtivosPath(): string {
     return (
-      (process.env.TOTVS_RM_PRODUTOS_PATH || '').trim() ||
       (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim() ||
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T'
+    );
+  }
+
+  /** Catálogo PRODUTOS (usado só para complementar IDPRD). */
+  private defaultProdutosCatalogoPath(): string {
+    return (
+      (process.env.TOTVS_RM_PRODUTOS_PATH || '').trim() ||
       '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOS/0/G'
     );
   }
 
   private produtosAtivosFallbackPaths(): string[] {
-    const custom =
-      (process.env.TOTVS_RM_PRODUTOS_PATH || '').trim() ||
-      (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim();
-    if (custom) return [custom];
-    return [
-      // Catálogo oficial Gennesis
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOS/0/G',
-      // Fallbacks legados
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T',
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/G',
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/0/F',
-    ];
+    return [...new Set([this.defaultProdutosAtivosPath(), this.defaultProdutosCatalogoPath()])];
   }
 
-  /** True se a linha já traz unidade (CODUNDCONTROLE / UNIDADE). */
-  private rowHasUnidade(row: Record<string, unknown>): boolean {
+  private pickProdutoIdPrd(row: Record<string, unknown>): string {
     const keys = Object.keys(row);
-    const wanted = new Set(
-      ['CODUNDCONTROLE', 'UNIDADE', 'CODUND', 'CODUNDCOMPRA', 'CODUNDVENDA', 'CODUM'].map((k) =>
-        k.toUpperCase().replace(/[\s_./-]+/g, '')
-      )
-    );
-    return keys.some((k) => {
-      const norm = k.toUpperCase().replace(/[\s_./-]+/g, '');
-      if (!wanted.has(norm)) return false;
-      const v = row[k];
-      return v != null && String(v).trim() !== '';
-    });
+    for (const alias of ['IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD']) {
+      const hit = keys.find((k) => k.toUpperCase().replace(/[\s_./-]+/g, '') === alias);
+      if (hit != null && row[hit] != null && String(row[hit]).trim()) {
+        return String(row[hit]).trim();
+      }
+    }
+    return '';
   }
 
   private pickProdutoCodigo(row: Record<string, unknown>): string {
@@ -1098,18 +1089,19 @@ export class TotvsRmRelatorioFinService {
   }
 
   /**
-   * Consulta PRODUTOS (catálogo com IDPRD) e, se não vier unidade,
-   * enriquece com UNIDADE de PRODUTOSATIVOS (CODUNDCONTROLE).
+   * Consulta PRODUTOSATIVOS (código, unidade, natureza orçamentária, status) e
+   * complementa IDPRD a partir do catálogo PRODUTOS quando disponível.
    */
   async fetchProdutosAtivosRows(): Promise<Record<string, unknown>[]> {
     const paths = this.produtosAtivosFallbackPaths();
     let lastError: Error | null = null;
     let rows: Record<string, unknown>[] | null = null;
+    let usedPath = '';
 
     for (const pathRel of paths) {
       try {
         rows = await this.fetchRowsForPath(pathRel);
-        this.pathRowsCache.set(normPathRel(pathRel), { rows, at: Date.now() });
+        usedPath = pathRel;
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
@@ -1122,59 +1114,43 @@ export class TotvsRmRelatorioFinService {
     }
 
     if (!rows) {
-      throw lastError ?? new Error('Falha ao buscar PRODUTOS no TOTVS RM');
+      throw lastError ?? new Error('Falha ao buscar PRODUTOSATIVOS no TOTVS RM');
     }
 
-    const sample = rows.slice(0, 40);
-    const hasUnit = sample.some((r) => r && typeof r === 'object' && this.rowHasUnidade(r));
-    if (hasUnit) return rows;
+    const catalogPath = this.defaultProdutosCatalogoPath();
+    const hasIdPrd = rows.slice(0, 40).some((r) => r && typeof r === 'object' && this.pickProdutoIdPrd(r));
+    if (hasIdPrd || normPathRel(usedPath) === normPathRel(catalogPath)) {
+      this.pathRowsCache.set(normPathRel(usedPath), { rows, at: Date.now() });
+      return rows;
+    }
 
-    const unitPaths = [
-      (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim(),
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T',
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/G',
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/0/F',
-    ].filter(Boolean);
-
-    for (const unitPath of unitPaths) {
-      try {
-        const unitRows = await this.fetchRowsForPath(unitPath);
-        const unitByCode = new Map<string, string>();
-        for (const ur of unitRows) {
-          if (!ur || typeof ur !== 'object') continue;
-          const code = this.pickProdutoCodigo(ur as Record<string, unknown>);
-          const unit = this.pickProdutoUnidade(ur as Record<string, unknown>);
-          if (!code || !unit) continue;
-          const prev = unitByCode.get(code);
-          // Preferir unidade específica a "UN" genérico (linhas duplicadas no RM).
-          if (!prev || (prev.toUpperCase() === 'UN' && unit.toUpperCase() !== 'UN')) {
-            unitByCode.set(code, unit);
-          }
-        }
-        if (unitByCode.size === 0) continue;
-
-        let enriched = 0;
-        const merged = rows.map((row) => {
-          const code = this.pickProdutoCodigo(row);
-          const unit = code ? unitByCode.get(code) : undefined;
-          if (!unit) return row;
-          enriched += 1;
-          return { ...row, UNIDADE: unit, CODUNDCONTROLE: unit };
-        });
-        console.log(
-          `[TOTVS RM] unidades enriquecidas via PRODUTOSATIVOS: ${enriched}/${rows.length} (path=${unitPath})`
-        );
-        this.pathRowsCache.set(normPathRel(paths[0] || unitPath), {
-          rows: merged,
-          at: Date.now(),
-        });
-        return merged;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[TOTVS RM] falha ao enriquecer UNIDADE (${unitPath}): ${message.slice(0, 180)}`);
+    try {
+      const catalogRows = await this.fetchRowsForPath(catalogPath);
+      const idByCode = new Map<string, string>();
+      for (const cr of catalogRows) {
+        if (!cr || typeof cr !== 'object') continue;
+        const code = this.pickProdutoCodigo(cr as Record<string, unknown>);
+        const idPrd = this.pickProdutoIdPrd(cr as Record<string, unknown>);
+        if (code && idPrd && !idByCode.has(code)) idByCode.set(code, idPrd);
       }
+      let enriched = 0;
+      const merged = rows.map((row) => {
+        const code = this.pickProdutoCodigo(row);
+        const idPrd = code ? idByCode.get(code) : undefined;
+        if (!idPrd) return row;
+        enriched += 1;
+        return { ...row, IDPRD: idPrd };
+      });
+      console.log(
+        `[TOTVS RM] IDPRD complementado via PRODUTOS: ${enriched}/${rows.length} (path=${catalogPath})`
+      );
+      rows = merged;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[TOTVS RM] falha ao complementar IDPRD (${catalogPath}): ${message.slice(0, 180)}`);
     }
 
+    this.pathRowsCache.set(normPathRel(usedPath), { rows, at: Date.now() });
     return rows;
   }
 
