@@ -7,11 +7,12 @@ export type LotBreakdownLotConfig = {
   gastosCostCenters: readonly string[];
 };
 
+/** `lote` e `lotes` são tratados como a mesma coluna (singular/plural). */
 export type LotBreakdownColumn = 'lote' | 'lotes' | 'servico' | 'contrato';
 
 export type LotBreakdownTabConfig = {
   tabKey: string;
-  /** Coluna da planilha NFS usada para identificar o lote. */
+  /** Coluna da planilha NFS usada para identificar o lote (`lote` ≡ `lotes`). */
   lotColumn: LotBreakdownColumn;
   lots: readonly LotBreakdownLotConfig[];
 };
@@ -41,7 +42,8 @@ export const NFS_TAB_LOT_BREAKDOWN: readonly LotBreakdownTabConfig[] = [
   },
   {
     tabKey: 'tjgo-retrofit',
-    lotColumn: 'lotes',
+    // Planilha NFS usa cabeçalho "LOTE" (singular), não "LOTES".
+    lotColumn: 'lote',
     lots: [
       {
         lotKey: 'lote-1',

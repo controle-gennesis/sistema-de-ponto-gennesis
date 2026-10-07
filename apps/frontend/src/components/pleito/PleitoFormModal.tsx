@@ -29,6 +29,7 @@ import {
   executionStatusPillClass,
 } from '@/lib/pleitoStatusStyles';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { Checkbox } from '@/components/ui/Checkbox';
 
 const OS_FORM_LABEL_CLS =
   'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400';
@@ -162,6 +163,9 @@ export function PleitoFormModal({
   const [visibleBudgetRevisions, setVisibleBudgetRevisions] = useState(() =>
     countFilledBudgetRevisions(pleitoToEdit ? pleitoToForm(pleitoToEdit) : emptyForm())
   );
+  const [confirmValorOs, setConfirmValorOs] = useState(
+    () => pleitoToEdit?.budgetValueConfirmed === true
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const closeForm = useCallback(() => {
@@ -188,9 +192,17 @@ export function PleitoFormModal({
       toast.error('Descrição do serviço é obrigatória');
       return;
     }
+    const latestBudget = parseBudgetToNumber(getLatestBudgetFromForm(form));
+    if (latestBudget > 0 && !confirmValorOs) {
+      toast.error('Confirme o valor do orçamento na OS.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const payload = formToPayload(form, contractId);
+      const hasBudget = parseBudgetToNumber(getLatestBudgetFromForm(form)) > 0;
+      const payload = formToPayload(form, contractId, {
+        budgetValueConfirmed: hasBudget ? confirmValorOs : false,
+      });
       if (isEdit && pleitoToEdit) {
         await api.patch(`/pleitos/${pleitoToEdit.id}`, payload);
         toast.success('Ordem de serviço atualizada com sucesso!');
@@ -384,6 +396,16 @@ export function PleitoFormModal({
                     </div>
                   </div>
                 </div>
+                {parseBudgetToNumber(getLatestBudgetFromForm(form)) > 0 ? (
+                  <div className="md:col-span-2">
+                    <Checkbox
+                      checked={confirmValorOs}
+                      onChange={setConfirmValorOs}
+                      disabled={isSubmitting}
+                      label="Confirmo o valor do orçamento na OS"
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

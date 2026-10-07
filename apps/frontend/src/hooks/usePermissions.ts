@@ -476,12 +476,16 @@ export function usePermissions() {
     can(pk('/ponto/controle/ver-valores-kanban'));
 
 
-  /** Página Orçamentos: Ver na matriz Acesso (como Caixinha/FD); legado pela coluna antiga. */
+  /**
+   * Página Orçamentos: módulo na matriz Acesso, flag Orçamento em algum contrato,
+   * ou qualquer contrato Liberado (mesmo critério de canAccessContractOrcamentoTab).
+   */
   const canAccessOrcamentoRoutePage =
     isElevatedUser ||
     can(orcamentoModuleKey) ||
     canAccessModule(orcamentoModuleKey) ||
-    hasOrcamentoViaAnyAllowedContract;
+    hasOrcamentoViaAnyAllowedContract ||
+    allowedContractIds.length > 0;
 
   /**
    * Tela global «Ordem de Serviço»:

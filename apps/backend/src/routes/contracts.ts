@@ -56,6 +56,9 @@ router.get('/:contractId/billings', (req, res, next) =>
 router.get('/:contractId/pleitos', (req, res, next) =>
   pleitoController.getPleitosByContract(req, res, next)
 );
+router.post('/:contractId/pleitos/sync-from-orcamento', (req, res, next) =>
+  pleitoController.syncFromOrcamento(req, res, next)
+);
 router.post('/:contractId/pleitos', (req, res, next) =>
   pleitoController.createPleito(req, res, next)
 );

@@ -45,6 +45,14 @@ async function ensureEmployeePhoneColumn(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensurePleitoBudgetValueConfirmed(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'pleitos', 'budgetValueConfirmed')) return;
+  console.warn('[Schema] Coluna pleitos.budgetValueConfirmed ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "budgetValueConfirmed" BOOLEAN NOT NULL DEFAULT false;
+  `);
+}
+
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
 
@@ -2922,6 +2930,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureUserProfileSetupColumn(prisma);
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);
+    await ensurePleitoBudgetValueConfirmed(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

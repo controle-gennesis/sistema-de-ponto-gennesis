@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
 import { OsDetailOcTab, sumOsPurchaseOrdersTotal, useOsPurchaseOrders } from '@/components/contract/OsDetailOcTab';
 import { formatOsSePasta } from '@/lib/formatOsSePasta';
@@ -24,6 +26,9 @@ import {
   type ContractPleitoHistorico,
 } from '@/lib/contractHistoricoPleitos';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
+import { formatBudgetForInput, parseBudgetToNumber } from '@/lib/pleitoForm';
 
 export type OsDetailModalTab = 'resumo' | 'pleitos' | 'ocs' | 'faturamento';
 
@@ -43,6 +48,7 @@ export type ContractOsDetailPleito = ContractPleitoHistorico & {
   budgetAmount2?: number | null;
   budgetAmount3?: number | null;
   budgetAmount4?: number | null;
+  budgetValueConfirmed?: boolean | null;
   startDate?: string | null;
   endDate?: string | null;
   engineer?: string | null;
@@ -50,6 +56,26 @@ export type ContractOsDetailPleito = ContractPleitoHistorico & {
   pv?: string | null;
   ipi?: string | null;
 };
+
+function latestBudgetAmountKey(
+  p: ContractOsDetailPleito
+): 'budgetAmount1' | 'budgetAmount2' | 'budgetAmount3' | 'budgetAmount4' {
+  const a2 = Number(p.budgetAmount2 || 0);
+  const a3 = Number(p.budgetAmount3 || 0);
+  const a4 = Number(p.budgetAmount4 || 0);
+  if (a4 > 0) return 'budgetAmount4';
+  if (a3 > 0) return 'budgetAmount3';
+  if (a2 > 0) return 'budgetAmount2';
+  return 'budgetAmount1';
+}
+
+function formatCurrencyDigitsInput(rawDigits: string): string {
+  if (!rawDigits) return '';
+  return (Number(rawDigits) / 100).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 type InfoRow = { label: string; value: React.ReactNode; stacked?: boolean };
 
@@ -252,6 +278,7 @@ export function ContractOsDetailModal({
   billings,
   headerActions,
   formatReportsBilling,
+  onBudgetConfirmChange,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -262,12 +289,32 @@ export function ContractOsDetailModal({
   billings: ContractBillingHistorico[];
   headerActions?: React.ReactNode;
   formatReportsBilling?: (value: string | null | undefined) => string | null;
+  onBudgetConfirmChange?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<OsDetailModalTab>('resumo');
+  const [confirmValorOs, setConfirmValorOs] = useState(false);
+  const [savingConfirm, setSavingConfirm] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState('');
+  const [savingBudget, setSavingBudget] = useState(false);
 
   useEffect(() => {
     if (isOpen) setActiveTab('resumo');
   }, [isOpen, pleito?.id]);
+
+  useEffect(() => {
+    setConfirmValorOs(pleito?.budgetValueConfirmed === true);
+  }, [pleito?.id, pleito?.budgetValueConfirmed]);
+
+  useEffect(() => {
+    if (!pleito) {
+      setBudgetDraft('');
+      return;
+    }
+    const fromAmount = Number(pleito[latestBudgetAmountKey(pleito)] || 0);
+    const fromBudget = parseBudgetToNumberSafe(pleito.budget);
+    const n = fromAmount > 0 ? fromAmount : fromBudget;
+    setBudgetDraft(n > 0 ? formatBudgetForInput(String(n)) : '');
+  }, [pleito?.id, pleito?.budget, pleito?.budgetAmount1, pleito?.budgetAmount2, pleito?.budgetAmount3, pleito?.budgetAmount4]);
 
   const linkedPleitos = useMemo(
     () => (pleito ? getOsLinkedPleitos(allPleitos, pleito.divSe) : []),
@@ -329,7 +376,6 @@ export function ContractOsDetailModal({
     push('Unidade', pleito.unit);
     push('Status orçamento', pleito.budgetStatus);
     push('Status execução', pleito.executionStatus);
-    push('Orçamento', pleito.budget ? formatOsCurrency(orcamento) : null);
     push('Total OCs vinculadas', ocTotalVinculado != null ? formatOsCurrency(ocTotalVinculado) : null);
     push(
       '% OCs / Orçamento',
@@ -465,6 +511,148 @@ export function ContractOsDetailModal({
                       </div>
                     ))}
                   </dl>
+                  <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                        Orçamento
+                      </label>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                          R$
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={budgetDraft}
+                          onChange={(e) =>
+                            setBudgetDraft(formatCurrencyDigitsInput(e.target.value.replace(/\D/g, '')))
+                          }
+                          disabled={savingBudget || savingConfirm}
+                          className={`${FORM_FIELD_INPUT_CLS} pl-10`}
+                          placeholder="0,00"
+                          aria-label="Valor do orçamento na OS"
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            savingBudget ||
+                            savingConfirm ||
+                            parseBudgetToNumber(budgetDraft) <= 0
+                          }
+                          onClick={() => {
+                            void (async () => {
+                              if (!pleito.id) return;
+                              const valor = parseBudgetToNumber(budgetDraft);
+                              if (valor <= 0) {
+                                toast.error('Informe um valor de orçamento válido.');
+                                return;
+                              }
+                              const amountKey = latestBudgetAmountKey(pleito);
+                              const previous =
+                                Number(pleito[amountKey] || 0) ||
+                                parseBudgetToNumberSafe(pleito.budget);
+                              const valueChanged = Math.abs(valor - previous) > 0.001;
+                              setSavingBudget(true);
+                              try {
+                                await api.patch(`/pleitos/${pleito.id}`, {
+                                  budget: valor.toFixed(2),
+                                  [amountKey]: valor,
+                                  ...(valueChanged ? { budgetValueConfirmed: false } : {}),
+                                });
+                                if (valueChanged) setConfirmValorOs(false);
+                                toast.success('Valor do orçamento atualizado.');
+                                onBudgetConfirmChange?.();
+                              } catch (err: unknown) {
+                                toast.error(
+                                  (err as { response?: { data?: { message?: string } } })?.response
+                                    ?.data?.message || 'Não foi possível atualizar o orçamento.'
+                                );
+                              } finally {
+                                setSavingBudget(false);
+                              }
+                            })();
+                          }}
+                          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {savingBudget ? 'Salvando...' : 'Salvar valor'}
+                        </button>
+                        {pleito.budget ? (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            Atual: {formatOsCurrency(orcamento)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+                      <Checkbox
+                        checked={confirmValorOs}
+                        onChange={setConfirmValorOs}
+                        disabled={
+                          savingConfirm ||
+                          savingBudget ||
+                          pleito.budgetValueConfirmed === true ||
+                          parseBudgetToNumber(budgetDraft) <= 0
+                        }
+                        label="Confirmo o valor do orçamento na OS"
+                      />
+                      {pleito.budgetValueConfirmed === true ? (
+                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          Valor do orçamento já confirmado nesta OS. Ao alterar o valor, será preciso confirmar de novo.
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={
+                            savingConfirm ||
+                            savingBudget ||
+                            !confirmValorOs ||
+                            parseBudgetToNumber(budgetDraft) <= 0
+                          }
+                          onClick={() => {
+                            void (async () => {
+                              if (!pleito.id || !confirmValorOs) return;
+                              const valor = parseBudgetToNumber(budgetDraft);
+                              if (valor <= 0) {
+                                toast.error('Informe e salve um valor de orçamento antes de confirmar.');
+                                return;
+                              }
+                              setSavingConfirm(true);
+                              try {
+                                const amountKey = latestBudgetAmountKey(pleito);
+                                const previous =
+                                  Number(pleito[amountKey] || 0) ||
+                                  parseBudgetToNumberSafe(pleito.budget);
+                                const valueChanged = Math.abs(valor - previous) > 0.001;
+                                await api.patch(`/pleitos/${pleito.id}`, {
+                                  ...(valueChanged
+                                    ? {
+                                        budget: valor.toFixed(2),
+                                        [amountKey]: valor,
+                                      }
+                                    : {}),
+                                  budgetValueConfirmed: true,
+                                });
+                                toast.success('Valor do orçamento confirmado na OS.');
+                                onBudgetConfirmChange?.();
+                              } catch (err: unknown) {
+                                toast.error(
+                                  (err as { response?: { data?: { message?: string } } })?.response
+                                    ?.data?.message || 'Não foi possível confirmar o valor.'
+                                );
+                              } finally {
+                                setSavingConfirm(false);
+                              }
+                            })();
+                          }}
+                          className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {savingConfirm ? 'Salvando...' : 'Salvar confirmação'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : null}
 

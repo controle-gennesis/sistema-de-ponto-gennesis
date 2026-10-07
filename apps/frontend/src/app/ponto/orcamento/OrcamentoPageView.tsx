@@ -42,7 +42,7 @@ import {
   ZoomOut,
   Lock,
   Unlock,
-  Columns3,
+  Columns,
   LayoutGrid,
   Undo2,
   CopyPlus,
@@ -92,6 +92,14 @@ import {
   seedOrcamentoDetailCache,
 } from '@/lib/orcamentoDetailCache';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
+import {
+  composeOsNumeroPasta,
+  formatOrcamentoValorBr,
+  parseOrcamentoValorBr,
+  splitOsNumeroPasta,
+  syncOrcamentoOsErrorMessage,
+  syncOrcamentoOsToContract,
+} from '@/lib/orcamentoOsSync';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { Modal } from '@/components/ui/Modal';
 import { expandShortLabelHex, KanbanLabelColorPicker } from '@/components/kanban/KanbanLabelColorPicker';
@@ -3052,6 +3060,16 @@ function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
 
 type OrcamentoMeta = {
   osNumeroPasta: string;
+  /** Código da OS (campo separado; `osNumeroPasta` permanece sincronizado via compose). */
+  osCodigo: string;
+  /** Número da pasta (campo separado). */
+  numeroPasta: string;
+  /** Se o orçamento é aditivo na OS vinculada. */
+  isAditivo?: boolean;
+  /** Pleito/OS vinculado no contrato após sync. */
+  linkedPleitoId?: string;
+  /** Contrato onde a OS foi sincronizada. */
+  linkedContractId?: string;
   dataAbertura: string; // yyyy-mm-dd — data de início
   dataEnvio: string; // yyyy-mm-dd — data de fim
   prazoExecucaoDias: string; // mantém como string p/ input
@@ -3568,11 +3586,65 @@ function normalizarCronogramaResumoMeta(raw: unknown): OrcamentoMeta['cronograma
 function metaNovoOrcamentoPadrao(): OrcamentoMeta {
   return {
     ...sessaoVazia().meta!,
+    osCodigo: '',
+    numeroPasta: '',
+    osNumeroPasta: '',
     descontoPercentual: '0',
     bdiPercentual: '0',
     reajustes: [],
     dataAbertura: todayInputDate()
   };
+}
+
+type OrcamentoOsDraft = {
+  descricaoServicoOs: string;
+  valorOs: string;
+  confirmSomarAditivo: boolean;
+  isAditivo: boolean | null;
+};
+
+const ORCAMENTO_OS_DRAFT_VAZIO: OrcamentoOsDraft = {
+  descricaoServicoOs: '',
+  valorOs: '',
+  confirmSomarAditivo: false,
+  isAditivo: null,
+};
+
+function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
+  OrcamentoMeta,
+  'osNumeroPasta' | 'osCodigo' | 'numeroPasta' | 'isAditivo' | 'linkedPleitoId' | 'linkedContractId'
+> {
+  const osNumeroPastaLegacy = typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '';
+  let osCodigo = typeof metaRaw.osCodigo === 'string' ? metaRaw.osCodigo : '';
+  let numeroPasta = typeof metaRaw.numeroPasta === 'string' ? metaRaw.numeroPasta : '';
+  if (!osCodigo.trim() && !numeroPasta.trim() && osNumeroPastaLegacy.trim()) {
+    const split = splitOsNumeroPasta(osNumeroPastaLegacy);
+    osCodigo = split.osCodigo;
+    numeroPasta = split.numeroPasta;
+  }
+  const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta) || osNumeroPastaLegacy;
+  return {
+    osNumeroPasta,
+    osCodigo,
+    numeroPasta,
+    isAditivo: typeof metaRaw.isAditivo === 'boolean' ? metaRaw.isAditivo : undefined,
+    linkedPleitoId:
+      typeof metaRaw.linkedPleitoId === 'string' && metaRaw.linkedPleitoId.trim()
+        ? metaRaw.linkedPleitoId.trim()
+        : undefined,
+    linkedContractId:
+      typeof metaRaw.linkedContractId === 'string' && metaRaw.linkedContractId.trim()
+        ? metaRaw.linkedContractId.trim()
+        : undefined,
+  };
+}
+
+function orcamentoOsDraftValido(draft: OrcamentoOsDraft, osCodigo: string, numeroPasta: string): boolean {
+  if (!osCodigo.trim() || !numeroPasta.trim()) return false;
+  if (draft.isAditivo === null) return false;
+  if (parseOrcamentoValorBr(draft.valorOs) <= 0) return false;
+  if (draft.isAditivo === true && !draft.confirmSomarAditivo) return false;
+  return true;
 }
 
 function todayInputDate(): string {
@@ -4288,6 +4360,8 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     cronograma: cronogramaVazio(),
     meta: {
       osNumeroPasta: '',
+      osCodigo: '',
+      numeroPasta: '',
       dataAbertura: '',
       dataEnvio: '',
       prazoExecucaoDias: '',
@@ -4316,7 +4390,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
     const hasMeta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw);
     const meta: OrcamentoMeta = hasMeta
       ? {
-          osNumeroPasta: typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '',
+          ...parseOsFieldsFromMetaRaw(metaRaw as Record<string, unknown>),
           dataAbertura: typeof metaRaw.dataAbertura === 'string' ? metaRaw.dataAbertura : '',
           dataEnvio: typeof metaRaw.dataEnvio === 'string' ? metaRaw.dataEnvio : '',
           prazoExecucaoDias: typeof metaRaw.prazoExecucaoDias === 'string' ? metaRaw.prazoExecucaoDias : '',
@@ -4705,7 +4779,7 @@ function parseOrcamentoDetailRaw(d: {
   const hasMeta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw);
   const meta: OrcamentoMeta = hasMeta
     ? {
-        osNumeroPasta: typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '',
+        ...parseOsFieldsFromMetaRaw(metaRaw as Record<string, unknown>),
         dataAbertura: typeof metaRaw.dataAbertura === 'string' ? metaRaw.dataAbertura : '',
         dataEnvio: typeof metaRaw.dataEnvio === 'string' ? metaRaw.dataEnvio : '',
         prazoExecucaoDias: typeof metaRaw.prazoExecucaoDias === 'string' ? metaRaw.prazoExecucaoDias : '',
@@ -7118,6 +7192,28 @@ export function OrcamentoPageView({
   const [importOrcamentoModalFile, setImportOrcamentoModalFile] = useState<File | null>(null);
   const [importOrcamentoModalDragging, setImportOrcamentoModalDragging] = useState(false);
   const [importOrigemModalOpen, setImportOrigemModalOpen] = useState(false);
+  const [importPlanilhaOsDraft, setImportPlanilhaOsDraft] = useState<OrcamentoOsDraft>(() => ({
+    ...ORCAMENTO_OS_DRAFT_VAZIO,
+  }));
+  const [importPlanilhaOsCodigo, setImportPlanilhaOsCodigo] = useState('');
+  const [importPlanilhaNumeroPasta, setImportPlanilhaNumeroPasta] = useState('');
+  const [orcafascioOsDraft, setOrcafascioOsDraft] = useState<OrcamentoOsDraft>(() => ({
+    ...ORCAMENTO_OS_DRAFT_VAZIO,
+  }));
+  const [orcafascioOsCodigo, setOrcafascioOsCodigo] = useState('');
+  const [orcafascioNumeroPasta, setOrcafascioNumeroPasta] = useState('');
+  const [reajusteOsModal, setReajusteOsModal] = useState<{
+    contractId: string;
+    osCodigo: string;
+    numeroPasta: string;
+    valor: number;
+    orcamentoId: string;
+    descricaoServicoOs: string;
+  } | null>(null);
+  const [reajusteOsConfirmValor, setReajusteOsConfirmValor] = useState(false);
+  const [reajusteOsSyncing, setReajusteOsSyncing] = useState(false);
+  /** Total atual do orçamento (com desconto+BDI) para reajuste de OS após nova revisão. */
+  const resumoFinanceiroTotalRef = useRef(0);
 
   const filteredCostCenters = useMemo(() => {
     const q = contratoSearch.trim().toLowerCase();
@@ -7479,7 +7575,32 @@ export function OrcamentoPageView({
       return;
     }
     setImportOrcamentoModalFile(null);
+    setImportPlanilhaOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
+    setImportPlanilhaOsCodigo('');
+    setImportPlanilhaNumeroPasta('');
     setImportOrcamentoModalOpen(true);
+  };
+
+  const resetImportPlanilhaOsDraft = () => {
+    setImportPlanilhaOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
+    setImportPlanilhaOsCodigo('');
+    setImportPlanilhaNumeroPasta('');
+  };
+
+  const resetOrcafascioOsDraft = () => {
+    setOrcafascioOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
+    setOrcafascioOsCodigo('');
+    setOrcafascioNumeroPasta('');
+  };
+
+  /** Contrato onde a OS deve ser sincronizada (nunca outro contrato). */
+  const resolveContractIdForOsSync = (preferredContractId?: string | null): string | null => {
+    const preferred = (preferredContractId || '').trim();
+    if (preferred) return preferred;
+    if (embeddedContractId) return embeddedContractId;
+    if (!centroCustoId) return null;
+    const opt = (importContractOptions ?? []).find((c) => String(c.costCenterId) === String(centroCustoId));
+    return opt?.id || null;
   };
 
   const abrirModalEscolherOrigemImport = () => {
@@ -7550,6 +7671,9 @@ export function OrcamentoPageView({
   const [novoOrcamentoMetaDraft, setNovoOrcamentoMetaDraft] = useState<OrcamentoMeta & { nomeOrcamento: string }>(
     () => ({ ...metaNovoOrcamentoPadrao(), nomeOrcamento: '' })
   );
+  const [novoOrcamentoOsDraft, setNovoOrcamentoOsDraft] = useState<OrcamentoOsDraft>(() => ({
+    ...ORCAMENTO_OS_DRAFT_VAZIO,
+  }));
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
   const [currentUserName, setCurrentUserName] = useState('');
@@ -8348,6 +8472,7 @@ export function OrcamentoPageView({
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
     setNovoOrcamentoMetaDraft({ ...metaNovoOrcamentoPadrao(), nomeOrcamento: '' });
+    setNovoOrcamentoOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setNovoOrcamentoStep(1);
     setNovoOrcamentoMetaOpen(true);
     void loadEmployeeOptionsForMeta();
@@ -8429,10 +8554,40 @@ export function OrcamentoPageView({
       toast.error('Informe o nome do orçamento.');
       return;
     }
+    const osCodigo = (novoOrcamentoMetaDraft.osCodigo || '').trim();
+    const numeroPasta = (novoOrcamentoMetaDraft.numeroPasta || '').trim();
+    if (!osCodigo || !numeroPasta) {
+      toast.error('Preencha OS e Número da pasta.');
+      return;
+    }
+    if (novoOrcamentoOsDraft.isAditivo === null) {
+      toast.error('Informe se o orçamento é aditivo.');
+      return;
+    }
+    const valorOs = parseOrcamentoValorBr(novoOrcamentoOsDraft.valorOs);
+    if (valorOs <= 0) {
+      toast.error('Informe o valor na OS.');
+      return;
+    }
+    if (novoOrcamentoOsDraft.isAditivo && !novoOrcamentoOsDraft.confirmSomarAditivo) {
+      toast.error('Confirme a soma do valor aditivo ao total da OS.');
+      return;
+    }
+    const contractId = resolveContractIdForOsSync();
+    if (!contractId) {
+      toast.error('Não foi possível identificar o contrato para sincronizar a OS.');
+      return;
+    }
     const { nomeOrcamento: _omitNome, ...metaRest } = novoOrcamentoMetaDraft;
+    const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
+    const descricaoServicoOs =
+      novoOrcamentoOsDraft.descricaoServicoOs.trim() || nomeTrim;
     const d = {
       ...metaRest,
-      osNumeroPasta: novoOrcamentoMetaDraft.osNumeroPasta.trim(),
+      osCodigo,
+      numeroPasta,
+      osNumeroPasta,
+      isAditivo: novoOrcamentoOsDraft.isAditivo === true,
       responsavelOrcamento: novoOrcamentoMetaDraft.responsavelOrcamento.trim(),
       descricao: novoOrcamentoMetaDraft.descricao.trim(),
       orcamentoRealizadoPor: currentUserName || novoOrcamentoMetaDraft.orcamentoRealizadoPor.trim(),
@@ -8452,8 +8607,8 @@ export function OrcamentoPageView({
           novoOrcamentoMetaDraft.prazoExecucaoDias
         )
     };
-    if (!d.osNumeroPasta || !d.descricao) {
-      toast.error('Preencha OS/Nº da pasta e descrição.');
+    if (!d.descricao) {
+      toast.error('Preencha a descrição.');
       return;
     }
     try {
@@ -8463,7 +8618,7 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
-      const metaInicial: OrcamentoMeta = {
+      let metaInicial: OrcamentoMeta = {
         ...d,
         revisaoCount: 1,
         familiaId: entry.familiaId || entry.id,
@@ -8480,8 +8635,41 @@ export function OrcamentoPageView({
           meta: metaInicial,
         }
       });
+      try {
+        const syncRes = await syncOrcamentoOsToContract({
+          contractId,
+          osCodigo,
+          numeroPasta,
+          serviceDescription: descricaoServicoOs,
+          valor: valorOs,
+          isAditivo: novoOrcamentoOsDraft.isAditivo === true,
+          confirmValor: true,
+          confirmSomarAditivo: novoOrcamentoOsDraft.isAditivo === true,
+          mode: novoOrcamentoOsDraft.isAditivo ? 'aditivo' : 'create',
+          startDate: d.dataAbertura || null,
+          endDate: d.dataEnvio || null,
+          orcamentoId: entry.id,
+        });
+        metaInicial = {
+          ...metaInicial,
+          linkedPleitoId: syncRes.id,
+          linkedContractId: contractId,
+        };
+        setMeta(metaInicial);
+        await saveOrcamentoToApi(centroCustoId, entry.id, {
+          servicos: [],
+          imports: [],
+          sessaoOrcamento: {
+            ...sessaoVazia(),
+            meta: metaInicial,
+          }
+        });
+      } catch (syncErr) {
+        toast.error(syncOrcamentoOsErrorMessage(syncErr));
+      }
       setNovoOrcamentoMetaOpen(false);
       setNovoOrcamentoStep(1);
+      setNovoOrcamentoOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
       toast.success('Novo orçamento criado. Preencha os serviços e clique em salvar para gerar a revisão R01.');
     } catch {
       toast.error('Não foi possível criar o orçamento.');
@@ -8494,14 +8682,28 @@ export function OrcamentoPageView({
     if (step === 1) {
       return (
         novoOrcamentoMetaDraft.nomeOrcamento.trim().length > 0 &&
-        novoOrcamentoMetaDraft.osNumeroPasta.trim().length > 0 &&
+        novoOrcamentoOsDraft.isAditivo !== null &&
+        (novoOrcamentoMetaDraft.osCodigo || '').trim().length > 0 &&
+        (novoOrcamentoMetaDraft.numeroPasta || '').trim().length > 0 &&
         (novoOrcamentoMetaDraft.dataAbertura || '').trim().length > 0
       );
     }
     if (step === 2) {
       return true;
     }
-    return true;
+    return (
+      novoOrcamentoMetaDraft.descricao.trim().length > 0 &&
+      orcamentoOsDraftValido(
+        {
+          ...novoOrcamentoOsDraft,
+          descricaoServicoOs:
+            novoOrcamentoOsDraft.descricaoServicoOs.trim() ||
+            novoOrcamentoMetaDraft.nomeOrcamento.trim(),
+        },
+        novoOrcamentoMetaDraft.osCodigo || '',
+        novoOrcamentoMetaDraft.numeroPasta || ''
+      )
+    );
   };
 
   const abrirOrcamentoDaLista = (id: string) => {
@@ -8519,6 +8721,18 @@ export function OrcamentoPageView({
   const confirmarNovaVersao = async () => {
     if (!centroCustoId || !orcamentoAtivoId || criandoVersao || versaoCongelada) return;
     setCriandoVersao(true);
+    const linkedContractId = meta.linkedContractId?.trim() || '';
+    const linkedPleitoId = meta.linkedPleitoId?.trim() || '';
+    const osCodigoSnap = (meta.osCodigo || '').trim();
+    const numeroPastaSnap = (meta.numeroPasta || '').trim();
+    const descricaoOsSnap =
+      (meta.descricao || '').trim() || (nomeOrcamentoRascunho || '').trim() || 'Orçamento';
+    const valorSnap =
+      resumoFinanceiroTotalRef.current > 0
+        ? resumoFinanceiroTotalRef.current
+        : typeof meta.totalComBdi === 'number' && meta.totalComBdi > 0
+          ? meta.totalComBdi
+          : 0;
     try {
       // Salva o estado atual antes de congelar/clonar.
       const sessao = sessaoRef.current ?? sessaoVazia();
@@ -8545,6 +8759,17 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
+      if (linkedPleitoId && linkedContractId && osCodigoSnap && numeroPastaSnap) {
+        setReajusteOsConfirmValor(false);
+        setReajusteOsModal({
+          contractId: linkedContractId,
+          osCodigo: osCodigoSnap,
+          numeroPasta: numeroPastaSnap,
+          valor: Number.isFinite(valorSnap) ? valorSnap : 0,
+          orcamentoId: entry.id,
+          descricaoServicoOs: descricaoOsSnap,
+        });
+      }
     } catch (err) {
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(apiMsg || 'Não foi possível criar a nova revisão.');
@@ -8596,8 +8821,18 @@ export function OrcamentoPageView({
   };
 
   const abrirEdicaoDados = () => {
+    let osCodigo = meta.osCodigo || '';
+    let numeroPasta = meta.numeroPasta || '';
+    if (!osCodigo.trim() && !numeroPasta.trim() && meta.osNumeroPasta) {
+      const split = splitOsNumeroPasta(meta.osNumeroPasta);
+      osCodigo = split.osCodigo;
+      numeroPasta = split.numeroPasta;
+    }
     setEditarDadosDraft({
       ...meta,
+      osCodigo,
+      numeroPasta,
+      osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || meta.osNumeroPasta,
       modoArredondamento: meta.modoArredondamento ?? 'truncar',
       nomeOrcamento: nomeOrcamentoRascunho || ''
     });
@@ -8607,16 +8842,24 @@ export function OrcamentoPageView({
 
   const salvarEdicaoDados = async () => {
     if (!centroCustoId || !orcamentoAtivoId) return;
+    if (typeof editarDadosDraft.isAditivo !== 'boolean') {
+      toast.error('Informe se o orçamento é aditivo.');
+      return;
+    }
     const nome = editarDadosDraft.nomeOrcamento.trim();
     if (!nome) {
       toast.error('Informe o nome do orçamento.');
       return;
     }
 
+    const osCodigo = (editarDadosDraft.osCodigo || '').trim();
+    const numeroPasta = (editarDadosDraft.numeroPasta || '').trim();
     const nextMeta: OrcamentoMeta = {
       ...meta,
       ...editarDadosDraft,
-      osNumeroPasta: editarDadosDraft.osNumeroPasta.trim(),
+      osCodigo,
+      numeroPasta,
+      osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || editarDadosDraft.osNumeroPasta.trim(),
       prazoExecucaoDias: editarDadosDraft.prazoExecucaoDias.trim(),
       responsavelOrcamento: editarDadosDraft.responsavelOrcamento.trim(),
       descricao: editarDadosDraft.descricao.trim(),
@@ -9008,6 +9251,17 @@ export function OrcamentoPageView({
       }
       setOrcafascioOrcamentoComposicoes(listComp);
       setOrcafascioOrcamentoComposicoesLoading(false);
+      const finPrefill = extrairMetaFinanceiraOrcafascio(listComp);
+      const nomePrefill = String(
+        orcamento.description || orcamento.code || 'Orçamento'
+      ).trim();
+      setOrcafascioOsDraft((prev) => ({
+        ...prev,
+        descricaoServicoOs: prev.descricaoServicoOs.trim() || nomePrefill,
+        valorOs:
+          prev.valorOs.trim() ||
+          (finPrefill.totalComBdi > 0 ? formatOrcamentoValorBr(finPrefill.totalComBdi) : ''),
+      }));
 
       try {
         const ana = await api.get(`/orcafascio/orcamentos/${enc}/analitico`, { timeout: 120000 });
@@ -9366,9 +9620,20 @@ export function OrcamentoPageView({
    */
   const importarPlanilhaComoNovoOrcamento = async (file: File): Promise<boolean> => {
     if (importOrcamentoInFlightRef.current) return false;
+    const osCodigo = importPlanilhaOsCodigo.trim();
+    const numeroPasta = importPlanilhaNumeroPasta.trim();
+    if (!orcamentoOsDraftValido(importPlanilhaOsDraft, osCodigo, numeroPasta)) {
+      toast.error('Preencha aditivo, OS, Número da pasta, valor e confirmação de aditivo (se houver) antes de importar.');
+      return false;
+    }
     const target = resolveImportTarget();
     if (!target) return false;
-    const { contractId: importContractId, costCenterId: ccId } = target;
+    const { contractId: importContractIdRaw, costCenterId: ccId } = target;
+    const importContractId = resolveContractIdForOsSync(importContractIdRaw);
+    if (!importContractId) {
+      toast.error('Selecione o contrato para sincronizar a OS.');
+      return false;
+    }
     setCentroCustoId(ccId);
     importOrcamentoInFlightRef.current = true;
     setIsImportandoOrcamento(true);
@@ -9453,13 +9718,36 @@ export function OrcamentoPageView({
       }
 
       const base = sessaoVazia();
-      const meta: OrcamentoMeta = {
+      const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
+      const descricaoServicoOs =
+        importPlanilhaOsDraft.descricaoServicoOs.trim() ||
+        parsed.metaPlanilha.descricao ||
+        nomeLista;
+      let valorOs = parseOrcamentoValorBr(importPlanilhaOsDraft.valorOs);
+      // Se o usuário não calculou total, tenta somar quantidades×preço das linhas importadas.
+      if (valorOs <= 0) {
+        let totalCalc = 0;
+        for (const s of servicosImportados) {
+          for (const sub of s.subtitulos) {
+            for (const it of sub.itens) {
+              const q = it.quantidadePlanilha;
+              const pu = Number(it.precoUnitario);
+              if (q != null && q > 0 && Number.isFinite(pu)) totalCalc += q * pu;
+            }
+          }
+        }
+        if (totalCalc > 0) valorOs = totalCalc;
+      }
+      let meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
         descricao:
           parsed.metaPlanilha.descricao ||
           `Orçamento importado da planilha ${file.name}. Revise OS, valores e as abas de orçamento.`,
-        osNumeroPasta: parsed.metaPlanilha.osNumeroPasta || nomeBase.slice(0, 60) || 'Importação',
+        osCodigo,
+        numeroPasta,
+        osNumeroPasta,
+        isAditivo: importPlanilhaOsDraft.isAditivo === true,
         prazoExecucaoDias: parsed.metaPlanilha.prazoExecucaoDias || '',
         responsavelOrcamento: parsed.metaPlanilha.responsavelOrcamento || '',
         orcamentoRealizadoPor: parsed.metaPlanilha.orcamentoRealizadoPor || currentUserName || '',
@@ -9479,19 +9767,50 @@ export function OrcamentoPageView({
       const padraoContrato = await fetchServicosPadraoFromApi(ccId);
       const importsMesclados: ImportRecord[] = Array.isArray(padraoContrato?.imports) ? padraoContrato.imports : [];
 
+      const sessaoSalvar = {
+        ...base,
+        subtitulosNoOrcamento,
+        quantidadesPorItem,
+        dimensoesPorItem: dimensoesPorItemImport,
+        observacoesPorItem: observacoesPorItemImport,
+        meta,
+        servicosDocumento: servicosParaApi
+      };
+
       await saveOrcamentoToApi(ccId, entry.id, {
         imports: importsMesclados,
         servicos: servicosParaApi,
-        sessaoOrcamento: {
-          ...base,
-          subtitulosNoOrcamento,
-          quantidadesPorItem,
-          dimensoesPorItem: dimensoesPorItemImport,
-          observacoesPorItem: observacoesPorItemImport,
-          meta,
-          servicosDocumento: servicosParaApi
-        }
+        sessaoOrcamento: sessaoSalvar
       });
+
+      try {
+        const syncRes = await syncOrcamentoOsToContract({
+          contractId: importContractId,
+          osCodigo,
+          numeroPasta,
+          serviceDescription: descricaoServicoOs,
+          valor: valorOs,
+          isAditivo: importPlanilhaOsDraft.isAditivo === true,
+          confirmValor: true,
+          confirmSomarAditivo: importPlanilhaOsDraft.isAditivo === true,
+          mode: importPlanilhaOsDraft.isAditivo ? 'aditivo' : 'create',
+          startDate: meta.dataAbertura || null,
+          endDate: meta.dataEnvio || null,
+          orcamentoId: entry.id,
+        });
+        meta = {
+          ...meta,
+          linkedPleitoId: syncRes.id,
+          linkedContractId: importContractId,
+        };
+        await saveOrcamentoToApi(ccId, entry.id, {
+          imports: importsMesclados,
+          servicos: servicosParaApi,
+          sessaoOrcamento: { ...sessaoSalvar, meta }
+        });
+      } catch (syncErr) {
+        toast.error(syncOrcamentoOsErrorMessage(syncErr));
+      }
 
       const entryAtualizado = { ...entry, nome: nomeLista };
       setListaOrcamentos(prev => [entryAtualizado, ...prev.filter(o => o.id !== entry.id)]);
@@ -9517,6 +9836,7 @@ export function OrcamentoPageView({
       setOrcamentoAtivoId(entry.id);
       abrirAposImportarOrcamento(importContractId, entry.id);
       setOrcamentoViewTab('montagem');
+      resetImportPlanilhaOsDraft();
       toast.success(
         `Novo orçamento criado com ${servicosImportados.length} serviço(s).${
           parsed.temMemorial ? ' Memória de cálculo importada.' : ''
@@ -9563,9 +9883,20 @@ export function OrcamentoPageView({
    */
   const importarOrcamentoOrcafascioComoNovo = async (): Promise<boolean> => {
     if (importOrcamentoInFlightRef.current) return false;
+    const osCodigo = orcafascioOsCodigo.trim();
+    const numeroPasta = orcafascioNumeroPasta.trim();
+    if (!orcamentoOsDraftValido(orcafascioOsDraft, osCodigo, numeroPasta)) {
+      toast.error('Preencha aditivo, OS, Número da pasta, valor e confirmação de aditivo (se houver) antes de importar.');
+      return false;
+    }
     const target = resolveImportTarget();
     if (!target) return false;
-    const { contractId: importContractId, costCenterId: ccId } = target;
+    const { contractId: importContractIdRaw, costCenterId: ccId } = target;
+    const importContractId = resolveContractIdForOsSync(importContractIdRaw);
+    if (!importContractId) {
+      toast.error('Selecione o contrato para sincronizar a OS.');
+      return false;
+    }
     setCentroCustoId(ccId);
     if (!orcafascioOrcamentoDetalhe) {
       toast.error('Selecione um orçamento do Orçafascio.');
@@ -9670,11 +10001,20 @@ export function OrcamentoPageView({
 
       const base = sessaoVazia();
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
-      const meta: OrcamentoMeta = {
+      const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
+      const descricaoServicoOs =
+        orcafascioOsDraft.descricaoServicoOs.trim() || nomeOrigem || nomeLista;
+      const valorOs =
+        parseOrcamentoValorBr(orcafascioOsDraft.valorOs) ||
+        (finApi.totalComBdi > 0 ? finApi.totalComBdi : 0);
+      let meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
         descricao: `Importado do Orçafascio${codigoOrigem ? ` · ${codigoOrigem}` : ''}: ${nomeOrigem}.`,
-        osNumeroPasta: (codigoOrigem || nomeOrigem).slice(0, 60),
+        osCodigo,
+        numeroPasta,
+        osNumeroPasta,
+        isAditivo: orcafascioOsDraft.isAditivo === true,
         orcamentoRealizadoPor: currentUserName || '',
         // BDI/% e desconto vêm do sintético; sem defaults fictícios (25%/28%).
         descontoPercentual: finApi.descontoPercentual,
@@ -9710,17 +10050,48 @@ export function OrcamentoPageView({
         ? padraoContrato.imports
         : [];
 
+      const sessaoSalvar = {
+        ...base,
+        subtitulosNoOrcamento,
+        quantidadesPorItem,
+        meta,
+        servicosDocumento: servicosParaApi,
+      };
+
       await saveOrcamentoToApi(ccId, entry.id, {
         imports: importsMesclados,
         servicos: servicosParaApi,
-        sessaoOrcamento: {
-          ...base,
-          subtitulosNoOrcamento,
-          quantidadesPorItem,
-          meta,
-          servicosDocumento: servicosParaApi,
-        },
+        sessaoOrcamento: sessaoSalvar,
       });
+
+      try {
+        const syncRes = await syncOrcamentoOsToContract({
+          contractId: importContractId,
+          osCodigo,
+          numeroPasta,
+          serviceDescription: descricaoServicoOs,
+          valor: valorOs,
+          isAditivo: orcafascioOsDraft.isAditivo === true,
+          confirmValor: true,
+          confirmSomarAditivo: orcafascioOsDraft.isAditivo === true,
+          mode: orcafascioOsDraft.isAditivo ? 'aditivo' : 'create',
+          startDate: meta.dataAbertura || null,
+          endDate: meta.dataEnvio || null,
+          orcamentoId: entry.id,
+        });
+        meta = {
+          ...meta,
+          linkedPleitoId: syncRes.id,
+          linkedContractId: importContractId,
+        };
+        await saveOrcamentoToApi(ccId, entry.id, {
+          imports: importsMesclados,
+          servicos: servicosParaApi,
+          sessaoOrcamento: { ...sessaoSalvar, meta },
+        });
+      } catch (syncErr) {
+        toast.error(syncOrcamentoOsErrorMessage(syncErr));
+      }
 
       // Já deixamos o detalhe no cache — abrir o orçamento não espera o S3 de novo.
       seedOrcamentoDetailCache(ccId, entry.id, {
@@ -9749,6 +10120,7 @@ export function OrcamentoPageView({
 
       setOrcafascioImportUsarMemoria(false);
       setOrcafascioImportModoArredondamento('truncar');
+      resetOrcafascioOsDraft();
       setOrcafascioModalOpen(false);
       setOrcafascioModalSoloOrcamentos(false);
       setOrcafascioImportSelectValue('');
@@ -12233,6 +12605,7 @@ export function OrcamentoPageView({
       valorFinal
     };
   }, [meta.bdiPercentual, meta.descontoPercentual, meta.reajustes, total]);
+  resumoFinanceiroTotalRef.current = resumoFinanceiro.totalComDescontoEBdi;
 
   /** Rodapé da Ficha de demanda: totais por MA/MO/LO e painel de faturamento vs orçamento. */
   const resumoRodapeFichaDemanda = useMemo(() => {
@@ -14797,7 +15170,19 @@ export function OrcamentoPageView({
                           Identificação
                         </p>
                         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-                          <DadosCampo label="OS/Nº da pasta">{meta.osNumeroPasta || '—'}</DadosCampo>
+                          {meta.osCodigo || meta.numeroPasta ? (
+                            <>
+                              <DadosCampo label="OS">{meta.osCodigo || '—'}</DadosCampo>
+                              <DadosCampo label="Nº da pasta">{meta.numeroPasta || '—'}</DadosCampo>
+                            </>
+                          ) : (
+                            <DadosCampo label="OS/Nº da pasta">{meta.osNumeroPasta || '—'}</DadosCampo>
+                          )}
+                          {typeof meta.isAditivo === 'boolean' ? (
+                            <DadosCampo label="Orçamento aditivo">
+                              {meta.isAditivo ? 'Sim' : 'Não'}
+                            </DadosCampo>
+                          ) : null}
                           <DadosCampo label="Prazo de execução (dias)">{meta.prazoExecucaoDias || '—'}</DadosCampo>
                           <DadosCampo label="Origem">
                             {orcamentoVeioOrcafascio
@@ -17550,6 +17935,98 @@ export function OrcamentoPageView({
         </AppModalOverlay>
       )}
 
+      {reajusteOsModal && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (reajusteOsSyncing) return;
+              setReajusteOsModal(null);
+              setReajusteOsConfirmValor(false);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Reajustar valor na OS?
+            </h3>
+            <p className="mb-3 text-center text-sm text-gray-600 dark:text-gray-400">
+              OS <span className="font-semibold">{reajusteOsModal.osCodigo}</span>
+              {' · '}
+              Pasta <span className="font-semibold">{reajusteOsModal.numeroPasta}</span>
+            </p>
+            <p className="mb-4 text-center text-sm text-gray-700 dark:text-gray-200">
+              Valor atual do orçamento:{' '}
+              <span className="font-semibold">
+                {reajusteOsModal.valor > 0
+                  ? `R$ ${formatOrcamentoValorBr(reajusteOsModal.valor)}`
+                  : '—'}
+              </span>
+            </p>
+            <div className="mb-5 flex justify-center">
+              <Checkbox
+                checked={reajusteOsConfirmValor}
+                onChange={setReajusteOsConfirmValor}
+                disabled={reajusteOsSyncing || reajusteOsModal.valor <= 0}
+                label="Confirmo o valor do orçamento na OS"
+              />
+            </div>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setReajusteOsModal(null);
+                  setReajusteOsConfirmValor(false);
+                }}
+                disabled={reajusteOsSyncing}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Agora não
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    if (!reajusteOsModal || !reajusteOsConfirmValor || reajusteOsModal.valor <= 0) {
+                      toast.error('Confirme o valor na OS.');
+                      return;
+                    }
+                    setReajusteOsSyncing(true);
+                    try {
+                      await syncOrcamentoOsToContract({
+                        contractId: reajusteOsModal.contractId,
+                        osCodigo: reajusteOsModal.osCodigo,
+                        numeroPasta: reajusteOsModal.numeroPasta,
+                        serviceDescription: reajusteOsModal.descricaoServicoOs,
+                        valor: reajusteOsModal.valor,
+                        isAditivo: false,
+                        confirmValor: true,
+                        mode: 'revisao',
+                        orcamentoId: reajusteOsModal.orcamentoId,
+                      });
+                      toast.success('Valor da OS atualizado.');
+                      setReajusteOsModal(null);
+                      setReajusteOsConfirmValor(false);
+                    } catch (err) {
+                      toast.error(syncOrcamentoOsErrorMessage(err));
+                    } finally {
+                      setReajusteOsSyncing(false);
+                    }
+                  })();
+                }}
+                disabled={
+                  reajusteOsSyncing ||
+                  !reajusteOsConfirmValor ||
+                  reajusteOsModal.valor <= 0
+                }
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {reajusteOsSyncing ? 'Atualizando...' : 'Atualizar OS'}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
       {orcamentoExcluirConfirm && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div
@@ -17924,6 +18401,7 @@ export function OrcamentoPageView({
           setOrcafascioOrcamentoAnalitico(null);
           setOrcafascioOrcamentoLinhaCatalogo(null);
           setOrcafascioOrcamentoLinhaChave(null);
+          resetOrcafascioOsDraft();
           dismissImportShellIfNeeded();
         }}
         title="Importar orçamento"
@@ -17950,8 +18428,12 @@ export function OrcamentoPageView({
                 setOrcafascioOrcamentoAnalitico(null);
                 setOrcafascioOrcamentoLinhaCatalogo(null);
                 setOrcafascioOrcamentoLinhaChave(null);
+                resetOrcafascioOsDraft();
                 return;
               }
+              setOrcafascioOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
+              setOrcafascioOsCodigo('');
+              setOrcafascioNumeroPasta('');
               const o = (orcafascioOrcamentos ?? []).find(
                 (x) => idOrcamentoOrcafascioParaApi(x) === v || String(x.id) === v
               );
@@ -18019,6 +18501,37 @@ export function OrcamentoPageView({
 
         {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
           <div className="mt-4 space-y-4">
+            <div>
+              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Orçamento aditivo? *
+              </p>
+              <SegmentedControl
+                aria-label="Orçamento aditivo"
+                value={
+                  (orcafascioOsDraft.isAditivo === true
+                    ? 'sim'
+                    : orcafascioOsDraft.isAditivo === false
+                      ? 'nao'
+                      : '') as 'sim' | 'nao'
+                }
+                onChange={(v) =>
+                  setOrcafascioOsDraft((p) => ({
+                    ...p,
+                    isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
+                    confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                  }))
+                }
+                className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                activeButtonClassName="font-semibold text-white"
+                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                options={[
+                  { value: 'sim', label: 'Sim' },
+                  { value: 'nao', label: 'Não' },
+                ]}
+              />
+            </div>
             {deferContractOnImport ? (
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -18035,6 +18548,79 @@ export function OrcamentoPageView({
                   emptyOptionsMessage="Nenhum contrato disponível."
                   className="w-full"
                 />
+              </div>
+            ) : null}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS *
+                </label>
+                <input
+                  value={orcafascioOsCodigo}
+                  onChange={(e) => setOrcafascioOsCodigo(e.target.value)}
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Ex: XX/2025"
+                  disabled={isImportandoOrcamento}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Número da pasta *
+                </label>
+                <input
+                  value={orcafascioNumeroPasta}
+                  onChange={(e) => setOrcafascioNumeroPasta(e.target.value)}
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Ex: 241"
+                  disabled={isImportandoOrcamento}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Descrição do serviço (OS)
+              </label>
+              <input
+                value={orcafascioOsDraft.descricaoServicoOs}
+                onChange={(e) =>
+                  setOrcafascioOsDraft((p) => ({ ...p, descricaoServicoOs: e.target.value }))
+                }
+                className={FORM_FIELD_INPUT_CLS}
+                placeholder="Descrição na OS do contrato"
+                disabled={isImportandoOrcamento}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Valor na OS *
+              </label>
+              <input
+                value={orcafascioOsDraft.valorOs}
+                onChange={(e) =>
+                  setOrcafascioOsDraft((p) => ({
+                    ...p,
+                    valorOs: formatOrcamentoValorBr(parseOrcamentoValorBr(e.target.value)),
+                  }))
+                }
+                className={FORM_FIELD_INPUT_CLS}
+                placeholder="0,00"
+                inputMode="decimal"
+                disabled={isImportandoOrcamento}
+              />
+            </div>
+            {orcafascioOsDraft.isAditivo === true ? (
+              <div className="space-y-1">
+                <Checkbox
+                  checked={orcafascioOsDraft.confirmSomarAditivo}
+                  onChange={(confirmSomarAditivo) =>
+                    setOrcafascioOsDraft((p) => ({ ...p, confirmSomarAditivo }))
+                  }
+                  disabled={isImportandoOrcamento}
+                  label="Confirmo somar este valor aditivo ao total da OS"
+                />
+                <p className="pl-7 text-xs text-gray-500 dark:text-gray-400">
+                  Este valor será somado à OS existente no mesmo contrato (mesma OS + Nº da pasta).
+                </p>
               </div>
             ) : null}
             <Checkbox
@@ -18081,6 +18667,7 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoLinhaChave(null);
               setOrcafascioImportUsarMemoria(false);
               setOrcafascioImportModoArredondamento('truncar');
+              resetOrcafascioOsDraft();
               dismissImportShellIfNeeded();
             }}
             disabled={isImportandoOrcamento}
@@ -18096,7 +18683,8 @@ export function OrcamentoPageView({
               !orcafascioImportSelectValue ||
               !orcafascioOrcamentoDetalhe ||
               orcafascioOrcamentoComposicoesLoading ||
-              (deferContractOnImport && !importContratoSelecionadoId.trim())
+              (deferContractOnImport && !importContratoSelecionadoId.trim()) ||
+              !orcamentoOsDraftValido(orcafascioOsDraft, orcafascioOsCodigo, orcafascioNumeroPasta)
             }
             className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
           >
@@ -18353,6 +18941,7 @@ export function OrcamentoPageView({
               if (!isImportandoOrcamento) {
                 setImportOrcamentoModalOpen(false);
                 setImportOrcamentoModalFile(null);
+                resetImportPlanilhaOsDraft();
                 dismissImportShellIfNeeded();
               }
             }}
@@ -18367,6 +18956,7 @@ export function OrcamentoPageView({
                   if (!isImportandoOrcamento) {
                     setImportOrcamentoModalOpen(false);
                     setImportOrcamentoModalFile(null);
+                    resetImportPlanilhaOsDraft();
                     dismissImportShellIfNeeded();
                   }
                 }}
@@ -18410,6 +19000,12 @@ export function OrcamentoPageView({
                       return;
                     }
                     setImportOrcamentoModalFile(f);
+                    setImportPlanilhaOsDraft((p) => ({
+                      ...p,
+                      descricaoServicoOs:
+                        p.descricaoServicoOs.trim() ||
+                        f.name.replace(/\.[^/.]+$/, '').trim(),
+                    }));
                   }}
                 />
 
@@ -18426,8 +19022,15 @@ export function OrcamentoPageView({
                     e.preventDefault();
                     setImportOrcamentoModalDragging(false);
                     const f = e.dataTransfer.files[0];
-                    if (f && /\.(xlsx|xls|csv)$/i.test(f.name)) setImportOrcamentoModalFile(f);
-                    else toast.error('Apenas arquivos .xlsx, .xls ou .csv');
+                    if (f && /\.(xlsx|xls|csv)$/i.test(f.name)) {
+                      setImportOrcamentoModalFile(f);
+                      setImportPlanilhaOsDraft((p) => ({
+                        ...p,
+                        descricaoServicoOs:
+                          p.descricaoServicoOs.trim() ||
+                          f.name.replace(/\.[^/.]+$/, '').trim(),
+                      }));
+                    } else toast.error('Apenas arquivos .xlsx, .xls ou .csv');
                   }}
                   className={`
                 relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200
@@ -18504,6 +19107,38 @@ export function OrcamentoPageView({
                 </div>
               </div>
 
+              <div>
+                <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Orçamento aditivo? *
+                </p>
+                <SegmentedControl
+                  aria-label="Orçamento aditivo"
+                  value={
+                    (importPlanilhaOsDraft.isAditivo === true
+                      ? 'sim'
+                      : importPlanilhaOsDraft.isAditivo === false
+                        ? 'nao'
+                        : '') as 'sim' | 'nao'
+                  }
+                  onChange={(v) =>
+                    setImportPlanilhaOsDraft((p) => ({
+                      ...p,
+                      isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
+                      confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                    }))
+                  }
+                  className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                  pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                  buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                  activeButtonClassName="font-semibold text-white"
+                  inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                  options={[
+                    { value: 'sim', label: 'Sim' },
+                    { value: 'nao', label: 'Não' },
+                  ]}
+                />
+              </div>
+
               {deferContractOnImport ? (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -18523,6 +19158,80 @@ export function OrcamentoPageView({
                 </div>
               ) : null}
 
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    OS *
+                  </label>
+                  <input
+                    value={importPlanilhaOsCodigo}
+                    onChange={(e) => setImportPlanilhaOsCodigo(e.target.value)}
+                    className={FORM_FIELD_INPUT_CLS}
+                    placeholder="Ex: XX/2025"
+                    disabled={isImportandoOrcamento}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Número da pasta *
+                  </label>
+                  <input
+                    value={importPlanilhaNumeroPasta}
+                    onChange={(e) => setImportPlanilhaNumeroPasta(e.target.value)}
+                    className={FORM_FIELD_INPUT_CLS}
+                    placeholder="Ex: 241"
+                    disabled={isImportandoOrcamento}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Descrição do serviço (OS)
+                </label>
+                <input
+                  value={importPlanilhaOsDraft.descricaoServicoOs}
+                  onChange={(e) =>
+                    setImportPlanilhaOsDraft((p) => ({ ...p, descricaoServicoOs: e.target.value }))
+                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Descrição na OS do contrato"
+                  disabled={isImportandoOrcamento}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Valor na OS *
+                </label>
+                <input
+                  value={importPlanilhaOsDraft.valorOs}
+                  onChange={(e) =>
+                    setImportPlanilhaOsDraft((p) => ({
+                      ...p,
+                      valorOs: formatOrcamentoValorBr(parseOrcamentoValorBr(e.target.value)),
+                    }))
+                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="0,00"
+                  inputMode="decimal"
+                  disabled={isImportandoOrcamento}
+                />
+              </div>
+              {importPlanilhaOsDraft.isAditivo === true ? (
+                <div className="space-y-1">
+                  <Checkbox
+                    checked={importPlanilhaOsDraft.confirmSomarAditivo}
+                    onChange={(confirmSomarAditivo) =>
+                      setImportPlanilhaOsDraft((p) => ({ ...p, confirmSomarAditivo }))
+                    }
+                    disabled={isImportandoOrcamento}
+                    label="Confirmo somar este valor aditivo ao total da OS"
+                  />
+                  <p className="pl-7 text-xs text-gray-500 dark:text-gray-400">
+                    Este valor será somado à OS existente no mesmo contrato (mesma OS + Nº da pasta).
+                  </p>
+                </div>
+              ) : null}
+
               <div className="flex space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
@@ -18530,6 +19239,7 @@ export function OrcamentoPageView({
                     if (!isImportandoOrcamento) {
                       setImportOrcamentoModalOpen(false);
                       setImportOrcamentoModalFile(null);
+                      resetImportPlanilhaOsDraft();
                       dismissImportShellIfNeeded();
                     }
                   }}
@@ -18544,7 +19254,12 @@ export function OrcamentoPageView({
                   disabled={
                     isImportandoOrcamento ||
                     !importOrcamentoModalFile ||
-                    (deferContractOnImport && !importContratoSelecionadoId.trim())
+                    (deferContractOnImport && !importContratoSelecionadoId.trim()) ||
+                    !orcamentoOsDraftValido(
+                      importPlanilhaOsDraft,
+                      importPlanilhaOsCodigo,
+                      importPlanilhaNumeroPasta
+                    )
                   }
                   className="flex flex-1 items-center justify-center space-x-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-800"
                 >
@@ -18629,6 +19344,36 @@ export function OrcamentoPageView({
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
+              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Orçamento aditivo? *
+              </p>
+              <SegmentedControl
+                aria-label="Orçamento aditivo"
+                value={
+                  (editarDadosDraft.isAditivo === true
+                    ? 'sim'
+                    : editarDadosDraft.isAditivo === false
+                      ? 'nao'
+                      : '') as 'sim' | 'nao'
+                }
+                onChange={(v) =>
+                  setEditarDadosDraft((p) => ({
+                    ...p,
+                    isAditivo: v === 'sim' ? true : v === 'nao' ? false : undefined,
+                  }))
+                }
+                className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                activeButtonClassName="font-semibold text-white"
+                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                options={[
+                  { value: 'sim', label: 'Sim' },
+                  { value: 'nao', label: 'Não' },
+                ]}
+              />
+            </div>
+            <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome do orçamento *</label>
               <input
                 value={editarDadosDraft.nomeOrcamento}
@@ -18638,11 +19383,39 @@ export function OrcamentoPageView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">OS/Nº da pasta</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">OS</label>
               <input
-                value={editarDadosDraft.osNumeroPasta}
-                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, osNumeroPasta: e.target.value }))}
+                value={editarDadosDraft.osCodigo || ''}
+                onChange={(e) =>
+                  setEditarDadosDraft((p) => {
+                    const osCodigo = e.target.value;
+                    return {
+                      ...p,
+                      osCodigo,
+                      osNumeroPasta: composeOsNumeroPasta(osCodigo, p.numeroPasta || ''),
+                    };
+                  })
+                }
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: XX/2025"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Número da pasta</label>
+              <input
+                value={editarDadosDraft.numeroPasta || ''}
+                onChange={(e) =>
+                  setEditarDadosDraft((p) => {
+                    const numeroPasta = e.target.value;
+                    return {
+                      ...p,
+                      numeroPasta,
+                      osNumeroPasta: composeOsNumeroPasta(p.osCodigo || '', numeroPasta),
+                    };
+                  })
+                }
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 241"
               />
             </div>
             <div>
@@ -18827,6 +19600,7 @@ export function OrcamentoPageView({
           if (!isCreatingOrcamento) {
             setNovoOrcamentoMetaOpen(false);
             setNovoOrcamentoStep(1);
+            setNovoOrcamentoOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
           }
         }}
         title="Criar novo orçamento"
@@ -18839,7 +19613,7 @@ export function OrcamentoPageView({
               {[
                 { id: 1 as const, label: 'Dados básicos', icon: FileText },
                 { id: 2 as const, label: 'Financeiro', icon: Calculator },
-                { id: 3 as const, label: 'Descrição', icon: ClipboardList }
+                { id: 3 as const, label: 'Descrição e OS', icon: ClipboardList }
               ].map((s, index, arr) => {
                 const isActive = novoOrcamentoStep === s.id;
                 const isCompleted = novoOrcamentoStep > s.id;
@@ -18895,6 +19669,37 @@ export function OrcamentoPageView({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
+                <p className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Orçamento aditivo? *
+                </p>
+                <SegmentedControl
+                  aria-label="Orçamento aditivo"
+                  value={
+                    (novoOrcamentoOsDraft.isAditivo === true
+                      ? 'sim'
+                      : novoOrcamentoOsDraft.isAditivo === false
+                        ? 'nao'
+                        : '') as 'sim' | 'nao'
+                  }
+                  onChange={(v) =>
+                    setNovoOrcamentoOsDraft((p) => ({
+                      ...p,
+                      isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
+                      confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                    }))
+                  }
+                  className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                  pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                  buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                  activeButtonClassName="font-semibold text-white"
+                  inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                  options={[
+                    { value: 'sim', label: 'Sim' },
+                    { value: 'nao', label: 'Não' },
+                  ]}
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Nome do orçamento *
                 </label>
@@ -18907,12 +19712,40 @@ export function OrcamentoPageView({
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS/Nº da pasta *</label>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS *</label>
                 <input
-                  value={novoOrcamentoMetaDraft.osNumeroPasta}
-                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, osNumeroPasta: e.target.value }))}
+                  value={novoOrcamentoMetaDraft.osCodigo || ''}
+                  onChange={(e) =>
+                    setNovoOrcamentoMetaDraft((p) => {
+                      const osCodigo = e.target.value;
+                      return {
+                        ...p,
+                        osCodigo,
+                        osNumeroPasta: composeOsNumeroPasta(osCodigo, p.numeroPasta || ''),
+                      };
+                    })
+                  }
                   className={FORM_FIELD_INPUT_CLS}
-                  placeholder="Ex: XX/2025 - Nº241"
+                  placeholder="Ex: XX/2025"
+                  disabled={isCreatingOrcamento}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Número da pasta *</label>
+                <input
+                  value={novoOrcamentoMetaDraft.numeroPasta || ''}
+                  onChange={(e) =>
+                    setNovoOrcamentoMetaDraft((p) => {
+                      const numeroPasta = e.target.value;
+                      return {
+                        ...p,
+                        numeroPasta,
+                        osNumeroPasta: composeOsNumeroPasta(p.osCodigo || '', numeroPasta),
+                      };
+                    })
+                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Ex: 241"
                   disabled={isCreatingOrcamento}
                 />
               </div>
@@ -19065,8 +19898,8 @@ export function OrcamentoPageView({
           {novoOrcamentoStep === 3 && (
             <div className="space-y-6">
               <div className="border-l-4 border-red-500 dark:border-red-400 pl-4">
-                <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Descrição</h4>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Detalhes complementares do orçamento</p>
+                <h4 className="text-xl font-bold text-gray-900 dark:text-gray-100">Descrição e OS</h4>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Detalhes e sincronização da OS no contrato</p>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Descrição *</label>
@@ -19078,9 +19911,58 @@ export function OrcamentoPageView({
                   disabled={isCreatingOrcamento}
                 />
               </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Descrição do serviço (OS)
+                </label>
+                <input
+                  value={novoOrcamentoOsDraft.descricaoServicoOs}
+                  onChange={(e) =>
+                    setNovoOrcamentoOsDraft((p) => ({ ...p, descricaoServicoOs: e.target.value }))
+                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Descrição na OS do contrato"
+                  disabled={isCreatingOrcamento}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Valor na OS *
+                </label>
+                <input
+                  value={novoOrcamentoOsDraft.valorOs}
+                  onChange={(e) =>
+                    setNovoOrcamentoOsDraft((p) => ({
+                      ...p,
+                      valorOs: formatOrcamentoValorBr(parseOrcamentoValorBr(e.target.value)),
+                    }))
+                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="0,00"
+                  inputMode="decimal"
+                  disabled={isCreatingOrcamento}
+                />
+              </div>
+              {novoOrcamentoOsDraft.isAditivo === true ? (
+                <div className="space-y-1">
+                  <Checkbox
+                    checked={novoOrcamentoOsDraft.confirmSomarAditivo}
+                    onChange={(confirmSomarAditivo) =>
+                      setNovoOrcamentoOsDraft((p) => ({ ...p, confirmSomarAditivo }))
+                    }
+                    disabled={isCreatingOrcamento}
+                    label="Confirmo somar este valor aditivo ao total da OS"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 pl-7">
+                    Este valor será somado à OS existente no mesmo contrato (mesma OS + Nº da pasta).
+                  </p>
+                </div>
+              ) : null}
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
                 <p><strong>Nome:</strong> {novoOrcamentoMetaDraft.nomeOrcamento.trim() || '—'}</p>
-                <p><strong>OS/Nº da pasta:</strong> {novoOrcamentoMetaDraft.osNumeroPasta || '—'}</p>
+                <p><strong>OS:</strong> {novoOrcamentoMetaDraft.osCodigo || '—'}</p>
+                <p><strong>Nº da pasta:</strong> {novoOrcamentoMetaDraft.numeroPasta || '—'}</p>
+                <p><strong>Aditivo:</strong> {novoOrcamentoOsDraft.isAditivo === true ? 'Sim' : novoOrcamentoOsDraft.isAditivo === false ? 'Não' : '—'}</p>
                 <p><strong>Data de início:</strong> {formatDataBr(novoOrcamentoMetaDraft.dataAbertura)}</p>
                 <p><strong>Data de fim:</strong> {formatDataBr(novoOrcamentoMetaDraft.dataEnvio || calcularDataFimOrcamento(novoOrcamentoMetaDraft.dataAbertura, novoOrcamentoMetaDraft.dataEnvio, novoOrcamentoMetaDraft.prazoExecucaoDias))}</p>
                 <p><strong>Responsável:</strong> {novoOrcamentoMetaDraft.responsavelOrcamento || '—'}</p>
@@ -19094,6 +19976,7 @@ export function OrcamentoPageView({
               onClick={() => {
                 setNovoOrcamentoMetaOpen(false);
                 setNovoOrcamentoStep(1);
+                setNovoOrcamentoOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
               }}
               disabled={isCreatingOrcamento}
               className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/60"
@@ -19113,7 +19996,17 @@ export function OrcamentoPageView({
             {novoOrcamentoStep < 3 ? (
               <button
                 type="button"
-                onClick={() => setNovoOrcamentoStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
+                onClick={() => {
+                  if (novoOrcamentoStep === 2) {
+                    setNovoOrcamentoOsDraft((d) => ({
+                      ...d,
+                      descricaoServicoOs:
+                        d.descricaoServicoOs.trim() ||
+                        novoOrcamentoMetaDraft.nomeOrcamento.trim(),
+                    }));
+                  }
+                  setNovoOrcamentoStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s));
+                }}
                 disabled={isCreatingOrcamento || !podeAvancarNovoOrcamento(novoOrcamentoStep)}
                 className="rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
@@ -19123,7 +20016,7 @@ export function OrcamentoPageView({
               <button
                 type="button"
                 onClick={confirmarCriacaoNovoOrcamento}
-                disabled={isCreatingOrcamento}
+                disabled={isCreatingOrcamento || !podeAvancarNovoOrcamento(3)}
                 className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <span className="inline-flex items-center gap-2">
@@ -19209,7 +20102,7 @@ export function OrcamentoPageView({
                 title="Escolher colunas visíveis"
                 aria-label="Escolher colunas visíveis"
               >
-                <Columns3 className="h-5 w-5 shrink-0" aria-hidden />
+                <Columns className="h-5 w-5 shrink-0" aria-hidden />
               </button>
             )}
             {orcamentoViewTab === 'montagem' && (

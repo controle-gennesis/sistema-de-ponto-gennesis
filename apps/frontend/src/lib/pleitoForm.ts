@@ -138,6 +138,7 @@ export interface PleitoFormData {
   budgetAmount2: number | null;
   budgetAmount3: number | null;
   budgetAmount4: number | null;
+  budgetValueConfirmed?: boolean | null;
   pv: string | null;
   ipi: string | null;
   reportsBilling: string | null;
@@ -178,7 +179,11 @@ export function pleitoToForm(p: PleitoFormData): Record<string, string> {
   };
 }
 
-export function formToPayload(f: Record<string, string>, contractId?: string | null) {
+export function formToPayload(
+  f: Record<string, string>,
+  contractId?: string | null,
+  opts?: { budgetValueConfirmed?: boolean }
+) {
   const nBudget = parseBudgetToNumber(getLatestBudgetFromForm(f));
   return {
     creationMonth: toPayloadStr(f.creationMonth),
@@ -204,6 +209,9 @@ export function formToPayload(f: Record<string, string>, contractId?: string | n
     budgetAmount2: toPayloadNum(f.budgetAmount2),
     budgetAmount3: toPayloadNum(f.budgetAmount3),
     budgetAmount4: toPayloadNum(f.budgetAmount4),
+    ...(opts?.budgetValueConfirmed !== undefined
+      ? { budgetValueConfirmed: opts.budgetValueConfirmed }
+      : {}),
     pv: toPayloadStr(f.pv),
     ipi: toPayloadStr(f.ipi),
     reportsBilling: toPayloadStr(f.reportsBilling),

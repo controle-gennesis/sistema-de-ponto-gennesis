@@ -83,6 +83,45 @@ export async function assertPleitoBillingAmount(
   }
 }
 
+/** Faturamento direto na OS (sem pleito): limita pelo orçamento restante da OS. */
+export async function assertOsBillingAmountWithoutPleito(
+  tx: Prisma.TransactionClient,
+  contractId: string,
+  serviceOrder: string,
+  grossValue: number,
+  excludeBillingId?: string
+): Promise<void> {
+  const os = serviceOrder.trim();
+  if (!os) return;
+
+  const osRows = await tx.pleito.findMany({
+    where: { updatedContractId: contractId, divSe: os },
+    select: { budget: true },
+  });
+  const orcamento = osRows.reduce((max, row) => {
+    const n = parseBudgetToNumber(row.budget);
+    return n > max ? n : max;
+  }, 0);
+  if (orcamento <= 0) return;
+
+  const billings = await tx.contractBilling.findMany({
+    where: {
+      contractId,
+      serviceOrder: os,
+      ...(excludeBillingId ? { id: { not: excludeBillingId } } : {}),
+    },
+    select: { grossValue: true },
+  });
+  const billed = billings.reduce((sum, row) => sum + Number(row.grossValue || 0), 0);
+  const remaining = Math.max(0, orcamento - billed);
+  if (grossValue > remaining + 0.01) {
+    throw createError(
+      `Valor bruto excede o restante a faturar da OS (R$ ${remaining.toFixed(2).replace('.', ',')})`,
+      400
+    );
+  }
+}
+
 export async function syncPleitoFromBillings(
   tx: Prisma.TransactionClient,
   pleitoId: string
