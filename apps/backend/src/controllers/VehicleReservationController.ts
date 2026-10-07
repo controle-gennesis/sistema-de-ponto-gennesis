@@ -6,25 +6,14 @@ import { prisma } from '../lib/prisma';
 import { assertUserHasVehicleReservationSuppliesAccess, userHasVehicleReservationSuppliesAccess } from '../lib/vehicleReservationSuppliesAccess';
 import { PhotoService } from '../services/PhotoService';
 import { findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
+import {
+  parseVehicleReservationDateTime,
+  vehicleReservationService,
+} from '../services/VehicleReservationService';
 
-const PERIODO_USO_VALUES = new Set(['INTEGRAL', 'MATUTINO', 'VESPERTINO', 'NOTURNO']);
 const photoService = new PhotoService();
 
-const reservationInclude = {
-  vehicle: {
-    select: {
-      id: true,
-      code: true,
-      marcaVeic: true,
-      modeloVeic: true,
-      placaVeic: true
-    }
-  },
-  createdBy: { select: { id: true, name: true } },
-  suppliesApprovedBy: { select: { id: true, name: true } },
-  baixaReportedBy: { select: { id: true, name: true } },
-  vistoriaReportedBy: { select: { id: true, name: true } }
-} as const;
+const reservationInclude = vehicleReservationService.include;
 
 function normalizeOptionalString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -32,68 +21,7 @@ function normalizeOptionalString(value: unknown): string | null {
   return trimmed || null;
 }
 
-function parsePeriodoUso(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const items = value
-    .map((item) => String(item).trim().toUpperCase())
-    .filter((item) => PERIODO_USO_VALUES.has(item));
-  return Array.from(new Set(items));
-}
-
-function parseDateOnly(value: unknown, fieldLabel: string): Date {
-  const raw = String(value ?? '').trim();
-  if (!raw) throw createError(`${fieldLabel} é obrigatória`, 400);
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) throw createError(`${fieldLabel} inválida`, 400);
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    throw createError(`${fieldLabel} inválida`, 400);
-  }
-  return date;
-}
-
-function parseDateTime(value: unknown, fieldLabel: string): Date {
-  const raw = String(value ?? '').trim();
-  if (!raw) throw createError(`${fieldLabel} é obrigatória`, 400);
-
-  // datetime-local: yyyy-MM-ddTHH:mm (hora local do solicitante, sem timezone)
-  const localMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (localMatch) {
-    const year = Number(localMatch[1]);
-    const month = Number(localMatch[2]);
-    const day = Number(localMatch[3]);
-    const hour = Number(localMatch[4]);
-    const minute = Number(localMatch[5]);
-    const second = Number(localMatch[6] || 0);
-    const date = new Date(year, month - 1, day, hour, minute, second, 0);
-    if (
-      date.getFullYear() !== year ||
-      date.getMonth() !== month - 1 ||
-      date.getDate() !== day ||
-      date.getHours() !== hour ||
-      date.getMinutes() !== minute
-    ) {
-      throw createError(`${fieldLabel} inválida`, 400);
-    }
-    return date;
-  }
-
-  // Compat: apenas data (legado)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return parseDateOnly(raw, fieldLabel);
-  }
-
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw createError(`${fieldLabel} inválida`, 400);
-  return date;
-}
+const parseDateTime = parseVehicleReservationDateTime;
 
 function parseStatusFilter(value: unknown): VehicleReservationStatus[] | undefined {
   const raw = String(value ?? '').trim().toUpperCase();
@@ -218,61 +146,6 @@ async function buildListWhere(
   return where;
 }
 
-function buildReservationData(body: Record<string, unknown>) {
-  const dataUsoInicio = parseDateTime(body.dataUsoInicio, 'Data de uso (início)');
-  const dataUsoFim = parseDateTime(body.dataUsoFim, 'Data de uso (fim)');
-  if (dataUsoFim < dataUsoInicio) {
-    throw createError('Data final não pode ser anterior à data inicial', 400);
-  }
-
-  const assinatura = normalizeOptionalString(body.assinatura) || '';
-
-  const motorista = normalizeOptionalString(body.motorista);
-  const atividade = normalizeOptionalString(body.atividade);
-  const localDestino = normalizeOptionalString(body.localDestino);
-  const solicitante = normalizeOptionalString(body.solicitante);
-
-  if (!solicitante) throw createError('Solicitante é obrigatório', 400);
-  if (!motorista) throw createError('Motorista é obrigatório', 400);
-  if (!atividade) throw createError('Atividade é obrigatória', 400);
-  if (!localDestino) throw createError('Local de destino é obrigatório', 400);
-
-  const periodoUso = parsePeriodoUso(body.periodoUso);
-
-  return {
-    solicitante,
-    motorista,
-    atividade,
-    localDestino,
-    dataUsoInicio,
-    dataUsoFim,
-    periodoUso,
-    polo: normalizeOptionalString(body.polo),
-    contrato: normalizeOptionalString(body.contrato),
-    observacaoCapacidadeVeiculo: normalizeOptionalString(body.observacaoCapacidadeVeiculo),
-    assinatura
-  };
-}
-
-async function reserveReservationCodes(count: number): Promise<string[]> {
-  if (count <= 0) return [];
-
-  const result = await prisma.$queryRaw<Array<{ max: number | null }>>`
-    SELECT MAX(
-      CASE WHEN code ~ '^[0-9]+$' THEN CAST(code AS INTEGER) END
-    ) AS max
-    FROM vehicle_reservations
-  `;
-
-  let start = Number(result[0]?.max ?? 0);
-  const codes: string[] = [];
-  for (let i = 0; i < count; i++) {
-    start += 1;
-    codes.push(String(start));
-  }
-  return codes;
-}
-
 export class VehicleReservationController {
   private async listReservations(
     req: AuthRequest,
@@ -352,19 +225,23 @@ export class VehicleReservationController {
 
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const parsed = buildReservationData(req.body);
-
-      const [code] = await reserveReservationCodes(1);
-      if (!code) throw createError('Não foi possível gerar o código da reserva', 500);
-
-      const reservation = await prisma.vehicleReservation.create({
-        data: {
-          ...parsed,
-          code,
-          status: VehicleReservationStatus.PENDING_SUPPLIES,
-          createdById: req.user?.id ?? null
-        },
-        include: reservationInclude
+      const body = (req.body || {}) as Record<string, unknown>;
+      const reservation = await vehicleReservationService.create({
+        solicitante: String(body.solicitante ?? ''),
+        motorista: String(body.motorista ?? ''),
+        atividade: String(body.atividade ?? ''),
+        localDestino: String(body.localDestino ?? ''),
+        dataUsoInicio: body.dataUsoInicio as string,
+        dataUsoFim: body.dataUsoFim as string,
+        periodoUso: body.periodoUso,
+        polo: body.polo as string | null | undefined,
+        contrato: body.contrato as string | null | undefined,
+        observacaoCapacidadeVeiculo: body.observacaoCapacidadeVeiculo as
+          | string
+          | null
+          | undefined,
+        assinatura: body.assinatura as string | null | undefined,
+        createdById: req.user?.id ?? null,
       });
 
       res.status(201).json({ success: true, data: reservation });
