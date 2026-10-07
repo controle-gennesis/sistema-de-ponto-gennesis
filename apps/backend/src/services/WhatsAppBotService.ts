@@ -1,12 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { metaWhatsApp } from './MetaWhatsAppService';
-import {
-  isWhatsAppFuelFlowStatus,
-  processWhatsAppFuelFlow,
-} from './WhatsAppFuelFlowHandler';
+import { processWhatsAppFuelFlow } from './WhatsAppFuelFlowHandler';
 import { processWhatsAppFuelRefuelReportFlow } from './WhatsAppFuelRefuelReportFlowHandler';
 import { processWhatsAppSupportFlow } from './WhatsAppSupportFlowHandler';
+import { processWhatsAppVehicleReservationFlow } from './WhatsAppVehicleReservationFlowHandler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -48,7 +46,20 @@ type FlowStatus =
   | 'SUPPORT_ASK_NAME'
   | 'SUPPORT_ASK_CPF'
   | 'SUPPORT_CONFIRM'
-  | 'SUPPORT_COMPLETE';
+  | 'SUPPORT_COMPLETE'
+  | 'VR_ASK_DRIVER_CPF'
+  | 'VR_ASK_DRIVER_NAME'
+  | 'VR_ASK_ATIVIDADE'
+  | 'VR_ASK_DESTINO'
+  | 'VR_ASK_START_DATE'
+  | 'VR_ASK_START_TIME'
+  | 'VR_ASK_END_DATE'
+  | 'VR_ASK_END_TIME'
+  | 'VR_ASK_POLO'
+  | 'VR_ASK_CONTRATO'
+  | 'VR_ASK_OBSERVATIONS'
+  | 'VR_CONFIRM'
+  | 'VR_COMPLETE';
 
 type FaqItem = { id: string; question: string; answer: string; label?: string };
 type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
@@ -324,6 +335,7 @@ const GENNECY_MAIN_MENU_ROWS: Array<{ id: string; title: string }> = [
   { id: 'ATESTADO', title: 'Enviar atestado' },
   { id: 'COMBUSTIVEL', title: 'Solicitar combustível' },
   { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
+  { id: 'RESERVAR_CARRO', title: 'Reservar carro' },
   { id: 'SUPORTE_SISTEMA', title: 'Suporte do sistema' },
   { id: 'ATENDENTE', title: 'Falar com atendente' },
   { id: 'DUVIDAS', title: 'Dúvidas' },
@@ -1115,6 +1127,31 @@ export class WhatsAppBotService {
             Object.keys(newPayload).forEach((k) => delete newPayload[k]);
           }
           skipDefaultSwitch = true;
+        } else {
+          const vehicleReservationResult = await processWhatsAppVehicleReservationFlow({
+            phone,
+            textRaw,
+            content,
+            flowStatus: normalizedFlowStatus,
+            payload: newPayload,
+            isMenuRequest,
+            isEndRequest,
+            resetToMenu,
+            endConversation,
+          });
+
+          if (vehicleReservationResult) {
+            sendAction = vehicleReservationResult.sendAction;
+            newStatus = vehicleReservationResult.newStatus as FlowStatus;
+            newPayload = vehicleReservationResult.newPayload;
+            if (vehicleReservationResult.newConversationStatus) {
+              newConversationStatus = vehicleReservationResult.newConversationStatus;
+            }
+            if (vehicleReservationResult.clearPayload) {
+              Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+            }
+            skipDefaultSwitch = true;
+          }
         }
       }
     }
