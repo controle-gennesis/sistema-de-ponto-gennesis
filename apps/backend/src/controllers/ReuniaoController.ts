@@ -8,7 +8,7 @@ import {
 } from '../services/ReuniaoService';
 import { getContractAccessForUser } from '../lib/contractAccess';
 import { prisma } from '../lib/prisma';
-import { getIsoMonthKey } from '../lib/monthPeriod';
+import { getMensalReportMonthKey } from '../lib/monthPeriod';
 import { getFortnightKey } from '../lib/weekPeriod';
 
 interface AuthRequest extends Request {
@@ -73,7 +73,8 @@ export class ReuniaoController {
         return res.status(401).json({ success: false, message: 'Não autenticado.' });
       }
 
-      const monthKey = String(req.query.monthKey || getIsoMonthKey()).trim() || getIsoMonthKey();
+      const monthKey =
+        String(req.query.monthKey || getMensalReportMonthKey()).trim() || getMensalReportMonthKey();
       const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
 
       if (access.filter === 'none') {

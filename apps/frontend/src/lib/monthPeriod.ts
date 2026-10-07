@@ -1,7 +1,10 @@
-/** Dia do mês em que o relatório mensal passa a aparecer para preenchimento. */
-export const MENSAL_REPORT_RELEASE_DAY = 20;
-/** Dia do mês limite para a equipe preencher o relatório mensal. */
-export const MENSAL_REPORT_DUE_DAY = 25;
+/**
+ * Dia do mês em que abre o relatório do **mês seguinte**.
+ * Ex.: 25/10 → Novembro/2026; de 01/11 a 24/11 o período ativo continua Novembro.
+ */
+export const MENSAL_REPORT_RELEASE_DAY = 25;
+/** Último dia do mês calendário em que o período ainda é o mês corrente (antes da troca no dia 25). */
+export const MENSAL_REPORT_DUE_DAY = 24;
 
 /** Chave do mês (ex.: 2026-08). */
 export function getIsoMonthKey(date = new Date()): string {
@@ -10,9 +13,21 @@ export function getIsoMonthKey(date = new Date()): string {
   return `${year}-${month}`;
 }
 
-/** True a partir do dia 20 do mês corrente (janela de abertura do relatório mensal). */
-export function isMensalReportVisible(date = new Date()): boolean {
-  return date.getDate() >= MENSAL_REPORT_RELEASE_DAY;
+/**
+ * Mês do relatório mensal ativo:
+ * - dia ≥ 25 → mês seguinte
+ * - dia &lt; 25 → mês corrente (aberto no dia 25 do mês anterior)
+ */
+export function getMensalReportMonthKey(date = new Date()): string {
+  if (date.getDate() >= MENSAL_REPORT_RELEASE_DAY) {
+    return getIsoMonthKey(new Date(date.getFullYear(), date.getMonth() + 1, 1));
+  }
+  return getIsoMonthKey(date);
+}
+
+/** Sempre há período ativo; a troca para o próximo mês ocorre no dia 25. */
+export function isMensalReportVisible(_date = new Date()): boolean {
+  return true;
 }
 
 const MONTH_NAMES = [

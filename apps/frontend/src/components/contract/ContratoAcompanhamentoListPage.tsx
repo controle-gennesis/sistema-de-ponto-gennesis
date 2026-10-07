@@ -38,7 +38,7 @@ import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/R
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
 import { ContratoReunioesLancamentosBar } from '@/components/contract/ContratoReunioesLancamentosBar';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
-import { entryMonthLabel, formatMonthLabel, getIsoMonthKey } from '@/lib/monthPeriod';
+import { entryMonthLabel, formatMonthLabel, getMensalReportMonthKey } from '@/lib/monthPeriod';
 import {
   entryWeekLabel,
   formatWeekLabel,
@@ -249,7 +249,7 @@ function sortByPeriodDesc(kind: AcompanhamentoKind, a: ReuniaoEntry, b: ReuniaoE
 }
 
 function isCurrentPeriod(kind: AcompanhamentoKind, entry: ReuniaoEntry) {
-  if (kind === 'mensal') return entry.monthKey === getIsoMonthKey();
+  if (kind === 'mensal') return entry.monthKey === getMensalReportMonthKey();
   return entry.weekKey === getFortnightKey();
 }
 

@@ -84,6 +84,10 @@ import {
   prefetchOrcafascioOrcamentosList,
 } from '@/lib/orcafascioOrcamentosCache';
 import {
+  budgetClientId,
+  resolveOrcafascioClientIdForContractName,
+} from '@/lib/orcafascioClients';
+import {
   hydrateOrcamentoDetailCache,
   invalidateOrcamentoDetailCache,
   loadOrcamentoDetailCached,
@@ -279,6 +283,8 @@ export interface OrcafascioOrcamentoItem {
   id: string;
   description?: string;
   code?: string;
+  /** ID do cliente Orçafascio (campo CLIENTE) — usado para filtrar por contrato. */
+  client_id?: string;
   created_at?: string;
   updated_at?: string;
   department_id?: string;
@@ -7049,7 +7055,6 @@ export function OrcamentoPageView({
   const [orcafascioModalSoloOrcamentos, setOrcafascioModalSoloOrcamentos] = useState(false);
   const [orcafascioImportSelectValue, setOrcafascioImportSelectValue] = useState('');
   /** Checkbox do modal de importação: usar memória de cálculo. */
-  const [orcafascioImportUsarMemoria, setOrcafascioImportUsarMemoria] = useState(false);
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
   const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
     useState<ModoArredondamento>('truncar');
@@ -9065,8 +9070,38 @@ export function OrcamentoPageView({
     }
   };
 
+  /** Nome do contrato usado para achar o `client_id` Orçafascio (não a descrição do orçamento). */
+  const orcafascioFilterContractName = useMemo(() => {
+    if (deferContractOnImport) {
+      const opt = (importContractOptions ?? []).find((c) => c.id === importContratoSelecionadoId);
+      return (opt?.label || '').trim() || null;
+    }
+    return (
+      String(embeddedContractName ?? '').trim() ||
+      rotuloContratoListaOrcamentos ||
+      null
+    );
+  }, [
+    deferContractOnImport,
+    importContractOptions,
+    importContratoSelecionadoId,
+    embeddedContractName,
+    rotuloContratoListaOrcamentos,
+  ]);
+
+  const orcafascioFilterClientId = useMemo(
+    () => resolveOrcafascioClientIdForContractName(orcafascioFilterContractName),
+    [orcafascioFilterContractName]
+  );
+
   const orcafascioImportSelectOptions = useMemo(() => {
-    return (orcafascioOrcamentos ?? []).map((o) => {
+    if (deferContractOnImport && !importContratoSelecionadoId.trim()) return [];
+    // Com contrato definido: só orçamentos cujo client_id é o Cliente Orçafascio do contrato.
+    if (!orcafascioFilterClientId) return [];
+    const filtered = (orcafascioOrcamentos ?? []).filter(
+      (o) => budgetClientId(o) === orcafascioFilterClientId
+    );
+    return filtered.map((o) => {
       const id = idOrcamentoOrcafascioParaApi(o);
       const nome = String(o.description ?? '').trim() || 'Orçamento sem nome';
       const codigo = String(o.code ?? '').trim();
@@ -9078,7 +9113,25 @@ export function OrcamentoPageView({
         searchText: [nome, codigo, codigoCompacto, id].filter(Boolean).join(' '),
       };
     });
-  }, [orcafascioOrcamentos]);
+  }, [
+    orcafascioOrcamentos,
+    deferContractOnImport,
+    importContratoSelecionadoId,
+    orcafascioFilterClientId,
+  ]);
+
+  // Troca de contrato: limpa orçamento selecionado (filtro por client_id muda).
+  useEffect(() => {
+    if (!deferContractOnImport || !orcafascioModalOpen || !orcafascioModalSoloOrcamentos) return;
+    setOrcafascioImportSelectValue('');
+    setOrcafascioImportDetalheModalOpen(false);
+    setOrcafascioOrcamentoDetalhe(null);
+    setOrcafascioOrcamentoComposicoes(null);
+    setOrcafascioOrcamentoAnalitico(null);
+    setOrcafascioOrcamentoLinhaCatalogo(null);
+    setOrcafascioOrcamentoLinhaChave(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage à troca de contrato com o modal aberto
+  }, [deferContractOnImport, importContratoSelecionadoId, orcafascioModalOpen, orcafascioModalSoloOrcamentos]);
 
   const verDetalheComposicaoOrcafascio = async (comp: OrcafascioComposicaoListItem) => {
     setOrcafascioComposicaoDetalheTab('itens');
@@ -9653,7 +9706,7 @@ export function OrcamentoPageView({
       ).slice(0, 120);
 
       const entry = await criarOrcamentoApi(ccId, nomeLista);
-      const usarMemoriaCalculo = orcafascioImportUsarMemoria;
+      const usarMemoriaCalculo = true;
       const modoArredondamento = orcafascioImportModoArredondamento;
       const subtitulosNoOrcamento: string[] = [];
       const quantidadesPorItem: Record<string, number> = {};
@@ -9745,9 +9798,8 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
       abrirAposImportarOrcamento(importContractId, entry.id);
-      setOrcamentoViewTab(usarMemoriaCalculo ? 'memorial' : 'montagem');
+      setOrcamentoViewTab('memorial');
 
-      setOrcafascioImportUsarMemoria(false);
       setOrcafascioImportModoArredondamento('truncar');
       setOrcafascioModalOpen(false);
       setOrcafascioModalSoloOrcamentos(false);
@@ -17930,139 +17982,119 @@ export function OrcamentoPageView({
         size="md"
         contentOverflowVisible
       >
-        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Orçamento
-        </label>
-        {orcafascioOrcamentosLoading && orcafascioOrcamentos === null ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-gray-500 dark:text-gray-400">
-            <Loader2 className="h-4 w-4 animate-spin text-red-600" aria-hidden />
-            Carregando orçamentos do Orçafascio…
-          </div>
-        ) : (
-          <SingleSelectSearchDropdown
-            value={orcafascioImportSelectValue}
-            onChange={(v) => {
-              setOrcafascioImportSelectValue(v);
-              setOrcafascioImportDetalheModalOpen(false);
-              if (!v) {
-                setOrcafascioOrcamentoDetalhe(null);
-                setOrcafascioOrcamentoComposicoes(null);
-                setOrcafascioOrcamentoAnalitico(null);
-                setOrcafascioOrcamentoLinhaCatalogo(null);
-                setOrcafascioOrcamentoLinhaChave(null);
-                return;
-              }
-              const o = (orcafascioOrcamentos ?? []).find(
-                (x) => idOrcamentoOrcafascioParaApi(x) === v || String(x.id) === v
-              );
-              if (o) void verDetalheOrcamentoOrcafascio(o, { force: true });
-            }}
-            options={orcafascioImportSelectOptions}
-            allowEmpty
-            emptyOptionLabel="Selecione o orçamento"
-            placeholder={
-              orcafascioOrcamentosLoading
-                ? 'Carregando…'
-                : orcafascioImportSelectOptions.length === 0
-                  ? 'Nenhum orçamento disponível'
-                  : 'Selecione o orçamento'
-            }
-            searchPlaceholder="Pesquisar por nome ou código..."
-            emptyOptionsMessage="Nenhum orçamento encontrado"
-            emptySearchMessage={
-              orcafascioOrcamentosLoading
-                ? 'Carregando lista completa… tente de novo em instantes'
-                : 'Nenhum orçamento corresponde à busca'
-            }
-            disabled={orcafascioOrcamentos === null}
-            noFocusRing
-            preferOpenDown
-            listMaxHeight={280}
-          />
-        )}
-        {orcafascioOrcamentosLoading && orcafascioOrcamentos !== null ? (
-          <p className="mt-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-            Carregando lista completa do Orçafascio…
-          </p>
-        ) : null}
-        {orcafascioImportSelectValue && orcafascioOrcamentoComposicoesLoading ? (
-          <p className="mt-4 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Carregando composições do orçamento…
-          </p>
-        ) : null}
-        {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
-          <div className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-800/50">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                {(orcafascioOrcamentoDetalhe.description as string) || 'Orçamento'}
-              </p>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {(orcafascioOrcamentoDetalhe.code as string) || '—'}
-                {' · '}
-                {(orcafascioOrcamentoComposicoes?.length ?? 0).toLocaleString('pt-BR')} composição
-                {(orcafascioOrcamentoComposicoes?.length ?? 0) === 1 ? '' : 'ões'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOrcafascioImportDetalheModalOpen(true)}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              title="Ver todos os dados"
-              aria-label="Ver todos os dados do orçamento"
-            >
-              <Eye className="h-4 w-4" aria-hidden />
-            </button>
+        {deferContractOnImport ? (
+          <div className={importContratoSelecionadoId.trim() ? 'mb-4' : undefined}>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Contrato
+            </label>
+            <StringSingleSelectDropdown
+              value={importContratoSelecionadoId}
+              onChange={setImportContratoSelecionadoId}
+              options={importContractSelectOptions}
+              allowEmpty
+              emptyOptionLabel="Selecione o contrato"
+              placeholder="Selecione o contrato"
+              searchPlaceholder="Pesquisar contrato..."
+              emptyOptionsMessage="Nenhum contrato disponível."
+              className="w-full"
+            />
           </div>
         ) : null}
 
-        {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
-          <div className="mt-4 space-y-4">
-            {deferContractOnImport ? (
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Contrato
-                </label>
-                <StringSingleSelectDropdown
-                  value={importContratoSelecionadoId}
-                  onChange={setImportContratoSelecionadoId}
-                  options={importContractSelectOptions}
-                  allowEmpty
-                  emptyOptionLabel="Selecione o contrato"
-                  placeholder="Selecione o contrato"
-                  searchPlaceholder="Pesquisar contrato..."
-                  emptyOptionsMessage="Nenhum contrato disponível."
-                  className="w-full"
-                />
+        {!deferContractOnImport || importContratoSelecionadoId.trim() ? (
+          <>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Orçamento
+            </label>
+            <SingleSelectSearchDropdown
+              value={orcafascioImportSelectValue}
+              onChange={(v) => {
+                setOrcafascioImportSelectValue(v);
+                setOrcafascioImportDetalheModalOpen(false);
+                if (!v) {
+                  setOrcafascioOrcamentoDetalhe(null);
+                  setOrcafascioOrcamentoComposicoes(null);
+                  setOrcafascioOrcamentoAnalitico(null);
+                  setOrcafascioOrcamentoLinhaCatalogo(null);
+                  setOrcafascioOrcamentoLinhaChave(null);
+                  return;
+                }
+                const o = (orcafascioOrcamentos ?? []).find(
+                  (x) => idOrcamentoOrcafascioParaApi(x) === v || String(x.id) === v
+                );
+                if (o) void verDetalheOrcamentoOrcafascio(o, { force: true });
+              }}
+              options={orcafascioImportSelectOptions}
+              allowEmpty
+              emptyOptionLabel="Nenhum"
+              placeholder={
+                orcafascioImportSelectOptions.length === 0
+                  ? 'Nenhum orçamento encontrado'
+                  : 'Pesquisar orçamento...'
+              }
+              searchPlaceholder="Pesquisar por nome ou código..."
+              emptyOptionsMessage="Nenhum orçamento encontrado"
+              emptySearchMessage="Nenhum orçamento corresponde à busca"
+              noFocusRing
+              preferOpenDown
+              listMaxHeight={280}
+            />
+            {orcafascioImportSelectValue && orcafascioOrcamentoComposicoesLoading ? (
+              <p className="mt-4 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Carregando composições do orçamento…
+              </p>
+            ) : null}
+            {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
+              <div className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {(orcafascioOrcamentoDetalhe.description as string) || 'Orçamento'}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {(orcafascioOrcamentoDetalhe.code as string) || '—'}
+                    {' · '}
+                    {(orcafascioOrcamentoComposicoes?.length ?? 0).toLocaleString('pt-BR')} composição
+                    {(orcafascioOrcamentoComposicoes?.length ?? 0) === 1 ? '' : 'ões'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOrcafascioImportDetalheModalOpen(true)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  title="Ver todos os dados"
+                  aria-label="Ver todos os dados do orçamento"
+                >
+                  <Eye className="h-4 w-4" aria-hidden />
+                </button>
               </div>
             ) : null}
-            <Checkbox
-              checked={orcafascioImportUsarMemoria}
-              onChange={setOrcafascioImportUsarMemoria}
-              label="Usar memória de cálculo"
-            />
-            <div>
-              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Arredondamento
-              </p>
-              <SegmentedControl
-                aria-label="Arredondamento"
-                value={orcafascioImportModoArredondamento}
-                onChange={setOrcafascioImportModoArredondamento}
-                className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                activeButtonClassName="font-semibold text-white"
-                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                options={[
-                  { value: 'truncar', label: 'Truncar' },
-                  { value: 'arredondar', label: 'Arredondar' },
-                  { value: 'nenhum', label: 'Não arredondar' },
-                ]}
-              />
-            </div>
-          </div>
+
+            {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Arredondamento
+                  </p>
+                  <SegmentedControl
+                    aria-label="Arredondamento"
+                    value={orcafascioImportModoArredondamento}
+                    onChange={setOrcafascioImportModoArredondamento}
+                    className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                    pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                    buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                    activeButtonClassName="font-semibold text-white"
+                    inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                    options={[
+                      { value: 'truncar', label: 'Truncar' },
+                      { value: 'arredondar', label: 'Arredondar' },
+                      { value: 'nenhum', label: 'Não arredondar' },
+                    ]}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <div className="mt-5 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
@@ -18079,7 +18111,6 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoAnalitico(null);
               setOrcafascioOrcamentoLinhaCatalogo(null);
               setOrcafascioOrcamentoLinhaChave(null);
-              setOrcafascioImportUsarMemoria(false);
               setOrcafascioImportModoArredondamento('truncar');
               dismissImportShellIfNeeded();
             }}

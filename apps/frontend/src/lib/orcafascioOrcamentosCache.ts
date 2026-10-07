@@ -7,6 +7,8 @@ export type OrcafascioOrcamentoListItem = {
   id: string;
   description?: string;
   code?: string;
+  /** Cliente Orçafascio (campo CLIENTE) — filtro de importação por contrato. */
+  client_id?: string;
   created_at?: string;
   updated_at?: string;
   department_id?: string;

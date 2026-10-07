@@ -3,7 +3,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { formatMonthLabel, getIsoMonthKey, isMensalReportVisible } from '../lib/monthPeriod';
+import {
+  formatMonthLabel,
+  getMensalReportMonthKey,
+  isMensalReportVisible,
+} from '../lib/monthPeriod';
 import { formatWeekLabel, getFortnightKey } from '../lib/weekPeriod';
 import { backendUploadsRoot } from '../lib/uploads';
 import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
@@ -546,7 +550,7 @@ export class ReuniaoService {
     }
 
     if (kind === 'mensal') {
-      const monthKey = getIsoMonthKey();
+      const monthKey = getMensalReportMonthKey();
       if (!opts?.forceNew) {
         const idx = await this.getIndex(contractId, kind);
         const existing = idx.reunioes.find((row) => row.monthKey === monthKey);
@@ -676,8 +680,8 @@ export class ReuniaoService {
   }
 
   /** Lista com enriquecimento do nome/descrição do formulário quando faltar no índice.
-   *  No mensal, a partir do dia 20 abre automaticamente o período do mês corrente
-   *  (prazo de preenchimento: dia 25), se o formulário estiver configurado. */
+   *  No mensal, garante o período ativo: a partir do dia 25 abre o mês seguinte
+   *  (antes do dia 25, o mês corrente — aberto no dia 25 do mês anterior). */
   async listReunioes(contractId: string, kind: ReuniaoKind): Promise<ReuniaoIndexEntry[]> {
     if (kind === 'mensal' && isMensalReportVisible()) {
       try {
@@ -716,8 +720,8 @@ export class ReuniaoService {
   }
 
   /**
-   * Contratos com relatório mensal do mês corrente ainda não finalizado
-   * (a partir do dia 20). Usado nos avisos da sidebar / listas / abas.
+   * Contratos com relatório mensal do período ativo ainda não finalizado.
+   * Usado nos avisos da sidebar / listas / abas.
    */
   async getMensalPendingSummary(contractIds: string[]): Promise<{
     count: number;
@@ -727,7 +731,7 @@ export class ReuniaoService {
       return { count: 0, contractIds: [] };
     }
 
-    const monthKey = getIsoMonthKey();
+    const monthKey = getMensalReportMonthKey();
     const pending: string[] = [];
 
     await Promise.all(
