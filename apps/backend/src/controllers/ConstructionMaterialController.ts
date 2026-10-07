@@ -6,6 +6,11 @@ import { prisma } from '../lib/prisma';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
 import { ensureConstructionMaterialTotvsIdPrd } from '../lib/ensureProductionSchema';
 import {
+  getMaterialTotvsSyncStatus,
+  runMaterialTotvsSync,
+  runMaterialTotvsSyncIfStale,
+} from '../services/MaterialTotvsSyncService';
+import {
   ensureUnaccentExtension,
   unaccentIlikeOr,
 } from '../lib/normalizeSearchText';
@@ -994,7 +999,7 @@ export class ConstructionMaterialController {
         });
       } catch (err) {
         const message = svc.formatAxiosError(err);
-        console.warn(`[TOTVS RM PRODUTOSATIVOS]: ${message}`);
+        console.warn(`[TOTVS RM PRODUTOS]: ${message}`);
         res.json({
           success: false,
           message,
@@ -1004,6 +1009,35 @@ export class ConstructionMaterialController {
       }
     } catch (error) {
       next(error);
+    }
+  }
+
+  /** Sincroniza materiais do TOTVS RM (upsert por IDPRD / código / nome único). Não apaga locais. */
+  async syncFromTotvs(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const force = String(req.query.force || '').trim() === '1';
+      const result = force
+        ? await runMaterialTotvsSync('manual')
+        : await runMaterialTotvsSyncIfStale(60_000);
+      res.json({
+        success: true,
+        data: result ?? getMaterialTotvsSyncStatus(),
+        message: result
+          ? `Sync TOTVS: ${result.created} criado(s), ${result.updated} atualizado(s)` +
+            (result.conflicts ? `, ${result.conflicts} conflito(s)` : '')
+          : 'Sync já em andamento ou recente',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[material-totvs] syncFromTotvs: ${message}`);
+      res.status(502).json({
+        success: false,
+        message:
+          /JSON|Unexpected token/i.test(message)
+            ? 'TOTVS RM devolveu resposta inválida ao buscar PRODUTOS. Verifique TOTVS_RM_PRODUTOS_PATH e as credenciais.'
+            : message || 'Falha ao sincronizar materiais do TOTVS',
+        data: getMaterialTotvsSyncStatus(),
+      });
     }
   }
 }

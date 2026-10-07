@@ -1,4 +1,4 @@
-﻿import { Router, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireToolRentalSuppliesAccess } from '../middleware/permissionAuth';

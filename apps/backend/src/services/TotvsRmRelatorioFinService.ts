@@ -978,11 +978,31 @@ export class TotvsRmRelatorioFinService {
       headers,
       timeout,
       httpsAgent,
-      validateStatus: () => true
+      validateStatus: () => true,
+      // RM às vezes devolve corpo vazio ou o literal `null` — não deixar o JSON.parse padrão estourar.
+      transformResponse: [
+        (raw: unknown) => {
+          if (raw == null || raw === '') return null;
+          if (typeof raw !== 'string') return raw;
+          const text = raw.trim();
+          if (!text || text === 'null' || text === 'undefined') return null;
+          try {
+            return JSON.parse(text) as unknown;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            throw new Error(`RM consulta JSON inválido (${pathRel}): ${msg}`);
+          }
+        },
+      ],
     });
 
     if (res.status < 200 || res.status >= 300) {
-      const msg = typeof res.data === 'string' ? res.data.slice(0, 500) : JSON.stringify(res.data).slice(0, 500);
+      const msg =
+        typeof res.data === 'string'
+          ? res.data.slice(0, 500)
+          : res.data == null
+            ? ''
+            : JSON.stringify(res.data).slice(0, 500);
       throw new Error(`RM consulta HTTP ${res.status}: ${msg}`);
     }
 
@@ -993,17 +1013,24 @@ export class TotvsRmRelatorioFinService {
     return this.fetchRowsForPath(this.defaultRelatorioPath());
   }
 
+  /** Consulta padrão de produtos no RM (dataset PRODUTOS). */
   defaultProdutosAtivosPath(): string {
     return (
+      (process.env.TOTVS_RM_PRODUTOS_PATH || '').trim() ||
       (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim() ||
-      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T'
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOS/0/G'
     );
   }
 
   private produtosAtivosFallbackPaths(): string[] {
-    const custom = (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim();
+    const custom =
+      (process.env.TOTVS_RM_PRODUTOS_PATH || '').trim() ||
+      (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim();
     if (custom) return [custom];
     return [
+      // Catálogo oficial Gennesis
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOS/0/G',
+      // Fallbacks legados
       '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T',
       '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/G',
       '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/0/F',
@@ -1029,7 +1056,7 @@ export class TotvsRmRelatorioFinService {
       }
     }
 
-    throw lastError ?? new Error('Falha ao buscar PRODUTOSATIVOS no TOTVS RM');
+    throw lastError ?? new Error('Falha ao buscar PRODUTOS no TOTVS RM');
   }
 
   async findProdutoAtivoByCodigo(codigo: string): Promise<{
