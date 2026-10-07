@@ -246,7 +246,7 @@ export function startFluigDatasetMirrorScheduler(): void {
   };
 
   // Boot: espera o servidor estabilizar (como o warmup Fluig).
-  setTimeout(() => run('boot'), 15_000);
+  setTimeout(() => run('boot'), 10_000);
 
   cron.schedule(
     '*/30 * * * *',
