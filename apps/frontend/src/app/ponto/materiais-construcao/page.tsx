@@ -193,9 +193,23 @@ function analyzeImportRow(
   if (/^sem natureza$/i.test(naturezaOrcamentaria)) {
     naturezaOrcamentaria = '';
   }
-  const ativoRaw = pickRowValue(row, 'Ativo', 'ativo', 'isActive');
+  const ativoRaw = pickRowValue(row, 'Ativo', 'ativo', 'isActive', 'STATUS', 'Status');
 
   const skipReasons: string[] = [];
+  const inactiveText = [name, description, ativoRaw].some((part) =>
+    String(part || '')
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toUpperCase()
+      .includes('INATIV')
+  );
+  if (inactiveText) skipReasons.push('Produto inativo (texto INATIV)');
+  if (
+    ativoRaw &&
+    ['false', '0', 'nao', 'não', 'n', 'inativo', 'no'].includes(ativoRaw.toLowerCase())
+  ) {
+    skipReasons.push('Produto marcado como inativo');
+  }
   if (!name) skipReasons.push('Nome em branco');
   if (!unit) skipReasons.push('Unidade em branco');
   if (!productType) {

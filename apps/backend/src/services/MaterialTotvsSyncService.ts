@@ -82,8 +82,26 @@ function parseFlagTruthy(raw: unknown): boolean | null {
   return null;
 }
 
+/** Nome/descrição com INATIV / INATIVAR / [INATIVO] etc. — sai do cadastro ativo. */
+function looksInactiveText(...parts: Array<string | null | undefined>): boolean {
+  return parts.some((p) => {
+    const t = String(p || '')
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toUpperCase();
+    return t.includes('INATIV');
+  });
+}
+
 /** ATIVO=1 ativo; INATIVO=1 inativo (coluna invertida no RM). */
 function parseProdutoAtivo(row: Record<string, unknown>): boolean {
+  const name = cell(pickRow(row, 'NOMEFANTASIA', 'PRODUTO', 'NOME', 'DESCRICAO', 'DESCRIÇÃO'));
+  const description = cell(pickRow(row, 'DESCRICAO', 'DESCRIÇÃO', 'DESCPRODUTO'));
+  const status = cell(pickRow(row, 'STATUS', 'SITUACAO', 'SITUAÇÃO', 'SITPRODUTO'));
+
+  // Texto manda: [INATIVAR], (INATIVAR), DEVER SER INATIVADO etc.
+  if (looksInactiveText(name, description, status)) return false;
+
   const ativoRaw = pickRow(row, 'ATIVO', 'ATIVOYN', 'FLDATIVO', 'ACTIVE');
   const ativo = parseFlagTruthy(ativoRaw);
   if (ativo != null) return ativo;
@@ -92,23 +110,11 @@ function parseProdutoAtivo(row: Record<string, unknown>): boolean {
   const inativo = parseFlagTruthy(inativoRaw);
   if (inativo != null) return !inativo;
 
-  const status = cell(pickRow(row, 'STATUS', 'SITUACAO', 'SITUAÇÃO', 'SITPRODUTO'));
   if (status) {
     const s = status.toLowerCase();
-    if (/inativ|desativ|bloque|cancel/.test(s)) return false;
+    if (/desativ|bloque|cancel/.test(s)) return false;
     if (/ativ|liber/.test(s)) return true;
   }
-
-  const name = cell(pickRow(row, 'NOMEFANTASIA', 'PRODUTO', 'NOME', 'DESCRICAO', 'DESCRIÇÃO'));
-  const description = cell(pickRow(row, 'DESCRICAO', 'DESCRIÇÃO', 'DESCPRODUTO'));
-  const looksInactive = [name, description].some((p) =>
-    String(p || '')
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .toUpperCase()
-      .includes('INATIV')
-  );
-  if (looksInactive) return false;
 
   return true;
 }
@@ -148,6 +154,8 @@ function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedPro
     unit: preferUnit(prev, next),
     unitFromTotvs: next.unitFromTotvs || prev.unitFromTotvs,
     idPrd: next.idPrd ?? prev.idPrd,
+    // Se qualquer linha indicar inativo (texto/flag), mantém inativo.
+    isActive: prev.isActive && next.isActive,
   };
 }
 
@@ -406,9 +414,18 @@ export async function runMaterialTotvsSync(
         }
       }
 
+      // Texto INATIV* no nome → nunca criar/atualizar como ativo.
+      const inactiveByText = looksInactiveText(m.name);
+      const effectiveActive = m.isActive && !inactiveByText;
+
       if (!target) {
         if (byCode.has(codeKey) || (m.idPrd != null && byIdPrd.has(m.idPrd))) {
           conflicts += 1;
+          continue;
+        }
+        // Não importa cadastro novo já marcado para inativar no texto.
+        if (!effectiveActive) {
+          skipped += 1;
           continue;
         }
         toCreate.push({
@@ -419,7 +436,7 @@ export async function runMaterialTotvsSync(
           productType: m.productType,
           category: m.productType,
           totvsIdPrd: m.idPrd,
-          isActive: m.isActive,
+          isActive: true,
         });
         const placeholder: LocalMaterial = {
           id: `__new_${codeKey}`,
@@ -429,7 +446,7 @@ export async function runMaterialTotvsSync(
           unit: m.unit,
           productType: m.productType,
           totvsIdPrd: m.idPrd,
-          isActive: m.isActive,
+          isActive: true,
         };
         byCode.set(codeKey, placeholder);
         if (m.idPrd != null) byIdPrd.set(m.idPrd, placeholder);
@@ -457,7 +474,8 @@ export async function runMaterialTotvsSync(
         }
       }
 
-      if (!needsUpdate(target, m, nextCode, nextIdPrd)) {
+      const mappedForUpdate: MappedProduct = { ...m, isActive: effectiveActive };
+      if (!needsUpdate(target, mappedForUpdate, nextCode, nextIdPrd)) {
         skipped += 1;
         continue;
       }
@@ -472,7 +490,7 @@ export async function runMaterialTotvsSync(
           productType: m.productType,
           category: m.productType,
           totvsIdPrd: nextIdPrd,
-          isActive: m.isActive,
+          isActive: effectiveActive,
         },
       });
 
@@ -484,6 +502,31 @@ export async function runMaterialTotvsSync(
         byIdPrd.delete(target.totvsIdPrd);
       }
       if (nextIdPrd != null) byIdPrd.set(nextIdPrd, { ...target, code: nextCode, totvsIdPrd: nextIdPrd });
+    }
+
+    // Locais ainda ativos com texto INATIV* (mesmo que o RM não tenha mandado no lote).
+    const pendingUpdateIds = new Set(toUpdate.map((u) => u.id));
+    for (const e of existing) {
+      if (!e.isActive) continue;
+      if (!looksInactiveText(e.name, e.description)) continue;
+      if (pendingUpdateIds.has(e.id)) {
+        const row = toUpdate.find((u) => u.id === e.id);
+        if (row) row.data.isActive = false;
+        continue;
+      }
+      toUpdate.push({
+        id: e.id,
+        data: {
+          code: e.code,
+          name: e.name,
+          description: e.description || e.name,
+          unit: e.unit,
+          productType: e.productType || 'Produto',
+          category: e.productType || 'Produto',
+          totvsIdPrd: e.totvsIdPrd,
+          isActive: false,
+        },
+      });
     }
 
     for (let i = 0; i < toCreate.length; i += CREATE_BATCH) {
