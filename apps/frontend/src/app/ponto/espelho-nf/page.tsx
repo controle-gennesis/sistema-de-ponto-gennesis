@@ -68,6 +68,7 @@ import {
 } from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { getDropdownPortalRoot } from '@/lib/zIndex';
 
 /** Campos opcionais que o usuário escolhe exibir no formulário (Constar na nota fiscal). */
 type NfConstarNaNotaFields = {
@@ -2932,7 +2933,7 @@ export default function EspelhoNfPage() {
                   top: espelhoPickerPanelGeo.top,
                   width: espelhoPickerPanelGeo.width,
                   maxHeight: espelhoPickerPanelGeo.maxHeight,
-                  zIndex: 200
+                  zIndex: 99999
                 }}
               >
                 <div className="shrink-0 border-b border-gray-200 p-2 dark:border-gray-600">
@@ -3125,7 +3126,7 @@ export default function EspelhoNfPage() {
                   )}
                 </ul>
               </div>,
-              document.body
+              getDropdownPortalRoot()
             )}
 
           {showEspelhoForm &&
@@ -3143,7 +3144,7 @@ export default function EspelhoNfPage() {
                   top: nfConstarPanelGeo.top,
                   width: nfConstarPanelGeo.width,
                   maxHeight: nfConstarPanelGeo.maxHeight,
-                  zIndex: 200
+                  zIndex: 99999
                 }}
               >
                 <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -3196,7 +3197,7 @@ export default function EspelhoNfPage() {
                   })}
                 </div>
               </div>,
-              document.body
+              getDropdownPortalRoot()
             )}
 
 

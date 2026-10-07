@@ -150,6 +150,9 @@ export function usePermissions() {
   const fdApprovalContractIdSet = new Set(fdApprovalContractIds);
   const fuelApprovalContractIds: string[] = permissionData?.fuelApprovalContractIds ?? [];
   const fuelApprovalContractIdSet = new Set(fuelApprovalContractIds);
+  const espelhoNfApprovalCostCenterIds: string[] =
+    permissionData?.espelhoNfApprovalCostCenterIds ?? [];
+  const espelhoNfApprovalSeesAll = isAdministrator || !!permissionData?.isAdmin;
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
@@ -608,6 +611,8 @@ export function usePermissions() {
     fdApprovalContractIdSet,
     fuelApprovalContractIds,
     fuelApprovalContractIdSet,
+    espelhoNfApprovalCostCenterIds,
+    espelhoNfApprovalSeesAll,
     canApproveRestrictedDpRequests,
     gestorCostCenterIds,
     isUnbUser,

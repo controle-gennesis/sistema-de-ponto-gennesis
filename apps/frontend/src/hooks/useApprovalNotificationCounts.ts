@@ -35,6 +35,8 @@ export function useApprovalNotificationCounts() {
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
+    espelhoNfApprovalCostCenterIds,
+    espelhoNfApprovalSeesAll,
     canApproveFuel,
     canApproveOc,
     canApproveMaterialRequests,
@@ -74,15 +76,28 @@ export function useApprovalNotificationCounts() {
   });
 
   const espelhoQuery = useQuery({
-    queryKey: ['approval-notification-counts', 'espelho'],
+    queryKey: [
+      'approval-notification-counts',
+      'espelho',
+      espelhoNfApprovalSeesAll,
+      espelhoNfApprovalCostCenterIds,
+    ],
     enabled: enabled && canApproveEspelhoNf,
     queryFn: async () => {
       const res = await api.get('/espelho-nf/bootstrap');
       const mirrors = Array.isArray(res.data?.data?.mirrors) ? res.data.data.mirrors : [];
+      const allowed = new Set(espelhoNfApprovalCostCenterIds);
       return mirrors.filter(
-        (m: { id?: string; approvalStatus?: string | null }) =>
-          resolveEspelhoApprovalStatus(String(m.id ?? ''), m.approvalStatus) ===
-          'PENDING_APPROVAL',
+        (m: { id?: string; approvalStatus?: string | null; costCenterId?: string | null }) => {
+          if (
+            resolveEspelhoApprovalStatus(String(m.id ?? ''), m.approvalStatus) !==
+            'PENDING_APPROVAL'
+          ) {
+            return false;
+          }
+          if (espelhoNfApprovalSeesAll) return true;
+          return allowed.has(String(m.costCenterId ?? ''));
+        },
       ).length;
     },
     refetchInterval: () => visibleTabRefetchInterval(30_000),

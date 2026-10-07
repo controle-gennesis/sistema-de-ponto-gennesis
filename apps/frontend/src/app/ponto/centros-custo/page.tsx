@@ -81,6 +81,7 @@ export default function CentrosCustoPage() {
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [showPermissionReminder, setShowPermissionReminder] = useState(false);
 
   const hasActiveCostCenterFilters =
     isActiveFilter !== 'all' || stateFilter !== 'all';
@@ -128,6 +129,7 @@ export default function CentrosCustoPage() {
       setShowForm(false);
       resetForm();
       toast.success('Centro de custo criado com sucesso!');
+      setShowPermissionReminder(true);
     },
     onError: (error: any) => {
       console.error('Erro ao criar centro de custo:', error);
@@ -549,6 +551,57 @@ export default function CentrosCustoPage() {
         </div>
 
         {/* Modal de confirmação de exclusão */}
+        {showPermissionReminder && (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowPermissionReminder(false)} />
+            <div className="relative mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <AlertCircle className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+              </div>
+              <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Configure as permissões deste centro
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Em <strong className="font-medium text-gray-800 dark:text-gray-200">Gerenciar permissões</strong>,
+                na aba <strong className="font-medium text-gray-800 dark:text-gray-200">Contratos</strong>,
+                libere a visualização e a aprovação dos contratos vinculados a este centro de custo.
+              </p>
+              <ul className="mt-3 space-y-1.5 text-sm text-gray-600 dark:text-gray-400">
+                <li>
+                  <strong className="font-medium text-gray-800 dark:text-gray-200">Visualização:</strong>{' '}
+                  Liberado, Orçamento, Relatórios, Ordens de Serviço, Produção Semanal e Reuniões.
+                </li>
+                <li>
+                  <strong className="font-medium text-gray-800 dark:text-gray-200">Aprovação:</strong>{' '}
+                  Gestor, para requisições de materiais e ordens de compra.
+                </li>
+              </ul>
+              <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                Sem essa configuração, o centro não aparece para quem depende dessas permissões.
+              </p>
+              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowPermissionReminder(false)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Entendi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPermissionReminder(false);
+                    router.push('/ponto/contratos');
+                  }}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
+                >
+                  Ir para Contratos
+                </button>
+              </div>
+            </div>
+          </AppModalOverlay>
+        )}
+
         {showDeleteModal && (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
@@ -609,6 +662,7 @@ export default function CentrosCustoPage() {
             queryClient.invalidateQueries({ queryKey: ['cost-centers-admin'] });
             queryClient.invalidateQueries({ queryKey: ['cost-centers'] });
             setIsImportModalOpen(false);
+            setShowPermissionReminder(true);
           }}
         />
       </MainLayout>
@@ -740,6 +794,16 @@ function CostCenterFormModal({
                 </span>
               </label>
             </div>
+            {!editingCostCenter ? (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  Depois de criar, configure em Gerenciar permissões, na aba Contratos, a
+                  visualização (Liberado, Orçamento, Relatórios, Ordens de Serviço, Produção
+                  Semanal e Reuniões) e a aprovação (Gestor) dos contratos deste centro.
+                </p>
+              </div>
+            ) : null}
             {(createMutation.isError || updateMutation.isError) && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />

@@ -2692,6 +2692,11 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
     secondTable: 'cost_centers',
   });
   await ensureUserAccessJunctionTable(prisma, {
+    table: 'user_espelho_nf_approval_cost_centers',
+    secondCol: 'costCenterId',
+    secondTable: 'cost_centers',
+  });
+  await ensureUserAccessJunctionTable(prisma, {
     table: 'user_fd_approval_contracts',
     secondCol: 'contractId',
     secondTable: 'contracts',
@@ -2714,6 +2719,9 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
     );
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "dpRequestViewCostCenterIds" JSONB NOT NULL DEFAULT '[]';`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "espelhoNfApprovalCostCenterIds" JSONB NOT NULL DEFAULT '[]';`
     );
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "fdApprovalContractIds" JSONB NOT NULL DEFAULT '[]';`

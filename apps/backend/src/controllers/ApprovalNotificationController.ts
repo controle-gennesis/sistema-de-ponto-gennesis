@@ -112,8 +112,20 @@ export class ApprovalNotificationController {
       }
 
       let espelhoMirrors = 0;
-      if (isAdmin || (await userHasEspelhoApprovePermission(userId))) {
+      // Sem centro de custo selecionado, a pessoa com a permissão não vê espelhos.
+      if (isAdmin) {
         espelhoMirrors = await prisma.espelhoNfMirror.count();
+      } else if (await userHasEspelhoApprovePermission(userId)) {
+        const scoped = await prisma.userEspelhoNfApprovalCostCenter.findMany({
+          where: { userId },
+          select: { costCenterId: true },
+        });
+        const costCenterIds = scoped.map((row) => row.costCenterId);
+        espelhoMirrors = costCenterIds.length
+          ? await prisma.espelhoNfMirror.count({
+              where: { costCenterId: { in: costCenterIds } },
+            })
+          : 0;
       }
 
       const data = {

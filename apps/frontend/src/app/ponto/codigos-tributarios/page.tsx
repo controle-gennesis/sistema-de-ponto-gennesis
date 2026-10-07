@@ -211,7 +211,7 @@ export default function CodigosTributariosEspelhoNfPage() {
       setTaxCodeForm(emptyTaxCodeFormState());
       setFederalTaxRatesByContext(emptyFederalTaxRatesByContext());
       setFederalTaxContextEnabled({ ...DEFAULT_CADASTRO_FEDERAL_TAX_CONTEXT_ENABLED });
-      toast.success('Código tributário cadastrado.');
+      toast.success('Regra tributária cadastrada.');
     },
     onError: (e: { response?: { data?: { message?: string } } }) => {
       toast.error(e.response?.data?.message || 'Erro ao cadastrar.');
@@ -230,7 +230,7 @@ export default function CodigosTributariosEspelhoNfPage() {
       setTaxCodeForm(emptyTaxCodeFormState());
       setFederalTaxRatesByContext(emptyFederalTaxRatesByContext());
       setFederalTaxContextEnabled({ ...DEFAULT_CADASTRO_FEDERAL_TAX_CONTEXT_ENABLED });
-      toast.success('Código atualizado.');
+      toast.success('Regra atualizada.');
     },
     onError: (e: { response?: { data?: { message?: string } } }) => {
       toast.error(e.response?.data?.message || 'Erro ao atualizar.');
@@ -245,7 +245,7 @@ export default function CodigosTributariosEspelhoNfPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['espelho-nf-bootstrap'] });
       setShowDeleteModal(null);
-      toast.success('Código excluído.');
+      toast.success('Regra excluída.');
     },
     onError: (e: { response?: { data?: { message?: string } } }) => {
       toast.error(e.response?.data?.message || 'Erro ao excluir.');
@@ -289,7 +289,7 @@ export default function CodigosTributariosEspelhoNfPage() {
     isError &&
     ((error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
       (error as Error)?.message ||
-      'Não foi possível carregar os códigos.');
+      'Não foi possível carregar as regras.');
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   if (loadingUser) {
@@ -319,7 +319,7 @@ export default function CodigosTributariosEspelhoNfPage() {
                     <Percent className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Códigos Tributários</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Regras Tributárias</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {isError ? 'Erro ao carregar.' : `${rows.length} registro(s)`}
                     </p>
@@ -359,7 +359,7 @@ export default function CodigosTributariosEspelhoNfPage() {
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
-                    Novo Código Tributário
+                    Nova Regra Tributária
                   </button>
                   )}
                 </div>
@@ -372,15 +372,15 @@ export default function CodigosTributariosEspelhoNfPage() {
                   <p className="max-w-md text-sm text-gray-700 dark:text-gray-300">{loadError}</p>
                 </div>
               ) : isLoading ? (
-                <CadastroListLoading message="Carregando códigos..." />
+                <CadastroListLoading message="Carregando regras..." />
               ) : rows.length === 0 ? (
                 <CadastroListEmpty
                   icon={Percent}
-                  title="Nenhum código tributário encontrado"
+                  title="Nenhuma regra tributária encontrada"
                   hint={
                     searchTerm.trim()
                       ? 'Tente ajustar a busca'
-                      : 'Cadastre um novo código para começar'
+                      : 'Cadastre uma nova regra para começar'
                   }
                 />
               ) : (
@@ -389,8 +389,8 @@ export default function CodigosTributariosEspelhoNfPage() {
                     startItem={1}
                     endItem={rows.length}
                     total={rows.length}
-                    itemLabel="código tributário"
-                    itemLabelPlural="códigos tributários"
+                    itemLabel="regra tributária"
+                    itemLabelPlural="regras tributárias"
                   />
                 <div className="table-scroll">
                   <table className={cadastroListClasses.table}>
@@ -470,7 +470,7 @@ export default function CodigosTributariosEspelhoNfPage() {
             <div className="relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-gray-800">
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {editing ? 'Editar Código Tributário' : 'Novo Código Tributário'}
+                  {editing ? 'Editar Regra Tributária' : 'Nova Regra Tributária'}
                 </h2>
                 <button
                   type="button"
@@ -522,7 +522,7 @@ export default function CodigosTributariosEspelhoNfPage() {
                 <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
               </div>
               <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Excluir Código Tributário?
+                Excluir Regra Tributária?
               </h3>
               <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
                 Não é possível excluir se estiver em uso por Tomador de Serviço ou espelho de nota fiscal.

@@ -101,6 +101,7 @@ type UserPermissionPayload = {
   fdApprovalContractIds?: string[];
   fuelApprovalContractIds?: string[];
   dpRequestViewCostCenterIds?: string[];
+  espelhoNfApprovalCostCenterIds?: string[];
   contractModuleFlags?: Record<string, ContractModuleFlags>;
 };
 type PermissionUserListItem = {
@@ -142,6 +143,7 @@ const RESTRICTED_DP_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-solic
 const FD_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-fichas-demanda');
 const FUEL_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-combustivel');
 const DP_REQUEST_VIEW_CC_KEY = pathToModuleKey('/ponto/controle/ver-solicitacoes-internas-cc');
+const ESPELHO_NF_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
 
 const DEPRECATED_CONTROLE_KEYS = new Set([
   DEPRECATED_DP_APPROVE_CONTROLE_KEY,
@@ -239,9 +241,10 @@ function serializeFullBaseline(
   dpRequestViewCostCenterIds: Set<string> = new Set(),
   cadastroCrud: CadastroCrudMap = {},
   dpApprovalContractSectors: Record<string, string[]> = {},
-  restrictedDpApprovalCostCenterSectors: Record<string, string[]> = {}
+  restrictedDpApprovalCostCenterSectors: Record<string, string[]> = {},
+  espelhoNfApprovalCostCenterIds: Set<string> = new Set()
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|fd:${serializeContractIds(fdApprovalContractIds)}|fuel:${serializeContractIds(fuelApprovalContractIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}|cc:${serializeCadastroCrud(cadastroCrud)}|ds:${serializeSectorsMap(dpApprovalContractSectors)}|rds:${serializeSectorsMap(restrictedDpApprovalCostCenterSectors)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|fd:${serializeContractIds(fdApprovalContractIds)}|fuel:${serializeContractIds(fuelApprovalContractIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}|cc:${serializeCadastroCrud(cadastroCrud)}|ds:${serializeSectorsMap(dpApprovalContractSectors)}|rds:${serializeSectorsMap(restrictedDpApprovalCostCenterSectors)}|enf:${serializeContractIds(espelhoNfApprovalCostCenterIds)}`;
 }
 
 const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
@@ -734,6 +737,8 @@ export function UserPermissionsEditor({
   );
   const [selectedDpRequestViewCostCenterIds, setSelectedDpRequestViewCostCenterIds] =
     useState<Set<string>>(new Set());
+  const [selectedEspelhoNfApprovalCostCenterIds, setSelectedEspelhoNfApprovalCostCenterIds] =
+    useState<Set<string>>(new Set());
   const [contractModuleFlags, setContractModuleFlags] = useState<Record<string, ContractModuleFlags>>({});
   const [cadastroCrudByModule, setCadastroCrudByModule] = useState<CadastroCrudMap>({});
   const [permissionActionModal, setPermissionActionModal] = useState<'menu' | 'copy' | 'restore' | null>(
@@ -768,6 +773,8 @@ export function UserPermissionsEditor({
   selectedFuelApprovalContractIdsRef.current = selectedFuelApprovalContractIds;
   const selectedDpRequestViewCostCenterIdsRef = useRef(selectedDpRequestViewCostCenterIds);
   selectedDpRequestViewCostCenterIdsRef.current = selectedDpRequestViewCostCenterIds;
+  const selectedEspelhoNfApprovalCostCenterIdsRef = useRef(selectedEspelhoNfApprovalCostCenterIds);
+  selectedEspelhoNfApprovalCostCenterIdsRef.current = selectedEspelhoNfApprovalCostCenterIds;
   const contractModuleFlagsRef = useRef(contractModuleFlags);
   contractModuleFlagsRef.current = contractModuleFlags;
   const cadastroCrudByModuleRef = useRef(cadastroCrudByModule);
@@ -801,6 +808,7 @@ export function UserPermissionsEditor({
           fdApprovalContractIds?: string[];
           fuelApprovalContractIds?: string[];
           dpRequestViewCostCenterIds?: string[];
+          espelhoNfApprovalCostCenterIds?: string[];
           contractModuleFlags?: Record<string, ContractModuleFlags>;
         };
         return {
@@ -820,6 +828,7 @@ export function UserPermissionsEditor({
           fdApprovalContractIds: d.fdApprovalContractIds ?? [],
           fuelApprovalContractIds: d.fuelApprovalContractIds ?? [],
           dpRequestViewCostCenterIds: d.dpRequestViewCostCenterIds ?? [],
+          espelhoNfApprovalCostCenterIds: d.espelhoNfApprovalCostCenterIds ?? [],
           contractModuleFlags: d.contractModuleFlags ?? {},
         } as UserPermissionPayload;
       }
@@ -927,6 +936,7 @@ export function UserPermissionsEditor({
     const nextFdContracts = new Set(userPermissionData.fdApprovalContractIds ?? []);
     const nextFuelContracts = new Set(userPermissionData.fuelApprovalContractIds ?? []);
     const nextViewCc = new Set(userPermissionData.dpRequestViewCostCenterIds ?? []);
+    const nextEspelhoCc = new Set(userPermissionData.espelhoNfApprovalCostCenterIds ?? []);
     const rawFlags = userPermissionData.contractModuleFlags ?? {};
     const nextFlags: Record<string, ContractModuleFlags> = {};
     // Liberados + contratos só com flag (ex.: Relatórios sem Liberado em dados legados).
@@ -954,6 +964,7 @@ export function UserPermissionsEditor({
     setSelectedFdApprovalContractIds(nextFdContracts);
     setSelectedFuelApprovalContractIds(nextFuelContracts);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
+    setSelectedEspelhoNfApprovalCostCenterIds(nextEspelhoCc);
     setContractModuleFlags(nextFlags);
     setCadastroCrudByModule(nextCadastroCrud);
     baselineSerializedRef.current = serializeFullBaseline(
@@ -969,7 +980,8 @@ export function UserPermissionsEditor({
       nextViewCc,
       nextCadastroCrud,
       nextSectors,
-      nextRestrictedSectors
+      nextRestrictedSectors,
+      nextEspelhoCc
     );
     hydratedRef.current = true;
   }, [userPermissionData]);
@@ -1057,6 +1069,9 @@ export function UserPermissionsEditor({
       const dpRequestViewCostCenterIds = currentSelected.has(DP_REQUEST_VIEW_CC_KEY)
         ? Array.from(selectedDpRequestViewCostCenterIdsRef.current)
         : [];
+      const espelhoNfApprovalCostCenterIds = currentSelected.has(ESPELHO_NF_APPROVE_KEY)
+        ? Array.from(selectedEspelhoNfApprovalCostCenterIdsRef.current)
+        : [];
       const contractModuleFlagsPayload = contractModuleFlagsRef.current;
       if (isPositionMode) {
         await api.put('/permissions/position-template', {
@@ -1070,6 +1085,7 @@ export function UserPermissionsEditor({
           fdApprovalContractIds,
           fuelApprovalContractIds,
           dpRequestViewCostCenterIds,
+          espelhoNfApprovalCostCenterIds,
           contractModuleFlags: contractModuleFlagsPayload,
         });
       } else {
@@ -1083,6 +1099,7 @@ export function UserPermissionsEditor({
           fdApprovalContractIds,
           fuelApprovalContractIds,
           dpRequestViewCostCenterIds,
+          espelhoNfApprovalCostCenterIds,
           contractModuleFlags: contractModuleFlagsPayload,
         });
       }
@@ -1108,7 +1125,8 @@ export function UserPermissionsEditor({
         pruneDpApprovalSectors(
           restrictedDpApprovalCostCenterSectorsRef.current,
           selectedRestrictedDpApprovalCostCenterIdsRef.current
-        )
+        ),
+        selectedEspelhoNfApprovalCostCenterIdsRef.current
       );
       await queryClient.invalidateQueries({ queryKey: ['permission-users'] });
       await queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
@@ -1148,6 +1166,9 @@ export function UserPermissionsEditor({
             fdApprovalContractIds: Array.from(selectedFdApprovalContractIdsRef.current),
             fuelApprovalContractIds: Array.from(selectedFuelApprovalContractIdsRef.current),
             dpRequestViewCostCenterIds: Array.from(selectedDpRequestViewCostCenterIdsRef.current),
+            espelhoNfApprovalCostCenterIds: Array.from(
+              selectedEspelhoNfApprovalCostCenterIdsRef.current
+            ),
             contractModuleFlags: updatedFlags,
           };
         });
@@ -1235,7 +1256,8 @@ export function UserPermissionsEditor({
       pruneDpApprovalSectors(
         restrictedDpApprovalCostCenterSectors,
         selectedRestrictedDpApprovalCostCenterIds
-      )
+      ),
+      selectedEspelhoNfApprovalCostCenterIds
     );
     if (serialized === baselineSerializedRef.current) return;
 
@@ -1259,7 +1281,8 @@ export function UserPermissionsEditor({
         pruneDpApprovalSectors(
           restrictedDpApprovalCostCenterSectorsRef.current,
           selectedRestrictedDpApprovalCostCenterIdsRef.current
-        )
+        ),
+        selectedEspelhoNfApprovalCostCenterIdsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       enqueuePersistPermissions();
@@ -1276,6 +1299,7 @@ export function UserPermissionsEditor({
     selectedFdApprovalContractIds,
     selectedFuelApprovalContractIds,
     selectedDpRequestViewCostCenterIds,
+    selectedEspelhoNfApprovalCostCenterIds,
     dpApprovalContractSectors,
     restrictedDpApprovalCostCenterSectors,
     contractModuleFlags,
@@ -1310,7 +1334,8 @@ export function UserPermissionsEditor({
         pruneDpApprovalSectors(
           restrictedDpApprovalCostCenterSectorsRef.current,
           selectedRestrictedDpApprovalCostCenterIdsRef.current
-        )
+        ),
+        selectedEspelhoNfApprovalCostCenterIdsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       enqueuePersistPermissions();
@@ -1400,6 +1425,9 @@ export function UserPermissionsEditor({
         }
         if (key === FUEL_APPROVE_KEY) {
           setSelectedFuelApprovalContractIds(new Set());
+        }
+        if (key === ESPELHO_NF_APPROVE_KEY) {
+          setSelectedEspelhoNfApprovalCostCenterIds(new Set());
         }
       } else {
         n.add(key);
@@ -1628,6 +1656,7 @@ export function UserPermissionsEditor({
     fdApprovalContractIds?: string[];
     fuelApprovalContractIds?: string[];
     dpRequestViewCostCenterIds?: string[];
+    espelhoNfApprovalCostCenterIds?: string[];
     contractModuleFlags?: Record<string, ContractModuleFlags>;
   }) => {
     const perms = source.permissions ?? [];
@@ -1659,6 +1688,7 @@ export function UserPermissionsEditor({
     const nextFdContracts = new Set(source.fdApprovalContractIds ?? []);
     const nextFuelContracts = new Set(source.fuelApprovalContractIds ?? []);
     const nextViewCc = new Set(source.dpRequestViewCostCenterIds ?? []);
+    const nextEspelhoCc = new Set(source.espelhoNfApprovalCostCenterIds ?? []);
     const rawFlags = source.contractModuleFlags ?? {};
     const nextFlags: Record<string, ContractModuleFlags> = {};
     for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(rawFlags)])) {
@@ -1676,6 +1706,7 @@ export function UserPermissionsEditor({
     setSelectedFdApprovalContractIds(nextFdContracts);
     setSelectedFuelApprovalContractIds(nextFuelContracts);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
+    setSelectedEspelhoNfApprovalCostCenterIds(nextEspelhoCc);
     setContractModuleFlags(nextFlags);
     setCadastroCrudByModule(parseCadastroCrudFromPerms(perms));
   };
@@ -1736,6 +1767,9 @@ export function UserPermissionsEditor({
     setSelectedFdApprovalContractIds(new Set(source.fdApprovalContractIds ?? []));
     setSelectedFuelApprovalContractIds(new Set(source.fuelApprovalContractIds ?? []));
     setSelectedDpRequestViewCostCenterIds(new Set(source.dpRequestViewCostCenterIds ?? []));
+    setSelectedEspelhoNfApprovalCostCenterIds(
+      new Set(source.espelhoNfApprovalCostCenterIds ?? [])
+    );
     toast.success('Permissões de acesso copiadas. Salvamento automático em andamento.');
   };
 
@@ -1824,6 +1858,7 @@ export function UserPermissionsEditor({
         fdApprovalContractIds?: string[];
         fuelApprovalContractIds?: string[];
         dpRequestViewCostCenterIds?: string[];
+        espelhoNfApprovalCostCenterIds?: string[];
         contractModuleFlags?: Record<string, ContractModuleFlags>;
       };
       applyPermissionsPayload({
@@ -1836,6 +1871,7 @@ export function UserPermissionsEditor({
         fdApprovalContractIds: data?.fdApprovalContractIds ?? [],
         fuelApprovalContractIds: data?.fuelApprovalContractIds ?? [],
         dpRequestViewCostCenterIds: data?.dpRequestViewCostCenterIds ?? [],
+        espelhoNfApprovalCostCenterIds: data?.espelhoNfApprovalCostCenterIds ?? [],
         contractModuleFlags: data?.contractModuleFlags ?? {},
       });
       toast.success('Padrões do cargo restaurados. Salvamento automático em andamento.');
@@ -1869,7 +1905,8 @@ export function UserPermissionsEditor({
       pruneDpApprovalSectors(
         restrictedDpApprovalCostCenterSectors,
         selectedRestrictedDpApprovalCostCenterIds
-      )
+      ),
+      selectedEspelhoNfApprovalCostCenterIds
     ) !== baselineSerializedRef.current;
 
   const handleBackWithSave = async () => {
@@ -2103,6 +2140,7 @@ export function UserPermissionsEditor({
                             const isFdApprove = mod.key === FD_APPROVE_KEY;
                             const isFuelApprove = mod.key === FUEL_APPROVE_KEY;
                             const isViewByCostCenter = mod.key === DP_REQUEST_VIEW_CC_KEY;
+                            const isEspelhoApprove = mod.key === ESPELHO_NF_APPROVE_KEY;
                             return (
                               <tr
                                 key={mod.key}
@@ -2211,6 +2249,26 @@ export function UserPermissionsEditor({
                                             placeholder="Selecionar contratos..."
                                             searchPlaceholder="Pesquisar contrato..."
                                             emptyOptionsMessage="Nenhum contrato cadastrado"
+                                            noFocusRing
+                                          />
+                                        </div>
+                                      ) : null}
+                                      {isEspelhoApprove && liberado ? (
+                                        <div className="mt-2 max-w-xl">
+                                          <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                            Centros de custo cujos espelhos da nota fiscal esta
+                                            pessoa pode aprovar. Sem seleção, nenhum espelho
+                                            aparece para aprovação.
+                                          </p>
+                                          <MultiSelectSearchDropdown
+                                            selected={Array.from(selectedEspelhoNfApprovalCostCenterIds)}
+                                            onChange={(ids) =>
+                                              setSelectedEspelhoNfApprovalCostCenterIds(new Set(ids))
+                                            }
+                                            options={restrictedCostCenterOptions}
+                                            placeholder="Selecionar centros de custo..."
+                                            searchPlaceholder="Pesquisar centro de custo..."
+                                            emptyOptionsMessage="Nenhum centro de custo ativo"
                                             noFocusRing
                                           />
                                         </div>
