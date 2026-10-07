@@ -134,6 +134,7 @@ import { startPncpSyncScheduler } from './services/PncpIngestService';
 import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
+import { startVehicleReservationBaixaReminderScheduler } from './services/VehicleReservationBaixaReminderScheduler';
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
 import { startMaterialTotvsSyncScheduler } from './services/MaterialTotvsSyncService';
 import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
@@ -795,6 +796,12 @@ try {
         startFuelRefuelEveningCheckScheduler();
       } catch (e) {
         console.error('[fuel-evening-check] falha ao agendar:', e);
+      }
+
+      try {
+        startVehicleReservationBaixaReminderScheduler();
+      } catch (e) {
+        console.error('[vehicle-baixa-reminder] falha ao agendar:', e);
       }
 
       try {

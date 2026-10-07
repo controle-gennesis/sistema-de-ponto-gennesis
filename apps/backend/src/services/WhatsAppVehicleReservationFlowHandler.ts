@@ -15,7 +15,6 @@ export type WhatsAppVehicleReservationFlowStatus =
   | 'VR_ASK_START_TIME'
   | 'VR_ASK_END_DATE'
   | 'VR_ASK_END_TIME'
-  | 'VR_ASK_POLO'
   | 'VR_ASK_CONTRATO'
   | 'VR_ASK_OBSERVATIONS'
   | 'VR_CONFIRM'
@@ -31,14 +30,9 @@ const YES_WORDS = /^(sim|s|confirmar|confirmo|ok|pode|yes)$/i;
 const NO_WORDS = /^(n[aã]o|nao|n|cancelar|cancela)$/i;
 const SKIP_WORDS = /^(n[aã]o|nao|nenhuma|nenhum|-|pular|skip)$/i;
 const DATE_TODAY_ID = 'vr_date_today';
-const DATE_SAME_ID = 'vr_date_same';
-const POLO_DF_ID = 'vr_polo_df';
-const POLO_GO_ID = 'vr_polo_go';
-const POLO_SKIP_ID = 'vr_polo_skip';
-/** WhatsApp lista no máx. 10 linhas; reserva 2 para «Pular» e «Mais contratos». */
-const CONTRACT_LIST_PAGE_SIZE = 8;
+/** WhatsApp lista no máx. 10 linhas; 1 reservada para «Mais contratos». */
+const CONTRACT_LIST_PAGE_SIZE = 9;
 const CONTRACT_OTHERS_ID = 'vr_contract_others';
-const CONTRACT_SKIP_ID = 'vr_contract_skip';
 
 function waButtons(body: string, extra?: Array<{ id: string; title: string }>): SendAction {
   return {
@@ -136,17 +130,9 @@ function askStartDateAction(body: string): SendAction {
 
 function askEndDateAction(body: string): SendAction {
   return waButtons(body, [
-    { id: DATE_SAME_ID, title: 'Mesmo dia' },
     { id: DATE_TODAY_ID, title: 'Hoje' },
     { id: 'MENU', title: 'Menu' },
-  ]);
-}
-
-function askPoloAction(): SendAction {
-  return waButtons('Qual o polo? (opcional)', [
-    { id: POLO_DF_ID, title: 'DF' },
-    { id: POLO_GO_ID, title: 'GO' },
-    { id: POLO_SKIP_ID, title: 'Pular' },
+    { id: 'END', title: 'Encerrar' },
   ]);
 }
 
@@ -162,7 +148,6 @@ function buildSummary(payload: Record<string, unknown>): string {
     `• Destino: ${payload.localDestino || '—'}`,
     `• Início: ${start ? formatBrDateTime(start) : '—'}`,
     `• Fim: ${end ? formatBrDateTime(end) : '—'}`,
-    `• Polo: ${payload.polo || '—'}`,
     `• Contrato: ${payload.contrato || '—'}`,
     `• Observações: ${String(payload.observacaoCapacidadeVeiculo || '').trim() || '—'}`,
     '',
@@ -187,6 +172,7 @@ async function listContracts(): Promise<ContractOptionPayload[]> {
 function contractListAction(
   contracts: ContractOptionPayload[],
   page: number,
+  body?: string,
 ): SendAction {
   const start = page * CONTRACT_LIST_PAGE_SIZE;
   const slice = contracts.slice(start, start + CONTRACT_LIST_PAGE_SIZE);
@@ -194,17 +180,41 @@ function contractListAction(
     id: c.id,
     title: truncateWaTitle(c.name || c.number),
   }));
-  rows.push({ id: CONTRACT_SKIP_ID, title: 'Pular contrato' });
   if (start + CONTRACT_LIST_PAGE_SIZE < contracts.length) {
     rows.push({ id: CONTRACT_OTHERS_ID, title: 'Mais contratos' });
   }
   return waList(
-    page === 0
-      ? 'Selecione o contrato (opcional) ou pule:'
-      : `Mais contratos (página ${page + 1}):`,
+    body ||
+      (page === 0
+        ? 'Selecione o contrato:'
+        : `Mais contratos (página ${page + 1}):`),
     rows.slice(0, 10),
     'Contratos',
   );
+}
+
+async function goToContractStep(newPayload: Record<string, unknown>): Promise<{
+  sendAction: SendAction;
+  newStatus: WhatsAppVehicleReservationFlowStatus | 'MENU';
+  newPayload: Record<string, unknown>;
+}> {
+  const contracts = await listContracts();
+  newPayload.contractOptions = contracts;
+  newPayload.contractListPage = 0;
+  if (!contracts.length) {
+    return {
+      sendAction: waButtons(
+        'Não há contratos cadastrados no sistema. Fale com o Suprimentos/Administração.',
+      ),
+      newStatus: 'MENU',
+      newPayload: {},
+    };
+  }
+  return {
+    sendAction: contractListAction(contracts, 0),
+    newStatus: 'VR_ASK_CONTRATO',
+    newPayload,
+  };
 }
 
 export function isWhatsAppVehicleReservationFlowStatus(status: string): boolean {
@@ -242,6 +252,7 @@ export async function processWhatsAppVehicleReservationFlow(params: {
   clearPayload?: boolean;
 } | null> {
   const {
+    phone,
     textRaw,
     content,
     flowStatus,
@@ -407,17 +418,13 @@ export async function processWhatsAppVehicleReservationFlow(params: {
     }
 
     case 'VR_ASK_END_DATE': {
-      let iso: string | null = null;
-      if (content === DATE_SAME_ID || content === 'mesmo_dia' || /mesmo\s*dia/i.test(textRaw)) {
-        iso = String(newPayload.startDateIso || '') || null;
-      } else if (content === DATE_TODAY_ID || content === 'hoje' || /^hoje$/i.test(textRaw.trim())) {
-        iso = todayIso();
-      } else {
-        iso = brDateToIso(textRaw);
-      }
+      const iso =
+        content === DATE_TODAY_ID || content === 'hoje' || /^hoje$/i.test(textRaw.trim())
+          ? todayIso()
+          : brDateToIso(textRaw);
       if (!iso) {
         return {
-          sendAction: askEndDateAction('Data inválida. Use DD/MM/AAAA, «Mesmo dia» ou «Hoje».'),
+          sendAction: askEndDateAction('Data inválida. Use DD/MM/AAAA ou toque em «Hoje».'),
           newStatus,
           newPayload,
         };
@@ -459,50 +466,11 @@ export async function processWhatsAppVehicleReservationFlow(params: {
         };
       }
       newPayload.endAt = endAt;
-      return {
-        sendAction: askPoloAction(),
-        newStatus: 'VR_ASK_POLO',
-        newPayload,
-      };
-    }
-
-    case 'VR_ASK_POLO': {
-      if (content === POLO_SKIP_ID || SKIP_WORDS.test(textRaw)) {
-        newPayload.polo = null;
-      } else if (content === POLO_DF_ID || /^df$/i.test(textRaw.trim())) {
-        newPayload.polo = 'DF';
-      } else if (content === POLO_GO_ID || /^go$/i.test(textRaw.trim())) {
-        newPayload.polo = 'GO';
-      } else {
-        return {
-          sendAction: askPoloAction(),
-          newStatus,
-          newPayload,
-        };
+      const next = await goToContractStep(newPayload);
+      if (next.newStatus === 'MENU') {
+        return { ...next, clearPayload: true };
       }
-
-      const contracts = await listContracts();
-      newPayload.contractOptions = contracts;
-      newPayload.contractListPage = 0;
-      if (!contracts.length) {
-        return {
-          sendAction: waButtons(
-            'Alguma observação sobre o veículo necessário? (capacidade, tipo…)\nEnvie o texto ou toque em «Não».',
-            [
-              { id: 'NAO', title: 'Não' },
-              { id: 'MENU', title: 'Menu' },
-              { id: 'END', title: 'Encerrar' },
-            ],
-          ),
-          newStatus: 'VR_ASK_OBSERVATIONS',
-          newPayload,
-        };
-      }
-      return {
-        sendAction: contractListAction(contracts, 0),
-        newStatus: 'VR_ASK_CONTRATO',
-        newPayload,
-      };
+      return next;
     }
 
     case 'VR_ASK_CONTRATO': {
@@ -510,9 +478,7 @@ export async function processWhatsAppVehicleReservationFlow(params: {
         (newPayload.contractOptions as ContractOptionPayload[] | undefined) ?? [];
       let page = Number(newPayload.contractListPage || 0);
 
-      if (content === CONTRACT_SKIP_ID || SKIP_WORDS.test(textRaw)) {
-        newPayload.contrato = null;
-      } else if (content === CONTRACT_OTHERS_ID) {
+      if (content === CONTRACT_OTHERS_ID) {
         page += 1;
         newPayload.contractListPage = page;
         return {
@@ -520,27 +486,31 @@ export async function processWhatsAppVehicleReservationFlow(params: {
           newStatus,
           newPayload,
         };
+      }
+
+      const selected = contracts.find((c) => c.id === content);
+      if (selected) {
+        newPayload.contrato = selected.name || selected.number;
       } else {
-        const selected = contracts.find((c) => c.id === content);
-        if (selected) {
-          newPayload.contrato = selected.name || selected.number;
+        const typed = textRaw.trim();
+        if (typed.length >= 2 && !SKIP_WORDS.test(typed)) {
+          newPayload.contrato = typed;
         } else {
-          const typed = textRaw.trim();
-          if (typed.length >= 2) {
-            newPayload.contrato = typed;
-          } else {
-            return {
-              sendAction: contractListAction(contracts, page),
-              newStatus,
-              newPayload,
-            };
-          }
+          return {
+            sendAction: contractListAction(
+              contracts,
+              page,
+              'Contrato é obrigatório. Selecione um contrato na lista:',
+            ),
+            newStatus,
+            newPayload,
+          };
         }
       }
 
       return {
         sendAction: waButtons(
-          'Alguma observação sobre o veículo necessário? (capacidade, tipo…)\nEnvie o texto ou toque em «Não».',
+          'Alguma observação sobre o veículo necessário?\nEnvie o texto ou toque em «Não»',
           [
             { id: 'NAO', title: 'Não' },
             { id: 'MENU', title: 'Menu' },
@@ -595,7 +565,15 @@ export async function processWhatsAppVehicleReservationFlow(params: {
       const startAt = newPayload.startAt instanceof Date ? newPayload.startAt : null;
       const endAt = newPayload.endAt instanceof Date ? newPayload.endAt : null;
 
-      if (!motorista || !atividade || !localDestino || !startAt || !endAt) {
+      const contrato = String(newPayload.contrato || '').trim();
+      if (!motorista || !atividade || !localDestino || !startAt || !endAt || !contrato) {
+        if (!contrato) {
+          const next = await goToContractStep(newPayload);
+          if (next.newStatus === 'MENU') {
+            return { ...next, clearPayload: true };
+          }
+          return next;
+        }
         return {
           sendAction: waButtons('Faltam dados. Volte ao menu e tente novamente.'),
           newStatus: 'MENU',
@@ -613,12 +591,13 @@ export async function processWhatsAppVehicleReservationFlow(params: {
           dataUsoInicio: startAt,
           dataUsoFim: endAt,
           periodoUso: [],
-          polo: (newPayload.polo as string | null | undefined) || null,
-          contrato: (newPayload.contrato as string | null | undefined) || null,
+          polo: null,
+          contrato,
           observacaoCapacidadeVeiculo:
             String(newPayload.observacaoCapacidadeVeiculo || '').trim() || null,
           assinatura: '',
           createdById: (newPayload.createdById as string | undefined) || null,
+          sourceWhatsAppPhone: phone,
         });
 
         return {

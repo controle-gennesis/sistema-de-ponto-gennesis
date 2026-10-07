@@ -45,6 +45,24 @@ async function ensureEmployeePhoneColumn(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureVehicleReservationSourceWhatsAppPhone(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'vehicle_reservations'))) return;
+  if (await columnExists(prisma, 'vehicle_reservations', 'sourceWhatsAppPhone')) return;
+  console.warn('[Schema] Coluna vehicle_reservations.sourceWhatsAppPhone ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "vehicle_reservations" ADD COLUMN IF NOT EXISTS "sourceWhatsAppPhone" TEXT;
+  `);
+}
+
+async function ensureVehicleReservationBaixaCheckRemindedAt(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'vehicle_reservations'))) return;
+  if (await columnExists(prisma, 'vehicle_reservations', 'baixaCheckRemindedAt')) return;
+  console.warn('[Schema] Coluna vehicle_reservations.baixaCheckRemindedAt ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "vehicle_reservations" ADD COLUMN IF NOT EXISTS "baixaCheckRemindedAt" TIMESTAMP(3);
+  `);
+}
+
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
 
@@ -2975,6 +2993,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
   try {
     await ensureUnaccentExtension(prisma);
     await ensureEmployeePhoneColumn(prisma);
+    await ensureVehicleReservationSourceWhatsAppPhone(prisma);
+    await ensureVehicleReservationBaixaCheckRemindedAt(prisma);
     await ensureUserProfileSetupColumn(prisma);
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);

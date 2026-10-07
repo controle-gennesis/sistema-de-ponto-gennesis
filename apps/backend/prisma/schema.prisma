@@ -2037,6 +2037,10 @@ model VehicleReservation {
   vistoriaReportedAt          DateTime?
   vistoriaReportedById        String?
   createdById                 String?
+  /// Telefone WhatsApp da conversa que originou a reserva (para avisar aprovação/rejeição).
+  sourceWhatsAppPhone         String?
+  /// Lembrete WhatsApp de baixa enviado quando dataUsoFim chegou e ainda está APPROVED.
+  baixaCheckRemindedAt        DateTime?
   createdAt                   DateTime                 @default(now())
   updatedAt                   DateTime                 @updatedAt
 

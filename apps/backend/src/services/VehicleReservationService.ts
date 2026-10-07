@@ -104,6 +104,7 @@ export type CreateVehicleReservationInput = {
   observacaoCapacidadeVeiculo?: string | null;
   assinatura?: string | null;
   createdById?: string | null;
+  sourceWhatsAppPhone?: string | null;
 };
 
 export function buildVehicleReservationData(body: Record<string, unknown>) {
@@ -191,6 +192,83 @@ export class VehicleReservationService {
         code,
         status: VehicleReservationStatus.PENDING_SUPPLIES,
         createdById: input.createdById ?? null,
+        sourceWhatsAppPhone: normalizeOptionalString(input.sourceWhatsAppPhone),
+      },
+      include: reservationInclude,
+    });
+  }
+
+  async listApprovedForWhatsAppPhone(phone: string) {
+    const phoneTrim = phone.trim();
+    if (!phoneTrim) return [];
+    return prisma.vehicleReservation.findMany({
+      where: {
+        status: VehicleReservationStatus.APPROVED,
+        sourceWhatsAppPhone: phoneTrim,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        code: true,
+        motorista: true,
+        solicitante: true,
+        createdById: true,
+        vehicle: {
+          select: {
+            id: true,
+            code: true,
+            marcaVeic: true,
+            modeloVeic: true,
+            placaVeic: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Baixa via WhatsApp: foto já salva (URL/key), assinatura dispensada.
+   */
+  async submitReturnFromWhatsApp(input: {
+    reservationId: string;
+    phone: string;
+    devolucaoAt: Date;
+    baixaFotoUrl: string | null;
+    baixaFotoKey: string | null;
+    baixaObservacao?: string | null;
+  }): Promise<VehicleReservationWithRelations> {
+    const phone = input.phone.trim();
+    if (!phone) throw createError('Telefone WhatsApp ausente', 400);
+    if (
+      !String(input.baixaFotoUrl || '').trim() &&
+      !String(input.baixaFotoKey || '').trim()
+    ) {
+      throw createError('Foto do veículo é obrigatória', 400);
+    }
+
+    const existing = await prisma.vehicleReservation.findUnique({
+      where: { id: input.reservationId },
+    });
+    if (!existing) throw createError('Reserva não encontrada', 404);
+    if (existing.status !== VehicleReservationStatus.APPROVED) {
+      throw createError('Somente reservas aprovadas podem receber baixa', 400);
+    }
+    if ((existing.sourceWhatsAppPhone || '').trim() !== phone) {
+      throw createError('Você não tem permissão para dar baixa nesta reserva', 403);
+    }
+
+    return prisma.vehicleReservation.update({
+      where: { id: existing.id, status: existing.status },
+      data: {
+        status: VehicleReservationStatus.COMPLETED,
+        devolucaoAt: input.devolucaoAt,
+        baixaObservacao: normalizeOptionalString(input.baixaObservacao),
+        baixaFotoUrl: String(input.baixaFotoUrl || '').trim() || null,
+        baixaFotoKey: String(input.baixaFotoKey || '').trim() || null,
+        baixaAssinatura: '',
+        baixaReportedAt: new Date(),
+        baixaReportedById: existing.createdById,
       },
       include: reservationInclude,
     });

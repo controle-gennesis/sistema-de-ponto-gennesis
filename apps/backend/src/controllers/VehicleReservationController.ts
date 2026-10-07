@@ -10,6 +10,10 @@ import {
   parseVehicleReservationDateTime,
   vehicleReservationService,
 } from '../services/VehicleReservationService';
+import {
+  notifyVehicleReservationApproved,
+  notifyVehicleReservationRejected,
+} from '../lib/vehicleReservationChatNotify';
 
 const photoService = new PhotoService();
 
@@ -346,6 +350,15 @@ export class VehicleReservationController {
         include: reservationInclude
       });
 
+      void notifyVehicleReservationApproved({
+        code: reservation.code,
+        sourceWhatsAppPhone: reservation.sourceWhatsAppPhone,
+        createdById: reservation.createdById,
+        approverUserId: req.user.id,
+        vehicle: reservation.vehicle,
+        comment: reservation.suppliesApprovalComment,
+      });
+
       res.json({ success: true, data: reservation });
     } catch (error) {
       next(error);
@@ -379,6 +392,13 @@ export class VehicleReservationController {
         include: reservationInclude
       });
 
+      void notifyVehicleReservationRejected({
+        code: reservation.code,
+        sourceWhatsAppPhone: reservation.sourceWhatsAppPhone,
+        createdById: reservation.createdById,
+        reason,
+      });
+
       res.json({ success: true, data: reservation });
     } catch (error) {
       next(error);
@@ -393,13 +413,9 @@ export class VehicleReservationController {
       const devolucaoAt = parseDateTime(req.body?.devolucaoAt, 'Data e hora da devolução');
       const baixaObservacao = normalizeOptionalString(req.body?.baixaObservacao);
       const baixaFoto = normalizeOptionalString(req.body?.baixaFoto);
-      const baixaAssinatura = normalizeOptionalString(req.body?.baixaAssinatura);
 
       if (!baixaFoto || !baixaFoto.startsWith('data:image/')) {
         throw createError('Foto do veículo é obrigatória', 400);
-      }
-      if (!baixaAssinatura || !baixaAssinatura.startsWith('data:image/')) {
-        throw createError('Assinatura da devolução é obrigatória', 400);
       }
 
       const existing = await prisma.vehicleReservation.findUnique({ where: { id } });
@@ -436,7 +452,7 @@ export class VehicleReservationController {
           baixaObservacao,
           baixaFotoUrl: upload.url,
           baixaFotoKey: upload.key,
-          baixaAssinatura,
+          baixaAssinatura: '',
           baixaReportedAt: new Date(),
           baixaReportedById: req.user.id
         },

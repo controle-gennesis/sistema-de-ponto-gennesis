@@ -5,6 +5,7 @@ import { processWhatsAppFuelFlow } from './WhatsAppFuelFlowHandler';
 import { processWhatsAppFuelRefuelReportFlow } from './WhatsAppFuelRefuelReportFlowHandler';
 import { processWhatsAppSupportFlow } from './WhatsAppSupportFlowHandler';
 import { processWhatsAppVehicleReservationFlow } from './WhatsAppVehicleReservationFlowHandler';
+import { processWhatsAppVehicleReservationReturnFlow } from './WhatsAppVehicleReservationReturnFlowHandler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -54,11 +55,16 @@ type FlowStatus =
   | 'VR_ASK_START_TIME'
   | 'VR_ASK_END_DATE'
   | 'VR_ASK_END_TIME'
-  | 'VR_ASK_POLO'
   | 'VR_ASK_CONTRATO'
   | 'VR_ASK_OBSERVATIONS'
   | 'VR_CONFIRM'
-  | 'VR_COMPLETE';
+  | 'VR_COMPLETE'
+  | 'VRR_SELECT_RESERVATION'
+  | 'VRR_ASK_DEVOLUCAO_AT'
+  | 'VRR_ASK_PHOTO'
+  | 'VRR_ASK_OBSERVATIONS'
+  | 'VRR_CONFIRM'
+  | 'VRR_COMPLETE';
 
 type FaqItem = { id: string; question: string; answer: string; label?: string };
 type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
@@ -335,6 +341,7 @@ const GENNECY_MAIN_MENU_ROWS: Array<{ id: string; title: string }> = [
   { id: 'COMBUSTIVEL', title: 'Solicitar combustível' },
   { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
   { id: 'RESERVAR_CARRO', title: 'Reservar carro' },
+  { id: 'DAR_BAIXA_VEICULO', title: 'Dar baixa do veículo' },
   { id: 'SUPORTE_SISTEMA', title: 'Suporte do sistema' },
   { id: 'ATENDENTE', title: 'Falar com atendente' },
   { id: 'DUVIDAS', title: 'Dúvidas' },
@@ -1127,29 +1134,56 @@ export class WhatsAppBotService {
           }
           skipDefaultSwitch = true;
         } else {
-          const vehicleReservationResult = await processWhatsAppVehicleReservationFlow({
+          const vehicleReturnResult = await processWhatsAppVehicleReservationReturnFlow({
             phone,
             textRaw,
             content,
             flowStatus: normalizedFlowStatus,
             payload: newPayload,
+            hasMedia,
+            savedMedia,
             isMenuRequest,
             isEndRequest,
             resetToMenu,
             endConversation,
           });
 
-          if (vehicleReservationResult) {
-            sendAction = vehicleReservationResult.sendAction;
-            newStatus = vehicleReservationResult.newStatus as FlowStatus;
-            newPayload = vehicleReservationResult.newPayload;
-            if (vehicleReservationResult.newConversationStatus) {
-              newConversationStatus = vehicleReservationResult.newConversationStatus;
+          if (vehicleReturnResult) {
+            sendAction = vehicleReturnResult.sendAction;
+            newStatus = vehicleReturnResult.newStatus as FlowStatus;
+            newPayload = vehicleReturnResult.newPayload;
+            if (vehicleReturnResult.newConversationStatus) {
+              newConversationStatus = vehicleReturnResult.newConversationStatus;
             }
-            if (vehicleReservationResult.clearPayload) {
+            if (vehicleReturnResult.clearPayload) {
               Object.keys(newPayload).forEach((k) => delete newPayload[k]);
             }
             skipDefaultSwitch = true;
+          } else {
+            const vehicleReservationResult = await processWhatsAppVehicleReservationFlow({
+              phone,
+              textRaw,
+              content,
+              flowStatus: normalizedFlowStatus,
+              payload: newPayload,
+              isMenuRequest,
+              isEndRequest,
+              resetToMenu,
+              endConversation,
+            });
+
+            if (vehicleReservationResult) {
+              sendAction = vehicleReservationResult.sendAction;
+              newStatus = vehicleReservationResult.newStatus as FlowStatus;
+              newPayload = vehicleReservationResult.newPayload;
+              if (vehicleReservationResult.newConversationStatus) {
+                newConversationStatus = vehicleReservationResult.newConversationStatus;
+              }
+              if (vehicleReservationResult.clearPayload) {
+                Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+              }
+              skipDefaultSwitch = true;
+            }
           }
         }
       }

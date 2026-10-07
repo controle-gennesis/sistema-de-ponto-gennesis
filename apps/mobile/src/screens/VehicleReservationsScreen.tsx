@@ -12,8 +12,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
-  PanResponder,
-  LayoutChangeEvent,
   KeyboardAvoidingView,
   Alert,
   Linking,
@@ -23,7 +21,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
-import Svg, { Path } from 'react-native-svg';
 import {
   Car,
   Search,
@@ -303,115 +300,6 @@ function SelectField({
   );
 }
 
-function SignaturePad({
-  colors,
-  onChange,
-}: {
-  colors: any;
-  onChange: (dataUrl: string) => void;
-}) {
-  const [paths, setPaths] = useState<string[]>([]);
-  const pathsRef = useRef<string[]>([]);
-  const currentPath = useRef('');
-  const sizeRef = useRef({ w: 1, h: 1 });
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-
-  const exportSvg = useCallback((allPaths: string[]) => {
-    if (!allPaths.length) {
-      onChangeRef.current('');
-      return;
-    }
-    const { w, h } = sizeRef.current;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="white"/>${allPaths
-      .map(
-        (d) =>
-          `<path d="${d}" stroke="#111" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
-      )
-      .join('')}</svg>`;
-    const encoded =
-      typeof btoa === 'function'
-        ? btoa(unescape(encodeURIComponent(svg)))
-        : Buffer.from(svg, 'utf-8').toString('base64');
-    onChangeRef.current(`data:image/svg+xml;base64,${encoded}`);
-  }, []);
-
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        currentPath.current = `M ${locationX} ${locationY}`;
-        setPaths((p) => {
-          const next = [...p, currentPath.current];
-          pathsRef.current = next;
-          return next;
-        });
-      },
-      onPanResponderMove: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        currentPath.current += ` L ${locationX} ${locationY}`;
-        setPaths((p) => {
-          const next = [...p];
-          next[next.length - 1] = currentPath.current;
-          pathsRef.current = next;
-          return next;
-        });
-      },
-      onPanResponderRelease: () => {
-        // Fora do setState — evita "Cannot update a component while rendering"
-        exportSvg(pathsRef.current);
-      },
-    }),
-  ).current;
-
-  const onLayout = (e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    sizeRef.current = { w: width, h: height };
-  };
-
-  const clear = () => {
-    pathsRef.current = [];
-    setPaths([]);
-    onChangeRef.current('');
-  };
-
-  return (
-    <View>
-      <View
-        onLayout={onLayout}
-        style={{
-          height: 160,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: '#fff',
-          overflow: 'hidden',
-        }}
-        {...pan.panHandlers}
-      >
-        <Svg width="100%" height="100%">
-          {paths.map((d, i) => (
-            <Path
-              key={`${i}-${d.slice(0, 12)}`}
-              d={d}
-              stroke="#111"
-              strokeWidth={3}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ))}
-        </Svg>
-      </View>
-      <TouchableOpacity onPress={clear} style={{ marginTop: 8, alignSelf: 'flex-end' }}>
-        <Text style={{ color: colors.primary, fontWeight: '600' }}>Limpar assinatura</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 export default function VehicleReservationsScreen() {
   const navigation = useNavigation();
   const navState = navigation.getState?.();
@@ -445,7 +333,6 @@ export default function VehicleReservationsScreen() {
     devolucaoAt: nowDatetimeLocal(),
     baixaFoto: '',
     baixaObservacao: '',
-    baixaAssinatura: '',
   });
   const [returning, setReturning] = useState(false);
 
@@ -681,10 +568,6 @@ export default function VehicleReservationsScreen() {
       showFormValidationToast('Tire a foto do veículo', { topOffset: toastTop });
       return;
     }
-    if (!returnForm.baixaAssinatura.startsWith('data:image/')) {
-      showFormValidationToast('Assine a devolução', { topOffset: toastTop });
-      return;
-    }
 
     setReturning(true);
     try {
@@ -692,7 +575,6 @@ export default function VehicleReservationsScreen() {
       const res = await api.put(`/api/vehicle-reservations/${returnTarget.id}/submit-return`, {
         devolucaoAt,
         baixaFoto: returnForm.baixaFoto,
-        baixaAssinatura: returnForm.baixaAssinatura,
         baixaObservacao: returnForm.baixaObservacao.trim() || undefined,
       });
       const data = await res.json();
@@ -1053,7 +935,6 @@ export default function VehicleReservationsScreen() {
                         devolucaoAt: nowDatetimeLocal(),
                         baixaFoto: '',
                         baixaObservacao: '',
-                        baixaAssinatura: '',
                       });
                       setReturnTarget(row);
                     }}
@@ -1431,7 +1312,6 @@ export default function VehicleReservationsScreen() {
                     devolucaoAt: nowDatetimeLocal(),
                     baixaFoto: '',
                     baixaObservacao: '',
-                    baixaAssinatura: '',
                   });
                   setReturnTarget(row);
                 }}
@@ -1715,16 +1595,6 @@ export default function VehicleReservationsScreen() {
                 <Camera size={16} color={colors.primary} strokeWidth={2.2} />
                 <Text style={styles.secondaryBtnText}>Tirar foto</Text>
               </TouchableOpacity>
-
-              <FormFieldLabel
-                label="Assinatura"
-                required
-                style={[styles.fieldLabel, { marginTop: 8 }]}
-              />
-              <SignaturePad
-                colors={colors}
-                onChange={(baixaAssinatura) => setReturnForm((f) => ({ ...f, baixaAssinatura }))}
-              />
 
               <Text style={styles.fieldLabel}>Observação (opcional)</Text>
               <TextInput

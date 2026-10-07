@@ -31,7 +31,6 @@ import {
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
-import { SignatureField, isBlankSignature } from '@/components/ui/SignatureField';
 import {
   VehicleReturnPhotoField,
   isBlankVehiclePhoto
@@ -98,14 +97,12 @@ type ReturnFormState = {
   devolucaoAt: string;
   baixaFoto: string;
   baixaObservacao: string;
-  baixaAssinatura: string;
 };
 
 const EMPTY_RETURN_FORM = (): ReturnFormState => ({
   devolucaoAt: defaultReturnDatetimeLocalValue(),
   baixaFoto: '',
-  baixaObservacao: '',
-  baixaAssinatura: ''
+  baixaObservacao: ''
 });
 
 type ReservationFormState = {
@@ -662,17 +659,13 @@ export default function ReservaVeiculosPage() {
     if (isBlankVehiclePhoto(returnFormData.baixaFoto)) {
       return toast.error('Fotografe o veículo');
     }
-    if (isBlankSignature(returnFormData.baixaAssinatura)) {
-      return toast.error('Assine a devolução');
-    }
 
     returnMutation.mutate({
       id: returnReservation.id,
       body: {
         devolucaoAt: returnFormData.devolucaoAt,
         baixaFoto: returnFormData.baixaFoto,
-        baixaObservacao: returnFormData.baixaObservacao.trim() || undefined,
-        baixaAssinatura: returnFormData.baixaAssinatura
+        baixaObservacao: returnFormData.baixaObservacao.trim() || undefined
       }
     });
   };
@@ -1311,18 +1304,6 @@ export default function ReservaVeiculosPage() {
                     }
                     className={fieldClassName}
                     placeholder="Opcional"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Assinatura *
-                  </label>
-                  <SignatureField
-                    value={returnFormData.baixaAssinatura}
-                    onChange={(baixaAssinatura) =>
-                      setReturnFormData((current) => ({ ...current, baixaAssinatura }))
-                    }
                   />
                 </div>
 
