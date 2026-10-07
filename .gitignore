@@ -128,3 +128,6 @@ tools/nfe-distribuicao/target/
 
 # AWS
 .aws/
+
+tmp-video-analysis/
+

@@ -14,6 +14,7 @@ import {
   getAvailableDatasets,
   getDatasetStructure,
   getDatasetData,
+  syncDatasetMirror,
   searchDataset,
   getDocumentsMeta,
   downloadDocument,
@@ -37,6 +38,7 @@ async function requireFluigApproverViewerManager(req: AuthRequest, res: express.
 router.get('/datasets', getAvailableDatasets);
 router.get('/datasets/:datasetId/structure', getDatasetStructure);
 router.post('/datasets/:datasetId/data', getDatasetData);
+router.post('/datasets/:datasetId/mirror/sync', syncDatasetMirror);
 router.post('/datasets/:datasetId/search', searchDataset);
 router.post('/documents/meta', getDocumentsMeta);
 router.get('/documents/:documentId/file', downloadDocument);
