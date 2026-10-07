@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Response, NextFunction } from 'express';
 import {
   ToolRentalDemandType,
@@ -9,12 +10,107 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { assertUserHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
+import {
+  assertLiberadoContractAccess,
+  getLiberadoContractAccessForUser,
+} from '../lib/contractAccess';
 import { findUserIdsMatchingSearch } from '../lib/normalizeSearchText';
+import { savePersistentUpload } from '../lib/persistentUpload';
+import { fixMulterOriginalName } from '../lib/fixUploadFileName';
+
+async function canAccessToolRentalRequest(
+  user: { id: string; isAdmin?: boolean },
+  row: {
+    createdById?: string | null;
+    assignedUserId?: string | null;
+    contractId?: string | null;
+  },
+): Promise<boolean> {
+  if (user.isAdmin) return true;
+  if (row.createdById === user.id || row.assignedUserId === user.id) return true;
+  if (row.contractId) {
+    const access = await getLiberadoContractAccessForUser(user.id, false);
+    if (access.filter === 'all') return true;
+    if (access.filter === 'ids' && access.ids.includes(row.contractId)) return true;
+  }
+  return false;
+}
+
+type ToolRentalAnexo = {
+  id: string;
+  name: string;
+  url: string;
+  kind?: string;
+};
+
+function parseToolRentalAttachments(value: unknown): ToolRentalAnexo[] {
+  if (!Array.isArray(value)) return [];
+  const out: ToolRentalAnexo[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+    const url = String(row.url || '').trim();
+    const name = String(row.name || '').trim();
+    const id = String(row.id || '').trim();
+    if (!url || !name) continue;
+    out.push({
+      id: id || randomUUID(),
+      name,
+      url,
+      kind: String(row.kind || 'outro').trim() || 'outro',
+    });
+  }
+  return out;
+}
+
+function legacyAttachmentsFromRow(row: {
+  ocMirrorUrl?: string | null;
+  ocMirrorName?: string | null;
+  paymentProofUrl?: string | null;
+  paymentProofName?: string | null;
+  attachments?: unknown;
+}): ToolRentalAnexo[] {
+  const list = parseToolRentalAttachments(row.attachments);
+  if (list.length > 0) return list;
+  const legacy: ToolRentalAnexo[] = [];
+  if (row.ocMirrorUrl?.trim()) {
+    legacy.push({
+      id: 'legacy-oc',
+      name: row.ocMirrorName?.trim() || 'Espelho OC',
+      url: row.ocMirrorUrl.trim(),
+      kind: 'oc',
+    });
+  }
+  if (row.paymentProofUrl?.trim()) {
+    legacy.push({
+      id: 'legacy-payment',
+      name: row.paymentProofName?.trim() || 'Comprovante',
+      url: row.paymentProofUrl.trim(),
+      kind: 'payment',
+    });
+  }
+  return legacy;
+}
+
+async function loadAttachmentsMap(ids: string[]): Promise<Map<string, unknown>> {
+  const map = new Map<string, unknown>();
+  if (ids.length === 0) return map;
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: string; attachments: unknown }>>(
+    `SELECT "id", "attachments" FROM "tool_rental_requests" WHERE "id" IN (${ids
+      .map((_, i) => `$${i + 1}`)
+      .join(',')})`,
+    ...ids,
+  );
+  for (const row of rows) map.set(row.id, row.attachments);
+  return map;
+}
 
 const include = {
   assignedUser: { select: { id: true, name: true, email: true } },
   createdBy: { select: { id: true, name: true } },
   suppliesApprovedBy: { select: { id: true, name: true } },
+  receivedBy: { select: { id: true, name: true } },
+  renewedFrom: { select: { id: true, code: true } },
   supplier: { select: { id: true, name: true, tradeName: true, code: true } },
   events: {
     orderBy: { createdAt: 'asc' as const },
@@ -61,6 +157,78 @@ function normalizeOptionalString(value: unknown): string | null {
   return trimmed || null;
 }
 
+type ToolRentalEquipamentoItem = {
+  nome: string;
+  quantidade: number;
+  linkSugestao?: string | null;
+};
+
+function normalizeEquipamentoLink(value: unknown): string | null {
+  let link = normalizeOptionalString(value);
+  if (!link) return null;
+  if (!/^https?:\/\//i.test(link)) {
+    link = `https://${link}`;
+  }
+  return link;
+}
+
+function parseEquipamentosInput(value: unknown, fallbackEquipamento?: unknown): ToolRentalEquipamentoItem[] {
+  if (Array.isArray(value)) {
+    const items: ToolRentalEquipamentoItem[] = [];
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue;
+      const row = raw as Record<string, unknown>;
+      const nome = String(row.nome ?? row.equipamento ?? row.name ?? '').trim();
+      const qtdRaw = Number(row.quantidade ?? row.quantity ?? row.qtd);
+      const quantidade = Number.isFinite(qtdRaw) && qtdRaw > 0 ? Math.floor(qtdRaw) : 0;
+      if (!nome || quantidade <= 0) continue;
+      const linkSugestao = normalizeEquipamentoLink(
+        row.linkSugestao ?? row.link ?? row.url,
+      );
+      items.push({
+        nome,
+        quantidade,
+        ...(linkSugestao ? { linkSugestao } : {}),
+      });
+    }
+    if (items.length) return items;
+  }
+  const single = normalizeOptionalString(fallbackEquipamento);
+  if (single) return [{ nome: single, quantidade: 1 }];
+  return [];
+}
+
+function formatEquipamentoSummary(items: ToolRentalEquipamentoItem[]): string {
+  return items.map((item) => `${item.nome} (${item.quantidade})`).join(', ');
+}
+
+async function persistEquipamentos(requestId: string, items: ToolRentalEquipamentoItem[]) {
+  await prisma.$executeRaw`
+    UPDATE "tool_rental_requests"
+    SET "equipamentos" = ${JSON.stringify(items)}::jsonb, "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = ${requestId}
+  `;
+}
+
+async function loadEquipamentosMap(ids: string[]): Promise<Map<string, unknown>> {
+  const map = new Map<string, unknown>();
+  if (ids.length === 0) return map;
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: string; equipamentos: unknown }>>(
+    `SELECT "id", "equipamentos" FROM "tool_rental_requests" WHERE "id" IN (${ids
+      .map((_, i) => `$${i + 1}`)
+      .join(',')})`,
+    ...ids,
+  );
+  for (const row of rows) map.set(row.id, row.equipamentos);
+  return map;
+}
+
+function resolveEquipamentosForRow(
+  row: { equipamento?: string | null; equipamentos?: unknown },
+): ToolRentalEquipamentoItem[] {
+  return parseEquipamentosInput(row.equipamentos, row.equipamento);
+}
+
 function requireString(value: unknown, label: string): string {
   const trimmed = normalizeOptionalString(value);
   if (!trimmed) throw createError(`${label} é obrigatório`, 400);
@@ -105,6 +273,7 @@ function parsePriority(value: unknown): ToolRentalPriority {
 
 function parseLogisticsMode(value: unknown): ToolRentalLogisticsMode {
   const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return ToolRentalLogisticsMode.RETIRADA_LOGISTICA;
   if (Object.values(ToolRentalLogisticsMode).includes(raw as ToolRentalLogisticsMode)) {
     return raw as ToolRentalLogisticsMode;
   }
@@ -154,6 +323,7 @@ export class ToolRentalRequestController {
             in: [
               ToolRentalRequestStatus.OPEN,
               ToolRentalRequestStatus.SUPPLIER_RELATION,
+              ToolRentalRequestStatus.QUOTATION,
               ToolRentalRequestStatus.AWAITING_PAYMENT,
             ],
           },
@@ -193,18 +363,85 @@ export class ToolRentalRequestController {
         total += n;
       }
 
+      const open = byStatus[ToolRentalRequestStatus.OPEN] ?? 0;
+      const supplierRelation = byStatus[ToolRentalRequestStatus.SUPPLIER_RELATION] ?? 0;
+      const quotation = byStatus[ToolRentalRequestStatus.QUOTATION] ?? 0;
+      const awaitingPayment = byStatus[ToolRentalRequestStatus.AWAITING_PAYMENT] ?? 0;
+      const inUse = byStatus[ToolRentalRequestStatus.IN_USE] ?? 0;
+      const completed = byStatus[ToolRentalRequestStatus.COMPLETED] ?? 0;
+      // Legado: pedidos antigos em AWAITING_RECEIPT contam como aguardando recebimento no fluxo
+      const legacyAwaitingReceipt = byStatus[ToolRentalRequestStatus.AWAITING_RECEIPT] ?? 0;
+      const rejected = byStatus[ToolRentalRequestStatus.REJECTED] ?? 0;
+      const cancelled = byStatus[ToolRentalRequestStatus.CANCELLED] ?? 0;
+
       res.json({
         success: true,
         data: {
-          open: byStatus[ToolRentalRequestStatus.OPEN] ?? 0,
-          supplierRelation: byStatus[ToolRentalRequestStatus.SUPPLIER_RELATION] ?? 0,
-          awaitingPayment: byStatus[ToolRentalRequestStatus.AWAITING_PAYMENT] ?? 0,
-          completed: byStatus[ToolRentalRequestStatus.COMPLETED] ?? 0,
-          rejected: byStatus[ToolRentalRequestStatus.REJECTED] ?? 0,
-          cancelled: byStatus[ToolRentalRequestStatus.CANCELLED] ?? 0,
+          open,
+          supplierRelation,
+          quotation,
+          awaitingPayment,
+          inUse,
+          pending: open + supplierRelation + quotation + awaitingPayment,
+          completed,
+          awaitingReceipt: legacyAwaitingReceipt,
+          rejected,
+          cancelled,
           total,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Lista enxuta de funcionários ativos para o select "Quem recebeu" (foto + CPF). */
+  async listReceiptUsers(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const users = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          role: 'EMPLOYEE',
+          employee: { isNot: null },
+        },
+        select: {
+          id: true,
+          name: true,
+          cpf: true,
+          profilePhotoUrl: true,
+          employee: { select: { id: true, position: true } },
+        },
+        orderBy: { name: 'asc' },
+        take: 2000,
+      });
+      const data = users
+        .filter((u) => {
+          if (!u.employee?.id) return false;
+          if (u.employee.position === 'Administrador') return false;
+          const name = String(u.name || '').trim();
+          if (!u.id || !name) return false;
+          if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) {
+            return false;
+          }
+          return true;
+        })
+        .map((u) => {
+          const cpfDigits = (u.cpf || '').replace(/\D/g, '');
+          const cpfMasked =
+            cpfDigits.length === 11
+              ? `${cpfDigits.slice(0, 3)}.${cpfDigits.slice(3, 6)}.${cpfDigits.slice(6, 9)}-${cpfDigits.slice(9)}`
+              : u.cpf || null;
+          return {
+            id: u.id,
+            name: String(u.name || '').trim(),
+            cpf: cpfMasked,
+            profilePhotoUrl: u.profilePhotoUrl || null,
+          };
+        })
+        .filter((row) => row.id && row.name)
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      res.json({ success: true, data });
     } catch (error) {
       next(error);
     }
@@ -223,15 +460,20 @@ export class ToolRentalRequestController {
         where.status = { in: statusFilter };
       }
 
-      // Engenharia: só as próprias, a menos que admin. Suprimentos usa scope=all.
+      // Engenharia: próprias + contratos liberados. Suprimentos usa scope=all.
       const scopeAll = String(scope ?? '').toLowerCase() === 'all';
       if (scopeAll) {
         await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
       } else if (!req.user.isAdmin) {
-        where.OR = [
+        const access = await getLiberadoContractAccessForUser(req.user.id, false);
+        const or: Record<string, unknown>[] = [
           { createdById: req.user.id },
           { assignedUserId: req.user.id },
         ];
+        if (access.filter === 'ids' && access.ids.length > 0) {
+          or.push({ contractId: { in: access.ids } });
+        }
+        where.OR = or;
       }
 
       if (search) {
@@ -272,10 +514,25 @@ export class ToolRentalRequestController {
         }),
         prisma.toolRentalRequest.count({ where }),
       ]);
+      const ids = rows.map((row) => row.id);
+      const [attachmentsMap, equipamentosMap] = await Promise.all([
+        loadAttachmentsMap(ids),
+        loadEquipamentosMap(ids),
+      ]);
 
       res.json({
         success: true,
-        data: rows,
+        data: rows.map((row) => ({
+          ...row,
+          attachments: legacyAttachmentsFromRow({
+            ...row,
+            attachments: attachmentsMap.get(row.id),
+          }),
+          equipamentos: resolveEquipamentosForRow({
+            equipamento: row.equipamento,
+            equipamentos: equipamentosMap.get(row.id),
+          }),
+        })),
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -297,13 +554,33 @@ export class ToolRentalRequestController {
       });
       if (!row) throw createError('Solicitação não encontrada', 404);
 
-      const isOwner =
-        row.createdById === req.user.id || row.assignedUserId === req.user.id;
-      if (!req.user.isAdmin && !isOwner) {
-        await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+      const canAccess = await canAccessToolRentalRequest(req.user, row);
+      if (!canAccess) {
+        try {
+          await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+        } catch {
+          throw createError('Solicitação não encontrada', 404);
+        }
       }
 
-      res.json({ success: true, data: row });
+      const [attachmentsMap, equipamentosMap] = await Promise.all([
+        loadAttachmentsMap([row.id]),
+        loadEquipamentosMap([row.id]),
+      ]);
+      res.json({
+        success: true,
+        data: {
+          ...row,
+          attachments: legacyAttachmentsFromRow({
+            ...row,
+            attachments: attachmentsMap.get(row.id),
+          }),
+          equipamentos: resolveEquipamentosForRow({
+            equipamento: row.equipamento,
+            equipamentos: equipamentosMap.get(row.id),
+          }),
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -314,15 +591,25 @@ export class ToolRentalRequestController {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       const body = (req.body || {}) as Record<string, unknown>;
 
-      const polo = requireString(body.polo, 'Polo').toUpperCase();
-      if (polo !== 'DF' && polo !== 'GO') {
-        throw createError('Polo deve ser DF ou GO', 400);
-      }
+      const poloRaw = String(body.polo ?? '').trim().toUpperCase();
+      const polo = poloRaw === 'GO' || poloRaw === 'DF' ? poloRaw : 'DF';
 
-      const contrato = requireString(body.contrato, 'Contrato');
+      const contractId = requireString(body.contractId, 'Contrato');
+      await assertLiberadoContractAccess(req, contractId);
+      const contractRow = await prisma.contract.findUnique({
+        where: { id: contractId },
+        select: { id: true, name: true },
+      });
+      if (!contractRow) throw createError('Contrato inválido', 400);
+      const contrato = contractRow.name;
+
       const obra = requireString(body.obra, 'Obra');
       const titulo = requireString(body.titulo, 'Título da locação');
-      const equipamento = requireString(body.equipamento, 'Equipamento');
+      const equipamentos = parseEquipamentosInput(body.equipamentos, body.equipamento);
+      if (equipamentos.length === 0) {
+        throw createError('Informe ao menos um equipamento com quantidade', 400);
+      }
+      const equipamento = formatEquipamentoSummary(equipamentos);
       const demandType = parseDemandType(body.demandType);
       const priority = parsePriority(body.priority);
       const logisticsMode = parseLogisticsMode(body.logisticsMode);
@@ -347,10 +634,11 @@ export class ToolRentalRequestController {
         supplierName = supplier.tradeName || supplier.name;
       }
 
-      const linkSugestao = normalizeOptionalString(body.linkSugestao);
-      if (linkSugestao && !/^https?:\/\//i.test(linkSugestao)) {
-        throw createError('Link de sugestão deve começar com http:// ou https://', 400);
-      }
+      // Compat: coluna legada guarda o 1º link; cada item também leva o próprio no JSON
+      const linkSugestao =
+        normalizeEquipamentoLink(body.linkSugestao) ||
+        equipamentos.find((item) => item.linkSugestao)?.linkSugestao ||
+        null;
 
       const [code] = await reserveCodes(1);
       const created = await prisma.$transaction(async (tx) => {
@@ -359,6 +647,7 @@ export class ToolRentalRequestController {
             code,
             polo,
             contrato,
+            contractId,
             obra,
             titulo,
             assignedUserId,
@@ -387,8 +676,62 @@ export class ToolRentalRequestController {
           include,
         });
       });
+      await persistEquipamentos(created.id, equipamentos);
 
-      res.status(201).json({ success: true, data: created });
+      res.status(201).json({
+        success: true,
+        data: { ...created, equipamentos },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateScNumber(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+
+      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
+      if (!row) throw createError('Solicitação não encontrada', 404);
+      if (
+        row.status !== ToolRentalRequestStatus.OPEN &&
+        row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION &&
+        row.status !== ToolRentalRequestStatus.QUOTATION
+      ) {
+        throw createError(
+          'Número da SC só pode ser informado em Aberta, Em análise ou Cotação',
+          400,
+        );
+      }
+
+      const scNumber = requireString(
+        req.body?.scNumber ?? req.body?.numeroSc ?? req.body?.sc,
+        'Número da SC',
+      );
+
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.toolRentalRequest.update({
+          where: { id: row.id },
+          data: { scNumber },
+        });
+        if (row.scNumber !== scNumber) {
+          await appendStatusEvent(tx, {
+            requestId: row.id,
+            fromStatus: row.status,
+            toStatus: row.status,
+            actorId: req.user!.id,
+            note: row.scNumber
+              ? `Número da SC atualizado: ${scNumber}`
+              : `Número da SC informado: ${scNumber}`,
+          });
+        }
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+      res.json({ success: true, data: updated });
     } catch (error) {
       next(error);
     }
@@ -402,10 +745,7 @@ export class ToolRentalRequestController {
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
       if (row.status !== ToolRentalRequestStatus.OPEN) {
-        throw createError(
-          'Somente solicitações abertas (após SC) podem ir para Relação com o Fornecedor',
-          400
-        );
+        throw createError('Somente solicitações abertas podem ir para Em análise', 400);
       }
 
       const comment = normalizeOptionalString(req.body?.comment ?? req.body?.suppliesApprovalComment);
@@ -425,7 +765,54 @@ export class ToolRentalRequestController {
           fromStatus: ToolRentalRequestStatus.OPEN,
           toStatus: ToolRentalRequestStatus.SUPPLIER_RELATION,
           actorId: req.user!.id,
-          note: comment || 'Encaminhada para Relação com o Fornecedor',
+          note: comment || 'Encaminhada para Em análise',
+        });
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async moveToQuotation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+
+      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
+      if (!row) throw createError('Solicitação não encontrada', 404);
+      if (row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION) {
+        throw createError('Somente solicitações em Em análise podem ir para Cotação', 400);
+      }
+
+      const scNumberFromBody = normalizeOptionalString(
+        req.body?.scNumber ?? req.body?.numeroSc ?? req.body?.sc,
+      );
+      const scNumber = scNumberFromBody || normalizeOptionalString(row.scNumber);
+      if (!scNumber) {
+        throw createError('Informe o número da SC antes de encaminhar para Cotação', 400);
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.toolRentalRequest.update({
+          where: { id: row.id, status: row.status },
+          data: {
+            status: ToolRentalRequestStatus.QUOTATION,
+            scNumber,
+            suppliesApprovedById: req.user!.id,
+            suppliesApprovedAt: new Date(),
+          },
+        });
+        await appendStatusEvent(tx, {
+          requestId: row.id,
+          fromStatus: ToolRentalRequestStatus.SUPPLIER_RELATION,
+          toStatus: ToolRentalRequestStatus.QUOTATION,
+          actorId: req.user!.id,
+          note: `Encaminhada para Cotação (SC ${scNumber})`,
         });
         return tx.toolRentalRequest.findUniqueOrThrow({
           where: { id: row.id },
@@ -445,9 +832,9 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION) {
+      if (row.status !== ToolRentalRequestStatus.QUOTATION) {
         throw createError(
-          'Somente solicitações em Relação com o Fornecedor podem ir para Aguardando Pagamento',
+          'Somente solicitações em Cotação podem ir para Aguardando Pagamento',
           400
         );
       }
@@ -472,7 +859,7 @@ export class ToolRentalRequestController {
         });
         await appendStatusEvent(tx, {
           requestId: row.id,
-          fromStatus: ToolRentalRequestStatus.SUPPLIER_RELATION,
+          fromStatus: ToolRentalRequestStatus.QUOTATION,
           toStatus: ToolRentalRequestStatus.AWAITING_PAYMENT,
           actorId: req.user!.id,
           note: ocMirrorUrl
@@ -528,8 +915,8 @@ export class ToolRentalRequestController {
           toStatus: ToolRentalRequestStatus.COMPLETED,
           actorId: req.user!.id,
           note: paymentProofUrl
-            ? 'Comprovante de pagamento anexado — solicitação finalizada'
-            : 'Solicitação finalizada',
+            ? 'Comprovante de pagamento anexado — solicitação finalizada (aguardando confirmação de recebimento)'
+            : 'Solicitação finalizada — aguardando confirmação de recebimento pela Engenharia',
         });
         return tx.toolRentalRequest.findUniqueOrThrow({
           where: { id: row.id },
@@ -537,6 +924,437 @@ export class ToolRentalRequestController {
         });
       });
       res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async confirmReceipt(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
+      if (!row) throw createError('Solicitação não encontrada', 404);
+
+      // Legado: AWAITING_RECEIPT vira COMPLETED sem mexer no recebimento
+      const statusOk =
+        row.status === ToolRentalRequestStatus.COMPLETED ||
+        row.status === ToolRentalRequestStatus.AWAITING_RECEIPT;
+      if (!statusOk) {
+        throw createError(
+          'Somente solicitações finalizadas podem ter o recebimento confirmado',
+          400
+        );
+      }
+      if (row.receivedAt) {
+        throw createError('Recebimento já foi confirmado nesta solicitação', 400);
+      }
+
+      if (!(await canAccessToolRentalRequest(req.user, row))) {
+        throw createError('Sem permissão para confirmar o recebimento desta solicitação', 403);
+      }
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const receivedById = requireString(body.receivedById, 'Quem recebeu');
+      const receiver = await prisma.user.findUnique({
+        where: { id: receivedById },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!receiver || receiver.isActive === false) {
+        throw createError('Funcionário inválido', 400);
+      }
+
+      let receivedAt = new Date();
+      const receivedAtRaw = normalizeOptionalString(body.receivedAt);
+      if (receivedAtRaw) {
+        const parsed = new Date(receivedAtRaw);
+        if (Number.isNaN(parsed.getTime())) {
+          throw createError('Data e hora do recebimento inválidas', 400);
+        }
+        receivedAt = parsed;
+      }
+
+      const receiptObservation = normalizeOptionalString(
+        body.receiptObservation ?? body.observation ?? body.observacao,
+      );
+      const receiptAttachments = parseToolRentalAttachments(
+        body.receiptAttachments ?? body.attachments,
+      ).map((a) => ({ ...a, kind: a.kind || 'receipt' }));
+
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.toolRentalRequest.update({
+          where: { id: row.id },
+          data: {
+            status: ToolRentalRequestStatus.IN_USE,
+            receivedById: receiver.id,
+            receivedAt,
+            receiptObservation,
+            receiptAttachments: receiptAttachments.length
+              ? (receiptAttachments as object)
+              : undefined,
+          },
+        });
+        await appendStatusEvent(tx, {
+          requestId: row.id,
+          fromStatus: row.status,
+          toStatus: ToolRentalRequestStatus.IN_USE,
+          actorId: req.user!.id,
+          note:
+            `Recebimento confirmado por ${receiver.name} — equipamento em uso` +
+            (receiptObservation ? ` — ${receiptObservation}` : ''),
+        });
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async renew(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const origin = await prisma.toolRentalRequest.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!origin) throw createError('Solicitação não encontrada', 404);
+
+      if (!(await canAccessToolRentalRequest(req.user, origin))) {
+        throw createError('Sem permissão para renovar esta solicitação', 403);
+      }
+
+      const canRenewFromInUse = origin.status === ToolRentalRequestStatus.IN_USE;
+      const canRenewLegacy =
+        origin.status === ToolRentalRequestStatus.COMPLETED && Boolean(origin.receivedAt);
+      if (!canRenewFromInUse && !canRenewLegacy) {
+        throw createError(
+          'Somente solicitações em uso (com recebimento confirmado) podem ser renovadas',
+          400
+        );
+      }
+      if (
+        origin.demandType !== ToolRentalDemandType.NOVA_LOCACAO &&
+        origin.demandType !== ToolRentalDemandType.RENOVACAO
+      ) {
+        throw createError('Apenas locações podem ser renovadas', 400);
+      }
+      if (origin.contractId) {
+        await assertLiberadoContractAccess(req, origin.contractId);
+      }
+
+      const periodoInicio = parseDateOnly(req.body?.periodoInicio, 'Data de início');
+      const periodoFim = parseDateOnly(req.body?.periodoFim, 'Data de fim');
+      if (periodoFim < periodoInicio) {
+        throw createError('Data final não pode ser anterior à data inicial', 400);
+      }
+
+      const observacao = normalizeOptionalString(req.body?.observacao);
+
+      const equipamentosMap = await loadEquipamentosMap([origin.id]);
+      const equipamentos = resolveEquipamentosForRow({
+        equipamento: origin.equipamento,
+        equipamentos: equipamentosMap.get(origin.id),
+      });
+
+      const [code] = await reserveCodes(1);
+      const created = await prisma.$transaction(async (tx) => {
+        if (origin.status === ToolRentalRequestStatus.IN_USE) {
+          await tx.toolRentalRequest.update({
+            where: { id: origin.id },
+            data: { status: ToolRentalRequestStatus.COMPLETED },
+          });
+          await appendStatusEvent(tx, {
+            requestId: origin.id,
+            fromStatus: ToolRentalRequestStatus.IN_USE,
+            toStatus: ToolRentalRequestStatus.COMPLETED,
+            actorId: req.user!.id,
+            note: 'Encerrada por renovação',
+          });
+        }
+
+        const row = await tx.toolRentalRequest.create({
+          data: {
+            code,
+            polo: origin.polo,
+            contrato: origin.contrato,
+            contractId: origin.contractId,
+            obra: origin.obra,
+            titulo: origin.titulo,
+            assignedUserId: req.user!.id,
+            supplierId: origin.supplierId,
+            supplierName: origin.supplierName,
+            priority: origin.priority,
+            logisticsMode: origin.logisticsMode,
+            demandType: ToolRentalDemandType.RENOVACAO,
+            equipamento: origin.equipamento,
+            periodoInicio,
+            periodoFim,
+            linkSugestao: origin.linkSugestao,
+            renewedFromId: origin.id,
+            createdById: req.user!.id,
+            status: ToolRentalRequestStatus.OPEN,
+          },
+        });
+        await appendStatusEvent(tx, {
+          requestId: row.id,
+          fromStatus: null,
+          toStatus: ToolRentalRequestStatus.OPEN,
+          actorId: req.user!.id,
+          note:
+            `Renovação da solicitação #${origin.code}` +
+            (observacao ? ` — ${observacao}` : ''),
+        });
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+      await persistEquipamentos(created.id, equipamentos);
+
+      res.status(201).json({
+        success: true,
+        data: { ...created, equipamentos },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async requestDevolution(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const origin = await prisma.toolRentalRequest.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!origin) throw createError('Solicitação não encontrada', 404);
+
+      if (!(await canAccessToolRentalRequest(req.user, origin))) {
+        throw createError('Sem permissão para solicitar devolução desta solicitação', 403);
+      }
+
+      const canDevolveFromInUse = origin.status === ToolRentalRequestStatus.IN_USE;
+      const canDevolveLegacy =
+        origin.status === ToolRentalRequestStatus.COMPLETED && Boolean(origin.receivedAt);
+      if (!canDevolveFromInUse && !canDevolveLegacy) {
+        throw createError(
+          'Somente solicitações em uso (com recebimento confirmado) podem solicitar devolução',
+          400
+        );
+      }
+      if (
+        origin.demandType !== ToolRentalDemandType.NOVA_LOCACAO &&
+        origin.demandType !== ToolRentalDemandType.RENOVACAO
+      ) {
+        throw createError('Apenas locações podem solicitar devolução por este fluxo', 400);
+      }
+      if (origin.contractId) {
+        await assertLiberadoContractAccess(req, origin.contractId);
+      }
+
+      const periodoInicio = parseDateOnly(
+        req.body?.periodoInicio ?? origin.periodoInicio,
+        'Data de início',
+      );
+      const periodoFim = parseDateOnly(
+        req.body?.periodoFim ?? new Date().toISOString().slice(0, 10),
+        'Data de fim',
+      );
+      if (periodoFim < periodoInicio) {
+        throw createError('Data final não pode ser anterior à data inicial', 400);
+      }
+
+      const observacao = normalizeOptionalString(req.body?.observacao);
+
+      const equipamentosMap = await loadEquipamentosMap([origin.id]);
+      const equipamentos = resolveEquipamentosForRow({
+        equipamento: origin.equipamento,
+        equipamentos: equipamentosMap.get(origin.id),
+      });
+
+      const [code] = await reserveCodes(1);
+      const created = await prisma.$transaction(async (tx) => {
+        if (origin.status === ToolRentalRequestStatus.IN_USE) {
+          await tx.toolRentalRequest.update({
+            where: { id: origin.id },
+            data: { status: ToolRentalRequestStatus.COMPLETED },
+          });
+          await appendStatusEvent(tx, {
+            requestId: origin.id,
+            fromStatus: ToolRentalRequestStatus.IN_USE,
+            toStatus: ToolRentalRequestStatus.COMPLETED,
+            actorId: req.user!.id,
+            note: 'Encerrada por devolução',
+          });
+        }
+
+        const row = await tx.toolRentalRequest.create({
+          data: {
+            code,
+            polo: origin.polo,
+            contrato: origin.contrato,
+            contractId: origin.contractId,
+            obra: origin.obra,
+            titulo: origin.titulo,
+            assignedUserId: req.user!.id,
+            supplierId: origin.supplierId,
+            supplierName: origin.supplierName,
+            priority: origin.priority,
+            logisticsMode: origin.logisticsMode,
+            demandType: ToolRentalDemandType.DEVOLUCAO,
+            equipamento: origin.equipamento,
+            periodoInicio,
+            periodoFim,
+            linkSugestao: origin.linkSugestao,
+            renewedFromId: origin.id,
+            createdById: req.user!.id,
+            status: ToolRentalRequestStatus.OPEN,
+          },
+        });
+        await appendStatusEvent(tx, {
+          requestId: row.id,
+          fromStatus: null,
+          toStatus: ToolRentalRequestStatus.OPEN,
+          actorId: req.user!.id,
+          note:
+            `Devolução da solicitação #${origin.code}` +
+            (observacao ? ` — ${observacao}` : ''),
+        });
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+      await persistEquipamentos(created.id, equipamentos);
+
+      res.status(201).json({
+        success: true,
+        data: { ...created, equipamentos },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async uploadAnexo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+
+      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
+      if (!row) throw createError('Solicitação não encontrada', 404);
+      if (row.status !== ToolRentalRequestStatus.QUOTATION) {
+        throw createError('Ordem de compra só pode ser anexada na etapa Cotação', 400);
+      }
+
+      const file = req.file;
+      if (!file?.buffer?.length) throw createError('Selecione um arquivo', 400);
+
+      const kindRaw = String(req.body?.kind || 'oc').trim().toLowerCase();
+      if (kindRaw === 'payment') {
+        throw createError(
+          'Neste fluxo só é permitido anexar Ordem de compra. Comprovante de pagamento não é utilizado.',
+          400,
+        );
+      }
+      const kind = kindRaw === 'outro' ? 'outro' : 'oc';
+
+      const originalName =
+        fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
+      const saved = await savePersistentUpload({
+        folder: `tool-rental-requests/${row.id}/anexos`,
+        buffer: file.buffer,
+        originalName,
+        mimeType: file.mimetype,
+        includeSafeOriginalName: true,
+      });
+
+      const attachmentsMap = await loadAttachmentsMap([row.id]);
+      const list = legacyAttachmentsFromRow({
+        ...row,
+        attachments: attachmentsMap.get(row.id),
+      });
+      list.push({
+        id: randomUUID(),
+        name: saved.originalName || originalName,
+        url: saved.url,
+        kind,
+      });
+
+      const note =
+        kind === 'payment'
+          ? 'Comprovante de pagamento anexado'
+          : kind === 'oc'
+            ? 'Ordem de compra anexada'
+            : 'Anexo adicionado';
+
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "tool_rental_requests"
+          SET "attachments" = ${JSON.stringify(list)}::jsonb, "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = ${row.id}
+        `;
+        await appendStatusEvent(tx, {
+          requestId: row.id,
+          fromStatus: row.status,
+          toStatus: row.status,
+          actorId: req.user!.id,
+          note,
+        });
+        return tx.toolRentalRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include,
+        });
+      });
+
+      res.json({
+        success: true,
+        data: { ...updated, attachments: list },
+        message: 'Anexo vinculado com sucesso',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteAnexo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+
+      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
+      if (!row) throw createError('Solicitação não encontrada', 404);
+      if (row.status !== ToolRentalRequestStatus.QUOTATION) {
+        throw createError('Ordem de compra só pode ser removida na etapa Cotação', 400);
+      }
+
+      const anexoId = String(req.params.anexoId || '').trim();
+      if (!anexoId) throw createError('Anexo inválido', 400);
+
+      const attachmentsMap = await loadAttachmentsMap([row.id]);
+      const list = legacyAttachmentsFromRow({
+        ...row,
+        attachments: attachmentsMap.get(row.id),
+      }).filter((a) => a.id !== anexoId);
+      await prisma.$executeRaw`
+        UPDATE "tool_rental_requests"
+        SET "attachments" = ${JSON.stringify(list)}::jsonb, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${row.id}
+      `;
+      const updated = await prisma.toolRentalRequest.findUniqueOrThrow({
+        where: { id: row.id },
+        include,
+      });
+
+      res.json({
+        success: true,
+        data: { ...updated, attachments: list },
+        message: 'Anexo removido',
+      });
     } catch (error) {
       next(error);
     }
@@ -551,9 +1369,10 @@ export class ToolRentalRequestController {
       if (!row) throw createError('Solicitação não encontrada', 404);
       if (
         row.status !== ToolRentalRequestStatus.OPEN &&
-        row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION
+        row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION &&
+        row.status !== ToolRentalRequestStatus.QUOTATION
       ) {
-        throw createError('Somente solicitações abertas ou em relação com fornecedor podem ser rejeitadas', 400);
+        throw createError('Somente solicitações abertas, em análise ou em cotação podem ser rejeitadas', 400);
       }
 
       const reason = requireString(

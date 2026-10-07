@@ -137,6 +137,7 @@ model User {
   toolRentalRequestsCreated                 ToolRentalRequest[]                  @relation("ToolRentalRequestCreator")
   toolRentalRequestsAssigned                ToolRentalRequest[]                  @relation("ToolRentalRequestAssignedUser")
   toolRentalRequestsSuppliesApproved        ToolRentalRequest[]                  @relation("ToolRentalRequestSuppliesApprover")
+  toolRentalRequestsReceived                ToolRentalRequest[]                  @relation("ToolRentalRequestReceivedBy")
   toolRentalRequestEvents                   ToolRentalRequestEvent[]             @relation("ToolRentalRequestEventActor")
   materialRequestComments                   MaterialRequestComment[]             @relation("MaterialRequestCommentAuthor")
   purchaseOrderComments                     PurchaseOrderComment[]               @relation("PurchaseOrderCommentAuthor")
@@ -1448,6 +1449,7 @@ model Contract {
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
   fuelGasStations           FuelGasStationContract[]
   obras                     Obra[]
+  toolRentalRequests        ToolRentalRequest[]
   empreiteiros              Empreiteiro[]
   empreiteiroContracts      EmpreiteiroContract[]
   empreiteiroDailyMeasurements EmpreiteiroDailyMeasurement[]
@@ -4509,18 +4511,23 @@ enum ToolRentalLogisticsMode {
 enum ToolRentalRequestStatus {
   OPEN
   SUPPLIER_RELATION
+  QUOTATION
   AWAITING_PAYMENT
+  AWAITING_RECEIPT
+  IN_USE
   COMPLETED
   REJECTED
   CANCELLED
 }
 
-/// SolicitaÃ§Ãµes de ferramentas (Engenharia â fluxo Suprimentos atÃ© pagamento)
+/// SolicitaÃ§Ãµes de ferramentas (Engenharia â Suprimentos â recebimento Engenharia)
 model ToolRentalRequest {
   id                      String                  @id @default(cuid())
   code                    String                  @unique
   polo                    String
   contrato                String
+  /// Contrato liberado (FK) — filtra lista da Engenharia
+  contractId              String?
   obra                    String
   titulo                  String
   assignedUserId          String
@@ -4529,19 +4536,34 @@ model ToolRentalRequest {
   priority                ToolRentalPriority      @default(NORMAL)
   logisticsMode           ToolRentalLogisticsMode
   demandType              ToolRentalDemandType
+  /// Resumo textual para busca/lista (ex.: "Andaime (2), Furadeira (1)")
   equipamento             String
+  /// Itens: [{ nome, quantidade }]
+  equipamentos            Json?
   periodoInicio           DateTime                @db.Date
   periodoFim              DateTime                @db.Date
   linkSugestao            String?
   status                  ToolRentalRequestStatus @default(OPEN)
+  /// Número da SC (Solicitação de Compra) criada pela Logística
+  scNumber                String?
   ocMirrorUrl             String?
   ocMirrorName            String?
   paymentProofUrl         String?
   paymentProofName        String?
+  /// Anexos do Suprimentos: [{ id, name, url, kind? }] — kind: oc (Ordem de Compra)
+  attachments             Json?
   suppliesApprovedById    String?
   suppliesApprovedAt      DateTime?
   suppliesApprovalComment String?
   suppliesRejectionReason String?
+  receivedById            String?
+  receivedAt              DateTime?
+  /// Observação do recebimento pela Engenharia
+  receiptObservation      String?
+  /// Anexos do recebimento: [{ id, name, url }]
+  receiptAttachments      Json?
+  /// Solicitação de origem quando esta é uma renovação
+  renewedFromId           String?
   createdById             String?
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
@@ -4549,12 +4571,18 @@ model ToolRentalRequest {
   assignedUser       User                     @relation("ToolRentalRequestAssignedUser", fields: [assignedUserId], references: [id], onDelete: Restrict)
   createdBy          User?                    @relation("ToolRentalRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
   suppliesApprovedBy User?                    @relation("ToolRentalRequestSuppliesApprover", fields: [suppliesApprovedById], references: [id], onDelete: SetNull)
+  receivedBy         User?                    @relation("ToolRentalRequestReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  renewedFrom        ToolRentalRequest?       @relation("ToolRentalRequestRenewal", fields: [renewedFromId], references: [id], onDelete: SetNull)
+  renewals           ToolRentalRequest[]      @relation("ToolRentalRequestRenewal")
+  contract           Contract?                @relation(fields: [contractId], references: [id], onDelete: SetNull)
   supplier           Supplier?                @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   events             ToolRentalRequestEvent[]
 
   @@index([status])
   @@index([createdById])
   @@index([assignedUserId])
+  @@index([contractId])
+  @@index([renewedFromId])
   @@index([createdAt])
   @@map("tool_rental_requests")
 }

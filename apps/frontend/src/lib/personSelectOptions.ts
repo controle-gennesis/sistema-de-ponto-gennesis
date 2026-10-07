@@ -32,11 +32,11 @@ export function personInitials(name: string): string {
 
 /** Opção de select com foto + CPF (mesmo padrão de Gestão OS / permissões). */
 export function toPersonSelectOption(person: PersonSelectSource): MultiSelectSearchOption {
-  const cpfLabel = formatPersonCpf(person.cpf);
+  const cpfLabel = formatPersonCpf(person.cpf) || '—';
   return {
     value: person.value,
     label: person.name,
-    description: cpfLabel || undefined,
+    description: cpfLabel,
     searchText: [person.name, person.cpf, cpfLabel, person.extraSearchText]
       .filter(Boolean)
       .join(' '),

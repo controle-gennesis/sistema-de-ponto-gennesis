@@ -2106,7 +2106,7 @@ function SolicitarMateriaisPage() {
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Solicite materiais para seus projetos</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
             {RM_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}

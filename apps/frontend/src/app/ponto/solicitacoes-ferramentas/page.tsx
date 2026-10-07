@@ -5,13 +5,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  Banknote,
-  Building2,
   CheckCircle,
   Clock,
   Eye,
+  Paperclip,
   Search,
+  Users,
   Wrench,
+  XCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -20,6 +22,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Loading } from '@/components/ui/Loading';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { FileDropZone } from '@/components/ui/FileDropZone';
+import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import {
   cadastroListClasses,
   getListTableRowClassName,
@@ -36,17 +40,17 @@ import {
   getCadastroListRange,
 } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
 import api from '@/lib/api';
-import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   formatToolRentalDemand,
   formatToolRentalLogistics,
   formatToolRentalPriority,
   formatToolRentalStatus,
+  resolveToolRentalDisplayStatus,
   toolRentalStatusBadgeClass,
   type ToolRentalDemandType,
   type ToolRentalLogisticsMode,
@@ -55,10 +59,10 @@ import {
 } from '@/lib/toolRentalLabels';
 import { buildToolRentalTimeline, type ToolRentalTimelineEvent } from '@/lib/toolRentalTimeline';
 import {
-  DpRequestHistoryModalTabs,
   DpRequestHistoryTimeline,
   type DpRequestHistoryModalTab,
 } from '@/lib/dpRequestHistoryModal';
+import { DetailInfoTabs, type DetailInfoTabItem } from '@/components/ui/DetailInfoLayout';
 
 type ToolRentalRequest = {
   id: string;
@@ -68,6 +72,8 @@ type ToolRentalRequest = {
   obra: string;
   titulo: string;
   equipamento: string;
+  equipamentos?: Array<{ nome: string; quantidade: number; linkSugestao?: string | null }> | null;
+  renewedFrom?: { id: string; code: string } | null;
   demandType: ToolRentalDemandType;
   logisticsMode?: ToolRentalLogisticsMode;
   priority: ToolRentalPriority;
@@ -76,12 +82,18 @@ type ToolRentalRequest = {
   periodoFim: string;
   linkSugestao?: string | null;
   supplierName?: string | null;
+  scNumber?: string | null;
   ocMirrorUrl?: string | null;
   ocMirrorName?: string | null;
   paymentProofUrl?: string | null;
   paymentProofName?: string | null;
+  attachments?: Array<{ id: string; name: string; url: string; kind?: string }> | null;
   suppliesApprovalComment?: string | null;
   suppliesRejectionReason?: string | null;
+  receivedAt?: string | null;
+  receivedBy?: { id: string; name: string } | null;
+  receiptObservation?: string | null;
+  receiptAttachments?: Array<{ id: string; name: string; url: string }> | null;
   createdAt?: string;
   updatedAt?: string;
   suppliesApprovedAt?: string | null;
@@ -91,12 +103,55 @@ type ToolRentalRequest = {
   events?: ToolRentalTimelineEvent[];
 };
 
-type StatusFilter =
-  | 'OPEN'
-  | 'SUPPLIER_RELATION'
-  | 'AWAITING_PAYMENT'
-  | 'COMPLETED'
-  | 'ALL';
+type StatusFilter = 'ALL' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
+
+const PENDING_STATUSES = 'OPEN,SUPPLIER_RELATION,QUOTATION,AWAITING_PAYMENT' as const;
+
+const LIST_HEADER_BY_FILTER: Record<
+  StatusFilter,
+  {
+    title: string;
+    subtitle: string;
+    Icon: LucideIcon;
+    iconBg: string;
+    iconColor: string;
+  }
+> = {
+  ALL: {
+    title: 'Todas as solicitações',
+    subtitle: 'Todas as solicitações de ferramentas.',
+    Icon: Users,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  PENDING: {
+    title: 'Pendentes',
+    subtitle: 'Em andamento no Suprimentos.',
+    Icon: Clock,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  COMPLETED: {
+    title: 'Finalizadas',
+    subtitle: 'Solicitações concluídas.',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  CANCELLED: {
+    title: 'Canceladas',
+    subtitle: 'Solicitações canceladas.',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+type ToolRentalAnexo = { id: string; name: string; url: string; kind?: string };
+
+function anexosByKind(list: ToolRentalAnexo[] | null | undefined, kind: string): ToolRentalAnexo[] {
+  return (list || []).filter((a) => (a.kind || 'outro') === kind && a.url);
+}
 
 function formatDateOnly(value: string | null | undefined): string {
   if (!value) return '—';
@@ -129,11 +184,14 @@ function SolicitacoesFerramentasPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [selected, setSelected] = useState<ToolRentalRequest | null>(null);
   const [detailTab, setDetailTab] = useState<DpRequestHistoryModalTab>('detalhes');
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const [scNumberDraft, setScNumberDraft] = useState('');
+  const [uploadingKind, setUploadingKind] = useState<'oc' | null>(null);
+  const [removingAnexoId, setRemovingAnexoId] = useState<string | null>(null);
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['tool-rental-requests-supplies'] });
@@ -146,6 +204,9 @@ function SolicitacoesFerramentasPage() {
     setDetailTab('detalhes');
     setShowReject(false);
     setRejectReason('');
+    setScNumberDraft('');
+    setUploadingKind(null);
+    setRemovingAnexoId(null);
   };
 
   const { data: listData, isLoading } = useQuery({
@@ -157,7 +218,12 @@ function SolicitacoesFerramentasPage() {
           page,
           limit: 20,
           scope: 'all',
-          status: statusFilter === 'ALL' ? undefined : statusFilter,
+          status:
+            statusFilter === 'ALL'
+              ? undefined
+              : statusFilter === 'PENDING'
+                ? PENDING_STATUSES
+                : statusFilter,
         },
       });
       return res.data;
@@ -170,13 +236,30 @@ function SolicitacoesFerramentasPage() {
       const res = await api.get('/tool-rental-requests/supplies-summary');
       return (
         res.data?.data ?? {
-          open: 0,
-          supplierRelation: 0,
-          awaitingPayment: 0,
+          pending: 0,
           completed: 0,
+          cancelled: 0,
           total: 0,
         }
       );
+    },
+  });
+
+  const saveScNumberMutation = useMutation({
+    mutationFn: async ({ id, scNumber }: { id: string; scNumber: string }) => {
+      const res = await api.put(`/tool-rental-requests/${id}/sc-number`, { scNumber });
+      return res.data?.data as ToolRentalRequest;
+    },
+    onSuccess: (row) => {
+      toast.success('Número da SC salvo');
+      if (row) {
+        setSelected(row);
+        setScNumberDraft(row.scNumber || '');
+      }
+      invalidateAll();
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.error || 'Falha ao salvar número da SC');
     },
   });
 
@@ -185,12 +268,26 @@ function SolicitacoesFerramentasPage() {
       await api.put(`/tool-rental-requests/${id}/to-supplier-relation`, {});
     },
     onSuccess: () => {
-      toast.success('Encaminhada para Relação com o Fornecedor');
+      toast.success('Encaminhada para Em análise');
       closeDetail();
       invalidateAll();
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.error || 'Falha ao encaminhar');
+    },
+  });
+
+  const toQuotationMutation = useMutation({
+    mutationFn: async ({ id, scNumber }: { id: string; scNumber: string }) => {
+      await api.put(`/tool-rental-requests/${id}/to-quotation`, { scNumber });
+    },
+    onSuccess: () => {
+      toast.success('Encaminhada para Cotação');
+      closeDetail();
+      invalidateAll();
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.error || 'Falha ao avançar etapa');
     },
   });
 
@@ -213,7 +310,7 @@ function SolicitacoesFerramentasPage() {
       await api.put(`/tool-rental-requests/${id}/complete`, {});
     },
     onSuccess: () => {
-      toast.success('Solicitação finalizada');
+      toast.success('Solicitação finalizada — aguardando confirmação de recebimento');
       closeDetail();
       invalidateAll();
     },
@@ -236,11 +333,56 @@ function SolicitacoesFerramentasPage() {
     },
   });
 
+  const uploadAnexoMutation = useMutation({
+    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('kind', 'oc');
+      const res = await api.post(`/tool-rental-requests/${id}/anexos`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data?.data as ToolRentalRequest;
+    },
+    onSuccess: (row) => {
+      toast.success('Ordem de compra anexada');
+      setSelected(row);
+      setUploadingKind(null);
+      invalidateAll();
+    },
+    onError: (err: any) => {
+      setUploadingKind(null);
+      toast.error(
+        err?.response?.data?.error || err?.response?.data?.message || 'Falha ao enviar anexo',
+      );
+    },
+  });
+
+  const deleteAnexoMutation = useMutation({
+    mutationFn: async ({ id, anexoId }: { id: string; anexoId: string }) => {
+      const res = await api.delete(`/tool-rental-requests/${id}/anexos/${anexoId}`);
+      return res.data?.data as ToolRentalRequest;
+    },
+    onSuccess: (row) => {
+      toast.success('Anexo removido');
+      setSelected(row);
+      setRemovingAnexoId(null);
+      invalidateAll();
+    },
+    onError: (err: any) => {
+      setRemovingAnexoId(null);
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Falha ao remover');
+    },
+  });
+
   const busy =
+    saveScNumberMutation.isPending ||
     toSupplierMutation.isPending ||
+    toQuotationMutation.isPending ||
     toPaymentMutation.isPending ||
     completeMutation.isPending ||
-    rejectMutation.isPending;
+    rejectMutation.isPending ||
+    uploadAnexoMutation.isPending ||
+    deleteAnexoMutation.isPending;
 
   const rows: ToolRentalRequest[] = listData?.data ?? [];
   const total = listData?.pagination?.total ?? 0;
@@ -257,7 +399,28 @@ function SolicitacoesFerramentasPage() {
   const openDetail = (row: ToolRentalRequest) => {
     setDetailTab('detalhes');
     setSelected(row);
+    setScNumberDraft(row.scNumber || '');
     setShowReject(false);
+  };
+
+  const persistScNumber = () => {
+    if (!selected) return;
+    const next = scNumberDraft.trim();
+    if (!next) return toast.error('Informe o número da SC');
+    if (next === (selected.scNumber || '').trim()) return;
+    saveScNumberMutation.mutate({ id: selected.id, scNumber: next });
+  };
+
+  const forwardToAnalysis = () => {
+    if (!selected) return;
+    toSupplierMutation.mutate(selected.id);
+  };
+
+  const forwardToQuotation = () => {
+    if (!selected) return;
+    const scNumber = scNumberDraft.trim() || selected.scNumber?.trim() || '';
+    if (!scNumber) return toast.error('Informe o número da SC antes de encaminhar');
+    toQuotationMutation.mutate({ id: selected.id, scNumber });
   };
 
   const buildRowMenuItems = (row: ToolRentalRequest): RowActionMenuExtraItem[] => [
@@ -265,6 +428,7 @@ function SolicitacoesFerramentasPage() {
       label:
         row.status === 'OPEN' ||
         row.status === 'SUPPLIER_RELATION' ||
+        row.status === 'QUOTATION' ||
         row.status === 'AWAITING_PAYMENT'
           ? 'Atender'
           : 'Ver detalhes',
@@ -273,39 +437,42 @@ function SolicitacoesFerramentasPage() {
     },
   ];
 
+  const listHeader = LIST_HEADER_BY_FILTER[statusFilter];
+  const ListHeaderIcon = listHeader.Icon;
+
   const stats = useMemo(
     () => [
       {
-        filter: 'OPEN' as StatusFilter,
-        label: 'Abertas',
-        value: summaryData?.open ?? 0,
-        Icon: Clock,
-        iconBg: 'bg-amber-100 dark:bg-amber-900/30',
-        iconColor: 'text-amber-600 dark:text-amber-400',
+        filter: 'ALL' as StatusFilter,
+        label: 'Todas',
+        value: summaryData?.total ?? 0,
+        Icon: LIST_HEADER_BY_FILTER.ALL.Icon,
+        iconBg: LIST_HEADER_BY_FILTER.ALL.iconBg,
+        iconColor: LIST_HEADER_BY_FILTER.ALL.iconColor,
       },
       {
-        filter: 'SUPPLIER_RELATION' as StatusFilter,
-        label: 'Relação fornecedor',
-        value: summaryData?.supplierRelation ?? 0,
-        Icon: Building2,
-        iconBg: 'bg-blue-100 dark:bg-blue-900/30',
-        iconColor: 'text-blue-600 dark:text-blue-400',
-      },
-      {
-        filter: 'AWAITING_PAYMENT' as StatusFilter,
-        label: 'Aguardando pagamento',
-        value: summaryData?.awaitingPayment ?? 0,
-        Icon: Banknote,
-        iconBg: 'bg-violet-100 dark:bg-violet-900/30',
-        iconColor: 'text-violet-600 dark:text-violet-400',
+        filter: 'PENDING' as StatusFilter,
+        label: 'Pendentes',
+        value: summaryData?.pending ?? 0,
+        Icon: LIST_HEADER_BY_FILTER.PENDING.Icon,
+        iconBg: LIST_HEADER_BY_FILTER.PENDING.iconBg,
+        iconColor: LIST_HEADER_BY_FILTER.PENDING.iconColor,
       },
       {
         filter: 'COMPLETED' as StatusFilter,
         label: 'Finalizadas',
         value: summaryData?.completed ?? 0,
-        Icon: CheckCircle,
-        iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
-        iconColor: 'text-emerald-600 dark:text-emerald-400',
+        Icon: LIST_HEADER_BY_FILTER.COMPLETED.Icon,
+        iconBg: LIST_HEADER_BY_FILTER.COMPLETED.iconBg,
+        iconColor: LIST_HEADER_BY_FILTER.COMPLETED.iconColor,
+      },
+      {
+        filter: 'CANCELLED' as StatusFilter,
+        label: 'Canceladas',
+        value: summaryData?.cancelled ?? 0,
+        Icon: LIST_HEADER_BY_FILTER.CANCELLED.Icon,
+        iconBg: LIST_HEADER_BY_FILTER.CANCELLED.iconBg,
+        iconColor: LIST_HEADER_BY_FILTER.CANCELLED.iconColor,
       },
     ],
     [summaryData]
@@ -324,10 +491,10 @@ function SolicitacoesFerramentasPage() {
       <PageStack>
           <ListPageHeader
             title="Pedidos de Ferramentas"
-            description="Acompanhe o fluxo após a SC: relação com fornecedor, pagamento e finalização"
+            description="Gerencie as solicitações de ferramentas"
           />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+        <div className={pageStatCardsGridClass}>
           {stats.map((stat) => (
             <FilterStatCard
               key={stat.filter}
@@ -349,15 +516,17 @@ function SolicitacoesFerramentasPage() {
           <CardHeader className={cadastroListClasses.cardHeader}>
             <div className={cadastroListClasses.cardHeaderRow}>
               <div className={cadastroListClasses.cardHeaderIconRow}>
-                <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                  <Wrench className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                  <ListHeaderIcon
+                    className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`}
+                  />
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                    Fila de atendimento
+                    {listHeader.title}
                   </h2>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Avance as etapas do atendimento
+                    {listHeader.subtitle}
                   </p>
                 </div>
               </div>
@@ -423,17 +592,9 @@ function SolicitacoesFerramentasPage() {
                           </ListRowNavigableLabel>
                         </td>
                         <td className={cadastroListClasses.tdTruncate}>
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-gray-900 dark:text-gray-100">
-                              {row.titulo}
-                            </p>
-                            <p className="truncate text-xs text-gray-500">
-                              {row.obra}
-                              {row.logisticsMode
-                                ? ` · ${formatToolRentalLogistics(row.logisticsMode)}`
-                                : ''}
-                            </p>
-                          </div>
+                          <p className="truncate font-medium text-gray-900 dark:text-gray-100">
+                            {row.titulo}
+                          </p>
                         </td>
                         <td className={cadastroListClasses.tdCenter}>
                           {formatToolRentalDemand(row.demandType)}
@@ -446,11 +607,19 @@ function SolicitacoesFerramentasPage() {
                           {formatDateOnly(row.periodoInicio)} – {formatDateOnly(row.periodoFim)}
                         </td>
                         <td className={cadastroListClasses.tdCenter}>
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${toolRentalStatusBadgeClass(row.status)}`}
-                          >
-                            {formatToolRentalStatus(row.status)}
-                          </span>
+                          {(() => {
+                            const displayStatus = resolveToolRentalDisplayStatus(
+                              row.status,
+                              row.receivedAt,
+                            );
+                            return (
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${toolRentalStatusBadgeClass(displayStatus)}`}
+                              >
+                                {formatToolRentalStatus(displayStatus)}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <RowActionMenuCell
                           isOpen={isRowMenuOpen(row.id)}
@@ -487,10 +656,25 @@ function SolicitacoesFerramentasPage() {
           }}
           title={selected ? `Solicitação #${selected.code}` : 'Solicitação'}
           size="lg"
+          headerClassName="!border-b-0 !pb-2"
+          contentClassName="!pt-0"
         >
           {selected ? (
             <div className="space-y-5">
-              <DpRequestHistoryModalTabs activeTab={detailTab} onTabChange={setDetailTab} />
+              <div className="-mx-6">
+                <DetailInfoTabs
+                  tabs={
+                    [
+                      { id: 'detalhes', label: 'Detalhes' },
+                      { id: 'timeline', label: 'Timeline' },
+                    ] satisfies DetailInfoTabItem<DpRequestHistoryModalTab>[]
+                  }
+                  active={detailTab}
+                  onChange={setDetailTab}
+                  ariaLabel="Seções da solicitação"
+                  className="px-6"
+                />
+              </div>
 
               {detailTab === 'timeline' ? (
                 <DpRequestHistoryTimeline
@@ -502,6 +686,16 @@ function SolicitacoesFerramentasPage() {
                   <dl>
                     <DetailRow label="Título" value={selected.titulo} />
                     <DetailRow label="Tipo" value={formatToolRentalDemand(selected.demandType)} />
+                    {selected.renewedFrom ? (
+                      <DetailRow
+                        label={selected.demandType === 'DEVOLUCAO' ? 'Devolução' : 'Renovação'}
+                        value={
+                          selected.demandType === 'DEVOLUCAO'
+                            ? `Devolução da solicitação #${selected.renewedFrom.code}`
+                            : `Renovação da solicitação #${selected.renewedFrom.code}`
+                        }
+                      />
+                    ) : null}
                     <DetailRow
                       label="Modalidade"
                       value={
@@ -514,7 +708,37 @@ function SolicitacoesFerramentasPage() {
                     <DetailRow label="Polo" value={selected.polo} />
                     <DetailRow label="Contrato" value={selected.contrato} />
                     <DetailRow label="Obra" value={selected.obra} />
-                    <DetailRow label="Equipamento" value={selected.equipamento} />
+                    <DetailRow
+                      label="Equipamentos"
+                      value={
+                        Array.isArray(selected.equipamentos) && selected.equipamentos.length > 0 ? (
+                          <ul className="space-y-1.5">
+                            {selected.equipamentos.map((item, index) => (
+                              <li key={`${item.nome}-${index}`}>
+                                <div>
+                                  {item.nome}{' '}
+                                  <span className="font-normal text-gray-500 dark:text-gray-400">
+                                    — qtd. {item.quantidade}
+                                  </span>
+                                </div>
+                                {item.linkSugestao ? (
+                                  <a
+                                    href={item.linkSugestao}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-0.5 block truncate text-xs font-normal text-blue-600 hover:underline dark:text-blue-400"
+                                  >
+                                    {item.linkSugestao}
+                                  </a>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          selected.equipamento || '—'
+                        )
+                      }
+                    />
                     <DetailRow
                       label="Período"
                       value={`${formatDateOnly(selected.periodoInicio)} – ${formatDateOnly(selected.periodoFim)}`}
@@ -526,48 +750,165 @@ function SolicitacoesFerramentasPage() {
                     <DetailRow label="Fornecedor" value={selected.supplierName || '—'} />
                     <DetailRow
                       label="Status"
-                      value={
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${toolRentalStatusBadgeClass(selected.status)}`}
-                        >
-                          {formatToolRentalStatus(selected.status)}
-                        </span>
-                      }
+                      value={(() => {
+                        const displayStatus = resolveToolRentalDisplayStatus(
+                          selected.status,
+                          selected.receivedAt,
+                        );
+                        return (
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${toolRentalStatusBadgeClass(displayStatus)}`}
+                          >
+                            {formatToolRentalStatus(displayStatus)}
+                          </span>
+                        );
+                      })()}
                     />
-                    {selected.ocMirrorUrl ? (
-                      <DetailRow
-                        label="Espelho OC"
-                        value={
-                          <a
-                            href={resolveApiMediaUrl(selected.ocMirrorUrl)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-red-600 underline dark:text-red-400"
+                    {selected.status === 'OPEN' ||
+                    selected.status === 'SUPPLIER_RELATION' ||
+                    selected.status === 'QUOTATION' ? (
+                      <div className="grid gap-1 border-b border-gray-100 py-2.5 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-4 dark:border-gray-700/80">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Nº da SC <span className="text-red-600">*</span>
+                        </dt>
+                        <dd className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <input
+                            value={scNumberDraft}
+                            onChange={(e) => setScNumberDraft(e.target.value)}
+                            onBlur={persistScNumber}
+                            disabled={busy}
+                            placeholder="Ex.: SC-12345"
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={busy || !scNumberDraft.trim()}
+                            onClick={persistScNumber}
+                            className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                           >
-                            {selected.ocMirrorName || 'Abrir arquivo'}
-                          </a>
-                        }
-                      />
-                    ) : null}
-                    {selected.paymentProofUrl ? (
-                      <DetailRow
-                        label="Comprovante"
-                        value={
-                          <a
-                            href={resolveApiMediaUrl(selected.paymentProofUrl)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-red-600 underline dark:text-red-400"
-                          >
-                            {selected.paymentProofName || 'Abrir arquivo'}
-                          </a>
-                        }
-                      />
-                    ) : null}
+                            {saveScNumberMutation.isPending ? 'Salvando…' : 'Salvar SC'}
+                          </button>
+                        </dd>
+                      </div>
+                    ) : (
+                      <DetailRow label="Nº da SC" value={selected.scNumber || '—'} />
+                    )}
                     {selected.suppliesRejectionReason ? (
                       <DetailRow label="Rejeição" value={selected.suppliesRejectionReason} />
                     ) : null}
+                    {selected.receivedAt ? (
+                      <>
+                        <DetailRow
+                          label="Quem recebeu"
+                          value={selected.receivedBy?.name || '—'}
+                        />
+                        <DetailRow
+                          label="Data e hora do recebimento"
+                          value={formatDateTime(selected.receivedAt)}
+                        />
+                        {selected.receiptObservation ? (
+                          <DetailRow label="Observação do recebimento" value={selected.receiptObservation} />
+                        ) : null}
+                      </>
+                    ) : null}
                   </dl>
+
+                  {selected.receivedAt &&
+                  Array.isArray(selected.receiptAttachments) &&
+                  selected.receiptAttachments.length > 0 ? (
+                    <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Anexos do recebimento
+                      </p>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                        {selected.receiptAttachments.map((anexo) => (
+                          <FilePreviewCard
+                            key={anexo.id}
+                            file={{
+                              originalName: anexo.name || 'Arquivo',
+                              fileUrl: anexo.url,
+                            }}
+                            extra="Recebimento"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {(() => {
+                    const anexos = selected.attachments || [];
+                    const ordensCompra = anexosByKind(anexos, 'oc');
+                    const canEditAnexos = !showReject && selected.status === 'QUOTATION';
+                    const showOcSection =
+                      canEditAnexos ||
+                      ordensCompra.length > 0 ||
+                      selected.status === 'QUOTATION' ||
+                      selected.status === 'AWAITING_PAYMENT' ||
+                      selected.status === 'COMPLETED' ||
+                      selected.status === 'AWAITING_RECEIPT';
+
+                    if (!showOcSection) return null;
+
+                    return (
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+                        <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            <Paperclip className="h-4 w-4 text-gray-500" />
+                            Ordem de compra
+                          </div>
+                        </div>
+                        <div className="space-y-3 p-4">
+                          {ordensCompra.length === 0 ? (
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Nenhuma ordem de compra anexada.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                              {ordensCompra.map((anexo) => (
+                                <FilePreviewCard
+                                  key={anexo.id}
+                                  file={{
+                                    originalName: anexo.name || 'Arquivo',
+                                    fileUrl: anexo.url,
+                                  }}
+                                  extra="OC"
+                                  removing={removingAnexoId === anexo.id}
+                                  onRemove={
+                                    canEditAnexos
+                                      ? () => {
+                                          setRemovingAnexoId(anexo.id);
+                                          deleteAnexoMutation.mutate({
+                                            id: selected.id,
+                                            anexoId: anexo.id,
+                                          });
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {canEditAnexos ? (
+                            <FileDropZone
+                              label="Adicionar ordem de compra"
+                              hint="Clique ou arraste imagem/PDF"
+                              uploading={uploadingKind === 'oc'}
+                              disabled={busy && uploadingKind !== 'oc'}
+                              onFiles={(files) => {
+                                const file = files[0];
+                                if (!file) return;
+                                setUploadingKind('oc');
+                                uploadAnexoMutation.mutate({
+                                  id: selected.id,
+                                  file,
+                                });
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {showReject ? (
                     <div className="space-y-3 rounded-xl border border-red-200 bg-red-50/50 p-4 dark:border-red-900/50 dark:bg-red-950/20">
@@ -618,15 +959,35 @@ function SolicitacoesFerramentasPage() {
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => toSupplierMutation.mutate(selected.id)}
+                        onClick={forwardToAnalysis}
                         className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                       >
-                        Encaminhar p/ Relação com Fornecedor
+                        Encaminhar p/ Em análise
                       </button>
                     </div>
                   ) : null}
 
                   {!showReject && selected.status === 'SUPPLIER_RELATION' ? (
+                    <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                      <button
+                        type="button"
+                        onClick={() => setShowReject(true)}
+                        className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+                      >
+                        Rejeitar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={forwardToQuotation}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                      >
+                        Encaminhar p/ Cotação
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {!showReject && selected.status === 'QUOTATION' ? (
                     <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                       <button
                         type="button"
@@ -652,9 +1013,9 @@ function SolicitacoesFerramentasPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => completeMutation.mutate(selected.id)}
-                        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                       >
-                        Finalizar solicitação
+                        Encaminhar p/ Recebimento
                       </button>
                     </div>
                   ) : null}

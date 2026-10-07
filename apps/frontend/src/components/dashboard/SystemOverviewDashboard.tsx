@@ -431,7 +431,9 @@ export function SystemOverviewDashboard() {
     const logOpen = data.logisticsByStatus.find((s) => s.status === 'PENDING')?.count ?? 0;
     const logDone = data.logisticsByStatus.find((s) => s.status === 'COMPLETED')?.count ?? 0;
     const toolsOpen = data.toolRentalsByStatus
-      .filter((s) => ['OPEN', 'SUPPLIER_RELATION', 'AWAITING_PAYMENT'].includes(s.status))
+      .filter((s) =>
+        ['OPEN', 'SUPPLIER_RELATION', 'QUOTATION', 'AWAITING_PAYMENT'].includes(s.status),
+      )
       .reduce((a, s) => a + s.count, 0);
     const toolsDone = data.toolRentalsByStatus
       .filter((s) => ['COMPLETED', 'REJECTED', 'CANCELLED'].includes(s.status))

@@ -49,13 +49,19 @@ function noteForInferredTransition(r: TimelineRequest): string | undefined {
     return r.suppliesRejectionReason || 'Solicitação rejeitada';
   }
   if (r.status === 'SUPPLIER_RELATION') {
-    return r.suppliesApprovalComment || 'Encaminhada para Relação com o Fornecedor';
+    return r.suppliesApprovalComment || 'Encaminhada para Em análise';
+  }
+  if (r.status === 'QUOTATION') {
+    return 'Encaminhada para Cotação';
   }
   if (r.status === 'AWAITING_PAYMENT') {
     return 'Espelho da OC anexado — aguardando pagamento';
   }
+  if (r.status === 'IN_USE') {
+    return 'Recebimento confirmado — equipamento em uso';
+  }
   if (r.status === 'COMPLETED') {
-    return 'Comprovante de pagamento anexado — solicitação finalizada';
+    return 'Solicitação finalizada';
   }
   if (r.status === 'CANCELLED') {
     return 'Solicitação cancelada';

@@ -47,11 +47,56 @@ export async function ensureToolRentalRequestsSchema(prisma: PrismaClient): Prom
         'OPEN',
         'SUPPLIER_RELATION',
         'AWAITING_PAYMENT',
+        'AWAITING_RECEIPT',
         'COMPLETED',
         'REJECTED',
         'CANCELLED'
       );
     EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  // Enum pode existir sem AWAITING_RECEIPT / QUOTATION em bases antigas
+  await prisma.$executeRawUnsafe(`
+    DO $$ BEGIN
+      ALTER TYPE "ToolRentalRequestStatus" ADD VALUE 'AWAITING_RECEIPT';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+      WHEN others THEN NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$ BEGIN
+      ALTER TYPE "ToolRentalRequestStatus" ADD VALUE 'QUOTATION';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+      WHEN others THEN NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$ BEGIN
+      ALTER TYPE "ToolRentalRequestStatus" ADD VALUE 'IN_USE';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+      WHEN others THEN NULL;
+    END $$;
+  `);
+
+  // Legado: recebidas e ainda sem renovação/devolução filha passam a Em uso
+  await prisma.$executeRawUnsafe(`
+    DO $$ BEGIN
+      UPDATE "tool_rental_requests" tr
+      SET "status" = 'IN_USE', "updatedAt" = CURRENT_TIMESTAMP
+      WHERE tr."status" = 'COMPLETED'
+        AND tr."receivedAt" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM "tool_rental_requests" child
+          WHERE child."renewedFromId" = tr."id"
+        );
+    EXCEPTION
+      WHEN others THEN NULL;
     END $$;
   `);
 
@@ -115,4 +160,78 @@ export async function ensureToolRentalRequestsSchema(prisma: PrismaClient): Prom
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "tool_rental_request_events_requestId_createdAt_idx" ON "tool_rental_request_events"("requestId", "createdAt");`
   );
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "attachments" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "equipamentos" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "receivedById" TEXT REFERENCES "users"("id") ON DELETE SET NULL;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "receivedAt" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "renewedFromId" TEXT REFERENCES "tool_rental_requests"("id") ON DELETE SET NULL;
+  `);
+
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "tool_rental_requests_renewedFromId_idx" ON "tool_rental_requests"("renewedFromId");`
+  );
+
+  // Recebimento passou a ser flag (receivedAt), não status principal
+  await prisma.$executeRawUnsafe(`
+    UPDATE "tool_rental_requests"
+    SET "status" = 'COMPLETED', "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "status" = 'AWAITING_RECEIPT';
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "contractId" TEXT REFERENCES "contracts"("id") ON DELETE SET NULL;
+  `);
+
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "tool_rental_requests_contractId_idx" ON "tool_rental_requests"("contractId");`
+  );
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "receiptObservation" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "receiptAttachments" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "scNumber" TEXT;
+  `);
+
+  // Backfill: vincula pelo nome do contrato quando houver match único
+  await prisma.$executeRawUnsafe(`
+    UPDATE "tool_rental_requests" tr
+    SET "contractId" = c.id
+    FROM "contracts" c
+    WHERE tr."contractId" IS NULL
+      AND tr."contrato" IS NOT NULL
+      AND LOWER(TRIM(tr."contrato")) = LOWER(TRIM(c.name))
+      AND (
+        SELECT COUNT(*) FROM "contracts" c2
+        WHERE LOWER(TRIM(c2.name)) = LOWER(TRIM(tr."contrato"))
+      ) = 1
+  `);
 }
