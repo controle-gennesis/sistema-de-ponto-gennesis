@@ -259,6 +259,10 @@ export class PleitoController {
         budgetAmount2: toDec(b.budgetAmount2),
         budgetAmount3: toDec(b.budgetAmount3),
         budgetAmount4: toDec(b.budgetAmount4),
+        budgetValueConfirmed:
+          b.budgetValueConfirmed === true ||
+          b.budgetValueConfirmed === 'true' ||
+          b.budgetValueConfirmed === 1,
         pv: b.pv?.trim() || null,
         ipi: b.ipi?.trim() || null,
         reportsBilling: b.reportsBilling?.trim() || null,
@@ -314,6 +318,12 @@ export class PleitoController {
       if (b.budgetAmount2 !== undefined) data.budgetAmount2 = toDec(b.budgetAmount2);
       if (b.budgetAmount3 !== undefined) data.budgetAmount3 = toDec(b.budgetAmount3);
       if (b.budgetAmount4 !== undefined) data.budgetAmount4 = toDec(b.budgetAmount4);
+      if (b.budgetValueConfirmed !== undefined) {
+        data.budgetValueConfirmed =
+          b.budgetValueConfirmed === true ||
+          b.budgetValueConfirmed === 'true' ||
+          b.budgetValueConfirmed === 1;
+      }
       if (b.pv !== undefined) data.pv = b.pv?.trim() || null;
       if (b.ipi !== undefined) data.ipi = b.ipi?.trim() || null;
       if (b.reportsBilling !== undefined) data.reportsBilling = b.reportsBilling?.trim() || null;

@@ -89,7 +89,7 @@ import {
 } from '@/lib/formatOsSePasta';
 import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 import { isUnbRelatedLabel } from '@/lib/unbBranding';
-import { exportHistoricoOsPdf, exportPleitosOsToXlsx, getOsFaturamentoAcumulado, getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, getOsStatusFaturamento, isOsConcluida, isOsPleiteada100, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck, type PleitoOsExportRow } from '@/lib/pleitoOsExport';
+import { exportHistoricoOsPdf, exportPleitosOsToXlsx, getOsFaturamentoAcumulado, getOsPleiteadoPct, getOsRestanteFaturar, getOsRestantePleitear, getOsStatus, getOsStatusFaturamento, isOsConcluida, isOsPleiteada100, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck, type PleitoOsExportRow } from '@/lib/pleitoOsExport';
 import { exportContractBillingsToXlsx } from '@/lib/contractBillingExport';
 import { productionWeekDate, formatProductionWeekRange } from '@/lib/contractWeeklyProduction';
 import { CONTRACT_PAGE_ACCENTS } from '@/lib/contractPageSurface';
@@ -784,6 +784,53 @@ function calcBillingNetFromGrossFormatted(grossFormatted: string): string {
   return net.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function OsFaturamentoModeRadio({
+  checked,
+  onChange,
+  title,
+  description,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  description: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={`group flex items-start gap-3 rounded-lg border border-gray-200 bg-white p-3 transition-colors dark:border-gray-600 dark:bg-gray-800 ${
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/60'
+      }`}
+    >
+      <div className="relative shrink-0 pt-0.5">
+        <input
+          type="radio"
+          checked={checked}
+          onChange={onChange}
+          disabled={disabled}
+          className="sr-only"
+        />
+        <div
+          className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-200 ${
+            checked
+              ? 'border-red-600 dark:border-red-500'
+              : 'border-gray-300 bg-white group-hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+          }`}
+        >
+          {checked ? <div className="h-2.5 w-2.5 rounded-full bg-red-600 dark:bg-red-500" /> : null}
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{title}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
+      </div>
+    </label>
+  );
+}
+
 function isNetValueMissing(b: ContractBilling): boolean {
   const net = Number(b.netValue || 0);
   if (net === 0) return true;
@@ -1093,6 +1140,12 @@ export default function ContractDetailPage() {
   const [filterProductionResponsible, setFilterProductionResponsible] = useState('');
   const [searchTermBillings, setSearchTermBillings] = useState('');
   const [showBillingFilterModal, setShowBillingFilterModal] = useState(false);
+  const [showOsFaturarModal, setShowOsFaturarModal] = useState(false);
+  const [osFaturarTargets, setOsFaturarTargets] = useState<ContractPleito[]>([]);
+  const [osFaturarMode, setOsFaturarMode] = useState<'saldo' | 'parcial'>('saldo');
+  const [osFaturarInvoice, setOsFaturarInvoice] = useState('');
+  const [osFaturarPartial, setOsFaturarPartial] = useState('');
+  const [isSavingOsFaturar, setIsSavingOsFaturar] = useState(false);
   const [pleitosListPage, setPleitosListPage] = useState(1);
   const [productionListPage, setProductionListPage] = useState(1);
   const [billingsListPage, setBillingsListPage] = useState(1);
@@ -1908,6 +1961,16 @@ export default function ContractDetailPage() {
   const selectedBillingPleitoSaldo = selectedBillingPleito
     ? getPleitoRemainingBalance(selectedBillingPleito, billings)
     : null;
+
+  const selectedBillingOsRestante = useMemo(() => {
+    const os = billingForm.serviceOrder.trim();
+    if (!os || billingForm.pleitoId.trim()) return null;
+    const osRow =
+      allPleitos.find((p) => (p.divSe || '').trim() === os && !isGeneratedPleito(p)) ||
+      allPleitos.find((p) => (p.divSe || '').trim() === os);
+    if (!osRow) return null;
+    return getOsRestanteFaturar(osRow, billings);
+  }, [allPleitos, billingForm.pleitoId, billingForm.serviceOrder, billings]);
 
   const availableYears = useMemo(() => {
     if (!contract) return [];
@@ -3722,14 +3785,138 @@ export default function ContractDetailPage() {
       toast.error(`Valor bruto excede o saldo do pleito (${formatCurrency(selectedBillingPleitoSaldo)})`);
       return;
     }
+    if (
+      !billingForm.pleitoId.trim() &&
+      selectedBillingOsRestante != null &&
+      gross > selectedBillingOsRestante + 0.01
+    ) {
+      toast.error(
+        `Valor bruto excede o restante a faturar da OS (${formatCurrency(selectedBillingOsRestante)})`
+      );
+      return;
+    }
     createBillingMutation.mutate({
       issueDate: billingForm.issueDate,
       invoiceNumber: billingForm.invoiceNumber.trim(),
       serviceOrder: billingForm.serviceOrder.trim(),
-      pleitoId: billingForm.pleitoId.trim(),
+      pleitoId: billingForm.pleitoId.trim() || undefined,
       grossValue: gross,
       netValue: net
     });
+  };
+
+  const openOsFaturarSemPleitoModal = (osList: ContractPleito[]) => {
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
+    const aptas = osList.filter((os) => {
+      const restante = getOsRestanteFaturar(os, billings);
+      return restante != null && restante > 0.01;
+    });
+    if (aptas.length === 0) {
+      toast.error('Nenhuma OS selecionada possui saldo para faturar.');
+      return;
+    }
+    setOsFaturarTargets(aptas);
+    setOsFaturarMode('saldo');
+    setOsFaturarInvoice('');
+    setOsFaturarPartial('');
+    setShowOsFaturarModal(true);
+  };
+
+  const openBillingForOs = (os: ContractPleito) => {
+    openOsFaturarSemPleitoModal([os]);
+  };
+
+  const handleFaturarOsSelecionadas = () => {
+    const ids = Array.from(selectedForPleito);
+    if (ids.length === 0) {
+      toast.error('Selecione ao menos uma OS.');
+      return;
+    }
+    const list = ids
+      .map((id) => pleitos.find((p) => p.id === id) || allPleitos.find((p) => p.id === id))
+      .filter((p): p is ContractPleito => !!p);
+    openOsFaturarSemPleitoModal(list);
+  };
+
+  const osFaturarPartialMax =
+    osFaturarTargets.length === 1 ? getOsRestanteFaturar(osFaturarTargets[0], billings) : null;
+
+  const confirmOsFaturarSemPleito = async () => {
+    if (osFaturarTargets.length === 0) {
+      toast.error('Nenhuma OS selecionada possui saldo para faturar.');
+      return;
+    }
+    const invoice = osFaturarInvoice.trim();
+    if (!invoice) {
+      toast.error('Informe o número da nota fiscal.');
+      return;
+    }
+    const isParcial = osFaturarMode === 'parcial';
+    if (isParcial && osFaturarTargets.length !== 1) {
+      toast.error('Para faturar valor parcial, selecione apenas uma OS por vez.');
+      return;
+    }
+
+    let valorParcial = 0;
+    if (isParcial) {
+      valorParcial = parseCurrencyInput(osFaturarPartial);
+      if (valorParcial <= 0) {
+        toast.error('Informe um valor parcial válido.');
+        return;
+      }
+      const maxSaldo = getOsRestanteFaturar(osFaturarTargets[0], billings) ?? 0;
+      if (valorParcial > maxSaldo + 0.01) {
+        toast.error(`O valor não pode exceder o restante a faturar (${formatCurrency(maxSaldo)}).`);
+        return;
+      }
+    }
+
+    const issueDate = toInputDate(new Date());
+    const targets = isParcial ? [osFaturarTargets[0]] : osFaturarTargets;
+
+    setIsSavingOsFaturar(true);
+    try {
+      await Promise.all(
+        targets.map(async (os) => {
+          const restante = getOsRestanteFaturar(os, billings) ?? 0;
+          const gross = isParcial ? valorParcial : restante;
+          if (gross <= 0.01) return;
+          const net = usesUnbBillingNetFactor
+            ? Math.round(gross * BILLING_NET_FROM_GROSS_RATE * 100) / 100
+            : gross;
+          await api.post(`/contracts/${contractId}/billings`, {
+            issueDate,
+            invoiceNumber: invoice,
+            serviceOrder: (os.divSe || '').trim(),
+            grossValue: gross,
+            netValue: net,
+          });
+        })
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] }),
+        queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] }),
+      ]);
+      setShowOsFaturarModal(false);
+      setOsFaturarTargets([]);
+      setOsFaturarInvoice('');
+      setOsFaturarPartial('');
+      toast.success(
+        isParcial
+          ? `OS faturada parcialmente (${formatCurrency(valorParcial)}) com NF ${invoice}.`
+          : `${targets.length} OS faturada(s) com NF ${invoice}.`
+      );
+    } catch (err: unknown) {
+      toast.error(
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+          'Não foi possível faturar a(s) OS selecionada(s).'
+      );
+    } finally {
+      setIsSavingOsFaturar(false);
+    }
   };
 
   const handleBillingEditSubmit = (e: React.FormEvent) => {
@@ -5547,6 +5734,13 @@ export default function ContractDetailPage() {
                     icon: <CheckCircle2 className={OS_TOOLBAR_BTN_ICON} />,
                   },
                   {
+                    label: 'Faturar (sem pleito)',
+                    onClick: handleFaturarOsSelecionadas,
+                    disabled: !canCreateContrato,
+                    disabledTitle: 'Sem permissão para faturar',
+                    icon: <Plus className={OS_TOOLBAR_BTN_ICON} />,
+                  },
+                  {
                     label: 'Gerar cronograma mensal',
                     onClick: handleGerarCronogramaMensal,
                     icon: <CalendarDays className={OS_TOOLBAR_BTN_ICON} />,
@@ -5625,6 +5819,7 @@ export default function ContractDetailPage() {
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor pleiteado</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a pleitear</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a faturar</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Pleito</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Faturamento</th>
                         <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
@@ -5636,6 +5831,7 @@ export default function ContractDetailPage() {
                         const osStatusFat = getOsStatusFaturamento(p, billingsForOs);
                         const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
                         const restantePleitear = getOsRestantePleitear(p, allPleitos);
+                        const restanteFaturar = getOsRestanteFaturar(p, billingsForOs);
                         const isSelected = selectedForPleito.has(p.id);
                         const linkedPleitos = getOsLinkedPleitos(allPleitos, p.divSe);
                         return (
@@ -5729,6 +5925,9 @@ export default function ContractDetailPage() {
                           <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
                             {p.budget ? formatCurrency(Number(p.budget)) : '-'}
                           </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
+                            {restanteFaturar != null ? formatCurrency(restanteFaturar) : '—'}
+                          </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
                             <span
                               className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
@@ -5784,6 +5983,20 @@ export default function ContractDetailPage() {
                               : 'Sem permissão para gerar pleito',
                           icon: (
                             <FileDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ),
+                        },
+                        {
+                          label: 'Faturar (sem pleito)',
+                          onClick: () =>
+                            openBillingForOs(pleitoRowForActionMenu as ContractPleito),
+                          disabled:
+                            !canCreateContrato ||
+                            isOsConcluida(pleitoRowForActionMenu, billingsForOs),
+                          disabledTitle: isOsConcluida(pleitoRowForActionMenu, billingsForOs)
+                            ? 'OS já faturada 100%'
+                            : 'Sem permissão para faturar',
+                          icon: (
+                            <Plus className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                           ),
                         },
                         {
@@ -7119,6 +7332,103 @@ export default function ContractDetailPage() {
           {editingProductionConfirmUi}
 
           {/* Modal Cadastrar Faturamento */}
+          <Modal
+            isOpen={showOsFaturarModal}
+            onClose={() => {
+              if (isSavingOsFaturar) return;
+              setShowOsFaturarModal(false);
+            }}
+            title="Faturar OS selecionadas"
+            size="md"
+            elevated
+          >
+            <div className="space-y-4">
+              <div>
+                <p className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Tipo de faturamento
+                </p>
+                <div className="space-y-2">
+                  <OsFaturamentoModeRadio
+                    checked={osFaturarMode === 'saldo'}
+                    onChange={() => setOsFaturarMode('saldo')}
+                    title="Faturar saldo total"
+                    description="Quita o restante a faturar de cada OS selecionada (100% ou saldo pendente)."
+                  />
+                  <OsFaturamentoModeRadio
+                    checked={osFaturarMode === 'parcial'}
+                    onChange={() => setOsFaturarMode('parcial')}
+                    disabled={osFaturarTargets.length !== 1}
+                    title="Faturar valor parcial"
+                    description={
+                      osFaturarTargets.length !== 1
+                        ? 'Disponível apenas com uma OS selecionada.'
+                        : osFaturarPartialMax != null
+                          ? `Informe um valor até ${formatCurrency(osFaturarPartialMax)}.`
+                          : 'Informe o valor a faturar.'
+                    }
+                  />
+                </div>
+              </div>
+
+              {osFaturarMode === 'parcial' && osFaturarTargets.length === 1 ? (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Valor a faturar
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                      R$
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={osFaturarPartial}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, '');
+                        setOsFaturarPartial(formatBillingCurrencyFromDigits(digits));
+                      }}
+                      placeholder="0,00"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Número da Nota Fiscal
+                </label>
+                <input
+                  type="text"
+                  value={osFaturarInvoice}
+                  onChange={(e) => setOsFaturarInvoice(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void confirmOsFaturarSemPleito();
+                  }}
+                  placeholder="Ex: 000123"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowOsFaturarModal(false)}
+                  disabled={isSavingOsFaturar}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void confirmOsFaturarSemPleito()}
+                  disabled={isSavingOsFaturar}
+                >
+                  {isSavingOsFaturar ? 'Faturando...' : 'Confirmar'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
           {showBillingModal && (
             <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={requestCloseBillingModal} />
@@ -7187,7 +7497,9 @@ export default function ContractDetailPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Pleito vinculado</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Pleito vinculado <span className="font-normal text-gray-500">(opcional)</span>
+                    </label>
                     <StringSingleSelectDropdown
                       value={billingForm.pleitoId}
                       onChange={(pleitoId) => {
@@ -7200,19 +7512,23 @@ export default function ContractDetailPage() {
                       }}
                       options={pleitosForBillingSelectOptions}
                       allowEmpty
-                      placeholder="Selecionar pleito"
+                      emptyOptionLabel="Sem pleito (faturar só pela OS)"
+                      placeholder="Sem pleito (faturar só pela OS)"
                       searchPlaceholder="Pesquisar pleito..."
-                      emptyOptionsMessage="Nenhum pleito apto para faturamento."
+                      emptyOptionsMessage="Nenhum pleito apto — você pode faturar só pela OS."
                       className="w-full"
                     />
-                    {billingForm.serviceOrder.trim() && pleitosForBillingForm.length === 0 && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                        Nenhum pleito apto para faturamento nesta OS. Gere o pleito no histórico antes de lançar o faturamento.
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Pode pular o pleito: selecione a OS e lance o faturamento normalmente.
+                    </p>
+                    {selectedBillingPleitoSaldo != null && billingForm.pleitoId && (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Saldo disponível do pleito: {formatCurrency(selectedBillingPleitoSaldo)}
                       </p>
                     )}
-                    {selectedBillingPleitoSaldo != null && billingForm.pleitoId && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Saldo disponível do pleito: {formatCurrency(selectedBillingPleitoSaldo)}
+                    {!billingForm.pleitoId.trim() && selectedBillingOsRestante != null && (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Restante a faturar da OS: {formatCurrency(selectedBillingOsRestante)}
                       </p>
                     )}
                   </div>
@@ -7671,6 +7987,10 @@ export default function ContractDetailPage() {
             contract={contract}
             allPleitos={allPleitos}
             billings={billings}
+            onBudgetConfirmChange={() => {
+              void queryClient.invalidateQueries({ queryKey: ['pleito', selectedPleitoId] });
+              void queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
+            }}
           />
           {selectedPleitoModalConfirmUi}
 

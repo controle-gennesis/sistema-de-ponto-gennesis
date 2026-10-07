@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
 import { assertContractAccess } from '../lib/contractAccess';
 import {
+  assertOsBillingAmountWithoutPleito,
   assertPleitoBillingAmount,
   syncPleitoFromBillings
 } from '../utils/contractBillingPleitoSync';
@@ -102,6 +103,8 @@ export class ContractBillingController {
       const billing = await prisma.$transaction(async (tx) => {
         if (pleito) {
           await assertPleitoBillingAmount(tx, pleito, contractId, gross);
+        } else if (serviceOrderTrimmed) {
+          await assertOsBillingAmountWithoutPleito(tx, contractId, serviceOrderTrimmed, gross);
         }
 
         const created = await tx.contractBilling.create({

@@ -1584,14 +1584,19 @@ function findLotBreakdownColumnIndex(headers: string[], lotColumn: LotBreakdownC
       return key.includes('contrato') || key.includes('centro de custo') || key === 'centro custo';
     });
   }
-  if (lotColumn === 'lotes') {
-    const exact = headers.findIndex((header) => normalizeHeaderKey(header) === 'lotes');
+  // "lote" e "lotes" são sempre equivalentes (singular/plural da mesma coluna).
+  if (lotColumn === 'lote' || lotColumn === 'lotes') {
+    const exact = headers.findIndex((header) => {
+      const key = normalizeHeaderKey(header);
+      return key === 'lote' || key === 'lotes';
+    });
     if (exact >= 0) return exact;
-    return headers.findIndex((header) => normalizeHeaderKey(header).includes('lotes'));
+    return headers.findIndex((header) => {
+      const key = normalizeHeaderKey(header);
+      return key.includes('lote') || key.includes('lotes');
+    });
   }
-  const exact = headers.findIndex((header) => normalizeHeaderKey(header) === 'lote');
-  if (exact >= 0) return exact;
-  return headers.findIndex((header) => normalizeHeaderKey(header).includes('lote'));
+  return -1;
 }
 
 function computeLotFaturamentoForTab(
