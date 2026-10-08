@@ -317,7 +317,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
       correctionNote: typeof correctionNote === 'string' ? correctionNote : undefined,
     }, req.user.id, !!req.user.isAdmin);
     const message =
-      status === 'IN_REVIEW' && request.status === 'APPROVED'
+      status === 'IN_REVIEW' && request?.status === 'APPROVED'
         ? 'Só os itens que estão no mapa foram para correção de quantidade. A ordem de compra não muda.'
         : 'Status atualizado';
     res.json({ success: true, data: request, message });
