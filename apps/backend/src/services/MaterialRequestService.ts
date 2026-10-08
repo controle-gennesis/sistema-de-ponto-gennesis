@@ -7,7 +7,10 @@ import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import {
   assertUserCanApproveMaterialRequestForCostCenter,
 } from '../lib/rmApprovalAccess';
-import { isOcStatusCoveringRmItems } from '../lib/rmProcurementCoverage';
+import {
+  isOcStatusCoveringRmItems,
+  OC_STATUSES_COVERING_RM_ITEMS,
+} from '../lib/rmProcurementCoverage';
 import {
   getRmApprovalNotifyUserIds,
   notifyNewPendingApprovalWhatsApp,
@@ -1147,21 +1150,22 @@ export class MaterialRequestService {
           'Apenas requisições pendentes ou aprovadas (sem OC) podem ser enviadas para correção'
         );
       }
-      if (existing.status === 'APPROVED') {
-        const ocCount = await prisma.purchaseOrder.count({
-          where: { materialRequestId: id },
-        });
-        if (ocCount > 0) {
-          throw new Error(
-            'Não é possível enviar para correção: esta RM já possui ordem de compra vinculada'
-          );
-        }
-      }
       if (!correctionNote) {
         throw new Error('Informe o que precisa ser alterado na correção');
       }
       if (correctionNote.length > 4000) {
         throw new Error('Observação muito longa (máx. 4000 caracteres)');
+      }
+      if (existing.status === 'APPROVED') {
+        const ocCount = await prisma.purchaseOrder.count({
+          where: {
+            materialRequestId: id,
+            status: { in: [...OC_STATUSES_COVERING_RM_ITEMS] },
+          },
+        });
+        if (ocCount > 0) {
+          return this.sendOpenItemsToQuantityCorrection(id, correctionNote, userId);
+        }
       }
     }
 
@@ -1265,6 +1269,109 @@ export class MaterialRequestService {
     }
 
     return updated;
+  }
+
+  /**
+   * RM aprovada com OC em andamento: só os itens que voltaram ao mapa
+   * vão para correção de quantidade. A RM e a OC não mudam de status.
+   */
+  async sendOpenItemsToQuantityCorrection(id: string, correctionNote: string, userId: string) {
+    const covered = await prisma.purchaseOrderItem.findMany({
+      where: {
+        materialRequestItemId: { not: null },
+        purchaseOrder: {
+          materialRequestId: id,
+          status: { in: [...OC_STATUSES_COVERING_RM_ITEMS] },
+        },
+      },
+      select: { materialRequestItemId: true },
+    });
+    const coveredIds = covered
+      .map((row) => row.materialRequestItemId)
+      .filter((itemId): itemId is string => Boolean(itemId));
+
+    const openItems = await prisma.materialRequestItem.findMany({
+      where: {
+        materialRequestId: id,
+        status: { notIn: ['CANCELLED', 'IN_REVIEW'] },
+        ...(coveredIds.length ? { id: { notIn: coveredIds } } : {}),
+      },
+      select: { id: true },
+    });
+    if (openItems.length === 0) {
+      throw new Error(
+        'Não é possível enviar para correção: os itens desta RM ainda estão em ordem de compra'
+      );
+    }
+
+    await prisma.materialRequestItem.updateMany({
+      where: { id: { in: openItems.map((item) => item.id) } },
+      data: { status: 'IN_REVIEW' },
+    });
+
+    await prisma.materialRequestComment.create({
+      data: {
+        materialRequestId: id,
+        userId,
+        content: `Correção de quantidade só dos itens fora da OC: ${correctionNote}`,
+      },
+    });
+
+    return this.getMaterialRequestById(id);
+  }
+
+  /**
+   * Solicitante ajusta a quantidade de um item em correção e devolve ao mapa.
+   */
+  async correctOpenItemQuantity(
+    requestId: string,
+    itemId: string,
+    quantity: number,
+    userId: string,
+    isAdmin = false
+  ) {
+    const existing = await prisma.materialRequest.findUnique({
+      where: { id: requestId },
+      select: { id: true, requestedBy: true, status: true },
+    });
+    if (!existing) throw new Error('Requisição não encontrada');
+    if (existing.requestedBy !== userId && !isAdmin) {
+      throw new Error('Apenas o solicitante ou o administrador pode corrigir a quantidade');
+    }
+
+    const item = await prisma.materialRequestItem.findFirst({
+      where: { id: itemId, materialRequestId: requestId },
+    });
+    if (!item) throw new Error('Item não encontrado');
+    if (item.status !== 'IN_REVIEW') {
+      throw new Error('Este item não está em correção de quantidade');
+    }
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error('Quantidade deve ser maior que zero');
+    }
+
+    const unitPrice = Number(item.unitPrice ?? 0);
+    const totalPrice = Number.isFinite(unitPrice) ? Math.round(unitPrice * qty * 100) / 100 : 0;
+
+    await prisma.materialRequestItem.update({
+      where: { id: itemId },
+      data: {
+        quantity: qty,
+        totalPrice,
+        status: 'APPROVED',
+      },
+    });
+
+    await prisma.materialRequestComment.create({
+      data: {
+        materialRequestId: requestId,
+        userId,
+        content: `Quantidade corrigida para ${qty} ${item.unit}. O item voltou ao mapa de cotação.`,
+      },
+    });
+
+    return this.getMaterialRequestById(requestId);
   }
 
   /**

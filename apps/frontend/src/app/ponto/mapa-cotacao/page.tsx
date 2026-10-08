@@ -853,7 +853,10 @@ export default function MapaCotacaoPage() {
   const selectedRequest = useMemo(() => {
     if (!selectedRequestRaw) return null;
     const openItems = (selectedRequestRaw.items ?? []).filter(
-      (i) => !coveredItemIdsForSelected.has(i.id) && i.status !== 'CANCELLED'
+      (i) =>
+        !coveredItemIdsForSelected.has(i.id) &&
+        i.status !== 'CANCELLED' &&
+        i.status !== 'IN_REVIEW'
     );
     return { ...selectedRequestRaw, items: openItems };
   }, [selectedRequestRaw, coveredItemIdsForSelected]);
@@ -1100,10 +1103,12 @@ export default function MapaCotacaoPage() {
         status: 'IN_REVIEW',
         correctionNote: note,
       });
-      return res.data;
+      return res.data as { message?: string };
     },
-    onSuccess: async () => {
-      toast.success('RM enviada para correção. O solicitante poderá editar os itens.');
+    onSuccess: async (data) => {
+      toast.success(
+        data?.message || 'RM enviada para correção. O solicitante poderá editar os itens.'
+      );
       setShowCorrectionConfirm(false);
       setCorrectionNote('');
       clearMapSelection();
@@ -2392,9 +2397,10 @@ export default function MapaCotacaoPage() {
             confirmBeforeClose={false}
           >
             <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-              Deseja enviar a {selectedRequestLabel || 'RM selecionada'} para correção? O solicitante
-              poderá editar, adicionar ou retirar itens. Depois precisará reenviar e a RM será
-              aprovada novamente.
+              Deseja enviar a {selectedRequestLabel || 'RM selecionada'} para correção? Se ela ainda
+              tiver outros itens em uma ordem de compra, só os itens deste mapa vão para correção
+              de quantidade. A ordem de compra não muda. O solicitante ajusta a quantidade e o item
+              volta ao mapa.
             </p>
             <div className="mb-6">
               <label

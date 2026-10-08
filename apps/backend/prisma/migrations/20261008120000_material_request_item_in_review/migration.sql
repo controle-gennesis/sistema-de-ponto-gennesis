@@ -1,0 +1,1 @@
+ALTER TYPE "MaterialRequestItemStatus" ADD VALUE IF NOT EXISTS 'IN_REVIEW';

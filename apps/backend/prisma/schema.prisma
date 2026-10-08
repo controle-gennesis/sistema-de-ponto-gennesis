@@ -1910,6 +1910,7 @@ enum MaterialRequestItemStatus {
   APPROVED // Aprovado
   PURCHASED // Comprado
   DELIVERED // Entregue
+  IN_REVIEW // Correção de quantidade — item fora da OC, RM continua aprovada
   CANCELLED // Cancelado
 }
 

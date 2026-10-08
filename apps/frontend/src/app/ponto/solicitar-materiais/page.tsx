@@ -1239,6 +1239,35 @@ function SolicitarMateriaisPage() {
     },
   });
 
+  const correctItemQtyMutation = useMutation({
+    mutationFn: async ({
+      requestId,
+      itemId,
+      quantity,
+    }: {
+      requestId: string;
+      itemId: string;
+      quantity: number;
+    }) => {
+      const res = await api.patch(
+        `/material-requests/${requestId}/items/${itemId}/correct-quantity`,
+        { quantity }
+      );
+      return res.data;
+    },
+    onSuccess: async (_data, { requestId }) => {
+      toast.success('Quantidade atualizada. O item voltou ao mapa de cotação.');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-request-detail', requestId] }),
+        queryClient.invalidateQueries({ queryKey: ['material-requests-approved-map'] }),
+      ]);
+    },
+    onError: (error: { response?: { data?: { message?: string } } }) => {
+      toast.error(error.response?.data?.message || 'Não foi possível atualizar a quantidade');
+    },
+  });
+
   const cancelRmItemMutation = useMutation({
     mutationFn: async ({ requestId, itemId }: { requestId: string; itemId: string }) => {
       const res = await api.patch(`/material-requests/${requestId}/items/${itemId}/cancel`);
@@ -3050,6 +3079,7 @@ function SolicitarMateriaisPage() {
                       requestedAt?: string;
                       createdAt?: string;
                       status?: string;
+                      requestedBy?: string;
                       description?: string;
                       obra?: string;
                       serviceOrder?: string;
@@ -3267,7 +3297,44 @@ function SolicitarMateriaisPage() {
                                           ) : null}
                                         </td>
                                         <td className="whitespace-nowrap px-2 py-3 text-right align-top tabular-nums">
-                                          {Number(item.quantity)}
+                                          {item.status === 'IN_REVIEW' &&
+                                          item.id &&
+                                          detailViewId &&
+                                          (d.requestedBy === userId || isElevatedUser) ? (
+                                            <form
+                                              className="flex items-center justify-end gap-2"
+                                              onSubmit={(e) => {
+                                                e.preventDefault();
+                                                const raw = new FormData(e.currentTarget).get('quantity');
+                                                const quantity = Number(String(raw).replace(',', '.'));
+                                                if (!Number.isFinite(quantity) || quantity <= 0) {
+                                                  toast.error('Informe uma quantidade maior que zero');
+                                                  return;
+                                                }
+                                                correctItemQtyMutation.mutate({
+                                                  requestId: detailViewId,
+                                                  itemId: item.id!,
+                                                  quantity,
+                                                });
+                                              }}
+                                            >
+                                              <input
+                                                name="quantity"
+                                                defaultValue={Number(item.quantity)}
+                                                inputMode="decimal"
+                                                className="w-20 rounded-md border border-amber-400 bg-white px-2 py-1 text-right text-sm dark:bg-gray-900"
+                                              />
+                                              <button
+                                                type="submit"
+                                                disabled={correctItemQtyMutation.isPending}
+                                                className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                                              >
+                                                Salvar
+                                              </button>
+                                            </form>
+                                          ) : (
+                                            Number(item.quantity)
+                                          )}
                                         </td>
                                         <td className="whitespace-nowrap px-2 py-3 text-center align-top">
                                           {item.unit || '—'}

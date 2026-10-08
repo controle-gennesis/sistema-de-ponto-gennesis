@@ -316,7 +316,11 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
       rejectionReason: undefined,
       correctionNote: typeof correctionNote === 'string' ? correctionNote : undefined,
     }, req.user.id, !!req.user.isAdmin);
-    res.json({ success: true, data: request, message: 'Status atualizado' });
+    const message =
+      status === 'IN_REVIEW' && request.status === 'APPROVED'
+        ? 'Só os itens que estão no mapa foram para correção de quantidade. A ordem de compra não muda.'
+        : 'Status atualizado';
+    res.json({ success: true, data: request, message });
   } catch (error) {
     if (error instanceof Error && /Apenas |Aprove apenas|Não é possível|Sem permissão|Informe o que|Observação muito/.test(error.message)) {
       const status = /Sem permissão/.test(error.message) ? 403 : 400;
@@ -556,6 +560,34 @@ router.patch(
     }
   }
 );
+
+/** Solicitante corrige a quantidade de um item fora da OC e devolve ao mapa. */
+router.patch('/:id/items/:itemId/correct-quantity', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const { id, itemId } = req.params;
+    const quantity = Number(req.body?.quantity);
+    const request = await materialRequestService.correctOpenItemQuantity(
+      id,
+      itemId,
+      quantity,
+      req.user.id,
+      !!req.user.isAdmin
+    );
+    res.json({
+      success: true,
+      data: request,
+      message: 'Quantidade atualizada. O item voltou ao mapa de cotação.',
+    });
+  } catch (error) {
+    if (error instanceof Error && /não encontrad|Não é possível|Quantidade|Apenas o solicitante|não está/.test(error.message)) {
+      const status = /Apenas o solicitante/.test(error.message) ? 403 : 400;
+      res.status(status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
 
 /** Cancela um item da RM que ainda não está em OC ativa. */
 router.patch('/:id/items/:itemId/cancel', async (req: AuthRequest, res: Response, next: NextFunction) => {

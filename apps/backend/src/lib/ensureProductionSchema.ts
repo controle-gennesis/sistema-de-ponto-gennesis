@@ -451,6 +451,28 @@ async function ensurePurchaseOrderStageApprovals(prisma: PrismaClient): Promise<
   }
 }
 
+async function ensureMaterialRequestItemInReviewStatus(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      INNER JOIN pg_type t ON e.enumtypid = t.oid
+      WHERE t.typname = 'MaterialRequestItemStatus'
+        AND e.enumlabel = 'IN_REVIEW'
+    ) AS "exists"
+  `;
+  if (rows[0]?.exists) return;
+  console.warn('[Schema] Enum MaterialRequestItemStatus sem IN_REVIEW — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TYPE "MaterialRequestItemStatus" ADD VALUE 'IN_REVIEW';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensureFinancialControlAguardarPagamentoStatus(prisma: PrismaClient): Promise<void> {
   const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
     SELECT EXISTS (
@@ -3003,6 +3025,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureEmployeePhoneColumn(prisma);
     await ensureVehicleReservationSourceWhatsAppPhone(prisma);
     await ensureVehicleReservationBaixaCheckRemindedAt(prisma);
+    await ensureMaterialRequestItemInReviewStatus(prisma);
     await ensureUserProfileSetupColumn(prisma);
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);
