@@ -2033,6 +2033,60 @@ function mesclarArvoreServicosOrcafascio(
   return { servicos, chaveParaNovaKey, chavesNovas };
 }
 
+function centavosOrcamento(n: number | undefined | null): number {
+  if (n == null || !Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
+/** Composição, preço, descrição, quantidade importada ou total diferentes do que está gravado. */
+function orcamentoOrcafascioDiverge(
+  atuais: ServicoPadrao[],
+  novos: ServicoPadrao[],
+  totaisAtuais: { semBdi: number; bdi: number; comBdi: number } | undefined,
+  totaisNovos: { totalSemBdi: number; totalBdi: number; totalComBdi: number }
+): boolean {
+  const centavosDiferem = (gravado: number | undefined, vindo: number | undefined) => {
+    const a = centavosOrcamento(gravado);
+    if (a === 0) return false;
+    return a !== centavosOrcamento(vindo);
+  };
+  const snapDe = (servicos: ServicoPadrao[]) => {
+    const map = new Map<string, ItemServico & { servico: string; subtitulo: string }>();
+    for (const s of servicos) {
+      for (const sub of s.subtitulos) {
+        for (const it of sub.itens) {
+          map.set(it.chave, { ...it, servico: s.nome.trim(), subtitulo: sub.nome.trim() });
+        }
+      }
+    }
+    return map;
+  };
+  const a = snapDe(atuais);
+  const b = snapDe(novos);
+  if (a.size !== b.size) return true;
+  for (const [chave, novo] of b) {
+    const atual = a.get(chave);
+    if (!atual) return true;
+    if (atual.servico !== novo.servico || atual.subtitulo !== novo.subtitulo) return true;
+    if ((atual.descricao ?? '').trim() !== (novo.descricao ?? '').trim()) return true;
+    const unidadeAtual = (atual.unidade ?? '').trim();
+    if (unidadeAtual && unidadeAtual !== (novo.unidade ?? '').trim()) return true;
+    if (centavosOrcamento(atual.precoUnitario) !== centavosOrcamento(novo.precoUnitario)) return true;
+    if (centavosDiferem(atual.precoUnitarioComBdi, novo.precoUnitarioComBdi)) return true;
+    if (centavosDiferem(atual.maoDeObraUnitario, novo.maoDeObraUnitario)) return true;
+    if (centavosDiferem(atual.materialUnitario, novo.materialUnitario)) return true;
+    if (centavosDiferem(atual.quantidadeImportada, novo.quantidadeImportada)) return true;
+    if (centavosDiferem(atual.totalSemBdiImportado, novo.totalSemBdiImportado)) return true;
+    if (centavosDiferem(atual.totalComBdiImportado, novo.totalComBdiImportado)) return true;
+  }
+  if (!totaisAtuais) return false;
+  return (
+    centavosDiferem(totaisAtuais.semBdi, totaisNovos.totalSemBdi) ||
+    centavosDiferem(totaisAtuais.bdi, totaisNovos.totalBdi) ||
+    centavosDiferem(totaisAtuais.comBdi, totaisNovos.totalComBdi)
+  );
+}
+
 type NomeOrcafascioEditado = { tipo: 'Título' | 'Subtítulo'; de: string; para: string };
 
 function snapshotNomesServicosOrcamento(svcs: ServicoPadrao[]): {
@@ -7421,6 +7475,7 @@ export function OrcamentoPageView({
     nome: string;
   } | null>(null);
   const [novaVersaoConfirmOpen, setNovaVersaoConfirmOpen] = useState(false);
+  const [atualizarOrcafascioConfirmOpen, setAtualizarOrcafascioConfirmOpen] = useState(false);
   const [criandoVersao, setCriandoVersao] = useState(false);
   const [excluindoOrcamento, setExcluindoOrcamento] = useState(false);
   /** Chaves `t:<servicoId>` / `s:<blocoKey>` das linhas de título/subtítulo recolhidas na montagem. */
@@ -10470,6 +10525,10 @@ export function OrcamentoPageView({
       return;
     }
     if (isAtualizandoOrcafascio) return;
+    if (versaoCongelada) {
+      toast.error('Esta revisão está congelada. Abra a versão atual para atualizar.');
+      return;
+    }
     setIsAtualizandoOrcafascio(true);
     if (orcamentoAutosaveTimerRef.current) {
       clearTimeout(orcamentoAutosaveTimerRef.current);
@@ -10517,6 +10576,12 @@ export function OrcamentoPageView({
         return;
       }
 
+      const finApi = extrairMetaFinanceiraOrcafascio(linhas);
+      if (!orcamentoOrcafascioDiverge(servicos, servicosNovos, meta.totaisOrcafascio, finApi)) {
+        toast.success('Orçamento já estava igual ao Orçafascio.');
+        return;
+      }
+
       const chavesAntes = coletarChavesComposicao(servicos);
       const chavesDepois = coletarChavesComposicao(servicosNovos);
       let adicionadas = 0;
@@ -10528,6 +10593,17 @@ export function OrcamentoPageView({
         servicos,
         servicosNovos
       );
+
+      const sessaoAtual = sessaoRef.current ?? sessaoVazia();
+      await saveOrcamentoToApi(
+        centroCustoId,
+        orcamentoAtivoId,
+        montarPayloadSalvarOrcamento(servicos, imports, sessaoAtual)
+      );
+      const entry = await criarVersaoOrcamentoApi(centroCustoId, orcamentoAtivoId);
+      const versaoNova = entry.versao ?? (meta.versao ?? 1) + 1;
+      const statusNova: OrcamentoStatusAprovacao =
+        meta.statusAprovacao === 'em_correcao' ? 'em_correcao' : 'rascunho';
 
       if (compsNovas.length > 0) {
         const porChave = new Map(composicoes.map((c) => [c.chave, c]));
@@ -10565,11 +10641,11 @@ export function OrcamentoPageView({
       const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
       const valoresManuaisNext = remapearRegistroPorChave(moMatManualPorItem, chaveParaNovaKey);
 
-      const finApi = extrairMetaFinanceiraOrcafascio(linhas);
       const orcafascioDadosRefresh =
         acharCabecalhoOrcafascioNaCache(budgetId, meta.osNumeroPasta) ?? meta.orcafascioDados;
+      const { fichaDemandaApprovalId: _aprovacaoAnterior, ...metaSemAprovacao } = meta;
       const nextMeta: OrcamentoMeta = {
-        ...meta,
+        ...metaSemAprovacao,
         orcafascioBudgetId: budgetId,
         ...(orcafascioDadosRefresh ? { orcafascioDados: orcafascioDadosRefresh } : {}),
         ...(finApi.totalComBdi > 0
@@ -10581,6 +10657,12 @@ export function OrcamentoPageView({
               },
             }
           : {}),
+        familiaId: entry.familiaId,
+        versao: versaoNova,
+        congelado: false,
+        origemVersaoId: orcamentoAtivoId,
+        revisaoCount: versaoNova,
+        statusAprovacao: statusNova,
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosMesclados);
@@ -10607,9 +10689,17 @@ export function OrcamentoPageView({
 
       await saveOrcamentoToApi(
         centroCustoId,
-        orcamentoAtivoId,
+        entry.id,
         montarPayloadSalvarOrcamento(servicosParaApi, imports, nextSessao)
       );
+
+      setListaOrcamentos((prev) => {
+        const marked = prev.map((o) =>
+          o.id === orcamentoAtivoId ? { ...normalizeListaVersaoFields(o), congelado: true } : o
+        );
+        return [entry, ...marked.filter((o) => o.id !== entry.id)];
+      });
+      orcamentosListaCache.delete(centroCustoId);
 
       setServicos(servicosParaApi);
       setSubtitulosNoOrcamento(subtitulosNoOrcamentoNext);
@@ -10626,27 +10716,55 @@ export function OrcamentoPageView({
       setInsumosAnaliticoManuais(manuaisNext);
       setMoMatManualPorItem(valoresManuaisNext);
       setMeta(nextMeta);
+      setNomeOrcamentoRascunho(entry.nome);
+      setOrcamentoAtivoId(entry.id);
+      navigateEmbeddedOrcamentoPath(entry.id);
 
       const partes: string[] = [];
       if (adicionadas > 0) partes.push(`${adicionadas} nova(s)`);
       if (removidas > 0) partes.push(`${removidas} removida(s)`);
       toast.success(
         partes.length > 0
-          ? `Orçamento atualizado do Orçafascio: ${partes.join(', ')}.`
-          : 'Orçamento já estava igual ao Orçafascio.'
+          ? `Revisão ${formatOrcamentoRevisao(versaoNova)} criada: ${partes.join(', ')}.`
+          : `Revisão ${formatOrcamentoRevisao(versaoNova)} criada com a atualização do Orçafascio.`
       );
-      if (orcamentoAtivoId) {
-        nomesOrcafascioSnapRef.current = {
-          orcamentoId: orcamentoAtivoId,
-          ...snapshotNomesServicosOrcamento(servicosParaApi)
-        };
+      nomesOrcafascioSnapRef.current = {
+        orcamentoId: entry.id,
+        ...snapshotNomesServicosOrcamento(servicosParaApi)
+      };
+
+      const linkedContractId = meta.linkedContractId?.trim() || '';
+      const linkedPleitoId = meta.linkedPleitoId?.trim() || '';
+      const osCodigoSnap = (meta.osCodigo || '').trim();
+      const numeroPastaSnap = (meta.numeroPasta || '').trim();
+      if (linkedPleitoId && linkedContractId && osCodigoSnap && numeroPastaSnap) {
+        const descricaoOsSnap =
+          (meta.descricao || '').trim() || (nomeOrcamentoRascunho || '').trim() || 'Orçamento';
+        const valorSnap =
+          finApi.totalComBdi > 0
+            ? finApi.totalComBdi
+            : resumoFinanceiroTotalRef.current > 0
+              ? resumoFinanceiroTotalRef.current
+              : typeof meta.totalComBdi === 'number' && meta.totalComBdi > 0
+                ? meta.totalComBdi
+                : 0;
+        setReajusteOsConfirmValor(false);
+        setReajusteOsModal({
+          contractId: linkedContractId,
+          osCodigo: osCodigoSnap,
+          numeroPasta: numeroPastaSnap,
+          valor: Number.isFinite(valorSnap) ? valorSnap : 0,
+          orcamentoId: entry.id,
+          descricaoServicoOs: descricaoOsSnap,
+        });
       }
     } catch (err) {
       if (isOrcamentoRequestTimeout(err)) {
         toast.error('A atualização demorou demais. Tente novamente.');
         return;
       }
-      const detail = err instanceof Error ? err.message : '';
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const detail = apiMsg || (err instanceof Error ? err.message : '');
       toast.error(detail ? `Não foi possível atualizar: ${detail}` : 'Não foi possível atualizar do Orçafascio.');
     } finally {
       setIsAtualizandoOrcafascio(false);
@@ -10669,15 +10787,7 @@ export function OrcamentoPageView({
       setModalNomesOrcafascioEditados(editados);
       return;
     }
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        'Atualizar a partir do Orçafascio?\n\nComposições novas entram neste orçamento. As que foram removidas lá saem daqui.\nQuantidade, memória de cálculo e ficha de demanda das linhas que continuam são mantidas.\n\nPara apagar uma composição só neste orçamento, clique com o botão direito na linha.'
-      )
-    ) {
-      return;
-    }
-    await executarAtualizarOrcamentoOrcafascio();
+    setAtualizarOrcafascioConfirmOpen(true);
   };
 
   const capturarSnapshotMontagem = (): SnapshotMontagemUndo => {
@@ -18293,6 +18403,70 @@ export function OrcamentoPageView({
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
               >
                 Apagar
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {atualizarOrcafascioConfirmOpen && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (isAtualizandoOrcafascio) return;
+              setAtualizarOrcafascioConfirmOpen(false);
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="atualizar-orcafascio-titulo"
+            className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800"
+          >
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+              <RefreshCw className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden />
+            </div>
+            <h3
+              id="atualizar-orcafascio-titulo"
+              className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100"
+            >
+              Atualizar a partir do Orçafascio?
+            </h3>
+            <p className="text-center text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+              Se lá tiver mudança, a revisão{' '}
+              <span className="font-semibold text-gray-800 dark:text-gray-200">
+                {formatOrcamentoRevisao(versaoNumero)}
+              </span>{' '}
+              fica congelada como está e a atualização entra em{' '}
+              <span className="font-semibold text-gray-800 dark:text-gray-200">
+                {formatOrcamentoRevisao(versaoNumero + 1)}
+              </span>
+              .
+            </p>
+            <p className="mt-3 text-center text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+              Se estiver igual, nenhuma revisão é criada. Quantidade, memória de cálculo e ficha de
+              demanda das linhas que continuam são mantidas.
+            </p>
+            <div className="mt-6 flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setAtualizarOrcafascioConfirmOpen(false)}
+                disabled={isAtualizandoOrcafascio}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAtualizarOrcafascioConfirmOpen(false);
+                  void executarAtualizarOrcamentoOrcafascio();
+                }}
+                disabled={isAtualizandoOrcafascio}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {isAtualizandoOrcafascio ? 'Atualizando...' : 'Atualizar'}
               </button>
             </div>
           </div>
