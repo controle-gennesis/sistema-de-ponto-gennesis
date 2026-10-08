@@ -1185,10 +1185,12 @@ function SolicitacoesCombustivelPageContent() {
                                 </p>
                               </div>
                             </td>
-                            <td className={cadastroListClasses.tdCenter}>
-                              {fuelContractLabel(row)}
+                            <td className={`${cadastroListClasses.tdCenter} max-w-0 overflow-hidden !whitespace-normal`}>
+                              <p className="break-words" title={fuelContractLabel(row)}>
+                                {fuelContractLabel(row)}
+                              </p>
                             </td>
-                            <td className={`${cadastroListClasses.tdCenter} min-w-0`}>
+                            <td className={`${cadastroListClasses.tdCenter} max-w-0 overflow-hidden !whitespace-normal`}>
                               <div className="mx-auto min-w-0 max-w-full leading-snug">
                                 <p className="truncate font-medium text-gray-900 dark:text-gray-100">
                                   {row.vehiclePlate}
