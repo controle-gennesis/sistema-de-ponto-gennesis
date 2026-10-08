@@ -27,6 +27,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -213,11 +214,18 @@ function ChartCard({
 type FuelQuotaGroup = {
   ownerContractId: string;
   ownerName: string;
+  contractNames?: string[];
   weeklyBudgetReais: number | null;
+  urgencyReais?: number | null;
   usedReais: number;
   remainingReais: number | null;
   unlimited: boolean;
 };
+
+function quotaContractNames(group: FuelQuotaGroup): string[] {
+  const names = (group.contractNames ?? []).map((name) => name.trim()).filter(Boolean);
+  return names.length > 0 ? names : [group.ownerName];
+}
 
 function formatWeekLabel(isoStart?: string, isoEnd?: string) {
   if (!isoStart || !isoEnd) return 'esta semana';
@@ -259,6 +267,7 @@ function WeeklyQuotaPanel({
               <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <th className="py-2 pr-3">Contrato</th>
                 <th className="py-2 px-3 text-right">Cota</th>
+                <th className="py-2 px-3 text-right">Urgência</th>
                 <th className="py-2 px-3 text-right">Usado</th>
                 <th className="py-2 pl-3 text-right">Disponível</th>
               </tr>
@@ -272,16 +281,25 @@ function WeeklyQuotaPanel({
                   remainingRaw != null && remainingRaw > -0.01 && remainingRaw < 0
                     ? 0
                     : remainingRaw;
+                const urgency = g.urgencyReais && g.urgencyReais > 0 ? g.urgencyReais : 0;
+                const budgetWithUrgency = (g.weeklyBudgetReais ?? 0) + urgency;
                 const usedPct =
-                  !g.unlimited && g.weeklyBudgetReais && g.weeklyBudgetReais > 0
-                    ? (g.usedReais / g.weeklyBudgetReais) * 100
+                  !g.unlimited && budgetWithUrgency > 0
+                    ? (g.usedReais / budgetWithUrgency) * 100
                     : 0;
                 const barPct = Math.max(0, Math.min(100, usedPct));
                 return (
                   <tr key={g.ownerContractId}>
                     <td className="py-2.5 pr-3">
-                      <div className="font-medium text-gray-900 dark:text-gray-100">
-                        {g.ownerName}
+                      <div className="space-y-0.5">
+                        {quotaContractNames(g).map((name, index) => (
+                          <div
+                            key={`${g.ownerContractId}-${index}`}
+                            className="font-medium text-gray-900 dark:text-gray-100"
+                          >
+                            {name}
+                          </div>
+                        ))}
                       </div>
                       {!g.unlimited && g.weeklyBudgetReais ? (
                         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
@@ -300,6 +318,15 @@ function WeeklyQuotaPanel({
                     </td>
                     <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
                       {g.unlimited ? 'Sem limite' : formatCurrency(g.weeklyBudgetReais ?? 0)}
+                    </td>
+                    <td
+                      className={`whitespace-nowrap py-2.5 px-3 text-right tabular-nums ${
+                        !g.unlimited && urgency > 0
+                          ? 'font-medium text-amber-600 dark:text-amber-400'
+                          : 'text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      {g.unlimited || urgency <= 0 ? '—' : formatCurrency(urgency)}
                     </td>
                     <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
                       {formatCurrency(g.usedReais)}
@@ -320,6 +347,130 @@ function WeeklyQuotaPanel({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </ChartCard>
+  );
+}
+
+function UrgencyByContractChart({
+  groups,
+  isLoading,
+  periodLabel,
+}: {
+  groups: FuelQuotaGroup[];
+  isLoading: boolean;
+  periodLabel?: string;
+}) {
+  const theme = useChartTheme();
+  const rows = groups
+    .filter((g) => !g.unlimited && (g.urgencyReais ?? 0) > 0)
+    .map((g) => {
+      const cota = g.weeklyBudgetReais ?? 0;
+      const urgencia = g.urgencyReais ?? 0;
+      const contractNames = quotaContractNames(g);
+      return {
+        name: g.ownerContractId,
+        contractNames,
+        fullName: contractNames.join(' · '),
+        urgencia,
+        cota,
+        acima: cota > 0 ? Math.round((urgencia / cota) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.urgencia - a.urgencia || b.acima - a.acima);
+  const axisWidth = Math.min(
+    280,
+    Math.max(140, ...rows.flatMap((row) => row.contractNames.map((name) => name.length * 6.6 + 16)))
+  );
+  const rowHeight = rows.some((row) => row.contractNames.length > 1) ? 64 : 48;
+
+  return (
+    <ChartCard
+      title="Urgências por contrato"
+      subtitle={
+        periodLabel
+          ? `Urgência lançada de ${periodLabel}. A barra maior é quem mais passou da cota nesse período.`
+          : 'Urgência lançada em todo o período. O filtro de datas acima limita a um mês ou intervalo.'
+      }
+      Icon={TrendingUp}
+    >
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Nenhuma urgência neste período.
+        </p>
+      ) : (
+        <div className="w-full" style={{ height: Math.max(180, rows.length * rowHeight) }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 72, left: 8, bottom: 4 }}>
+              <CartesianGrid stroke={theme.chartGrid} strokeDasharray="3 3" horizontal={false} />
+              <XAxis
+                type="number"
+                tick={{ fill: theme.chartTick, fontSize: 11 }}
+                tickFormatter={(v) => formatCurrencyCompact(Number(v))}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={axisWidth}
+                tick={(tickProps) => {
+                  const { x, y, payload } = tickProps as {
+                    x?: number;
+                    y?: number;
+                    payload?: { value?: string };
+                  };
+                  const row = rows.find((item) => item.name === payload?.value);
+                  const lines = row?.contractNames ?? [];
+                  const startDy = lines.length > 1 ? -((lines.length - 1) * 7) : 4;
+                  return (
+                    <text
+                      x={x}
+                      y={y}
+                      textAnchor="end"
+                      fill={theme.chartTick}
+                      fontSize={11}
+                    >
+                      {lines.map((line, index) => (
+                        <tspan key={`${line}-${index}`} x={x} dy={index === 0 ? startDy : 14}>
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  );
+                }}
+              />
+              <Tooltip
+                contentStyle={theme.tipStyle}
+                formatter={(value, _name, item) => {
+                  const row = item?.payload as { cota?: number; acima?: number } | undefined;
+                  const urgencia = formatCurrency(Number(value ?? 0));
+                  const detalhe =
+                    row?.cota
+                      ? `${urgencia} · ${row.acima ?? 0}% acima da cota de ${formatCurrency(row.cota)}`
+                      : urgencia;
+                  return [detalhe, 'Urgência'];
+                }}
+                labelFormatter={(_, payload) =>
+                  (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
+                }
+              />
+              <Bar dataKey="urgencia" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                {rows.map((row, i) => (
+                  <Cell key={row.fullName} fill={i === 0 ? '#dc2626' : '#d97706'} />
+                ))}
+                <LabelList
+                  dataKey="urgencia"
+                  position="right"
+                  formatter={(value) => formatCurrency(Number(value ?? 0))}
+                  style={{ fill: theme.chartTick, fontSize: 11 }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
     </ChartCard>
@@ -557,6 +708,31 @@ function AnalisesCombustivelContent() {
     },
     staleTime: 15_000,
   });
+
+  const { data: urgencyGroups = [], isLoading: loadingUrgency } = useQuery({
+    queryKey: ['fuel-urgency-chart', dateFrom, dateTo],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/quota-urgency-chart', {
+        params: {
+          ...(dateFrom ? { from: dateFrom } : {}),
+          ...(dateTo ? { to: dateTo } : {}),
+        },
+      });
+      return (res.data?.data?.groups || []) as FuelQuotaGroup[];
+    },
+    staleTime: 15_000,
+  });
+
+  const urgencyPeriodLabel = (() => {
+    const fmt = (ymd: string) => {
+      const [year, month, day] = ymd.split('-');
+      return `${day}/${month}/${year}`;
+    };
+    if (dateFrom && dateTo) return `${fmt(dateFrom)} a ${fmt(dateTo)}`;
+    if (dateFrom) return `${fmt(dateFrom)} em diante`;
+    if (dateTo) return `até ${fmt(dateTo)}`;
+    return '';
+  })();
 
   const weeklyQuotaCard = (
     <WeeklyQuotaPanel
@@ -861,6 +1037,12 @@ function AnalisesCombustivelContent() {
           iconColor="text-blue-600 dark:text-blue-400"
         />
       </div>
+
+      <UrgencyByContractChart
+        groups={urgencyGroups}
+        isLoading={loadingUrgency}
+        periodLabel={urgencyPeriodLabel || undefined}
+      />
 
       <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-2">
         <ChartCard

@@ -331,6 +331,7 @@ type FuelQuotaBalance = {
   weeklyTankQuota: number | null;
   tankPriceReais: number;
   weeklyBudgetReais: number | null;
+  urgencyReais?: number | null;
   usedReais: number;
   remainingReais: number | null;
   unlimited: boolean;
@@ -1861,11 +1862,20 @@ function SolicitacoesCombustivelPageContent() {
                           ) : (
                             <div className="space-y-1 text-gray-700 dark:text-gray-300">
                               <p>
-                                Cota semanal de {quotaBalance.ownerName}:{' '}
+                                Cota desta semana de {quotaBalance.ownerName}:{' '}
                                 <span className="font-medium">
-                                  {formatReais(quotaBalance.weeklyBudgetReais)}
+                                  {formatReais(
+                                    (quotaBalance.weeklyBudgetReais ?? 0) +
+                                      (quotaBalance.urgencyReais ?? 0)
+                                  )}
                                 </span>
                               </p>
+                              {(quotaBalance.urgencyReais ?? 0) > 0 ? (
+                                <p className="text-amber-600 dark:text-amber-400">
+                                  {formatReais(quotaBalance.weeklyBudgetReais)} +{' '}
+                                  {formatReais(quotaBalance.urgencyReais)} de urgência
+                                </p>
+                              ) : null}
                               <p>Já usado nesta semana: {formatReais(quotaBalance.usedReais)}</p>
                               <p>
                                 Restante:{' '}

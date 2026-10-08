@@ -1,10 +1,12 @@
 ---
-description: Lembrete — Gennesis Conecta sumiu do Google
+description: Lembrete — Gennesis Conecta no Google
 alwaysApply: true
 ---
 
 # Gennesis Conecta no Google
 
-O usuário pediu para lembrar: ao pesquisar **Gennesis Conecta** no Google, o resultado **aparecia** e **agora sumiu**.
+A indexação foi corrigida (home pública → `/auth/login`, sem cair em `/ponto/` bloqueado no `robots.txt`).
 
-Tratar isso como pendência de visibilidade/SEO do produto quando o assunto for site, domínio, indexação ou divulgação do Conecta.
+Em out/2026 o usuário confirmou: ao pesquisar **Gennesis Conecta**, o resultado **voltou a aparecer** no Google.
+
+Se sumir de novo, revisar redirect da raiz, `robots.txt`, sitemap e Search Console — não redirecionar a home indexável para `/ponto/`.

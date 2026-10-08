@@ -1428,6 +1428,9 @@ model Contract {
   /// Cota de abastecimento por semana, em tanques (ex.: 1.5). Nulo = sem cota configurada (sem limite).
   /// O valor em R$ é tanques × CompanySettings.fuelTankPriceReais, dividido entre todos os veículos do contrato.
   weeklyFuelTankQuota Decimal? @db.Decimal(6, 2)
+  /// Acréscimo de urgência em R$, só na semana de fuelQuotaUrgencyWeekStart. Não altera a cota.
+  fuelQuotaUrgencyReais Decimal? @db.Decimal(12, 2)
+  fuelQuotaUrgencyWeekStart DateTime?
   /// Se preenchido, este contrato usa a cota do contrato apontado (e dos demais no mesmo grupo).
   fuelQuotaParentContractId String?
   /// Cliente do Orçafascio (id do select de cliente). Usado para filtrar orçamentos na importação.
