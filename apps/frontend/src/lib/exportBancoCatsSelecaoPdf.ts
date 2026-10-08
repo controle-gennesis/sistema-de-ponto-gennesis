@@ -5,6 +5,7 @@ export type BancoCatsPdfServico = {
   empresa: string;
   descricao: string;
   und: string;
+  paginaReferente?: string;
   quant: string;
   fonte?: string;
 };
@@ -159,9 +160,10 @@ export async function exportBancoCatsSelecaoPdf(
   y += 18;
 
   const colEmpresa = 22;
-  const colUnd = 14;
-  const colQuant = 20;
-  const colDesc = contentW - colEmpresa - colUnd - colQuant;
+  const colUnd = 12;
+  const colPagina = 24;
+  const colQuant = 18;
+  const colDesc = contentW - colEmpresa - colUnd - colPagina - colQuant;
 
   for (const quadrante of quadrantes) {
     const queryLines = doc.splitTextToSize(
@@ -211,22 +213,29 @@ export async function exportBancoCatsSelecaoPdf(
 
     y += headerBlockH + 3;
 
-    // cabeçalho da tabela
-    y = ensureSpace(doc, y, 8);
+    // cabeçalho da tabela — mesma ordem da consulta, com página referente entre UND e QUANT.
+    const paginaHeaderLines = doc.splitTextToSize('PÁGINA REFERENTE', colPagina - 2) as string[];
+    const tableHeaderH = Math.max(7, paginaHeaderLines.length * 3.2 + 2.4);
+    y = ensureSpace(doc, y, tableHeaderH + 1);
     doc.setFillColor(243, 244, 246);
-    doc.rect(MARGIN, y, contentW, 7, 'F');
+    doc.rect(MARGIN, y, contentW, tableHeaderH, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(...TEXT_MUTED);
+    const headerTextY = y + (paginaHeaderLines.length > 1 ? 3.6 : 4.6);
     let x = MARGIN + 1.5;
-    doc.text('EMPRESA', x, y + 4.8);
+    doc.text('EMPRESA', x, headerTextY);
     x += colEmpresa;
-    doc.text('DESCRIÇÃO / FONTE', x, y + 4.8);
+    doc.text('DESCRIÇÃO / FONTE', x, headerTextY);
     x += colDesc;
-    doc.text('UND', x, y + 4.8);
+    doc.text('UND', x, headerTextY);
     x += colUnd;
-    doc.text('QUANT.', x, y + 4.8);
-    y += 8;
+    for (let li = 0; li < paginaHeaderLines.length; li += 1) {
+      doc.text(paginaHeaderLines[li], x, headerTextY + li * 3.2);
+    }
+    x += colPagina;
+    doc.text('QUANT.', x, headerTextY);
+    y += tableHeaderH + 1;
 
     for (let i = 0; i < quadrante.servicos.length; i += 1) {
       const item = quadrante.servicos[i];
@@ -237,12 +246,14 @@ export async function exportBancoCatsSelecaoPdf(
         colDesc - 2
       ) as string[];
       const undLines = doc.splitTextToSize(item.und || '—', colUnd - 2) as string[];
+      const paginaLines = doc.splitTextToSize(item.paginaReferente?.trim() || '—', colPagina - 2) as string[];
       const quantLines = doc.splitTextToSize(item.quant || '—', colQuant - 2) as string[];
       const descBlockLines = [...descLines, ...fonteLines];
       const maxLines = Math.max(
         empresaLines.length,
         descBlockLines.length,
         undLines.length,
+        paginaLines.length,
         quantLines.length,
         1
       );
@@ -283,6 +294,10 @@ export async function exportBancoCatsSelecaoPdf(
         doc.text(undLines[li], cx, textTop + li * 3.8);
       }
       cx += colUnd;
+      for (let li = 0; li < paginaLines.length; li += 1) {
+        doc.text(paginaLines[li], cx, textTop + li * 3.8);
+      }
+      cx += colPagina;
       doc.setFont('helvetica', 'bold');
       for (let li = 0; li < quantLines.length; li += 1) {
         doc.text(quantLines[li], cx, textTop + li * 3.8);

@@ -938,6 +938,7 @@ export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: str
               empresa: match.item.empresa,
               descricao: match.item.descricao,
               und: match.item.und,
+              paginaReferente: match.item.paginaReferente,
               quant: match.item.quant,
               fonte: match.item.fonte,
             }));
