@@ -1377,10 +1377,11 @@ export class OrcafascioService {
     orderType?: string,
     orderName?: string,
     perPage?: number,
-    search?: string
+    search?: string,
+    opts?: { bypassCache?: boolean }
   ): Promise<{ budgets: Record<string, unknown>[]; total?: number; current_page?: number; per_page?: number }> {
     const cacheKey = this.budgetsListCacheKey(page, orderType, orderName, perPage, search);
-    const cached = this.budgetsListCache.get(cacheKey);
+    const cached = opts?.bypassCache ? undefined : this.budgetsListCache.get(cacheKey);
 
     if (cached) {
       const age = Date.now() - cached.fetchedAt;

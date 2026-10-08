@@ -598,17 +598,7 @@ export default function OrcamentosPage() {
                               className="whitespace-nowrap px-3 py-3 text-center sm:px-3"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <OrcamentoRevisaoBadge
-                                versao={o.versao}
-                                options={(
-                                  revisoesPorFamilia.get(`${o.costCenterId}::${o.familiaId}`) ?? [o]
-                                ).map((v) => ({
-                                  label: formatOrcamentoRevisao(v.versao),
-                                  href: `/ponto/orcamentos/${v.contractId}/${v.orcamentoId}`,
-                                  current: v.orcamentoId === o.orcamentoId,
-                                  congelada: v.congelado,
-                                }))}
-                              />
+                              <OrcamentoRevisaoBadge versao={o.versao} />
                             </td>
                             <td className="max-w-[10rem] px-3 py-3 text-center sm:px-4">
                               <span className="block truncate text-sm text-gray-700 dark:text-gray-300">

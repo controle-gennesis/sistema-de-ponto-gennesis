@@ -79,6 +79,7 @@ import {
   type PoloFd,
 } from '@/lib/fichaDemandaApproval';
 import {
+  invalidateOrcafascioOrcamentosCache,
   loadOrcafascioOrcamentosList,
   peekOrcafascioOrcamentosCache,
   prefetchOrcafascioOrcamentosList,
@@ -9146,7 +9147,10 @@ export function OrcamentoPageView({
     }
   };
 
-  const carregarOrcamentosOrcafascioParaSelect = useCallback(async (search = '') => {
+  const carregarOrcamentosOrcafascioParaSelect = useCallback(async (
+    search = '',
+    opts?: { force?: boolean }
+  ) => {
     const applyPayload = (payload: {
       items: OrcafascioOrcamentoItem[] | { id?: string; description?: string; code?: string; [k: string]: unknown }[];
       total: number | null;
@@ -9159,7 +9163,8 @@ export function OrcamentoPageView({
       setOrcafascioOrcamentosLoading(Boolean(payload.incomplete));
     };
 
-    const cached = peekOrcafascioOrcamentosCache(search);
+    const force = opts?.force === true;
+    const cached = force ? null : peekOrcafascioOrcamentosCache(search);
     if (cached) {
       applyPayload(cached);
     } else {
@@ -9169,6 +9174,7 @@ export function OrcamentoPageView({
     try {
       const payload = await loadOrcafascioOrcamentosList({
         search,
+        force,
         onPartial: (partial) => {
           applyPayload(partial);
         },
@@ -9206,19 +9212,12 @@ export function OrcamentoPageView({
     setOrcafascioOrcamentoLinhaCatalogo(null);
     setOrcafascioOrcamentoLinhaChave(null);
 
-    const cached = peekOrcafascioOrcamentosCache('');
-    if (cached) {
-      setOrcafascioOrcamentos(cached.items as OrcafascioOrcamentoItem[]);
-      setOrcafascioOrcamentosTotal(cached.total);
-      setOrcafascioOrcamentosPage(1);
-      setOrcafascioOrcamentosLoading(Boolean(cached.incomplete));
-    } else {
-      setOrcafascioOrcamentos(null);
-      setOrcafascioOrcamentosLoading(true);
-    }
+    setOrcafascioOrcamentos(null);
+    setOrcafascioOrcamentosLoading(true);
 
     setOrcafascioModalOpen(true);
-    void carregarOrcamentosOrcafascioParaSelect('');
+    invalidateOrcafascioOrcamentosCache('');
+    void carregarOrcamentosOrcafascioParaSelect('', { force: true });
   };
 
   const verDetalheOrcamentoOrcafascio = async (
@@ -14567,8 +14566,10 @@ export function OrcamentoPageView({
         <div
           className={
             orcamentoAtivoId
-              ? orcamentoViewTab === 'memorial'
-                ? 'flex flex-col'
+              ? orcamentoViewTab === 'memorial' ||
+                orcamentoViewTab === 'cronograma' ||
+                cronogramaOnly
+                ? 'flex w-full min-w-0 flex-col'
                 : 'flex h-[calc(100dvh-6rem)] flex-col overflow-hidden lg:h-[calc(100dvh-8rem)]'
               : 'space-y-6'
           }
@@ -14579,7 +14580,7 @@ export function OrcamentoPageView({
             orcamentoViewTab === 'cronograma' &&
             !loadingFromApi &&
             linhasCronograma.length > 0 && (
-              <div className="mb-4 grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+              <div className="mb-4 grid w-full min-w-0 shrink-0 grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
                 <FilterStatCard
                   label="Progresso físico"
                   count={`${resumoCronograma.progressoFisico.toFixed(1).replace('.', ',')}%`}
@@ -15023,8 +15024,10 @@ export function OrcamentoPageView({
             ) : (
             <div
               className={
-                orcamentoViewTab === 'memorial'
-                  ? 'flex flex-col !animate-none [transform:none]'
+                orcamentoViewTab === 'memorial' ||
+                orcamentoViewTab === 'cronograma' ||
+                cronogramaOnly
+                  ? 'flex w-full min-w-0 flex-col !animate-none [transform:none]'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !animate-none [transform:none]'
               }
             >
@@ -15034,8 +15037,10 @@ export function OrcamentoPageView({
             <Card
               padding="none"
               className={
-                orcamentoViewTab === 'memorial'
-                  ? 'flex flex-col !border-0 !bg-transparent shadow-none dark:!bg-transparent'
+                orcamentoViewTab === 'memorial' ||
+                orcamentoViewTab === 'cronograma' ||
+                cronogramaOnly
+                  ? 'flex w-full min-w-0 flex-col !border-0 !bg-transparent shadow-none dark:!bg-transparent'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !border-0 !bg-transparent shadow-none dark:!bg-transparent'
               }
               style={{
@@ -15045,8 +15050,10 @@ export function OrcamentoPageView({
             >
               <CardContent
                 className={
-                  orcamentoViewTab === 'memorial'
-                    ? 'flex flex-col !p-0 !pt-0'
+                  orcamentoViewTab === 'memorial' ||
+                  orcamentoViewTab === 'cronograma' ||
+                  cronogramaOnly
+                    ? 'flex w-full min-w-0 flex-col !p-0 !pt-0'
                     : 'flex min-h-0 flex-1 flex-col overflow-hidden !p-0 !pt-0'
                 }
               >
@@ -16475,7 +16482,7 @@ export function OrcamentoPageView({
 
 
                 {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <div className="flex w-full min-w-0 flex-col">
                   {linhasCronograma.length === 0 ? (
                     <OrcamentoSecaoVazia
                       titulo="Cronograma vazio"
@@ -16492,9 +16499,7 @@ export function OrcamentoPageView({
                       }}
                     />
                   ) : (
-                    <div
-                      className={`min-h-0 flex-1 overflow-auto overscroll-contain ${gradeHideVerticalScrollbarCls}`}
-                    >
+                    <div className={`w-full min-w-0 ${gradeHideVerticalScrollbarCls}`}>
                     <OrcamentoCronogramaPainel
                       linhas={linhasCronograma}
                       cronograma={cronograma}
@@ -18521,12 +18526,12 @@ export function OrcamentoPageView({
                 emptyOptionLabel="Selecione o orçamento"
                 placeholder={
                   orcafascioOrcamentosLoading
-                    ? 'Carregando…'
+                    ? ''
                     : !orcafascioFilterClientId
                       ? 'Contrato sem cliente Orçafascio mapeado'
                       : orcafascioImportSelectOptions.length === 0
-                        ? 'Nenhum orçamento disponível'
-                        : 'Selecione o orçamento'
+                        ? 'Nenhum orçamento encontrado'
+                        : 'Pesquisar orçamento...'
                 }
                 searchPlaceholder="Pesquisar por nome ou código..."
                 emptyOptionsMessage={
@@ -18534,23 +18539,12 @@ export function OrcamentoPageView({
                     ? 'Este contrato não tem cliente Orçafascio mapeado'
                     : 'Nenhum orçamento encontrado'
                 }
-                emptySearchMessage={
-                  orcafascioOrcamentosLoading
-                    ? 'Carregando lista completa… tente de novo em instantes'
-                    : 'Nenhum orçamento corresponde à busca'
-                }
-                disabled={orcafascioOrcamentos === null}
+                emptySearchMessage="Nenhum orçamento corresponde à busca"
                 noFocusRing
                 preferOpenDown
                 listMaxHeight={280}
               />
             )}
-            {orcafascioOrcamentosLoading && orcafascioOrcamentos !== null ? (
-              <p className="mt-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                Carregando lista completa do Orçafascio…
-              </p>
-            ) : null}
             {orcafascioImportSelectValue && orcafascioOrcamentoComposicoesLoading ? (
               <p className="mt-4 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

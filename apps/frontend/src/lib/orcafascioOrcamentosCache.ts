@@ -102,6 +102,7 @@ export async function loadOrcafascioOrcamentosList(options?: {
   const search = (options?.search ?? '').trim();
   const force = options?.force === true;
   const bucket = getBucket(search);
+  if (force) bucket.payload = null;
   const now = Date.now();
   const onPartial = options?.onPartial;
 
@@ -140,6 +141,7 @@ export async function loadOrcafascioOrcamentosList(options?: {
           page: 1,
           per_page: 500,
           ...(q ? { search: q } : {}),
+          ...(force ? { refresh: '1' } : {}),
         },
         timeout: 90000,
       });
@@ -167,6 +169,7 @@ export async function loadOrcafascioOrcamentosList(options?: {
               page,
               per_page: Math.min(500, perPage),
               ...(q ? { search: q } : {}),
+              ...(force ? { refresh: '1' } : {}),
             },
             timeout: 60000,
           });
@@ -226,6 +229,15 @@ export function peekOrcafascioOrcamentosCache(
 /** true se ainda há fetch/paginação em andamento para essa busca. */
 export function isOrcafascioOrcamentosListLoading(search = ''): boolean {
   return Boolean(getBucket(search).inflight);
+}
+
+/** Descarta o cache em memória (ex.: abrir o modal de importar). */
+export function invalidateOrcafascioOrcamentosCache(search?: string): void {
+  if (search === undefined) {
+    buckets.clear();
+    return;
+  }
+  buckets.delete(bucketKey(search));
 }
 
 /** Dispara fetch em background (prefetch ao entrar na página / hover). */

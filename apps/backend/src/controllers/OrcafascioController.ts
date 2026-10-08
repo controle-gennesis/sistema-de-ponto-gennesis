@@ -112,7 +112,15 @@ export class OrcafascioController {
       const search = (req.query.search as string) || undefined;
       const orderType = (req.query.order_type as string) || undefined;
       const orderName = (req.query.order_name as string) || undefined;
-      const data = await orcafascioService.listarOrcamentos(page, orderType, orderName, perPage, search);
+      const refresh = String(req.query.refresh || '').trim() === '1';
+      const data = await orcafascioService.listarOrcamentos(
+        page,
+        orderType,
+        orderName,
+        perPage,
+        search,
+        { bypassCache: refresh }
+      );
       res.json(data);
     } catch (err) {
       next(err);

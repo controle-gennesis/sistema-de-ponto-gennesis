@@ -637,10 +637,18 @@ export default function SolicitarCombustivelPage() {
   const { data: fleetVehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: ['fuel-request-fleet-vehicles'],
     queryFn: async () => {
-      const res = await api.get('/vehicles', {
-        params: { isActive: 'true', limit: 100, page: 1 },
-      });
-      return (res.data?.data || []) as FleetVehicle[];
+      const all: FleetVehicle[] = [];
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages && page <= 20) {
+        const res = await api.get('/vehicles', {
+          params: { isActive: 'true', limit: 500, page },
+        });
+        all.push(...((res.data?.data || []) as FleetVehicle[]));
+        totalPages = Number(res.data?.pagination?.totalPages) || 1;
+        page += 1;
+      }
+      return all;
     },
     enabled: showForm,
     staleTime: 10 * 60 * 1000,

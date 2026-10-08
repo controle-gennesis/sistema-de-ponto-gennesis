@@ -72,9 +72,9 @@ import {
   type CronogramaSubServico
 } from './orcamentoCronogramaTypes';
 import {
+  gradeHideVerticalScrollbarCls,
   gradeTableCls,
   gradeTableRowTrCls,
-  gradeTableViewportCls,
   gradeThStickyCls,
   tdGradeDateCls
 } from './orcamentoGradeCellClasses';
@@ -788,7 +788,7 @@ export function OrcamentoCronogramaPainel({
 
   return (
     <>
-    <div className="space-y-4">
+    <div className="w-full min-w-0 space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center space-x-3">
           <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
@@ -1233,8 +1233,11 @@ export function OrcamentoCronogramaPainel({
         )}
 
         {viewMode === 'tabela' && (
-          <div data-orc-table-viewport className={gradeTableViewportCls}>
-            <table className={`min-w-[72rem] w-full border-separate border-spacing-0 table-fixed ${gradeTableCls}`}>
+          <div
+            data-orc-table-viewport
+            className={`w-full min-w-0 overflow-x-auto overscroll-contain rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`}
+          >
+            <table className={`w-full min-w-0 border-separate border-spacing-0 ${gradeTableCls}`}>
               <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr className={gradeTableRowTrCls}>
                   <th className={`${gradeThStickyCls} ${thServicoColCls}`}>Serviço</th>
