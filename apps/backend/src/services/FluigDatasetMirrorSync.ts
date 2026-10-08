@@ -262,7 +262,7 @@ export async function getFluigDatasetMirrorPayload(
   };
 }
 
-/** Sync a cada 30 min + uma execução após o boot. */
+/** Sync todo dia às 7:00 e às 12:00 (America/Sao_Paulo). Não busca na subida do servidor. */
 export function startFluigDatasetMirrorScheduler(): void {
   const tz = process.env.TZ || 'America/Sao_Paulo';
 
@@ -277,16 +277,8 @@ export function startFluigDatasetMirrorScheduler(): void {
       });
   };
 
-  // Boot: espera o servidor estabilizar (como o warmup Fluig).
-  setTimeout(() => run('boot'), 10_000);
+  cron.schedule('0 7 * * *', () => run('cron-7h'), { timezone: tz });
+  cron.schedule('0 12 * * *', () => run('cron-12h'), { timezone: tz });
 
-  cron.schedule(
-    '*/30 * * * *',
-    () => {
-      run('cron-30m');
-    },
-    { timezone: tz }
-  );
-
-  console.log('[fluig-mirror] agendado: a cada 30 minutos (+ sync no boot)');
+  console.log('[fluig-mirror] agendado: todo dia às 7:00 e às 12:00 (sem busca na subida)');
 }
