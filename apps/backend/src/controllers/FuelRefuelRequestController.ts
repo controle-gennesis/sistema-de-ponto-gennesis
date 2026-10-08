@@ -24,7 +24,7 @@ import {
   type EmployeeCpfLookupResult,
 } from '../lib/employeeCpfLookup';
 import { prisma } from '../lib/prisma';
-import { getFuelQuotaBalance, listFuelQuotaBalances } from '../lib/fuelWeeklyQuota';
+import { getFuelQuotaBalance, getSaoPauloWeekRange, listFuelQuotaBalances, listFuelUrgencyChart, saveFuelUrgencyWeek, urgencyAppliesThisWeek } from '../lib/fuelWeeklyQuota';
 import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { PhotoService } from '../services/PhotoService';
 
@@ -909,6 +909,25 @@ export class FuelRefuelRequestController {
     }
   }
 
+  async listUrgencyChart(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const from = String(req.query.from || '').trim();
+      const to = String(req.query.to || '').trim();
+      const ymd = /^\d{4}-\d{2}-\d{2}$/;
+      const groups = await listFuelUrgencyChart(
+        ymd.test(from) ? from : undefined,
+        ymd.test(to) ? to : undefined
+      );
+      res.json({ success: true, data: { groups } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listQuotaBalances(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = req.user;
@@ -929,6 +948,7 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
 
+      const week = getSaoPauloWeekRange();
       const [settings, contracts, parentRows] = await Promise.all([
         prisma.companySettings.findFirst({ select: { fuelTankPriceReais: true } }),
         prisma.contract.findMany({
@@ -938,6 +958,8 @@ export class FuelRefuelRequestController {
             name: true,
             number: true,
             weeklyFuelTankQuota: true,
+            fuelQuotaUrgencyReais: true,
+            fuelQuotaUrgencyWeekStart: true,
           },
         }),
         prisma.$queryRaw<Array<{ id: string; parentId: string | null }>>`
@@ -966,11 +988,19 @@ export class FuelRefuelRequestController {
           tankPriceReais: Number(settings?.fuelTankPriceReais ?? 350),
           contracts: contracts.map((c) => {
             const rootId = resolveRoot(c.id);
+            const urgencySameWeek = urgencyAppliesThisWeek(
+              c.fuelQuotaUrgencyWeekStart,
+              week.weekStart
+            );
             return {
               id: c.id,
               name: c.name.trim() || c.number,
               number: c.number,
               weeklyTankQuota: c.weeklyFuelTankQuota == null ? null : Number(c.weeklyFuelTankQuota),
+              urgencyReais:
+                urgencySameWeek && c.fuelQuotaUrgencyReais != null
+                  ? Number(c.fuelQuotaUrgencyReais)
+                  : 0,
               fuelQuotaParentContractId: rootId === c.id ? null : rootId,
             };
           }),
@@ -1015,6 +1045,7 @@ export class FuelRefuelRequestController {
           weeklyFuelTankQuota: z.number().positive().nullable().optional(),
           fuelQuotaParentContractId: z.string().nullable().optional(),
           dissolveGroup: z.boolean().optional(),
+          urgencyReais: z.number().nonnegative().nullable().optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) {
@@ -1078,9 +1109,56 @@ export class FuelRefuelRequestController {
         nextQuota = body.weeklyFuelTankQuota;
       }
 
+      if (body.urgencyReais !== undefined) {
+        if (resolveRoot(contractId) !== contractId) {
+          throw createError(
+            'Lance a urgência no contrato que define a cota do grupo.',
+            400
+          );
+        }
+        const week = getSaoPauloWeekRange();
+        const amount =
+          body.urgencyReais == null || body.urgencyReais <= 0 ? null : body.urgencyReais;
+        const urgencyWeekStart =
+          amount == null
+            ? null
+            : new Date(
+                Date.UTC(
+                  week.weekStart.getUTCFullYear(),
+                  week.weekStart.getUTCMonth(),
+                  week.weekStart.getUTCDate(),
+                  12,
+                  0,
+                  0
+                )
+              );
+        await prisma.$executeRawUnsafe(
+          `
+            UPDATE "contracts"
+            SET "fuelQuotaUrgencyReais" = $1,
+                "fuelQuotaUrgencyWeekStart" = $2,
+                "updatedAt" = CURRENT_TIMESTAMP
+            WHERE id = $3
+          `,
+          amount,
+          urgencyWeekStart,
+          contractId
+        );
+        await saveFuelUrgencyWeek(contractId, urgencyWeekStart ?? week.weekStart, amount);
+        if (
+          body.weeklyFuelTankQuota === undefined &&
+          body.fuelQuotaParentContractId === undefined &&
+          !body.dissolveGroup
+        ) {
+          res.json({ success: true, message: 'Urgência desta semana atualizada' });
+          return;
+        }
+      }
+
       if (
         body.fuelQuotaParentContractId === undefined &&
         body.weeklyFuelTankQuota === undefined &&
+        body.urgencyReais === undefined &&
         !body.dissolveGroup
       ) {
         throw createError('Nada para atualizar', 400);

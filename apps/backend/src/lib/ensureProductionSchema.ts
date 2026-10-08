@@ -2921,10 +2921,38 @@ async function ensureFuelWeeklyQuotaColumns(prisma: PrismaClient): Promise<void>
     ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "fuelQuotaParentContractId" TEXT;
   `);
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "fuelQuotaUrgencyReais" DECIMAL(12,2);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "fuelQuotaUrgencyWeekStart" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "fuel_refuel_requests" ADD COLUMN IF NOT EXISTS "releasedAmountReais" DECIMAL(12,2);
   `);
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "fuel_refuel_requests" ADD COLUMN IF NOT EXISTS "refuelCheckRemindedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "fuel_quota_urgency_weeks" (
+      "contractId" TEXT NOT NULL,
+      "weekStart" DATE NOT NULL,
+      "amountReais" DECIMAL(12,2) NOT NULL,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "fuel_quota_urgency_weeks_pkey" PRIMARY KEY ("contractId", "weekStart")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "fuel_quota_urgency_weeks" ("contractId", "weekStart", "amountReais", "updatedAt")
+    SELECT id,
+           ("fuelQuotaUrgencyWeekStart")::date,
+           "fuelQuotaUrgencyReais",
+           CURRENT_TIMESTAMP
+    FROM "contracts"
+    WHERE "fuelQuotaUrgencyReais" > 0
+      AND "fuelQuotaUrgencyWeekStart" IS NOT NULL
+    ON CONFLICT ("contractId", "weekStart")
+    DO UPDATE SET "amountReais" = EXCLUDED."amountReais",
+                  "updatedAt" = CURRENT_TIMESTAMP;
   `);
 }
 
