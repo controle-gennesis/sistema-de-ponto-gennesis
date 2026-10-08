@@ -70,6 +70,9 @@ router.get('/quota-balance', (req, res, next) =>
 router.get('/quota-balances', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.listQuotaBalances(req, res, next),
 );
+router.get('/quota-urgency-chart', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listUrgencyChart(req, res, next),
+);
 router.get('/quota-config', requireAdministrator, (req, res, next) =>
   fuelRefuelRequestController.getQuotaConfig(req, res, next),
 );

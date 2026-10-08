@@ -19,6 +19,7 @@ type QuotaContract = {
   name: string;
   number: string;
   weeklyTankQuota: number | null;
+  urgencyReais?: number | null;
   fuelQuotaParentContractId?: string | null;
 };
 
@@ -65,6 +66,8 @@ const labelClass =
   'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 const saveButtonClass =
   'inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50';
+const removeButtonClass =
+  'inline-flex h-10 items-center justify-center rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800';
 
 function buildQuotaGroups(contracts: QuotaContract[]): QuotaGroup[] {
   const byId = new Map(contracts.map((c) => [c.id, c]));
@@ -109,6 +112,7 @@ export function FuelQuotaConfigModal({
   const [tankPriceInput, setTankPriceInput] = useState('');
   const [quotaInputs, setQuotaInputs] = useState<Record<string, string>>({});
   const [reaisInputs, setReaisInputs] = useState<Record<string, string>>({});
+  const [urgencyInputs, setUrgencyInputs] = useState<Record<string, string>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-quota-config'],
@@ -125,13 +129,19 @@ export function FuelQuotaConfigModal({
     setTankPriceInput(formatCurrencyInputBrFromNumber(price));
     const nextTanks: Record<string, string> = {};
     const nextReais: Record<string, string> = {};
+    const nextUrgency: Record<string, string> = {};
     data.contracts.forEach((c) => {
       const tanksRaw = c.weeklyTankQuota == null ? '' : String(c.weeklyTankQuota);
       nextTanks[c.id] = tanksRaw;
       nextReais[c.id] = reaisFromTanksRaw(tanksRaw, price);
+      nextUrgency[c.id] =
+        c.urgencyReais && c.urgencyReais > 0
+          ? formatCurrencyInputBrFromNumber(c.urgencyReais)
+          : '';
     });
     setQuotaInputs(nextTanks);
     setReaisInputs(nextReais);
+    setUrgencyInputs(nextUrgency);
   }, [data]);
 
   const groups = useMemo(() => buildQuotaGroups(data?.contracts ?? []), [data?.contracts]);
@@ -187,21 +197,29 @@ export function FuelQuotaConfigModal({
       weeklyFuelTankQuota?: number | null;
       fuelQuotaParentContractId?: string | null;
       dissolveGroup?: boolean;
+      urgencyReais?: number | null;
     }) => {
       const { contractId, ...body } = payload;
       await api.patch(`/fuel-refuel-requests/quota-config/contracts/${contractId}`, body);
     },
     onSuccess: (_data, variables) => {
       toast.success(
-        variables.dissolveGroup
-          ? 'Grupo desfeito'
-          : variables.fuelQuotaParentContractId === null
-            ? 'Contrato desagrupado'
-            : variables.fuelQuotaParentContractId
-              ? 'Contratos agrupados'
-              : 'Cota semanal atualizada'
+        variables.urgencyReais === null
+          ? 'Urgência desta semana removida'
+          : variables.urgencyReais !== undefined
+            ? 'Urgência desta semana atualizada'
+            : variables.dissolveGroup
+            ? 'Grupo desfeito'
+            : variables.fuelQuotaParentContractId === null
+              ? 'Contrato desagrupado'
+              : variables.fuelQuotaParentContractId
+                ? 'Contratos agrupados'
+                : 'Cota semanal atualizada'
       );
       queryClient.invalidateQueries({ queryKey: ['fuel-quota-config'] });
+      queryClient.invalidateQueries({ queryKey: ['fuel-quota-balances'] });
+      queryClient.invalidateQueries({ queryKey: ['fuel-urgency-chart'] });
+      queryClient.invalidateQueries({ queryKey: ['fuel-quota-balance'] });
     },
     onError: (error: {
       response?: { data?: { message?: string; error?: string } };
@@ -232,6 +250,25 @@ export function FuelQuotaConfigModal({
       return;
     }
     quotaMutation.mutate({ contractId, weeklyFuelTankQuota: value });
+  };
+
+  const handleSaveUrgency = (contractId: string) => {
+    const raw = (urgencyInputs[contractId] ?? '').trim();
+    if (!raw) {
+      quotaMutation.mutate({ contractId, urgencyReais: null });
+      return;
+    }
+    const value = parseCurrencyInputBr(raw);
+    if (value == null || value < 0) {
+      toast.error('Informe um valor de urgência válido');
+      return;
+    }
+    quotaMutation.mutate({ contractId, urgencyReais: value });
+  };
+
+  const handleRemoveUrgency = (contractId: string) => {
+    setUrgencyInputs((prev) => ({ ...prev, [contractId]: '' }));
+    quotaMutation.mutate({ contractId, urgencyReais: null });
   };
 
   const handleGroupChange = (
@@ -377,6 +414,48 @@ export function FuelQuotaConfigModal({
                     >
                       Salvar
                     </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <div>
+                      <label className={labelClass}>Urgência desta semana</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={urgencyInputs[group.owner.id] ?? ''}
+                        onChange={(e) =>
+                          setUrgencyInputs((prev) => ({
+                            ...prev,
+                            [group.owner.id]: maskCurrencyInputBrOrEmpty(e.target.value),
+                          }))
+                        }
+                        placeholder="R$ 0,00"
+                        className={fieldClass}
+                      />
+                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        Soma só nesta semana. Não altera tanques nem o valor da cota.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {(group.owner.urgencyReais ?? 0) > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveUrgency(group.owner.id)}
+                          disabled={quotaMutation.isPending}
+                          className={removeButtonClass}
+                        >
+                          Remover
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => handleSaveUrgency(group.owner.id)}
+                        disabled={quotaMutation.isPending}
+                        className={saveButtonClass}
+                      >
+                        Salvar
+                      </button>
+                    </div>
                   </div>
 
                   {members.length > 0 ? (
