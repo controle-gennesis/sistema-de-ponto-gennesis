@@ -1628,7 +1628,7 @@ export default function ContractDetailPage() {
     queryKey: ['contract-orcamentos-count', contract?.costCenterId],
     queryFn: async () => {
       const res = await api.get(`/orcamento/${contract!.costCenterId}`);
-      return res.data as { orcamentos?: { id: string }[] };
+      return res.data as { orcamentos?: { id: string; statusAprovacao?: string }[] };
     },
     enabled: !!contract?.costCenterId && (canAccessOrcamento || canAccessCronogramasModulo),
   });
@@ -1738,10 +1738,14 @@ export default function ContractDetailPage() {
     staleTime: 30_000,
   });
 
-  const orcamentosCount = Array.isArray(orcamentosListaData?.orcamentos)
-    ? orcamentosListaData.orcamentos.length
-    : 0;
-  const cronogramasCount = orcamentosCount;
+  const orcamentosLista = Array.isArray(orcamentosListaData?.orcamentos)
+    ? orcamentosListaData.orcamentos
+    : [];
+  const orcamentosCount = orcamentosLista.length;
+  const cronogramasCount = orcamentosLista.filter((o) => {
+    const status = String(o.statusAprovacao || '').trim().toLowerCase();
+    return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
+  }).length;
   const relatoriosCount = Array.isArray(relatoriosListaData?.data)
     ? relatoriosListaData.data.length
     : 0;

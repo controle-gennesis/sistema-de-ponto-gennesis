@@ -17,6 +17,7 @@ interface Contract {
   id: string;
   costCenterId: string;
   name?: string;
+  orcafascioClientId?: string | null;
 }
 
 /**
@@ -136,6 +137,7 @@ export default function OrcamentoListaGlobalDetalhePage() {
         lockedCostCenterId={contract.costCenterId}
         embeddedContractId={contractId}
         embeddedContractName={typeof contract.name === 'string' ? contract.name.trim() : ''}
+        embeddedOrcafascioClientId={contract.orcafascioClientId?.trim() || null}
         embeddedOrcamentoIdFromRoute={orcamentoId}
         listaGlobalEntry
       />

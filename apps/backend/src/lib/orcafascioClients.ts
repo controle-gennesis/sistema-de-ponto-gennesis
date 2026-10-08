@@ -1,8 +1,7 @@
 /**
- * Clientes do Orçafascio (campo CLIENTE do orçamento).
- * A API de budgets só devolve `client_id` (sem nome) e não há endpoint público de clients —
- * estes IDs vêm do select de cliente no app Orçafascio (`value` = id, texto = nome).
- * O cadastro do contrato grava o id. O nome só entra como reserva quando o contrato ainda não tem o cliente escolhido.
+ * Clientes já conhecidos do Orçafascio.
+ * Contratos com o mesmo nome recebem o código automaticamente.
+ * Cliente novo: o código é colado no cadastro do contrato.
  */
 export type OrcafascioClient = { id: string; name: string };
 
@@ -18,7 +17,6 @@ export const ORCAFASCIO_CLIENTS: readonly OrcafascioClient[] = [
   { id: '6ac669d38705af669a8938ab', name: 'FHE - DF' },
 ];
 
-/** Normaliza rótulo para comparar contrato Gênnesis ↔ cliente Orçafascio. */
 export function normalizeOrcafascioClientLabel(raw: string): string {
   return String(raw || '')
     .normalize('NFD')
@@ -38,7 +36,6 @@ export function resolveOrcafascioClientIdForContractName(
   const exact = ORCAFASCIO_CLIENTS.find((c) => normalizeOrcafascioClientLabel(c.name) === target);
   if (exact) return exact.id;
 
-  // Aceita contrato que contenha o nome do cliente (ou o inverso), evitando ambiguidade curta.
   const partial = ORCAFASCIO_CLIENTS.filter((c) => {
     const n = normalizeOrcafascioClientLabel(c.name);
     if (n.length < 4 || target.length < 4) return false;
@@ -54,8 +51,4 @@ export function resolveOrcafascioClientIdForContractName(
   });
   if (byWords.length === 1) return byWords[0].id;
   return null;
-}
-
-export function budgetClientId(budget: { client_id?: unknown; [key: string]: unknown }): string {
-  return String(budget.client_id ?? '').trim();
 }

@@ -38,6 +38,7 @@ type ContractRow = {
   name?: string;
   number?: string;
   costCenterId?: string | null;
+  orcafascioClientId?: string | null;
 };
 
 type OrcamentoStatusAprovacao =
@@ -46,7 +47,8 @@ type OrcamentoStatusAprovacao =
   | 'aguardando_aprovacao'
   | 'aprovado'
   | 'em_correcao'
-  | 'reprovado';
+  | 'reprovado'
+  | 'finalizado';
 
 type OrcamentoListaRow = {
   id: string;
@@ -86,6 +88,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   aprovado: 'Aprovado',
   em_correcao: 'Em correção',
   reprovado: 'Reprovado',
+  finalizado: 'Finalizado',
 };
 
 function codigoFromNomeOrcamento(nome: string): string {
@@ -109,6 +112,7 @@ function normalizarStatusAprovacao(raw: unknown): OrcamentoStatusAprovacao {
     s === 'aprovado' ||
     s === 'em_correcao' ||
     s === 'reprovado' ||
+    s === 'finalizado' ||
     s === 'rascunho'
   ) {
     return s;
@@ -130,6 +134,8 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
       return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
     case 'reprovado':
       return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
+    case 'finalizado':
+      return `${base} bg-teal-100 text-teal-900 dark:bg-teal-900/40 dark:text-teal-200`;
     default:
       return `${base} bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200`;
   }
@@ -409,6 +415,7 @@ export default function OrcamentosPage() {
           id: c.id,
           costCenterId: String(c.costCenterId),
           label: (c.name || c.number || c.id).trim(),
+          orcafascioClientId: c.orcafascioClientId?.trim() || null,
         })),
     [contractsComOrcamento]
   );

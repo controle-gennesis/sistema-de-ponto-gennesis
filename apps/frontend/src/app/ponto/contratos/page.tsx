@@ -30,6 +30,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { resolveOrcafascioClientIdForContractName } from '@/lib/orcafascioClients';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -66,6 +67,7 @@ interface Contract {
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
   allowBillingImportWithoutOsPleito?: boolean;
+  orcafascioClientId?: string | null;
 }
 
 type ContractPermissionUser = {
@@ -251,6 +253,7 @@ export default function ContratosPage() {
     costCenterId: '',
     valuePlusAddenda: '',
     allowBillingImportWithoutOsPleito: false,
+    orcafascioClientId: '',
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [permissionsContract, setPermissionsContract] = useState<Contract | null>(null);
@@ -426,6 +429,7 @@ export default function ContratosPage() {
       costCenterId: '',
       valuePlusAddenda: '',
       allowBillingImportWithoutOsPleito: false,
+      orcafascioClientId: '',
     });
     setEditingContract(null);
   };
@@ -444,6 +448,10 @@ export default function ContratosPage() {
       costCenterId: contract.costCenterId,
       valuePlusAddenda: contract.valuePlusAddenda ? formatCurrencyInput(contract.valuePlusAddenda) : '',
       allowBillingImportWithoutOsPleito: Boolean(contract.allowBillingImportWithoutOsPleito),
+      orcafascioClientId:
+        contract.orcafascioClientId?.trim() ||
+        resolveOrcafascioClientIdForContractName(contract.name) ||
+        '',
     });
     setShowForm(true);
   };
@@ -483,6 +491,14 @@ export default function ContratosPage() {
       toast.error('Valor mais aditivos é obrigatório');
       return;
     }
+    const orcafascioClientId =
+      String(formData.orcafascioClientId || '').trim() ||
+      resolveOrcafascioClientIdForContractName(formData.name) ||
+      '';
+    if (orcafascioClientId && !/^[a-f0-9]{24}$/i.test(orcafascioClientId)) {
+      toast.error('Código do cliente Orçafascio inválido. Cole o código de 24 caracteres do cliente.');
+      return;
+    }
 
     const payload = {
       name: formData.name.trim(),
@@ -492,6 +508,7 @@ export default function ContratosPage() {
       costCenterId: formData.costCenterId,
       valuePlusAddenda: parsedValue,
       allowBillingImportWithoutOsPleito: Boolean(formData.allowBillingImportWithoutOsPleito),
+      orcafascioClientId,
     };
 
     if (editingContract) {
@@ -1185,7 +1202,18 @@ function ContractFormModal({
                   type="text"
                   required
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    const previousAuto = resolveOrcafascioClientIdForContractName(formData.name) || '';
+                    const nextAuto = resolveOrcafascioClientIdForContractName(name) || '';
+                    const current = String(formData.orcafascioClientId || '').trim();
+                    const keepTyped = Boolean(current && current !== previousAuto);
+                    setFormData({
+                      ...formData,
+                      name,
+                      orcafascioClientId: keepTyped ? current : nextAuto,
+                    });
+                  }}
                   className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   placeholder="Ex: Contrato de Obra X"
                 />
@@ -1242,6 +1270,25 @@ function ContractFormModal({
                   emptyOptionsMessage="Nenhum centro de custo disponível."
                   className="w-full"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Código do cliente Orçafascio
+                </label>
+                <input
+                  type="text"
+                  value={formData.orcafascioClientId}
+                  onChange={(e) =>
+                    setFormData({ ...formData, orcafascioClientId: e.target.value.trim() })
+                  }
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Ex: 6ac669d38705af669a8938ab"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Clientes já conhecidos preenchem este código sozinhos. Para um cliente novo, cole o código do Orçafascio.
+                </p>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">

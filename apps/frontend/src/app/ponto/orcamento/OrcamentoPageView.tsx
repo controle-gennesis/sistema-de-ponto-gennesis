@@ -191,7 +191,14 @@ export type OrcamentoPageProps = {
    */
   deferContractOnImport?: boolean;
   /** Contratos disponíveis para escolher durante a importação (modo lista global). */
-  importContractOptions?: Array<{ id: string; costCenterId: string; label: string }>;
+  importContractOptions?: Array<{
+    id: string;
+    costCenterId: string;
+    label: string;
+    orcafascioClientId?: string | null;
+  }>;
+  /** Cliente Orçafascio gravado no contrato (página dentro do contrato). */
+  embeddedOrcafascioClientId?: string | null;
   /** Pré-seleciona o contrato no modal de importação (ex.: filtro ativo na lista). */
   initialImportContractId?: string | null;
   /** Só renderiza os modais de importação (overlay na lista global). */
@@ -471,16 +478,34 @@ function precosMoMatDeLinhaOrcafascio(row: Record<string, unknown>): {
     valorNumericoOrcafascio(p?.type_mdo) ??
     valorNumericoOrcafascio(p?.mdo) ??
     valorNumericoOrcafascio(p?.labor) ??
+    valorNumericoOrcafascio(row.price_type_mdo) ??
     valorNumericoOrcafascio(row.type_mdo) ??
     valorNumericoOrcafascio(row.mdo_price) ??
     valorNumericoOrcafascio(row.labor_price);
-  const mat =
+  const matBase =
     valorNumericoOrcafascio(p?.type_mat) ??
     valorNumericoOrcafascio(p?.mat) ??
     valorNumericoOrcafascio(p?.material) ??
+    valorNumericoOrcafascio(row.price_type_mat) ??
     valorNumericoOrcafascio(row.type_mat) ??
     valorNumericoOrcafascio(row.mat_price) ??
     valorNumericoOrcafascio(row.material_price);
+  // A grade só tem MO e Material: equipamento e serviço entram no Material para fechar o PU.
+  const equipamento =
+    valorNumericoOrcafascio(p?.type_ep) ??
+    valorNumericoOrcafascio(p?.type_eq) ??
+    valorNumericoOrcafascio(row.price_type_eq) ??
+    valorNumericoOrcafascio(row.price_type_ep) ??
+    valorNumericoOrcafascio(row.type_ep) ??
+    valorNumericoOrcafascio(row.type_eq);
+  const servico =
+    valorNumericoOrcafascio(p?.type_serv) ??
+    valorNumericoOrcafascio(row.price_type_serv) ??
+    valorNumericoOrcafascio(row.type_serv);
+  const mat =
+    matBase == null && equipamento == null && servico == null
+      ? null
+      : (matBase ?? 0) + (equipamento ?? 0) + (servico ?? 0);
   return { mo, mat };
 }
 
@@ -506,7 +531,14 @@ function reconciliarMoMatComPrecoUnitario(
   if (!(soma > 0)) return { mo: moN, mat: matN };
 
   const tol = Math.max(0.05, preco * 0.02);
-  if (Math.abs(soma - preco) <= tol) return { mo: moN, mat: matN };
+  if (Math.abs(soma - preco) <= tol) {
+    // Resíduo de arredondamento do split: fecha no PU para o total bater com o Orçafascio.
+    const residuo = preco - soma;
+    if (residuo === 0) return { mo: moN, mat: matN };
+    if (matN > 0 && matN + residuo >= 0) return { mo: moN, mat: matN + residuo };
+    if (moN + residuo >= 0) return { mo: moN + residuo, mat: matN };
+    return { mo: moN, mat: matN };
+  }
 
   // Split veio como total da linha (× quantidade do sintético).
   const q = qtyLinha != null && Number.isFinite(qtyLinha) ? Number(qtyLinha) : 0;
@@ -792,6 +824,7 @@ function moMatUnitarioDeItemOuComposicao(
   item: {
     maoDeObraUnitario?: number;
     materialUnitario?: number;
+    moMatOrcafascio?: boolean;
     precoUnitario?: number;
     descricao?: string;
     analiticoLinhas?: LinhaAnaliticoComposicao[];
@@ -802,6 +835,13 @@ function moMatUnitarioDeItemOuComposicao(
   qtdAtual?: number | null
 ): { mo: number; mat: number } {
   const precoItem = Number(item.precoUnitario) || 0;
+  if (item.moMatOrcafascio === true && precoItem > 0) {
+    const moOrc = Number(item.maoDeObraUnitario) || 0;
+    const matOrc = Number(item.materialUnitario) || 0;
+    if (moOrc + matOrc > 0 && distanciaMoMatAoPreco(moOrc, matOrc, precoItem) <= 0.02) {
+      return { mo: moOrc, mat: matOrc };
+    }
+  }
   const precoComp = Number(composicao?.precoUnitario) || 0;
   const qOrig = Number(item.quantidadeImportada) || 0;
   const totImp = Number(item.totalSemBdiImportado) || 0;
@@ -1710,9 +1750,11 @@ function montarServicosDeLinhasOrcafascio(
     const qty = valorNumericoOrcafascio(row.qty ?? row.quantity ?? null);
     const splitAna = analiticoRow ? precosMoMatDeLinhaOrcafascio(analiticoRow) : { mo: null, mat: null };
     const splitSint = precosMoMatDeLinhaOrcafascio(row);
-    const moSplit = splitAna.mo ?? splitSint.mo;
-    const matSplit = splitAna.mat ?? splitSint.mat;
+    const usaSint = splitSint.mo != null || splitSint.mat != null;
+    const moSplit = usaSint ? splitSint.mo : splitAna.mo;
+    const matSplit = usaSint ? splitSint.mat : splitAna.mat;
     const scoreSplit = distanciaMoMatAoPreco(moSplit ?? 0, matSplit ?? 0, precoUnitario);
+    let moMatOrcafascio = false;
     const linhasAna = analiticoLinhas;
     const anaRuim =
       !!linhasAna?.length &&
@@ -1732,6 +1774,7 @@ function montarServicosDeLinhasOrcafascio(
       );
       maoDeObraUnitario = reconc.mo > 0 ? reconc.mo : undefined;
       materialUnitario = reconc.mat > 0 ? reconc.mat : undefined;
+      moMatOrcafascio = reconc.mo + reconc.mat > 0;
     } else if (anaRuim) {
       maoDeObraUnitario = undefined;
       materialUnitario = undefined;
@@ -1801,6 +1844,7 @@ function montarServicosDeLinhasOrcafascio(
       ...(precoComBdi != null && precoComBdi > 0 ? { precoUnitarioComBdi: precoComBdi } : {}),
       ...(maoDeObraUnitario != null && maoDeObraUnitario > 0 ? { maoDeObraUnitario } : {}),
       ...(materialUnitario != null && materialUnitario > 0 ? { materialUnitario } : {}),
+      ...(moMatOrcafascio ? { moMatOrcafascio: true } : {}),
       ...(String(row.unity ?? row.unit ?? '').trim()
         ? { unidade: String(row.unity ?? row.unit ?? '').trim() }
         : {}),
@@ -2098,13 +2142,6 @@ function rotuloEncargosOrcafascio(exempt?: boolean): string {
 function rotuloSimNaoOrcafascio(v?: boolean): string {
   if (v == null) return '—';
   return v ? 'Sim' : 'Não';
-}
-
-function rotuloModoArredondamentoDados(modo?: ModoArredondamento): string {
-  if (modo === 'truncar') return 'Truncar';
-  if (modo === 'arredondar') return 'Arredondar';
-  if (modo === 'nenhum') return 'Não arredondar';
-  return '—';
 }
 
 function acharCabecalhoOrcafascioNaCache(
@@ -2780,6 +2817,8 @@ export interface ItemServico {
   precoUnitarioComBdi?: number;
   maoDeObraUnitario?: number;
   materialUnitario?: number;
+  /** MO/MAT vieram do próprio Orçafascio e fecham com o PU — vencem o analítico. */
+  moMatOrcafascio?: boolean;
   /** Unidade da composição (ex. Orçafascio); persiste com a linha. */
   unidade?: string;
   /** Analítico gravado na linha ao incluir a composição — sobrevive ao F5 sem depender do catálogo global. */
@@ -2840,6 +2879,7 @@ function servicosParaLocalStorage(servicos: ServicoPadrao[]): ServicoPadrao[] {
         if (it.precoUnitarioComBdi != null) row.precoUnitarioComBdi = it.precoUnitarioComBdi;
         if (it.maoDeObraUnitario != null) row.maoDeObraUnitario = it.maoDeObraUnitario;
         if (it.materialUnitario != null) row.materialUnitario = it.materialUnitario;
+        if (it.moMatOrcafascio === true) row.moMatOrcafascio = true;
         if (it.quantidadeImportada != null && Number.isFinite(it.quantidadeImportada)) {
           row.quantidadeImportada = it.quantidadeImportada;
         }
@@ -2952,7 +2992,8 @@ type OrcamentoStatusAprovacao =
   | 'aguardando_aprovacao'
   | 'aprovado'
   | 'em_correcao'
-  | 'reprovado';
+  | 'reprovado'
+  | 'finalizado';
 
 type OrcamentoListaEntry = {
   id: string;
@@ -3019,6 +3060,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   aprovado: 'Aprovado',
   em_correcao: 'Em correção',
   reprovado: 'Reprovado',
+  finalizado: 'Finalizado',
 };
 
 function normalizarStatusAprovacaoOrcamento(
@@ -3031,11 +3073,16 @@ function normalizarStatusAprovacaoOrcamento(
     s === 'aprovado' ||
     s === 'em_correcao' ||
     s === 'reprovado' ||
+    s === 'finalizado' ||
     s === 'rascunho'
   ) {
     return s;
   }
   return 'rascunho';
+}
+
+function orcamentoComCronograma(status: OrcamentoStatusAprovacao): boolean {
+  return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
 }
 
 function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
@@ -3052,6 +3099,8 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
       return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
     case 'reprovado':
       return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
+    case 'finalizado':
+      return `${base} bg-teal-100 text-teal-900 dark:bg-teal-900/40 dark:text-teal-200`;
     default:
       // Mesmo padrão do badge "Lançado" no Controle Financeiro
       return `${base} bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200`;
@@ -4140,7 +4189,7 @@ function estiloFundoPinturaOrc(
 
 function formatarMoedaCampoOrc(valor: number): string {
   const n = Number.isFinite(valor) ? Math.max(0, valor) : 0;
-  return truncarMoeda2(n).toLocaleString('pt-BR', {
+  return arredondarMoeda2(n).toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -6514,19 +6563,9 @@ function roundTo(n: number, decimals: number) {
 }
 
 /**
- * Arredondamento monetário no estilo Orçafascio: trunca para 2 casas
- * (ex.: 17.280,628 → 17.280,62), em vez de arredondar para cima.
+ * Arredondamento monetário em 2 casas (meio para cima), igual ao Orçafascio.
  * Compensa lixo de ponto flutuante (ex.: 13.765,08×5 → 68.825,399999… → 68.825,40).
  */
-function truncarMoeda2(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  const sign = n < 0 ? -1 : 1;
-  const abs = Math.abs(n);
-  const cents = Math.floor(abs * 100 + 1e-8);
-  return (sign * cents) / 100;
-}
-
-/** Igual a truncarMoeda2, mas arredondando (pra cima ou pra baixo) em vez de truncar. */
 function arredondarMoeda2(n: number): number {
   if (!Number.isFinite(n)) return 0;
   const sign = n < 0 ? -1 : 1;
@@ -6537,18 +6576,10 @@ function arredondarMoeda2(n: number): number {
 
 export type ModoArredondamento = 'truncar' | 'arredondar' | 'nenhum';
 
-/**
- * Opção escolhida na importação do Orçafascio (que usa 9 casas decimais internamente) — controla
- * como os subtotais por item são calculados aqui, pra reduzir divergência com o valor de lá:
- * - truncar: trunca em 2 casas (padrão TCU, igual ao truncarMoeda2 — comportamento de sempre).
- * - arredondar: arredonda em 2 casas normalmente.
- * - nenhum: mantém a precisão cheia (sem cortar em 2 casas) — só a exibição arredonda pra tela.
- */
-function aplicarModoArredondamento(n: number, modo: ModoArredondamento | undefined): number {
+/** Subtotais por item sempre arredondados em 2 casas (meio para cima), igual ao Orçafascio. */
+function aplicarModoArredondamento(n: number, _modo?: ModoArredondamento): number {
   if (!Number.isFinite(n)) return 0;
-  if (modo === 'arredondar') return arredondarMoeda2(n);
-  if (modo === 'nenhum') return n;
-  return truncarMoeda2(n);
+  return arredondarMoeda2(n);
 }
 
 function fmtCalcNumero(n: number, casas = 2) {
@@ -6561,7 +6592,7 @@ function fmtCalcMoeda(n: number) {
 
 /** Exibição em planilha exportada (pt-BR). */
 function formatarBRLExport(n: number) {
-  return `R$ ${truncarMoeda2(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `R$ ${arredondarMoeda2(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatarPesoPctExport(n: number) {
@@ -6714,7 +6745,7 @@ const MoedaCelula = memo(function MoedaCelula({
   valorClassName?: string;
   simboloClassName?: string;
 }) {
-  const formatted = truncarMoeda2(valor).toLocaleString('pt-BR', {
+  const formatted = arredondarMoeda2(valor).toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
@@ -7021,6 +7052,7 @@ export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null,
   embeddedContractName = null,
+  embeddedOrcafascioClientId = null,
   embeddedOrcamentoIdFromRoute = null,
   autoOpenNovoOrcamento = false,
   autoOpenImportOrcamento = false,
@@ -7133,7 +7165,7 @@ export function OrcamentoPageView({
   const [orcafascioImportUsarMemoria, setOrcafascioImportUsarMemoria] = useState(false);
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
   const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
-    useState<ModoArredondamento>('truncar');
+    useState<ModoArredondamento>('arredondar');
   const [orcafascioImportDetalheModalOpen, setOrcafascioImportDetalheModalOpen] = useState(false);
   const [orcafascioModalTab, setOrcafascioModalTab] = useState<'composicoes' | 'orcamentos'>('composicoes');
   const [orcafascioModalOrcamentosSearch, setOrcafascioModalOrcamentosSearch] = useState('');
@@ -7689,6 +7721,7 @@ export function OrcamentoPageView({
     useState<Partial<FichaDemandaApprovalFormState> | null>(null);
   const [fdAprovacaoPreparando, setFdAprovacaoPreparando] = useState(false);
   const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
+  const [finalizandoOrcamento, setFinalizandoOrcamento] = useState(false);
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -8840,7 +8873,7 @@ export function OrcamentoPageView({
       osCodigo,
       numeroPasta,
       osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || meta.osNumeroPasta,
-      modoArredondamento: meta.modoArredondamento ?? 'truncar',
+      modoArredondamento: meta.modoArredondamento ?? 'arredondar',
       nomeOrcamento: nomeOrcamentoRascunho || ''
     });
     setEditarDadosOpen(true);
@@ -8873,7 +8906,7 @@ export function OrcamentoPageView({
       orcamentoRealizadoPor: editarDadosDraft.orcamentoRealizadoPor.trim(),
       descontoPercentual: editarDadosDraft.descontoPercentual.trim(),
       bdiPercentual: editarDadosDraft.bdiPercentual.trim(),
-      modoArredondamento: editarDadosDraft.modoArredondamento ?? 'truncar',
+      modoArredondamento: editarDadosDraft.modoArredondamento ?? 'arredondar',
       reajustes: (editarDadosDraft.reajustes ?? []).map((r, idx) => ({
         nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
         percentual: (r.percentual || '').trim()
@@ -9343,10 +9376,21 @@ export function OrcamentoPageView({
     rotuloContratoListaOrcamentos,
   ]);
 
-  const orcafascioFilterClientId = useMemo(
-    () => resolveOrcafascioClientIdForContractName(orcafascioFilterContractName),
-    [orcafascioFilterContractName]
-  );
+  const orcafascioFilterClientId = useMemo(() => {
+    const stored = deferContractOnImport
+      ? importContractOptions
+          .find((c) => c.id === importContratoSelecionadoId)
+          ?.orcafascioClientId?.trim() || ''
+      : String(embeddedOrcafascioClientId || '').trim();
+    if (stored) return stored;
+    return resolveOrcafascioClientIdForContractName(orcafascioFilterContractName);
+  }, [
+    deferContractOnImport,
+    importContractOptions,
+    importContratoSelecionadoId,
+    embeddedOrcafascioClientId,
+    orcafascioFilterContractName,
+  ]);
 
   const orcafascioImportSelectOptions = useMemo(() => {
     if (deferContractOnImport && !importContratoSelecionadoId.trim()) return [];
@@ -10172,7 +10216,7 @@ export function OrcamentoPageView({
       setOrcamentoViewTab(usarMemoriaCalculo ? 'memorial' : 'montagem');
 
       setOrcafascioImportUsarMemoria(false);
-      setOrcafascioImportModoArredondamento('truncar');
+      setOrcafascioImportModoArredondamento('arredondar');
       resetOrcafascioOsDraft();
       setOrcafascioModalOpen(false);
       setOrcafascioModalSoloOrcamentos(false);
@@ -12762,10 +12806,12 @@ export function OrcamentoPageView({
     };
   }, [linhasAnaliticoOrcamento, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
 
-  const podeEnviarFdAprovacao =
+  const podeFinalizarOrcamento =
     statusAprovacaoAtivo === 'rascunho' ||
     statusAprovacaoAtivo === 'pronta' ||
-    statusAprovacaoAtivo === 'em_correcao';
+    statusAprovacaoAtivo === 'em_correcao' ||
+    statusAprovacaoAtivo === 'reprovado';
+  const podeEnviarFdAprovacao = statusAprovacaoAtivo === 'finalizado';
 
   // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
   useEffect(() => {
@@ -12773,7 +12819,7 @@ export function OrcamentoPageView({
     const pct = fichaDemandaProgresso.pct;
     const bdiPercentual =
       Math.round(resumoFinanceiro.bdiPct * 10000) / 100; // pontos % com 2 casas
-    const totalComBdi = truncarMoeda2(resumoFinanceiro.totalComDescontoEBdi);
+    const totalComBdi = arredondarMoeda2(resumoFinanceiro.totalComDescontoEBdi);
     const metaAtual = sessaoRef.current.meta;
     const metaMudou =
       metaAtual?.fichaDemandaPct !== pct || metaAtual?.totalComBdi !== totalComBdi;
@@ -13492,8 +13538,8 @@ export function OrcamentoPageView({
         values[9] = '';
         values[10] = '';
         values[11] = '';
-        values[12] = truncarMoeda2(resumo.custoDir);
-        values[13] = truncarMoeda2(resumo.totalComBdi);
+        values[12] = arredondarMoeda2(resumo.custoDir);
+        values[13] = arredondarMoeda2(resumo.totalComBdi);
         values[14] = resumo.pesoPct;
         rows.push({ kind: 'titulo', values });
       }
@@ -13508,8 +13554,8 @@ export function OrcamentoPageView({
       subValues[9] = '';
       subValues[10] = '';
       subValues[11] = '';
-      subValues[12] = truncarMoeda2(resumoSub.custoDir);
-      subValues[13] = truncarMoeda2(resumoSub.totalComBdi);
+      subValues[12] = arredondarMoeda2(resumoSub.custoDir);
+      subValues[13] = arredondarMoeda2(resumoSub.totalComBdi);
       subValues[14] = resumoSub.pesoPct;
       rows.push({ kind: 'subtitulo', values: subValues });
 
@@ -13528,14 +13574,14 @@ export function OrcamentoPageView({
               usaDimensoes ? tipoAuto : 'un'
             ),
             roundTo(row.quantidade, 4),
-            truncarMoeda2(row.maoDeObraUnitario),
-            truncarMoeda2(row.materialUnitario),
-            truncarMoeda2(row.precoUnitario),
-            truncarMoeda2(row.precoUnitarioComBdi),
-            truncarMoeda2(row.subMaoDeObra),
-            truncarMoeda2(row.subMaterial),
-            truncarMoeda2(row.total),
-            truncarMoeda2(row.totalComBdi),
+            arredondarMoeda2(row.maoDeObraUnitario),
+            arredondarMoeda2(row.materialUnitario),
+            arredondarMoeda2(row.precoUnitario),
+            arredondarMoeda2(row.precoUnitarioComBdi),
+            arredondarMoeda2(row.subMaoDeObra),
+            arredondarMoeda2(row.subMaterial),
+            arredondarMoeda2(row.total),
+            arredondarMoeda2(row.totalComBdi),
             totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
             observacoesPorItem[row.key] ?? '',
           ],
@@ -13555,8 +13601,8 @@ export function OrcamentoPageView({
     const pushRodape = (rotulo: string, semBdi: number | '', comBdi: number | '') => {
       const values = empty();
       values[3] = rotulo;
-      values[12] = semBdi === '' ? '\u00A0' : truncarMoeda2(semBdi);
-      values[13] = comBdi === '' ? '\u00A0' : truncarMoeda2(comBdi);
+      values[12] = semBdi === '' ? '\u00A0' : arredondarMoeda2(semBdi);
+      values[13] = comBdi === '' ? '\u00A0' : arredondarMoeda2(comBdi);
       rows.push({ kind: 'total', values });
     };
     rows.push({ kind: 'blank', values: empty() });
@@ -14130,7 +14176,7 @@ export function OrcamentoPageView({
       });
       rows.push({
         kind: 'total',
-        values: ['VALOR TOTAL', '', '', '', '', '', '', '', truncarMoeda2(row.total)],
+        values: ['VALOR TOTAL', '', '', '', '', '', '', '', arredondarMoeda2(row.total)],
         formats: { 8: 'currency' },
       });
     });
@@ -14231,14 +14277,51 @@ export function OrcamentoPageView({
     toast.success('Cronograma exportado com sucesso.');
   };
 
+  const finalizarOrcamento = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    if (versaoCongelada || meta.congelado === true) {
+      toast.error('Esta revisão está somente leitura.');
+      return;
+    }
+    if (!podeFinalizarOrcamento || finalizandoOrcamento) return;
+    setFinalizandoOrcamento(true);
+    const prevMeta = meta;
+    const prevSessao = sessaoRef.current;
+    const nextMeta: OrcamentoMeta = { ...meta, statusAprovacao: 'finalizado' };
+    const nextSessao: SessaoOrcamentoPersist = { ...sessaoRef.current, meta: nextMeta };
+    setMeta(nextMeta);
+    sessaoRef.current = nextSessao;
+    try {
+      await saveOrcamentoToApi(
+        centroCustoId,
+        orcamentoAtivoId,
+        montarPayloadSalvarOrcamento(servicos, imports, nextSessao)
+      );
+      setListaOrcamentos((prev) =>
+        prev.map((o) =>
+          o.id === orcamentoAtivoId
+            ? { ...o, statusAprovacao: 'finalizado', updatedAt: new Date().toISOString() }
+            : o
+        )
+      );
+      toast.success('Orçamento finalizado. O cronograma foi criado.');
+    } catch {
+      setMeta(prevMeta);
+      sessaoRef.current = prevSessao;
+      toast.error('Não foi possível finalizar o orçamento.');
+    } finally {
+      setFinalizandoOrcamento(false);
+    }
+  };
+
   const abrirEnvioFichaDemandaAprovacao = async () => {
     if (!orcamentoAtivoId) return;
-    if (
-      statusAprovacaoAtivo !== 'rascunho' &&
-      statusAprovacaoAtivo !== 'pronta' &&
-      statusAprovacaoAtivo !== 'em_correcao'
-    ) {
-      toast.error('Este orçamento já foi enviado ou aprovado.');
+    if (statusAprovacaoAtivo !== 'finalizado') {
+      toast.error(
+        statusAprovacaoAtivo === 'aguardando_aprovacao' || statusAprovacaoAtivo === 'aprovado'
+          ? 'Este orçamento já foi enviado ou aprovado.'
+          : 'Finalize o orçamento antes de enviar para aprovação.'
+      );
       return;
     }
     if (!embeddedContractId && !centroCustoId) {
@@ -14983,7 +15066,13 @@ export function OrcamentoPageView({
                             <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                             <span>Ver detalhes</span>
                           </button>
-                          {embeddedContractId && (
+                          {embeddedContractId &&
+                          orcamentoComCronograma(
+                            normalizarStatusAprovacaoOrcamento(
+                              listaOrcamentos.find((item) => item.id === orcamentoListaActionMenu.orcamentoId)
+                                ?.statusAprovacao
+                            )
+                          ) && (
                             <button
                               type="button"
                               role="menuitem"
@@ -15276,9 +15365,6 @@ export function OrcamentoPageView({
                               {rotuloSimNaoOrcafascio(meta.usarMemoriaCalculo)}
                             </DadosCampo>
                           ) : null}
-                          <DadosCampo label="Arredondamento">
-                            {rotuloModoArredondamentoDados(meta.modoArredondamento ?? 'truncar')}
-                          </DadosCampo>
                         </dl>
                       </div>
 
@@ -16483,7 +16569,23 @@ export function OrcamentoPageView({
 
                 {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
                   <div className="flex w-full min-w-0 flex-col">
-                  {linhasCronograma.length === 0 ? (
+                  {!orcamentoComCronograma(statusAprovacaoAtivo) ? (
+                    <OrcamentoSecaoVazia
+                      titulo="Cronograma ainda não criado"
+                      texto="Finalize o orçamento para criar o cronograma."
+                      Icon={Calendar}
+                      onIrOrcamento={() => {
+                        if (cronogramaOnly && embeddedContractId && orcamentoAtivoId) {
+                          const destino = listaGlobalEntry
+                            ? `/ponto/orcamentos/${embeddedContractId}/${orcamentoAtivoId}`
+                            : `/ponto/contratos/${embeddedContractId}/orcamento/${orcamentoAtivoId}`;
+                          router.push(destino);
+                          return;
+                        }
+                        setOrcamentoViewTab('montagem');
+                      }}
+                    />
+                  ) : linhasCronograma.length === 0 ? (
                     <OrcamentoSecaoVazia
                       titulo="Cronograma vazio"
                       texto="Adicione serviços na aba Orçamento para planejar prazos e acompanhar o andamento da obra."
@@ -17701,6 +17803,35 @@ export function OrcamentoPageView({
                   >
                     <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
+                  {!fichaDemandaOnly ? (
+                    <button
+                      type="button"
+                      onClick={() => void finalizarOrcamento()}
+                      disabled={
+                        finalizandoOrcamento ||
+                        !podeFinalizarOrcamento ||
+                        versaoCongelada ||
+                        meta.congelado === true
+                      }
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700 bg-teal-700 text-white shadow-sm transition-colors hover:bg-teal-800 hover:border-teal-800 active:bg-teal-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:pointer-events-none dark:border-teal-600 dark:bg-teal-700 dark:hover:bg-teal-600 dark:hover:border-teal-600 dark:active:bg-teal-800 dark:focus-visible:ring-offset-gray-900 ${
+                        podeFinalizarOrcamento ? 'disabled:opacity-50' : 'disabled:opacity-100'
+                      }`}
+                      title={
+                        podeFinalizarOrcamento
+                          ? 'Finalizar orçamento e criar o cronograma'
+                          : 'Orçamento finalizado'
+                      }
+                      aria-label={
+                        podeFinalizarOrcamento ? 'Finalizar orçamento' : 'Orçamento finalizado'
+                      }
+                    >
+                      {finalizandoOrcamento ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      ) : (
+                        <Check className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                    </button>
+                  ) : null}
                   {analiticoDisponivel && !fichaDemandaOnly && (
                     <button
                       type="button"
@@ -17713,7 +17844,9 @@ export function OrcamentoPageView({
                         statusAprovacaoAtivo === 'aguardando_aprovacao' ||
                         statusAprovacaoAtivo === 'aprovado'
                           ? 'Orçamento já enviado ou aprovado'
-                          : 'Enviar para aprovação'
+                          : statusAprovacaoAtivo === 'finalizado'
+                            ? 'Enviar para aprovação'
+                            : 'Finalize o orçamento antes de enviar para aprovação'
                       }
                       aria-label="Enviar para aprovação"
                     >
@@ -18461,7 +18594,7 @@ export function OrcamentoPageView({
           setOrcafascioOrcamentoLinhaCatalogo(null);
           setOrcafascioOrcamentoLinhaChave(null);
           setOrcafascioImportUsarMemoria(false);
-          setOrcafascioImportModoArredondamento('truncar');
+          setOrcafascioImportModoArredondamento('arredondar');
           resetOrcafascioOsDraft();
           dismissImportShellIfNeeded();
         }}
@@ -18528,7 +18661,7 @@ export function OrcamentoPageView({
                   orcafascioOrcamentosLoading
                     ? ''
                     : !orcafascioFilterClientId
-                      ? 'Contrato sem cliente Orçafascio mapeado'
+                      ? 'Informe o cliente Orçafascio no cadastro do contrato'
                       : orcafascioImportSelectOptions.length === 0
                         ? 'Nenhum orçamento encontrado'
                         : 'Pesquisar orçamento...'
@@ -18536,7 +18669,7 @@ export function OrcamentoPageView({
                 searchPlaceholder="Pesquisar por nome ou código..."
                 emptyOptionsMessage={
                   !orcafascioFilterClientId
-                    ? 'Este contrato não tem cliente Orçafascio mapeado'
+                    ? 'Informe o cliente Orçafascio no cadastro do contrato'
                     : 'Nenhum orçamento encontrado'
                 }
                 emptySearchMessage="Nenhum orçamento corresponde à busca"
@@ -18687,26 +18820,6 @@ export function OrcamentoPageView({
                   onChange={setOrcafascioImportUsarMemoria}
                   label="Usar memória de cálculo"
                 />
-                <div>
-                  <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Arredondamento
-                  </p>
-                  <SegmentedControl
-                    aria-label="Arredondamento"
-                    value={orcafascioImportModoArredondamento}
-                    onChange={setOrcafascioImportModoArredondamento}
-                    className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                    pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                    buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                    activeButtonClassName="font-semibold text-white"
-                    inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                    options={[
-                      { value: 'truncar', label: 'Truncar' },
-                      { value: 'arredondar', label: 'Arredondar' },
-                      { value: 'nenhum', label: 'Não arredondar' },
-                    ]}
-                  />
-                </div>
               </div>
             ) : null}
           </>
@@ -18727,7 +18840,7 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoLinhaCatalogo(null);
               setOrcafascioOrcamentoLinhaChave(null);
               setOrcafascioImportUsarMemoria(false);
-              setOrcafascioImportModoArredondamento('truncar');
+              setOrcafascioImportModoArredondamento('arredondar');
               resetOrcafascioOsDraft();
               dismissImportShellIfNeeded();
             }}
@@ -19546,28 +19659,6 @@ export function OrcamentoPageView({
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
                 placeholder="Ex: 28,35"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Arredondamento
-              </p>
-              <SegmentedControl
-                aria-label="Arredondamento"
-                value={editarDadosDraft.modoArredondamento ?? 'truncar'}
-                onChange={(modoArredondamento) =>
-                  setEditarDadosDraft((p) => ({ ...p, modoArredondamento }))
-                }
-                className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                activeButtonClassName="font-semibold text-white"
-                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                options={[
-                  { value: 'truncar', label: 'Truncar' },
-                  { value: 'arredondar', label: 'Arredondar' },
-                  { value: 'nenhum', label: 'Não arredondar' },
-                ]}
               />
             </div>
             <div className="sm:col-span-2">

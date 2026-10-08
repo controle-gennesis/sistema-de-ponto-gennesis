@@ -24,9 +24,19 @@ import {
   resolveGastosPoloForContract
 } from '../lib/gastosOperacionaisPolo';
 import { findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
+import { resolveOrcafascioClientIdForContractName } from '../lib/orcafascioClients';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
+
+function parseOrcafascioClientId(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  if (!/^[a-f0-9]{24}$/i.test(value)) {
+    throw createError('Código do cliente Orçafascio inválido', 400);
+  }
+  return value;
+}
 
 type GastosOperacionaisDetailRow = {
   contract: string;
@@ -298,6 +308,7 @@ export class ContractController {
         costCenterId,
         valuePlusAddenda,
         allowBillingImportWithoutOsPleito,
+        orcafascioClientId,
       } = req.body;
 
       if (!name?.trim()) {
@@ -354,6 +365,9 @@ export class ContractController {
             costCenterId,
             valuePlusAddenda: value,
             allowBillingImportWithoutOsPleito: Boolean(allowBillingImportWithoutOsPleito),
+            orcafascioClientId:
+              parseOrcafascioClientId(orcafascioClientId) ||
+              resolveOrcafascioClientIdForContractName(name),
           },
           include: {
             costCenter: {
@@ -415,6 +429,7 @@ export class ContractController {
         costCenterId,
         valuePlusAddenda,
         allowBillingImportWithoutOsPleito,
+        orcafascioClientId,
       } = req.body;
 
       const existing = await prisma.contract.findUnique({
@@ -452,6 +467,12 @@ export class ContractController {
       if (valuePlusAddenda !== undefined) updateData.valuePlusAddenda = Number(valuePlusAddenda) || 0;
       if (allowBillingImportWithoutOsPleito !== undefined) {
         updateData.allowBillingImportWithoutOsPleito = Boolean(allowBillingImportWithoutOsPleito);
+      }
+      if (orcafascioClientId !== undefined) {
+        const typed = parseOrcafascioClientId(orcafascioClientId);
+        const contractName = name !== undefined ? String(name).trim() : existing.name;
+        updateData.orcafascioClientId =
+          typed || resolveOrcafascioClientIdForContractName(contractName);
       }
 
       if (updateData.endDate && updateData.startDate && updateData.endDate < updateData.startDate) {

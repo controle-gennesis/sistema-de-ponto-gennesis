@@ -17,6 +17,7 @@ interface Contract {
   id: string;
   costCenterId: string;
   name?: string;
+  orcafascioClientId?: string | null;
 }
 
 /** Redireciona `?orcamento=uuid` (formato antigo) para `/orcamento/uuid`. */
@@ -35,11 +36,13 @@ function OrcamentoEmbeddedWithQueryFlags({
   lockedCostCenterId,
   embeddedContractId,
   embeddedContractName,
+  embeddedOrcafascioClientId,
   embeddedOrcamentoIdFromRoute,
 }: {
   lockedCostCenterId: string;
   embeddedContractId: string;
   embeddedContractName: string;
+  embeddedOrcafascioClientId?: string | null;
   embeddedOrcamentoIdFromRoute: string | null;
 }) {
   const searchParams = useSearchParams();
@@ -58,6 +61,7 @@ function OrcamentoEmbeddedWithQueryFlags({
       lockedCostCenterId={lockedCostCenterId}
       embeddedContractId={embeddedContractId}
       embeddedContractName={embeddedContractName}
+      embeddedOrcafascioClientId={embeddedOrcafascioClientId}
       embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
       autoOpenNovoOrcamento={autoOpenNovoOrcamento}
       autoOpenImportOrcamento={autoOpenImportOrcamento}
@@ -208,6 +212,7 @@ export default function ContratoOrcamentoPage() {
         lockedCostCenterId={contract.costCenterId}
         embeddedContractId={contractId}
         embeddedContractName={typeof contract.name === 'string' ? contract.name.trim() : ''}
+        embeddedOrcafascioClientId={contract.orcafascioClientId?.trim() || null}
         embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
       />
     </Suspense>

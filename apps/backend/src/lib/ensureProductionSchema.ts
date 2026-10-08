@@ -4,6 +4,7 @@ import { ensureSupportTicketsSchema } from './ensureSupportTicketsSchema';
 import { ensureToolRentalRequestsSchema } from './ensureToolRentalRequestsSchema';
 import { ensureCaixinhaAccountsTable } from './ensureCaixinhaAccounts';
 import { ensureFluigDatasetMirrorSchema } from './ensureFluigDatasetMirrorSchema';
+import { resolveOrcafascioClientIdForContractName } from './orcafascioClients';
 
 async function columnExists(
   prisma: PrismaClient,
@@ -69,6 +70,35 @@ async function ensurePleitoBudgetValueConfirmed(prisma: PrismaClient): Promise<v
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "budgetValueConfirmed" BOOLEAN NOT NULL DEFAULT false;
   `);
+}
+
+async function ensureContractOrcafascioClientId(prisma: PrismaClient): Promise<void> {
+  if (!(await columnExists(prisma, 'contracts', 'orcafascioClientId'))) {
+    console.warn('[Schema] Coluna contracts.orcafascioClientId ausente — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "orcafascioClientId" TEXT;
+    `);
+  }
+
+  const pending = await prisma.contract.findMany({
+    where: { OR: [{ orcafascioClientId: null }, { orcafascioClientId: '' }] },
+    select: { id: true, name: true, number: true },
+  });
+  let filled = 0;
+  for (const row of pending) {
+    const clientId =
+      resolveOrcafascioClientIdForContractName(row.name) ||
+      resolveOrcafascioClientIdForContractName(row.number);
+    if (!clientId) continue;
+    await prisma.contract.update({
+      where: { id: row.id },
+      data: { orcafascioClientId: clientId },
+    });
+    filled += 1;
+  }
+  if (filled > 0) {
+    console.warn(`[Schema] Código Orçafascio preenchido em ${filled} contrato(s) já conhecido(s).`);
+  }
 }
 
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
@@ -3029,6 +3059,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureUserProfileSetupColumn(prisma);
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);
+    await ensureContractOrcafascioClientId(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);

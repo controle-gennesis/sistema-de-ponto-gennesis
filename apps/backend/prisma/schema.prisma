@@ -1430,6 +1430,8 @@ model Contract {
   weeklyFuelTankQuota Decimal? @db.Decimal(6, 2)
   /// Se preenchido, este contrato usa a cota do contrato apontado (e dos demais no mesmo grupo).
   fuelQuotaParentContractId String?
+  /// Cliente do Orçafascio (id do select de cliente). Usado para filtrar orçamentos na importação.
+  orcafascioClientId String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

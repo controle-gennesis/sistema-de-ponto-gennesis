@@ -32,6 +32,7 @@ type OrcamentoListaRow = {
   id: string;
   nome: string;
   updatedAt: string;
+  statusAprovacao?: string;
   cronogramaProgressoFisico?: number;
   cronogramaConcluido?: number;
   cronogramaTotalEtapas?: number;
@@ -150,7 +151,12 @@ export default function CronogramasPage() {
           const orcs = (Array.isArray(res.data?.orcamentos)
             ? res.data.orcamentos
             : []) as OrcamentoListaRow[];
-          return orcs.map(
+          return orcs
+            .filter((o) => {
+              const status = String(o.statusAprovacao || '').trim().toLowerCase();
+              return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
+            })
+            .map(
             (o): CronogramaListItem => ({
               contractId: c.id,
               contractName: (c.name || c.number || c.id).trim(),
