@@ -9469,7 +9469,7 @@ export function OrcamentoPageView({
           ?.orcafascioClientId?.trim() || ''
       : String(embeddedOrcafascioClientId || '').trim();
     if (stored) return stored;
-    return resolveOrcafascioClientIdForContractName(orcafascioFilterContractName);
+    return resolveOrcafascioClientIdForContractName(orcafascioFilterContractName) ?? '';
   }, [
     deferContractOnImport,
     importContractOptions,
@@ -13071,16 +13071,18 @@ export function OrcamentoPageView({
       prevDim,
       rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
     );
-    const novaLinha = { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 };
+    const linhaVazia = () => ({ descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 });
     const linhas = [...atual.linhas];
     if (
       inserirAposIdx !== undefined &&
       inserirAposIdx >= 0 &&
       inserirAposIdx < linhas.length
     ) {
-      linhas.splice(inserirAposIdx + 1, 0, novaLinha);
+      linhas.splice(inserirAposIdx + 1, 0, linhaVazia());
+    } else if (linhas.length === 0) {
+      for (let i = 0; i < 6; i++) linhas.push(linhaVazia());
     } else {
-      linhas.push(novaLinha);
+      linhas.push(linhaVazia());
     }
     const nextDim = { ...atual, linhas };
     setDimensoesPorItem(prev => ({
@@ -16768,13 +16770,16 @@ export function OrcamentoPageView({
                               >
                                 {servicoGrupo.servicoNome || 'Serviço'}
                               </div>
-                              <div>
+                              <div className="flex flex-col gap-4 bg-gray-50 p-4 dark:bg-gray-950/40">
                                 {servicoGrupo.etapas.map(etapa => {
                                   const mesmoTituloSubtitulo =
                                     servicoGrupo.servicoNome.trim().toLowerCase() ===
                                     etapa.subtituloNome.trim().toLowerCase();
                                   return (
-                                    <div key={etapa.blocoKey || etapa.subtituloNome}>
+                                    <div
+                                      key={etapa.blocoKey || etapa.subtituloNome}
+                                      className="flex flex-col gap-4"
+                                    >
                                       {!mesmoTituloSubtitulo && etapa.subtituloNome.trim() ? (
                                         <div className="border-t border-gray-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                                           {etapa.subtituloNome}
@@ -16786,7 +16791,7 @@ export function OrcamentoPageView({
                                           <div
                                             key={row.key}
                                             id={`memorial-medicoes-${row.key}`}
-                                            className="scroll-mt-4"
+                                            className="scroll-mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
                                           >
                                             <OrcamentoMedicaoPainel
                                               rowKey={row.key}

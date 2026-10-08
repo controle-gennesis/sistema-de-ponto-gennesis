@@ -3,7 +3,6 @@
 import React, { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Info, Plus, Trash2 } from 'lucide-react';
 import {
-  ROTULO_COLUNA_MEDICAO_OPCOES,
   type CampoFormulaMedicao,
   type DimensoesItem,
   type LinhaMedicao,
@@ -13,10 +12,8 @@ import { calcA, calcV, calcularQuantidadeLinha, linhasMedicaoEfetivas } from './
 import {
   gradeTableCls,
   gradeTableRowTrCls,
-  inputGradeCls,
-  selectGradeHeaderMemorialCls
+  inputGradeCls
 } from './orcamentoGradeCellClasses';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 
 /** Painel de medições (C, L, H, %, N, A, V) — aba Memorial de cálculo (layout em tabela, padrão das demais abas). */
@@ -107,6 +104,8 @@ const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0`;
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
 const inputThDescricaoCls =
   'box-border h-full min-h-0 w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-0 text-left text-[11px] font-bold uppercase tracking-wide text-[var(--orc-header-fg,#4b5563)] shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
+const inputThRotuloCls =
+  'box-border h-full min-h-0 w-full min-w-0 border-0 rounded-none bg-transparent px-1 py-0 text-center text-[11px] font-bold tracking-wide text-[var(--orc-header-fg,#374151)] shadow-none outline-none ring-0 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
 
 const MEMORIAL_COMMIT_MS = 180;
 
@@ -647,18 +646,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       N: 'N',
       pct: '%'
     };
-    const salvo = col === 'pct' ? dim.rotulosColunas?.pct : dim.rotulosColunas?.[col];
-    const normalizarLegado = (v: string | undefined) => {
-      if (v === undefined) return undefined;
-      if (v === '') return col === 'pct' ? '%' : 'N';
-      return v;
-    };
-    const salvoNorm = normalizarLegado(salvo);
-    const valorAtual = salvoNorm === undefined ? padraoPorCampo[col] : salvoNorm;
-    const opcoes = [...ROTULO_COLUNA_MEDICAO_OPCOES] as string[];
-    const lista = Array.from(
-      new Set(valorAtual !== '' && !opcoes.includes(valorAtual) ? [valorAtual, ...opcoes] : opcoes)
-    );
+    const salvo = (col === 'pct' ? dim.rotulosColunas?.pct : dim.rotulosColunas?.[col])?.trim();
+    const valorAtual = salvo || padraoPorCampo[col];
     const ariaDim =
       col === 'C'
         ? 'comprimento'
@@ -677,21 +666,18 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         title={titleCell}
         style={stickyThead ? stickyHeaderTopStyle : undefined}
       >
-        <label className="flex h-full min-h-0 items-stretch justify-center">
-          <span className="sr-only">
-            Coluna {col === 'pct' ? '%' : col}, rótulo {valorAtual}
-          </span>
-          <StringSingleSelectDropdown
-            className="h-full w-full"
-            triggerClassName={`${selectGradeHeaderMemorialCls} !min-h-0 !h-full !py-0`}
-            hideChevron
-            value={valorAtual}
-            disabled={readOnly || !updateRotuloColunaMedicao}
-            onChange={(value) => updateRotuloColunaMedicao?.(col, value)}
-            options={lista}
-            allowEmpty={false}
-          />
-        </label>
+        <MemorialCampoLocal
+          committedValue={valorAtual}
+          onCommit={(raw) => {
+            const texto = raw.trim();
+            updateRotuloColunaMedicao?.(col, texto || padraoPorCampo[col]);
+          }}
+          disabled={readOnly || !updateRotuloColunaMedicao}
+          className={inputThRotuloCls}
+          placeholder={padraoPorCampo[col]}
+          ariaLabel={`Rótulo da coluna de ${ariaDim}`}
+          title={titleCell || `Rótulo da coluna de ${ariaDim}`}
+        />
       </Tag>
     );
   };
@@ -1085,7 +1071,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     <div
       className={
         embedded
-          ? 'overflow-hidden border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+          ? 'overflow-hidden bg-white dark:bg-gray-900'
           : 'overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
       }
     >
