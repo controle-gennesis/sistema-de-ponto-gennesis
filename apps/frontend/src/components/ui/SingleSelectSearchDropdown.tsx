@@ -29,6 +29,8 @@ export type SingleSelectSearchDropdownProps = {
   emptyOptionLabel?: string;
   className?: string;
   triggerClassName?: string;
+  /** Esconde a seta do campo. O valor continua selecionável. */
+  hideChevron?: boolean;
   /** Quebra o texto do campo e das opções em vez de cortar com reticências. */
   wrapLabel?: boolean;
   menuInline?: boolean;
