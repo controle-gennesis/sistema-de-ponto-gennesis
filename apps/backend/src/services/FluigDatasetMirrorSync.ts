@@ -262,7 +262,7 @@ export async function getFluigDatasetMirrorPayload(
   };
 }
 
-/** Sync todo dia às 7:00 e às 12:00 (America/Sao_Paulo). Não busca na subida do servidor. */
+/** Sync todo dia às 3:00 e às 12:30 (America/Sao_Paulo). Não busca na subida do servidor. */
 export function startFluigDatasetMirrorScheduler(): void {
   const tz = process.env.TZ || 'America/Sao_Paulo';
 
@@ -277,8 +277,8 @@ export function startFluigDatasetMirrorScheduler(): void {
       });
   };
 
-  cron.schedule('0 7 * * *', () => run('cron-7h'), { timezone: tz });
-  cron.schedule('0 12 * * *', () => run('cron-12h'), { timezone: tz });
+  cron.schedule('0 3 * * *', () => run('cron-3h'), { timezone: tz });
+  cron.schedule('30 12 * * *', () => run('cron-12h30'), { timezone: tz });
 
-  console.log('[fluig-mirror] agendado: todo dia às 7:00 e às 12:00 (sem busca na subida)');
+  console.log('[fluig-mirror] agendado: todo dia às 3:00 e às 12:30 (sem busca na subida)');
 }

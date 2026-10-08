@@ -58,7 +58,7 @@ export async function getDatasetData(req: Request, res: Response) {
     const { fields, constraints, order } = req.body || {};
     const startedAt = Date.now();
 
-    // Datasets espelhados: página lê do Postgres (job sync às 7:00 e às 12:00).
+    // Datasets espelhados: página lê do Postgres (job sync às 3:00 e às 12:30).
     if (isFluigMirroredDataset(datasetId)) {
       const mirrored = await getFluigDatasetMirrorPayload(datasetId);
       if (mirrored) {
