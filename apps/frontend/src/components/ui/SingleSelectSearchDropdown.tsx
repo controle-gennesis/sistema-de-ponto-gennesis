@@ -29,7 +29,8 @@ export type SingleSelectSearchDropdownProps = {
   emptyOptionLabel?: string;
   className?: string;
   triggerClassName?: string;
-  hideChevron?: boolean;
+  /** Quebra o texto do campo e das opções em vez de cortar com reticências. */
+  wrapLabel?: boolean;
   menuInline?: boolean;
   /** Altura máxima da lista de opções (padrão: 220). */
   listMaxHeight?: number;
@@ -151,8 +152,20 @@ function OptionAvatar({
   );
 }
 
-function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearchOption; noTruncate?: boolean }) {
-  const labelClass = noTruncate ? 'whitespace-nowrap' : 'truncate';
+function OptionLabelContent({
+  opt,
+  noTruncate = false,
+  wrapLabel = false,
+}: {
+  opt: MultiSelectSearchOption;
+  noTruncate?: boolean;
+  wrapLabel?: boolean;
+}) {
+  const labelClass = wrapLabel
+    ? 'whitespace-normal break-words'
+    : noTruncate
+      ? 'whitespace-nowrap'
+      : 'truncate';
   const label = opt.labelClassName ? (
     <span className={`${labelClass} font-normal tracking-tight ${opt.labelClassName}`}>{opt.label}</span>
   ) : (
@@ -269,6 +282,7 @@ export function SingleSelectSearchDropdown({
   className = '',
   triggerClassName,
   hideChevron = false,
+  wrapLabel = false,
   menuInline = false,
   listMaxHeight: listMaxHeightProp,
   noFocusRing = false,
@@ -407,9 +421,15 @@ export function SingleSelectSearchDropdown({
 
   const triggerButtonClassName = triggerClassName
     ? triggerClassName
-    : `${SINGLE_SELECT_TRIGGER_BASE_CLS} ${singleSelectTriggerBorderClass(open, hideFocus)} ${singleSelectTriggerTextClass(Boolean(selectedLabel))}`;
+    : `${SINGLE_SELECT_TRIGGER_BASE_CLS} ${singleSelectTriggerBorderClass(open, hideFocus)} ${singleSelectTriggerTextClass(Boolean(selectedLabel))} ${
+        wrapLabel ? '!h-auto min-h-10 items-start py-2' : ''
+      }`;
 
-  const triggerLabelClassName = hideChevron ? 'text-center' : 'block truncate';
+  const triggerLabelClassName = hideChevron
+    ? 'text-center'
+    : wrapLabel
+      ? 'block whitespace-normal break-words text-left leading-snug'
+      : 'block truncate';
 
   const listMaxHeight = menuInline
     ? listCap
@@ -530,14 +550,16 @@ export function SingleSelectSearchDropdown({
                 >
                   <span
                     className={`min-w-0 flex-1 ${
-                      opt.description?.trim() || (opt.statusSegments?.length ?? 0) > 0
-                        ? ''
-                        : disableSearch
-                          ? 'whitespace-nowrap'
-                          : 'truncate'
+                      wrapLabel
+                        ? 'whitespace-normal break-words'
+                        : opt.description?.trim() || (opt.statusSegments?.length ?? 0) > 0
+                          ? ''
+                          : disableSearch
+                            ? 'whitespace-nowrap'
+                            : 'truncate'
                     }`}
                   >
-                    <OptionLabelContent opt={opt} noTruncate={disableSearch} />
+                    <OptionLabelContent opt={opt} noTruncate={disableSearch} wrapLabel={wrapLabel} />
                   </span>
                   {active ? (
                     <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />

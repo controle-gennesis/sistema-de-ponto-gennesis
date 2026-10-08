@@ -19,6 +19,8 @@ export type StringSingleSelectDropdownProps = {
   className?: string;
   triggerClassName?: string;
   hideChevron?: boolean;
+  /** Quebra o texto do campo e das opções em vez de cortar com reticências. */
+  wrapLabel?: boolean;
   menuInline?: boolean;
   disableSearch?: boolean;
   menuAlign?: 'start' | 'end';
@@ -41,6 +43,7 @@ export function StringSingleSelectDropdown({
   className = '',
   triggerClassName,
   hideChevron = false,
+  wrapLabel = false,
   menuInline = false,
   disableSearch = false,
   menuAlign = 'start',
@@ -71,6 +74,7 @@ export function StringSingleSelectDropdown({
       className={className}
       triggerClassName={triggerClassName}
       hideChevron={hideChevron}
+      wrapLabel={wrapLabel}
       menuInline={menuInline}
       disableSearch={disableSearch}
       menuAlign={menuAlign}

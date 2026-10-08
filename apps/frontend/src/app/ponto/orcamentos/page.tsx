@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading, formatCadastroListId } from '@/components/ui/CadastroListSummary';
+import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -57,6 +57,8 @@ type OrcamentoListaRow = {
   statusAprovacao?: string;
   bdiPercentual?: number;
   totalComBdi?: number;
+  osCodigo?: string;
+  numeroPasta?: string;
   familiaId?: string;
   versao?: number;
   congelado?: boolean;
@@ -69,6 +71,8 @@ type OrcamentoListItem = {
   contractName: string;
   orcamentoId: string;
   nome: string;
+  osCodigo: string;
+  numeroPasta: string;
   codigo: string;
   updatedAt: string;
   status: OrcamentoStatusAprovacao;
@@ -256,6 +260,8 @@ export default function OrcamentosPage() {
               contractName: (c.name || c.number || c.id).trim(),
               orcamentoId: o.id,
               nome: nomeOrcamentoSemCodigo(o.nome) || o.nome,
+              osCodigo: typeof o.osCodigo === 'string' ? o.osCodigo.trim() : '',
+              numeroPasta: typeof o.numeroPasta === 'string' ? o.numeroPasta.trim() : '',
               codigo: codigoFromNomeOrcamento(o.nome),
               updatedAt: o.updatedAt || '',
               status: normalizarStatusAprovacao(o.statusAprovacao),
@@ -304,11 +310,18 @@ export default function OrcamentosPage() {
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
       if (!q) return true;
       const nome = (o.nome || '').toLowerCase();
+      const os = (o.osCodigo || '').toLowerCase();
+      const pasta = (o.numeroPasta || '').toLowerCase();
       const codigo = (o.codigo || '').toLowerCase();
       const contrato = (o.contractName || '').toLowerCase();
       const status = (ORCAMENTO_STATUS_LABELS[o.status] || '').toLowerCase();
       return (
-        nome.includes(q) || codigo.includes(q) || contrato.includes(q) || status.includes(q)
+        nome.includes(q) ||
+        os.includes(q) ||
+        pasta.includes(q) ||
+        codigo.includes(q) ||
+        contrato.includes(q) ||
+        status.includes(q)
       );
     });
   }, [orcamentosData, searchTerm, contratoFiltro]);
@@ -477,7 +490,7 @@ export default function OrcamentosPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por orçamento, código ou contrato..."
+                      placeholder="Buscar por orçamento, OS ou pasta"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -558,16 +571,19 @@ export default function OrcamentosPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="w-[9%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
-                            Código
+                          <th className="w-[9%] whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                            OS
                           </th>
-                          <th className="min-w-[14rem] w-[32%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[8%] whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                            Pasta
+                          </th>
+                          <th className="min-w-[14rem] w-[28%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Descrição
                           </th>
                           <th className="w-[7%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
                             Revisão
                           </th>
-                          <th className="w-[12%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                          <th className="min-w-[12rem] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Contrato
                           </th>
                           <th className="w-[11%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
@@ -593,8 +609,11 @@ export default function OrcamentosPage() {
                             className={getListTableRowClassName(true)}
                             aria-label={`Abrir orçamento ${o.nome} ${formatOrcamentoRevisao(o.versao)}`}
                           >
-                            <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-4">
-                              {formatCadastroListId(o.codigo || null)}
+                            <td className="whitespace-nowrap px-3 py-3 text-sm text-gray-900 dark:text-gray-100 sm:px-4">
+                              {o.osCodigo || '—'}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-sm text-gray-900 dark:text-gray-100 sm:px-4">
+                              {o.numeroPasta || '—'}
                             </td>
                             <td className="min-w-[14rem] px-3 py-3 sm:px-6">
                               <ListRowNavigableLabel className="block font-medium whitespace-normal break-words">
@@ -607,8 +626,8 @@ export default function OrcamentosPage() {
                             >
                               <OrcamentoRevisaoBadge versao={o.versao} />
                             </td>
-                            <td className="max-w-[10rem] px-3 py-3 text-center sm:px-4">
-                              <span className="block truncate text-sm text-gray-700 dark:text-gray-300">
+                            <td className="min-w-[12rem] px-3 py-3 text-left sm:px-4">
+                              <span className="block whitespace-normal break-words text-sm text-gray-700 dark:text-gray-300">
                                 {o.contractName}
                               </span>
                             </td>

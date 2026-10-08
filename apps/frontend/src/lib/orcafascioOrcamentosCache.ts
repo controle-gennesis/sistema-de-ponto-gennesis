@@ -139,7 +139,7 @@ export async function loadOrcafascioOrcamentosList(options?: {
       const first = await api.get<OrcafascioOrcamentosApiResponse>('/orcafascio/orcamentos', {
         params: {
           page: 1,
-          per_page: 500,
+          per_page: 5000,
           ...(q ? { search: q } : {}),
           ...(force ? { refresh: '1' } : {}),
         },

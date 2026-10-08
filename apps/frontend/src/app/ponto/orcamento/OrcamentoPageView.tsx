@@ -79,7 +79,6 @@ import {
   type PoloFd,
 } from '@/lib/fichaDemandaApproval';
 import {
-  invalidateOrcafascioOrcamentosCache,
   loadOrcafascioOrcamentosList,
   peekOrcafascioOrcamentosCache,
   prefetchOrcafascioOrcamentosList,
@@ -3085,6 +3084,16 @@ function orcamentoComCronograma(status: OrcamentoStatusAprovacao): boolean {
   return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
 }
 
+function fichaDemandaLiberada(status: OrcamentoStatusAprovacao): boolean {
+  return (
+    status === 'finalizado' ||
+    status === 'aguardando_aprovacao' ||
+    status === 'aprovado' ||
+    status === 'em_correcao' ||
+    status === 'reprovado'
+  );
+}
+
 function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
   const base =
     'inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap';
@@ -3695,10 +3704,15 @@ function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
   };
 }
 
-function orcamentoOsDraftValido(draft: OrcamentoOsDraft, osCodigo: string, numeroPasta: string): boolean {
+function orcamentoOsDraftValido(
+  draft: OrcamentoOsDraft,
+  osCodigo: string,
+  numeroPasta: string,
+  opts?: { exigirValor?: boolean }
+): boolean {
   if (!osCodigo.trim() || !numeroPasta.trim()) return false;
   if (draft.isAditivo === null) return false;
-  if (parseOrcamentoValorBr(draft.valorOs) <= 0) return false;
+  if (opts?.exigirValor !== false && parseOrcamentoValorBr(draft.valorOs) <= 0) return false;
   if (draft.isAditivo === true && !draft.confirmSomarAditivo) return false;
   return true;
 }
@@ -3890,6 +3904,15 @@ function parseMedicaoBlurNumber(raw: string): number | null {
   }
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Campo vazio mantém o valor vindo do Orçafascio. */
+function percentualInformadoOuFallback(digitado: string, fallback: string): string {
+  const limpo = digitado.replace('%', '').trim();
+  if (!limpo) return fallback;
+  const n = parsePlanilhaPtBr(limpo);
+  if (n === null || !Number.isFinite(n)) return fallback;
+  return formatPercentualMetaPt(n, 2);
 }
 
 /** Converte campo percentual (ex.: "25,01") para decimal (0.2501). */
@@ -6599,6 +6622,44 @@ function formatarPesoPctExport(n: number) {
   return `${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }
 
+function OrcamentoAditivoEscolha({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: boolean | null | undefined;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex gap-2" role="group" aria-label="Orçamento aditivo">
+      {(
+        [
+          { v: true, label: 'Sim' },
+          { v: false, label: 'Não' },
+        ] as const
+      ).map((opt) => {
+        const active = value === opt.v;
+        return (
+          <button
+            key={opt.label}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(opt.v)}
+            className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              active
+                ? 'border-red-600 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Estado vazio das abas derivadas do orçamento (sem itens na montagem). */
 function OrcamentoSecaoVazia({
   titulo,
@@ -7161,8 +7222,9 @@ export function OrcamentoPageView({
   const [orcafascioModalOpen, setOrcafascioModalOpen] = useState(false);
   const [orcafascioModalSoloOrcamentos, setOrcafascioModalSoloOrcamentos] = useState(false);
   const [orcafascioImportSelectValue, setOrcafascioImportSelectValue] = useState('');
-  /** Checkbox do modal de importação: usar memória de cálculo. */
-  const [orcafascioImportUsarMemoria, setOrcafascioImportUsarMemoria] = useState(false);
+  /** BDI e desconto opcionais no modal de importação. Vazio usa o valor do Orçafascio. */
+  const [orcafascioImportBdi, setOrcafascioImportBdi] = useState('');
+  const [orcafascioImportDesconto, setOrcafascioImportDesconto] = useState('');
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
   const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
     useState<ModoArredondamento>('arredondar');
@@ -7171,6 +7233,19 @@ export function OrcamentoPageView({
   const [orcafascioModalOrcamentosSearch, setOrcafascioModalOrcamentosSearch] = useState('');
   const [orcafascioOrcamentos, setOrcafascioOrcamentos] = useState<OrcafascioOrcamentoItem[] | null>(null);
   const [orcafascioOrcamentosLoading, setOrcafascioOrcamentosLoading] = useState(false);
+  const orcafascioFilterClientIdRef = useRef('');
+  const [orcafascioCarregandoPontos, setOrcafascioCarregandoPontos] = useState(1);
+  useEffect(() => {
+    if (!orcafascioOrcamentosLoading) {
+      setOrcafascioCarregandoPontos(1);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setOrcafascioCarregandoPontos((n) => (n >= 3 ? 1 : n + 1));
+    }, 450);
+    return () => window.clearInterval(id);
+  }, [orcafascioOrcamentosLoading]);
+  const textoCarregandoOrcamentos = `Carregando orçamentos${'.'.repeat(orcafascioCarregandoPontos)}`;
   const [orcafascioOrcamentosPage, setOrcafascioOrcamentosPage] = useState(1);
   const [orcafascioOrcamentosTotal, setOrcafascioOrcamentosTotal] = useState<number | null>(null);
   const [orcafascioOrcamentoDetalhe, setOrcafascioOrcamentoDetalhe] = useState<OrcafascioOrcamentoItem | null>(null);
@@ -7722,6 +7797,7 @@ export function OrcamentoPageView({
   const [fdAprovacaoPreparando, setFdAprovacaoPreparando] = useState(false);
   const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
   const [finalizandoOrcamento, setFinalizandoOrcamento] = useState(false);
+  const [confirmFinalizarOrcamento, setConfirmFinalizarOrcamento] = useState(false);
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -9192,8 +9268,12 @@ export function OrcamentoPageView({
       setOrcafascioOrcamentos(payload.items as OrcafascioOrcamentoItem[]);
       setOrcafascioOrcamentosTotal(payload.total);
       setOrcafascioOrcamentosPage(1);
-      // Mantém “atualizando” enquanto pagina; libera o select assim que há itens.
-      setOrcafascioOrcamentosLoading(Boolean(payload.incomplete));
+      const clientId = orcafascioFilterClientIdRef.current;
+      const hasMatch = clientId
+        ? (payload.items as OrcafascioOrcamentoItem[]).some((o) => budgetClientId(o) === clientId)
+        : payload.items.length > 0;
+      // Só segura o “carregando” enquanto o cliente ainda não apareceu na lista.
+      setOrcafascioOrcamentosLoading(Boolean(payload.incomplete) && !hasMatch);
     };
 
     const force = opts?.force === true;
@@ -9245,12 +9325,18 @@ export function OrcamentoPageView({
     setOrcafascioOrcamentoLinhaCatalogo(null);
     setOrcafascioOrcamentoLinhaChave(null);
 
-    setOrcafascioOrcamentos(null);
-    setOrcafascioOrcamentosLoading(true);
+    const cached = peekOrcafascioOrcamentosCache('');
+    if (cached && cached.items.length > 0) {
+      setOrcafascioOrcamentos(cached.items as OrcafascioOrcamentoItem[]);
+      setOrcafascioOrcamentosTotal(cached.total);
+      setOrcafascioOrcamentosLoading(Boolean(cached.incomplete));
+    } else {
+      setOrcafascioOrcamentos(null);
+      setOrcafascioOrcamentosLoading(true);
+    }
 
     setOrcafascioModalOpen(true);
-    invalidateOrcafascioOrcamentosCache('');
-    void carregarOrcamentosOrcafascioParaSelect('', { force: true });
+    void carregarOrcamentosOrcafascioParaSelect('');
   };
 
   const verDetalheOrcamentoOrcafascio = async (
@@ -9391,6 +9477,7 @@ export function OrcamentoPageView({
     embeddedOrcafascioClientId,
     orcafascioFilterContractName,
   ]);
+  orcafascioFilterClientIdRef.current = orcafascioFilterClientId;
 
   const orcafascioImportSelectOptions = useMemo(() => {
     if (deferContractOnImport && !importContratoSelecionadoId.trim()) return [];
@@ -9982,8 +10069,8 @@ export function OrcamentoPageView({
     if (importOrcamentoInFlightRef.current) return false;
     const osCodigo = orcafascioOsCodigo.trim();
     const numeroPasta = orcafascioNumeroPasta.trim();
-    if (!orcamentoOsDraftValido(orcafascioOsDraft, osCodigo, numeroPasta)) {
-      toast.error('Preencha aditivo, OS, Número da pasta, valor e confirmação de aditivo (se houver) antes de importar.');
+    if (!orcamentoOsDraftValido(orcafascioOsDraft, osCodigo, numeroPasta, { exigirValor: false })) {
+      toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
       return false;
     }
     const target = resolveImportTarget();
@@ -10081,7 +10168,7 @@ export function OrcamentoPageView({
       ).slice(0, 120);
 
       const entry = await criarOrcamentoApi(ccId, nomeLista);
-      const usarMemoriaCalculo = orcafascioImportUsarMemoria;
+      const usarMemoriaCalculo = true;
       const modoArredondamento = orcafascioImportModoArredondamento;
       const subtitulosNoOrcamento: string[] = [];
       const quantidadesPorItem: Record<string, number> = {};
@@ -10098,6 +10185,14 @@ export function OrcamentoPageView({
 
       const base = sessaoVazia();
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
+      const bdiPercentual = percentualInformadoOuFallback(
+        orcafascioImportBdi,
+        finApi.bdiPercentual
+      );
+      const descontoPercentual = percentualInformadoOuFallback(
+        orcafascioImportDesconto,
+        finApi.descontoPercentual
+      );
       const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
       const descricaoServicoOs =
         orcafascioOsDraft.descricaoServicoOs.trim() || nomeOrigem || nomeLista;
@@ -10113,9 +10208,9 @@ export function OrcamentoPageView({
         osNumeroPasta,
         isAditivo: orcafascioOsDraft.isAditivo === true,
         orcamentoRealizadoPor: currentUserName || '',
-        // BDI/% e desconto vêm do sintético; sem defaults fictícios (25%/28%).
-        descontoPercentual: finApi.descontoPercentual,
-        bdiPercentual: finApi.bdiPercentual,
+        // BDI e desconto: o que foi digitado no modal; vazio usa o sintético do Orçafascio.
+        descontoPercentual,
+        bdiPercentual,
         reajustes: [],
         importadoPlanilha: true,
         usarMemoriaCalculo,
@@ -10203,7 +10298,7 @@ export function OrcamentoPageView({
         },
       });
 
-      const bdiPtsImport = parsePercentualMeta(finApi.bdiPercentual) * 100;
+      const bdiPtsImport = parsePercentualMeta(bdiPercentual) * 100;
       const entryAtualizado: OrcamentoListaEntry = {
         ...entry,
         nome: nomeLista,
@@ -10213,9 +10308,10 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
       abrirAposImportarOrcamento(importContractId, entry.id);
-      setOrcamentoViewTab(usarMemoriaCalculo ? 'memorial' : 'montagem');
+      setOrcamentoViewTab('montagem');
 
-      setOrcafascioImportUsarMemoria(false);
+      setOrcafascioImportBdi('');
+      setOrcafascioImportDesconto('');
       setOrcafascioImportModoArredondamento('arredondar');
       resetOrcafascioOsDraft();
       setOrcafascioModalOpen(false);
@@ -10232,9 +10328,7 @@ export function OrcamentoPageView({
       );
       toast.success(
         `Orçamento «${nomeLista}» criado com ${servicosImportados.length} serviço(s) e ${totalItens} composição(ões)${
-          finApi.bdiPercentual && finApi.bdiPercentual !== '0'
-            ? ` · BDI ${finApi.bdiPercentual}%`
-            : ''
+          bdiPercentual && bdiPercentual !== '0' ? ` · BDI ${bdiPercentual}%` : ''
         }.`
       );
       return true;
@@ -13718,11 +13812,18 @@ export function OrcamentoPageView({
       ...(analiticoDisponivel
         ? [
             { value: 'analitico' as const, label: 'Analítico' },
-            { value: 'planilhaAnalitica' as const, label: 'Ficha de demanda' },
+            {
+              value: 'planilhaAnalitica' as const,
+              label: 'Ficha de demanda',
+              disabled: !fichaDemandaLiberada(statusAprovacaoAtivo),
+              title: fichaDemandaLiberada(statusAprovacaoAtivo)
+                ? undefined
+                : 'Finalize o orçamento para liberar a ficha de demanda',
+            },
           ]
         : []),
     ];
-  }, [fichaDemandaOnly, memorialDisponivel, analiticoDisponivel]);
+  }, [fichaDemandaOnly, memorialDisponivel, analiticoDisponivel, statusAprovacaoAtivo]);
 
   const gradeZoomAtivo =
     orcamentoViewTab === 'montagem' ||
@@ -13743,6 +13844,13 @@ export function OrcamentoPageView({
       setOrcamentoViewTab('montagem');
     }
   }, [analiticoDisponivel, orcamentoViewTab]);
+
+  useEffect(() => {
+    if (fichaDemandaOnly) return;
+    if (orcamentoViewTab === 'planilhaAnalitica' && !fichaDemandaLiberada(statusAprovacaoAtivo)) {
+      setOrcamentoViewTab('montagem');
+    }
+  }, [fichaDemandaOnly, orcamentoViewTab, statusAprovacaoAtivo]);
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial' || !memorialDisponivel) return;
@@ -14311,6 +14419,7 @@ export function OrcamentoPageView({
       toast.error('Não foi possível finalizar o orçamento.');
     } finally {
       setFinalizandoOrcamento(false);
+      setConfirmFinalizarOrcamento(false);
     }
   };
 
@@ -17753,6 +17862,13 @@ export function OrcamentoPageView({
                     aria-label={fichaDemandaOnly ? 'Abas da ficha de demanda' : 'Abas do orçamento'}
                     value={orcamentoViewTab}
                     onChange={(next) => {
+                      if (
+                        next === 'planilhaAnalitica' &&
+                        !fichaDemandaOnly &&
+                        !fichaDemandaLiberada(statusAprovacaoAtivo)
+                      ) {
+                        return;
+                      }
                       setOrcamentoViewTab(next);
                       irParaTopoDasAbas();
                     }}
@@ -17806,7 +17922,13 @@ export function OrcamentoPageView({
                   {!fichaDemandaOnly ? (
                     <button
                       type="button"
-                      onClick={() => void finalizarOrcamento()}
+                      onClick={() => {
+                        if (itensCalculados.length === 0) {
+                          toast.error('Adicione itens ao orçamento antes de finalizar.');
+                          return;
+                        }
+                        setConfirmFinalizarOrcamento(true);
+                      }}
                       disabled={
                         finalizandoOrcamento ||
                         !podeFinalizarOrcamento ||
@@ -17881,6 +18003,50 @@ export function OrcamentoPageView({
         isSaving={fdAprovacaoEnviando}
         title="Enviar ficha de demanda para aprovação"
       />
+
+      {confirmFinalizarOrcamento && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (finalizandoOrcamento) return;
+              setConfirmFinalizarOrcamento(false);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/30">
+              <Check className="h-6 w-6 text-teal-700 dark:text-teal-300" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Finalizar orçamento?
+            </h3>
+            <p className="text-center text-sm text-gray-600 dark:text-gray-400">
+              Confira o total antes de continuar. O cronograma será criado e a ficha de demanda será liberada.
+            </p>
+            <p className="mb-6 mt-3 text-center text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+              {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmFinalizarOrcamento(false)}
+                disabled={finalizandoOrcamento}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-60 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void finalizarOrcamento()}
+                disabled={finalizandoOrcamento}
+                className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 disabled:opacity-60"
+              >
+                {finalizandoOrcamento ? 'Finalizando...' : 'Finalizar'}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
 
       {confirmApagarSelecaoMontagem && itensSelecionadosMontagem.size > 0 && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
@@ -18593,7 +18759,8 @@ export function OrcamentoPageView({
           setOrcafascioOrcamentoAnalitico(null);
           setOrcafascioOrcamentoLinhaCatalogo(null);
           setOrcafascioOrcamentoLinhaChave(null);
-          setOrcafascioImportUsarMemoria(false);
+          setOrcafascioImportBdi('');
+          setOrcafascioImportDesconto('');
           setOrcafascioImportModoArredondamento('arredondar');
           resetOrcafascioOsDraft();
           dismissImportShellIfNeeded();
@@ -18617,6 +18784,7 @@ export function OrcamentoPageView({
               searchPlaceholder="Pesquisar contrato..."
               emptyOptionsMessage="Nenhum contrato disponível."
               className="w-full"
+              wrapLabel
             />
           </div>
         ) : null}
@@ -18629,7 +18797,7 @@ export function OrcamentoPageView({
             {orcafascioOrcamentosLoading && orcafascioOrcamentos === null ? (
               <div className="flex items-center gap-2 py-6 text-sm text-gray-500 dark:text-gray-400">
                 <Loader2 className="h-4 w-4 animate-spin text-red-600" aria-hidden />
-                Carregando orçamentos do Orçafascio…
+                {textoCarregandoOrcamentos}
               </div>
             ) : (
               <SingleSelectSearchDropdown
@@ -18655,22 +18823,21 @@ export function OrcamentoPageView({
                   if (o) void verDetalheOrcamentoOrcafascio(o, { force: true });
                 }}
                 options={orcafascioImportSelectOptions}
-                allowEmpty
-                emptyOptionLabel="Selecione o orçamento"
+                allowEmpty={false}
                 placeholder={
                   orcafascioOrcamentosLoading
-                    ? ''
+                    ? textoCarregandoOrcamentos
                     : !orcafascioFilterClientId
                       ? 'Informe o cliente Orçafascio no cadastro do contrato'
-                      : orcafascioImportSelectOptions.length === 0
-                        ? 'Nenhum orçamento encontrado'
-                        : 'Pesquisar orçamento...'
+                      : 'Selecione o orçamento'
                 }
                 searchPlaceholder="Pesquisar por nome ou código..."
                 emptyOptionsMessage={
-                  !orcafascioFilterClientId
-                    ? 'Informe o cliente Orçafascio no cadastro do contrato'
-                    : 'Nenhum orçamento encontrado'
+                  orcafascioOrcamentosLoading
+                    ? textoCarregandoOrcamentos
+                    : !orcafascioFilterClientId
+                      ? 'Informe o cliente Orçafascio no cadastro do contrato'
+                      : 'Nenhum orçamento encontrado'
                 }
                 emptySearchMessage="Nenhum orçamento corresponde à busca"
                 noFocusRing
@@ -18685,18 +18852,11 @@ export function OrcamentoPageView({
               </p>
             ) : null}
             {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
-              <div className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-800/50">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {(orcafascioOrcamentoDetalhe.description as string) || 'Orçamento'}
-                  </p>
-                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {(orcafascioOrcamentoDetalhe.code as string) || '—'}
-                    {' · '}
-                    {(orcafascioOrcamentoComposicoes?.length ?? 0).toLocaleString('pt-BR')} composição
-                    {(orcafascioOrcamentoComposicoes?.length ?? 0) === 1 ? '' : 'ões'}
-                  </p>
-                </div>
+              <div className="mt-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                <p className="min-w-0 flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {(orcafascioOrcamentoComposicoes?.length ?? 0).toLocaleString('pt-BR')}{' '}
+                  {(orcafascioOrcamentoComposicoes?.length ?? 0) === 1 ? 'composição' : 'composições'}
+                </p>
                 <button
                   type="button"
                   onClick={() => setOrcafascioImportDetalheModalOpen(true)}
@@ -18715,31 +18875,16 @@ export function OrcamentoPageView({
                   <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Orçamento aditivo? *
                   </p>
-                  <SegmentedControl
-                    aria-label="Orçamento aditivo"
-                    value={
-                      (orcafascioOsDraft.isAditivo === true
-                        ? 'sim'
-                        : orcafascioOsDraft.isAditivo === false
-                          ? 'nao'
-                          : '') as 'sim' | 'nao'
-                    }
-                    onChange={(v) =>
+                  <OrcamentoAditivoEscolha
+                    value={orcafascioOsDraft.isAditivo}
+                    disabled={isImportandoOrcamento}
+                    onChange={(next) =>
                       setOrcafascioOsDraft((p) => ({
                         ...p,
-                        isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
-                        confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                        isAditivo: next,
+                        confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
                       }))
                     }
-                    className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                    pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                    buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                    activeButtonClassName="font-semibold text-white"
-                    inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                    options={[
-                      { value: 'sim', label: 'Sim' },
-                      { value: 'nao', label: 'Não' },
-                    ]}
                   />
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -18770,7 +18915,7 @@ export function OrcamentoPageView({
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Descrição do serviço (OS)
+                    Descrição do serviço
                   </label>
                   <input
                     value={orcafascioOsDraft.descricaoServicoOs}
@@ -18779,24 +18924,6 @@ export function OrcamentoPageView({
                     }
                     className={FORM_FIELD_INPUT_CLS}
                     placeholder="Descrição na OS do contrato"
-                    disabled={isImportandoOrcamento}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Valor na OS *
-                  </label>
-                  <input
-                    value={orcafascioOsDraft.valorOs}
-                    onChange={(e) =>
-                      setOrcafascioOsDraft((p) => ({
-                        ...p,
-                        valorOs: formatOrcamentoValorBr(parseOrcamentoValorBr(e.target.value)),
-                      }))
-                    }
-                    className={FORM_FIELD_INPUT_CLS}
-                    placeholder="0,00"
-                    inputMode="decimal"
                     disabled={isImportandoOrcamento}
                   />
                 </div>
@@ -18815,11 +18942,34 @@ export function OrcamentoPageView({
                     </p>
                   </div>
                 ) : null}
-                <Checkbox
-                  checked={orcafascioImportUsarMemoria}
-                  onChange={setOrcafascioImportUsarMemoria}
-                  label="Usar memória de cálculo"
-                />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      BDI (%)
+                    </label>
+                    <input
+                      value={orcafascioImportBdi}
+                      onChange={(e) => setOrcafascioImportBdi(e.target.value)}
+                      className={FORM_FIELD_INPUT_CLS}
+                      placeholder="Ex: 28,35"
+                      inputMode="decimal"
+                      disabled={isImportandoOrcamento}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Desconto (%)
+                    </label>
+                    <input
+                      value={orcafascioImportDesconto}
+                      onChange={(e) => setOrcafascioImportDesconto(e.target.value)}
+                      className={FORM_FIELD_INPUT_CLS}
+                      placeholder="Ex: 25,01"
+                      inputMode="decimal"
+                      disabled={isImportandoOrcamento}
+                    />
+                  </div>
+                </div>
               </div>
             ) : null}
           </>
@@ -18839,7 +18989,8 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoAnalitico(null);
               setOrcafascioOrcamentoLinhaCatalogo(null);
               setOrcafascioOrcamentoLinhaChave(null);
-              setOrcafascioImportUsarMemoria(false);
+              setOrcafascioImportBdi('');
+              setOrcafascioImportDesconto('');
               setOrcafascioImportModoArredondamento('arredondar');
               resetOrcafascioOsDraft();
               dismissImportShellIfNeeded();
@@ -18858,20 +19009,19 @@ export function OrcamentoPageView({
               !orcafascioOrcamentoDetalhe ||
               orcafascioOrcamentoComposicoesLoading ||
               (deferContractOnImport && !importContratoSelecionadoId.trim()) ||
-              !orcamentoOsDraftValido(orcafascioOsDraft, orcafascioOsCodigo, orcafascioNumeroPasta)
+              !orcamentoOsDraftValido(orcafascioOsDraft, orcafascioOsCodigo, orcafascioNumeroPasta, {
+                exigirValor: false,
+              })
             }
             className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
           >
             {isImportandoOrcamento ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Adicionando…
+                Importando…
               </>
             ) : (
-              <>
-                <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                Adicionar em Orçamentos
-              </>
+              'Importar Orçamento'
             )}
           </button>
         </div>
@@ -19068,9 +19218,6 @@ export function OrcamentoPageView({
         title="Importar orçamento"
         size="md"
       >
-        <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-          Escolha de onde vem o orçamento.
-        </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             type="button"
@@ -19078,15 +19225,12 @@ export function OrcamentoPageView({
               setImportOrigemModalOpen(false);
               abrirModalImportarOrcamentoExcel();
             }}
-            className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-red-300 hover:bg-red-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800 dark:hover:bg-red-950/30"
+            className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-green-300 hover:bg-green-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-green-800 dark:hover:bg-green-950/30"
           >
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
               <FileSpreadsheet className="h-5 w-5" aria-hidden />
             </span>
             <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Planilha</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Excel no padrão Gênnesis (sintético e, se houver, memória).
-            </span>
           </button>
           <button
             type="button"
@@ -19094,15 +19238,12 @@ export function OrcamentoPageView({
               setImportOrigemModalOpen(false);
               abrirModalImportarOrcafascioOrcamentos();
             }}
-            className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-red-300 hover:bg-red-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800 dark:hover:bg-red-950/30"
+            className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
           >
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
               <Upload className="h-5 w-5" aria-hidden />
             </span>
             <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Orçafascio</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Busca o orçamento direto no Orçafascio.
-            </span>
           </button>
         </div>
       </Modal>
@@ -19285,31 +19426,15 @@ export function OrcamentoPageView({
                 <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Orçamento aditivo? *
                 </p>
-                <SegmentedControl
-                  aria-label="Orçamento aditivo"
-                  value={
-                    (importPlanilhaOsDraft.isAditivo === true
-                      ? 'sim'
-                      : importPlanilhaOsDraft.isAditivo === false
-                        ? 'nao'
-                        : '') as 'sim' | 'nao'
-                  }
-                  onChange={(v) =>
+                <OrcamentoAditivoEscolha
+                  value={importPlanilhaOsDraft.isAditivo}
+                  onChange={(next) =>
                     setImportPlanilhaOsDraft((p) => ({
                       ...p,
-                      isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
-                      confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                      isAditivo: next,
+                      confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
                     }))
                   }
-                  className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                  pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                  buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                  activeButtonClassName="font-semibold text-white"
-                  inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                  options={[
-                    { value: 'sim', label: 'Sim' },
-                    { value: 'nao', label: 'Não' },
-                  ]}
                 />
               </div>
 
@@ -19360,7 +19485,7 @@ export function OrcamentoPageView({
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Descrição do serviço (OS)
+                  Descrição do serviço
                 </label>
                 <input
                   value={importPlanilhaOsDraft.descricaoServicoOs}
@@ -19521,30 +19646,14 @@ export function OrcamentoPageView({
               <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Orçamento aditivo? *
               </p>
-              <SegmentedControl
-                aria-label="Orçamento aditivo"
-                value={
-                  (editarDadosDraft.isAditivo === true
-                    ? 'sim'
-                    : editarDadosDraft.isAditivo === false
-                      ? 'nao'
-                      : '') as 'sim' | 'nao'
-                }
-                onChange={(v) =>
+              <OrcamentoAditivoEscolha
+                value={editarDadosDraft.isAditivo}
+                onChange={(next) =>
                   setEditarDadosDraft((p) => ({
                     ...p,
-                    isAditivo: v === 'sim' ? true : v === 'nao' ? false : undefined,
+                    isAditivo: next,
                   }))
                 }
-                className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                activeButtonClassName="font-semibold text-white"
-                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                options={[
-                  { value: 'sim', label: 'Sim' },
-                  { value: 'nao', label: 'Não' },
-                ]}
               />
             </div>
             <div className="sm:col-span-2">
@@ -19824,31 +19933,16 @@ export function OrcamentoPageView({
                 <p className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Orçamento aditivo? *
                 </p>
-                <SegmentedControl
-                  aria-label="Orçamento aditivo"
-                  value={
-                    (novoOrcamentoOsDraft.isAditivo === true
-                      ? 'sim'
-                      : novoOrcamentoOsDraft.isAditivo === false
-                        ? 'nao'
-                        : '') as 'sim' | 'nao'
-                  }
-                  onChange={(v) =>
+                <OrcamentoAditivoEscolha
+                  value={novoOrcamentoOsDraft.isAditivo}
+                  disabled={isCreatingOrcamento}
+                  onChange={(next) =>
                     setNovoOrcamentoOsDraft((p) => ({
                       ...p,
-                      isAditivo: v === 'sim' ? true : v === 'nao' ? false : null,
-                      confirmSomarAditivo: v === 'sim' ? p.confirmSomarAditivo : false,
+                      isAditivo: next,
+                      confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
                     }))
                   }
-                  className="h-auto w-full max-w-xs rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
-                  pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
-                  buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
-                  activeButtonClassName="font-semibold text-white"
-                  inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                  options={[
-                    { value: 'sim', label: 'Sim' },
-                    { value: 'nao', label: 'Não' },
-                  ]}
                 />
               </div>
               <div className="sm:col-span-2">
@@ -20065,7 +20159,7 @@ export function OrcamentoPageView({
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Descrição do serviço (OS)
+                  Descrição do serviço
                 </label>
                 <input
                   value={novoOrcamentoOsDraft.descricaoServicoOs}

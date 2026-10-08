@@ -7,6 +7,7 @@ export type SegmentedOption<T extends string> = {
   label: React.ReactNode;
   title?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 };
 
 type SegmentedControlProps<T extends string> = {
@@ -120,9 +121,18 @@ export function SegmentedControl<T extends string>({
             title={opt.title}
             aria-label={opt.ariaLabel}
             aria-pressed={active}
-            onClick={() => onChange(opt.value)}
+            aria-disabled={opt.disabled || undefined}
+            disabled={opt.disabled}
+            onClick={() => {
+              if (opt.disabled) return;
+              onChange(opt.value);
+            }}
             className={`relative z-10 inline-flex h-full shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm transition-colors duration-200 sm:px-3 outline-none ring-0 focus:outline-none focus-visible:outline-none ${buttonClassName} ${
-              active ? activeButtonClassName : inactiveButtonClassName
+              opt.disabled
+                ? 'cursor-not-allowed opacity-40'
+                : active
+                  ? activeButtonClassName
+                  : inactiveButtonClassName
             }`}
           >
             {opt.label}

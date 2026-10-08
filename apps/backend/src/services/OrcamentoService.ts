@@ -24,6 +24,10 @@ export interface OrcamentoIndexEntry {
   bdiPercentual?: number;
   /** Total com BDI (R$), espelhado da meta. */
   totalComBdi?: number;
+  /** OS do orçamento, espelhada da meta. */
+  osCodigo?: string;
+  /** Número da pasta, espelhado da meta. */
+  numeroPasta?: string;
   /** Progresso físico do cronograma (%), espelhado de meta.cronogramaResumo. */
   cronogramaProgressoFisico?: number;
   /** Etapas concluídas no cronograma. */
@@ -111,6 +115,15 @@ function extractListaFinanceiroFromMeta(meta: Record<string, unknown> | undefine
     return { ...(bdiPercentual !== undefined ? { bdiPercentual } : {}), totalComBdi: totalDirect };
   }
   return bdiPercentual !== undefined ? { bdiPercentual } : {};
+}
+
+function extractOsPastaFromMeta(meta: Record<string, unknown> | undefined): {
+  osCodigo: string;
+  numeroPasta: string;
+} {
+  const osCodigo = typeof meta?.osCodigo === 'string' ? meta.osCodigo.trim() : '';
+  const numeroPasta = typeof meta?.numeroPasta === 'string' ? meta.numeroPasta.trim() : '';
+  return { osCodigo, numeroPasta };
 }
 
 function extractCronogramaResumoFromMeta(meta: Record<string, unknown> | undefined): {
@@ -422,16 +435,17 @@ export class OrcamentoService {
     centroCustoId: string,
     index: OrcamentoIndex
   ): Promise<OrcamentoIndex> {
-    const LISTA_FIN_VERSION = 2;
+    const LISTA_FIN_VERSION = 3;
     const needsBdiFill = index.orcamentos.some(o => o.bdiPercentual == null);
-    const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
-    if (!needsBdiFill && !needsOrcafascioScrub) return index;
+    const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < 2;
+    const needsOsFill = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
+    if (!needsBdiFill && !needsOrcafascioScrub && !needsOsFill) return index;
 
-    let changed = needsOrcafascioScrub;
+    let changed = needsOrcafascioScrub || needsOsFill;
     const orcamentos: OrcamentoIndexEntry[] = [];
 
     for (const o of index.orcamentos) {
-      if (o.bdiPercentual != null && !needsOrcafascioScrub) {
+      if (o.bdiPercentual != null && !needsOrcafascioScrub && !needsOsFill) {
         orcamentos.push(o);
         continue;
       }
@@ -440,6 +454,7 @@ export class OrcamentoService {
         const file = await this.readOrcamentoFile(centroCustoId, o.id);
         const metaRaw = (file?.sessaoOrcamento as { meta?: Record<string, unknown> } | undefined)?.meta;
         const fin = extractListaFinanceiroFromMeta(metaRaw);
+        const osPasta = extractOsPastaFromMeta(metaRaw);
         const orcaComBdi = Number(
           metaRaw?.totaisOrcafascio && typeof metaRaw.totaisOrcafascio === 'object'
             ? (metaRaw.totaisOrcafascio as { comBdi?: unknown }).comBdi
@@ -461,9 +476,16 @@ export class OrcamentoService {
             ? 0
             : o.totalComBdi != null && o.totalComBdi > 0
               ? o.totalComBdi
-              : fin.totalComBdi ?? o.totalComBdi ?? 0
+              : fin.totalComBdi ?? o.totalComBdi ?? 0,
+          osCodigo: osPasta.osCodigo,
+          numeroPasta: osPasta.numeroPasta,
         };
-        if (next.bdiPercentual !== o.bdiPercentual || next.totalComBdi !== o.totalComBdi) {
+        if (
+          next.bdiPercentual !== o.bdiPercentual ||
+          next.totalComBdi !== o.totalComBdi ||
+          next.osCodigo !== o.osCodigo ||
+          next.numeroPasta !== o.numeroPasta
+        ) {
           changed = true;
         }
         orcamentos.push(next);
@@ -471,9 +493,11 @@ export class OrcamentoService {
         orcamentos.push({
           ...o,
           bdiPercentual: o.bdiPercentual ?? 0,
-          totalComBdi: o.totalComBdi ?? 0
+          totalComBdi: o.totalComBdi ?? 0,
+          osCodigo: o.osCodigo ?? '',
+          numeroPasta: o.numeroPasta ?? '',
         });
-        if (o.bdiPercentual == null) changed = true;
+        if (o.bdiPercentual == null || o.osCodigo == null) changed = true;
       }
     }
 
@@ -848,6 +872,9 @@ export class OrcamentoService {
     const finFromMeta = extractListaFinanceiroFromMeta(
       meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
     );
+    const osPastaFromMeta = extractOsPastaFromMeta(
+      meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
+    );
     const cronoFromMeta = extractCronogramaResumoFromMeta(
       meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
     );
@@ -867,6 +894,8 @@ export class OrcamentoService {
                 ? { bdiPercentual: finFromMeta.bdiPercentual }
                 : {}),
               ...(finFromMeta.totalComBdi !== undefined ? { totalComBdi: finFromMeta.totalComBdi } : {}),
+              osCodigo: osPastaFromMeta.osCodigo,
+              numeroPasta: osPastaFromMeta.numeroPasta,
               ...(cronoFromMeta.cronogramaProgressoFisico !== undefined
                 ? {
                     cronogramaProgressoFisico: cronoFromMeta.cronogramaProgressoFisico,
@@ -1075,6 +1104,8 @@ export class OrcamentoService {
       fichaDemandaPct: origemNorm.fichaDemandaPct,
       bdiPercentual: origemNorm.bdiPercentual,
       totalComBdi: origemNorm.totalComBdi,
+      osCodigo: origemNorm.osCodigo,
+      numeroPasta: origemNorm.numeroPasta,
       cronogramaProgressoFisico: origemNorm.cronogramaProgressoFisico,
       cronogramaConcluido: origemNorm.cronogramaConcluido,
       cronogramaTotalEtapas: origemNorm.cronogramaTotalEtapas,
