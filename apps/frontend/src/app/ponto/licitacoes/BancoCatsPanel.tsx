@@ -109,6 +109,7 @@ type IndexedRow = {
   und: string;
   quant: string;
   fonte: string;
+  paginaReferente: string;
   descricao: string;
   searchText: string;
 };
@@ -462,6 +463,12 @@ export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: str
       'quant.',
     ]);
     const fonteIdx = findColumnIndex(headers, ['fonte']);
+    const paginaIdx = findColumnIndex(headers, [
+      'pagina referente',
+      'página referente',
+      'pagina',
+      'página',
+    ]);
     const descricaoIdx = findColumnIndex(headers, ['descricao', 'descrição']);
     const manualSet = new Set(sheet.manualRowKeys ?? []);
 
@@ -476,6 +483,7 @@ export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: str
         und: undIdx >= 0 ? (cells[undIdx] ?? '').trim() : '',
         quant: quantIdx >= 0 ? (cells[quantIdx] ?? '').trim() : '',
         fonte: fonteIdx >= 0 ? (cells[fonteIdx] ?? '').trim() : '',
+        paginaReferente: paginaIdx >= 0 ? (cells[paginaIdx] ?? '').trim() : '',
         descricao: descricaoIdx >= 0 ? (cells[descricaoIdx] ?? '').trim() : '',
         searchText: buildSearchIndexText(cells.join(' ')),
       };
@@ -1531,6 +1539,9 @@ export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: str
                                   UND
                                 </th>
                                 <th scope="col" className={cadastroListClasses.thCenter}>
+                                  PÁGINA REFERENTE
+                                </th>
+                                <th scope="col" className={cadastroListClasses.thCenter}>
                                   <button
                                     type="button"
                                     onClick={cycleQuantSort}
@@ -1605,6 +1616,9 @@ export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: str
                                     </td>
                                     <td className={cadastroListClasses.tdCenter}>
                                       {match.item.und || '—'}
+                                    </td>
+                                    <td className={`${cadastroListClasses.tdCenter} whitespace-nowrap`}>
+                                      {match.item.paginaReferente || '—'}
                                     </td>
                                     <td className={cadastroListClasses.tdCenter}>
                                       {match.item.quant || '—'}
