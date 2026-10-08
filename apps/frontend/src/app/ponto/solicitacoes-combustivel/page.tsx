@@ -1967,6 +1967,24 @@ function SolicitacoesCombustivelPageContent() {
                             if (!releasedAmountReais || releasedAmountReais <= 0) {
                               return toast.error('Informe o valor que será liberado');
                             }
+                            if (
+                              quotaBalance &&
+                              !quotaBalance.unlimited &&
+                              (quotaBalance.remainingReais ?? 0) <= 0
+                            ) {
+                              return toast.error(
+                                'Este contrato já ultrapassou o limite semanal. Entre em contato com o Gestor.',
+                              );
+                            }
+                            if (
+                              quotaBalance &&
+                              !quotaBalance.unlimited &&
+                              releasedAmountReais > (quotaBalance.remainingReais ?? 0)
+                            ) {
+                              return toast.error(
+                                'O valor a liberar ultrapassa o restante da cota semanal.',
+                              );
+                            }
                             if (!approveGasStationId) {
                               return toast.error('Selecione o posto para abastecimento');
                             }
@@ -1979,7 +1997,12 @@ function SolicitacoesCombustivelPageContent() {
                           disabled={
                             approveMutation.isPending ||
                             !approveGasStationId ||
-                            !releasedAmountInput.trim()
+                            !releasedAmountInput.trim() ||
+                            (!!quotaBalance &&
+                              !quotaBalance.unlimited &&
+                              ((quotaBalance.remainingReais ?? 0) <= 0 ||
+                                (parseCurrencyInputBr(releasedAmountInput) || 0) >
+                                  (quotaBalance.remainingReais ?? 0)))
                           }
                         >
                           {approveMutation.isPending ? 'Atendendo...' : 'Atender solicitação'}

@@ -612,6 +612,8 @@ export class FuelRefuelRequestService {
       throw createError('Informe o valor que será liberado', 400);
     }
 
+    await assertWeeklyQuotaAvailable(contractId, releasedAmountReais);
+
     const refuelDeadlineAt = computeRefuelDeadlineAtForDate(row.refuelDate);
 
     const updated = await prisma.fuelRefuelRequest.update({

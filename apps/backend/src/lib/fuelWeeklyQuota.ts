@@ -193,10 +193,25 @@ export function isWeeklyQuotaExhausted(balance: FuelQuotaBalance): boolean {
   return !balance.unlimited && (balance.remainingReais ?? 0) <= 0;
 }
 
-export async function assertWeeklyQuotaAvailable(contractId: string): Promise<void> {
+export async function assertWeeklyQuotaAvailable(
+  contractId: string,
+  amountReais = 0,
+): Promise<void> {
   const balance = await getFuelQuotaBalance(contractId);
-  if (isWeeklyQuotaExhausted(balance)) {
+  if (balance.unlimited) return;
+  const remaining = balance.remainingReais ?? 0;
+  if (remaining <= 0) {
     throw createError(WEEKLY_QUOTA_EXCEEDED_MESSAGE, 400);
+  }
+  if (amountReais > remaining) {
+    const remainingLabel = remaining.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    });
+    throw createError(
+      `O valor a liberar ultrapassa o restante da cota semanal (${remainingLabel}).`,
+      400,
+    );
   }
 }
 
