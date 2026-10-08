@@ -13855,6 +13855,40 @@ export function OrcamentoPageView({
   }, [fichaDemandaOnly, orcamentoViewTab, statusAprovacaoAtivo]);
 
   useEffect(() => {
+    if (loadingFromApi || gradeTravada || !memorialDisponivel || !orcamentoAtivoId) return;
+    setDimensoesPorItem((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of itensCalculados) {
+        if (ehComposicaoCargaEntulho(row.item.descricao)) continue;
+        if (linhasMedicaoEfetivas(prev[row.key]).length > 0) continue;
+        const tipo = row.tipoUnidade && row.tipoUnidade !== 'un' ? row.tipoUnidade : 'm3';
+        const base = dimensoesComLinhasEfetivas(prev[row.key], tipo);
+        next[row.key] = {
+          ...base,
+          linhas: Array.from({ length: 6 }, () => ({
+            descricao: '',
+            C: 0,
+            L: 0,
+            H: 0,
+            N: 1,
+            empolamento: 1,
+          })),
+        };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [
+    loadingFromApi,
+    gradeTravada,
+    memorialDisponivel,
+    orcamentoAtivoId,
+    itensCalculados,
+    dimensoesPorItem,
+  ]);
+
+  useEffect(() => {
     if (orcamentoViewTab !== 'memorial' || !memorialDisponivel) return;
     if (itensMemoriaCalculoLista.length === 0) {
       setMemorialItemKey(null);
@@ -16758,7 +16792,9 @@ export function OrcamentoPageView({
                           const idxPorKey = new Map(
                             itensMemoriaCalculoLista.map((r, i) => [r.key, i] as const)
                           );
-                          return itensMemoriaCalculoAgrupados.map(servicoGrupo => (
+                          return itensMemoriaCalculoAgrupados.map(servicoGrupo => {
+                            const fundoServico = estiloLinhaTituloOrc(aparenciaMemorial, isDark);
+                            return (
                             <section
                               key={servicoGrupo.servicoKey}
                               id={`memorial-servico-${servicoGrupo.servicoKey}`}
@@ -16770,7 +16806,16 @@ export function OrcamentoPageView({
                               >
                                 {servicoGrupo.servicoNome || 'Serviço'}
                               </div>
-                              <div className="flex flex-col gap-4 bg-gray-50 p-4 dark:bg-gray-950/40">
+                              <div
+                                className={`flex flex-col gap-4 p-4 ${
+                                  fundoServico ? '' : 'bg-red-600 dark:bg-red-950/90'
+                                }`}
+                                style={
+                                  fundoServico
+                                    ? { backgroundColor: fundoServico.backgroundColor }
+                                    : undefined
+                                }
+                              >
                                 {servicoGrupo.etapas.map(etapa => {
                                   const mesmoTituloSubtitulo =
                                     servicoGrupo.servicoNome.trim().toLowerCase() ===
@@ -16857,7 +16902,8 @@ export function OrcamentoPageView({
                                 })}
                               </div>
                             </section>
-                          ));
+                            );
+                          });
                         })()}
                       </div>
                     )}
