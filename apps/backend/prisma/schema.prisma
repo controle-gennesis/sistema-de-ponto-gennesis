@@ -1666,6 +1666,8 @@ model Pleito {
   budgetAmount2      Decimal?  @db.Decimal(15, 2)
   budgetAmount3      Decimal?  @db.Decimal(15, 2)
   budgetAmount4      Decimal?  @db.Decimal(15, 2)
+  /// Aditivos do orçamento vinculados a esta OS: [{ orcamentoId, descricao, valor }].
+  budgetAdditives    Json?
   /// Confirmação explícita do valor do orçamento na OS (cadastro/detalhe em Contratos).
   budgetValueConfirmed Boolean @default(false)
   pv                 String? // RVI â FEITO ou PENDENTE

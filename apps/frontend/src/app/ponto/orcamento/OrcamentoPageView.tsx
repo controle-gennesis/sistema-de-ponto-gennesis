@@ -3177,6 +3177,68 @@ function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
   return '';
 }
 
+type OrcamentoMovimentoTipo = 'importacao' | 'fechamento' | 'reabertura';
+
+type OrcamentoMovimento = {
+  tipo: OrcamentoMovimentoTipo;
+  em: string;
+  usuario: string;
+};
+
+const ROTULO_MOVIMENTO_ORCAMENTO: Record<OrcamentoMovimentoTipo, string> = {
+  importacao: 'Importação',
+  fechamento: 'Fechamento',
+  reabertura: 'Reabertura',
+};
+
+function parseHistoricoMovimentos(raw: unknown): OrcamentoMovimento[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: OrcamentoMovimento[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const tipo = row.tipo;
+    if (tipo !== 'importacao' && tipo !== 'fechamento' && tipo !== 'reabertura') continue;
+    const em = typeof row.em === 'string' ? row.em.trim() : '';
+    if (!em) continue;
+    const usuario =
+      typeof row.usuario === 'string' && row.usuario.trim() ? row.usuario.trim() : 'Usuário';
+    out.push({ tipo, em, usuario });
+  }
+  return out.length ? out : undefined;
+}
+
+function anexarMovimentoOrcamento(
+  meta: OrcamentoMeta,
+  tipo: OrcamentoMovimentoTipo,
+  usuario: string
+): OrcamentoMeta {
+  const item: OrcamentoMovimento = {
+    tipo,
+    em: new Date().toISOString(),
+    usuario: usuario.trim() || 'Usuário',
+  };
+  return {
+    ...meta,
+    historicoMovimentos: [...(meta.historicoMovimentos ?? []), item],
+  };
+}
+
+function movimentosHistoricoOrcamento(meta: OrcamentoMeta): OrcamentoMovimento[] {
+  const lista = [...(meta.historicoMovimentos ?? [])];
+  if (!lista.some((m) => m.tipo === 'importacao')) {
+    const em = meta.orcafascioDados?.createdAt?.trim();
+    if (em) {
+      lista.unshift({
+        tipo: 'importacao',
+        em,
+        usuario: meta.orcamentoRealizadoPor?.trim() || '—',
+      });
+    }
+  }
+  return lista.sort((a, b) => new Date(a.em).getTime() - new Date(b.em).getTime());
+}
+
 type OrcamentoMeta = {
   osNumeroPasta: string;
   /** Código da OS (campo separado; `osNumeroPasta` permanece sincronizado via compose). */
@@ -3254,6 +3316,8 @@ type OrcamentoMeta = {
   aparenciaAbas?: AparenciaAbasOrcamento;
   /** Trava edição da aba Orçamento e da Memória de cálculo. */
   gradeTravada?: boolean;
+  /** Importações, fechamentos e reaberturas, com data e usuário. */
+  historicoMovimentos?: OrcamentoMovimento[];
 };
 
 export type AparenciaAbaOrcamento = 'montagem' | 'memorial' | 'analitico' | 'fichaDemanda';
@@ -4581,6 +4645,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
           aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
           gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
+          historicoMovimentos: parseHistoricoMovimentos(metaRaw.historicoMovimentos),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -4969,6 +5034,7 @@ function parseOrcamentoDetailRaw(d: {
         aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
         aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
         gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
+        historicoMovimentos: parseHistoricoMovimentos(metaRaw.historicoMovimentos),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -7377,6 +7443,7 @@ export function OrcamentoPageView({
     valor: number;
     orcamentoId: string;
     descricaoServicoOs: string;
+    isAditivo: boolean;
   } | null>(null);
   const [reajusteOsConfirmValor, setReajusteOsConfirmValor] = useState(false);
   const [reajusteOsSyncing, setReajusteOsSyncing] = useState(false);
@@ -7789,13 +7856,18 @@ export function OrcamentoPageView({
   const aparenciaOrcamento = aparenciaDaAba(meta, abaAparenciaFromViewTab(orcamentoViewTab));
   const versaoCongelada = meta.congelado === true;
   const versaoNumero = meta.versao && meta.versao >= 1 ? meta.versao : 1;
-  const gradeTravada = meta.gradeTravada === true || versaoCongelada;
+  const orcamentoFechado = normalizarStatusAprovacaoOrcamento(meta.statusAprovacao) === 'finalizado';
+  const gradeTravada = meta.gradeTravada === true || versaoCongelada || orcamentoFechado;
   const gradeTravadaRef = useRef(gradeTravada);
   gradeTravadaRef.current = gradeTravada;
 
   const alternarGradeTravada = useCallback(() => {
     if (versaoCongelada) {
       toast.error('Esta revisão está congelada. Crie uma nova revisão para editar.');
+      return;
+    }
+    if (orcamentoFechado) {
+      toast.error('Orçamento finalizado. Reabra para editar.');
       return;
     }
     const next = !(meta.gradeTravada === true);
@@ -7811,7 +7883,7 @@ export function OrcamentoPageView({
     setMeta((m) => ({ ...m, gradeTravada: next ? true : undefined }));
     if (next) toast.success('Orçamento e memória travados.');
     else toast.success('Orçamento e memória liberados.');
-  }, [versaoCongelada, meta.gradeTravada]);
+  }, [versaoCongelada, orcamentoFechado, meta.gradeTravada]);
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
 
   const dataFimOrcamento = useMemo(
@@ -7853,6 +7925,8 @@ export function OrcamentoPageView({
   const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
   const [finalizandoOrcamento, setFinalizandoOrcamento] = useState(false);
   const [confirmFinalizarOrcamento, setConfirmFinalizarOrcamento] = useState(false);
+  const [reabrindoOrcamento, setReabrindoOrcamento] = useState(false);
+  const [confirmReabrirOrcamento, setConfirmReabrirOrcamento] = useState(false);
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -8735,11 +8809,6 @@ export function OrcamentoPageView({
       toast.error('Informe se o orçamento é aditivo.');
       return;
     }
-    const valorOs = parseOrcamentoValorBr(novoOrcamentoOsDraft.valorOs);
-    if (valorOs <= 0) {
-      toast.error('Informe o valor na OS.');
-      return;
-    }
     if (novoOrcamentoOsDraft.isAditivo && !novoOrcamentoOsDraft.confirmSomarAditivo) {
       toast.error('Confirme a soma do valor aditivo ao total da OS.');
       return;
@@ -8812,10 +8881,11 @@ export function OrcamentoPageView({
           osCodigo,
           numeroPasta,
           serviceDescription: descricaoServicoOs,
-          valor: valorOs,
+          valor: 0,
           isAditivo: novoOrcamentoOsDraft.isAditivo === true,
           confirmValor: true,
           confirmSomarAditivo: novoOrcamentoOsDraft.isAditivo === true,
+          linkOnly: novoOrcamentoOsDraft.isAditivo === true,
           mode: novoOrcamentoOsDraft.isAditivo ? 'aditivo' : 'create',
           startDate: d.dataAbertura || null,
           endDate: d.dataEnvio || null,
@@ -8872,7 +8942,8 @@ export function OrcamentoPageView({
             novoOrcamentoMetaDraft.nomeOrcamento.trim(),
         },
         novoOrcamentoMetaDraft.osCodigo || '',
-        novoOrcamentoMetaDraft.numeroPasta || ''
+        novoOrcamentoMetaDraft.numeroPasta || '',
+        { exigirValor: false }
       )
     );
   };
@@ -8939,6 +9010,7 @@ export function OrcamentoPageView({
           valor: Number.isFinite(valorSnap) ? valorSnap : 0,
           orcamentoId: entry.id,
           descricaoServicoOs: descricaoOsSnap,
+          isAditivo: meta.isAditivo === true,
         });
       }
     } catch (err) {
@@ -8992,6 +9064,14 @@ export function OrcamentoPageView({
   };
 
   const abrirEdicaoDados = () => {
+    if (versaoCongelada) {
+      toast.error('Esta revisão está somente leitura.');
+      return;
+    }
+    if (orcamentoFechado) {
+      toast.error('Orçamento finalizado. Reabra para editar.');
+      return;
+    }
     let osCodigo = meta.osCodigo || '';
     let numeroPasta = meta.numeroPasta || '';
     if (!osCodigo.trim() && !numeroPasta.trim() && meta.osNumeroPasta) {
@@ -9861,8 +9941,8 @@ export function OrcamentoPageView({
     if (importOrcamentoInFlightRef.current) return false;
     const osCodigo = importPlanilhaOsCodigo.trim();
     const numeroPasta = importPlanilhaNumeroPasta.trim();
-    if (!orcamentoOsDraftValido(importPlanilhaOsDraft, osCodigo, numeroPasta)) {
-      toast.error('Preencha aditivo, OS, Número da pasta, valor e confirmação de aditivo (se houver) antes de importar.');
+    if (!orcamentoOsDraftValido(importPlanilhaOsDraft, osCodigo, numeroPasta, { exigirValor: false })) {
+      toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
       return false;
     }
     const target = resolveImportTarget();
@@ -9962,21 +10042,6 @@ export function OrcamentoPageView({
         importPlanilhaOsDraft.descricaoServicoOs.trim() ||
         parsed.metaPlanilha.descricao ||
         nomeLista;
-      let valorOs = parseOrcamentoValorBr(importPlanilhaOsDraft.valorOs);
-      // Se o usuário não calculou total, tenta somar quantidades×preço das linhas importadas.
-      if (valorOs <= 0) {
-        let totalCalc = 0;
-        for (const s of servicosImportados) {
-          for (const sub of s.subtitulos) {
-            for (const it of sub.itens) {
-              const q = it.quantidadePlanilha;
-              const pu = Number(it.precoUnitario);
-              if (q != null && q > 0 && Number.isFinite(pu)) totalCalc += q * pu;
-            }
-          }
-        }
-        if (totalCalc > 0) valorOs = totalCalc;
-      }
       let meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
@@ -10000,6 +10065,13 @@ export function OrcamentoPageView({
         versao: entry.versao ?? 1,
         congelado: false,
         revisaoCount: 1,
+        historicoMovimentos: [
+          {
+            tipo: 'importacao',
+            em: new Date().toISOString(),
+            usuario: (currentUserName || parsed.metaPlanilha.orcamentoRealizadoPor || '').trim() || 'Usuário',
+          },
+        ],
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -10028,10 +10100,11 @@ export function OrcamentoPageView({
           osCodigo,
           numeroPasta,
           serviceDescription: descricaoServicoOs,
-          valor: valorOs,
+          valor: 0,
           isAditivo: importPlanilhaOsDraft.isAditivo === true,
           confirmValor: true,
           confirmSomarAditivo: importPlanilhaOsDraft.isAditivo === true,
+          linkOnly: importPlanilhaOsDraft.isAditivo === true,
           mode: importPlanilhaOsDraft.isAditivo ? 'aditivo' : 'create',
           startDate: meta.dataAbertura || null,
           endDate: meta.dataEnvio || null,
@@ -10251,9 +10324,6 @@ export function OrcamentoPageView({
       const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
       const descricaoServicoOs =
         orcafascioOsDraft.descricaoServicoOs.trim() || nomeOrigem || nomeLista;
-      const valorOs =
-        parseOrcamentoValorBr(orcafascioOsDraft.valorOs) ||
-        (finApi.totalComBdi > 0 ? finApi.totalComBdi : 0);
       let meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
@@ -10289,6 +10359,13 @@ export function OrcamentoPageView({
         versao: entry.versao ?? 1,
         congelado: false,
         revisaoCount: 1,
+        historicoMovimentos: [
+          {
+            tipo: 'importacao',
+            em: new Date().toISOString(),
+            usuario: currentUserName.trim() || 'Usuário',
+          },
+        ],
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -10317,10 +10394,11 @@ export function OrcamentoPageView({
           osCodigo,
           numeroPasta,
           serviceDescription: descricaoServicoOs,
-          valor: valorOs,
+          valor: 0,
           isAditivo: orcafascioOsDraft.isAditivo === true,
           confirmValor: true,
           confirmSomarAditivo: orcafascioOsDraft.isAditivo === true,
+          linkOnly: orcafascioOsDraft.isAditivo === true,
           mode: orcafascioOsDraft.isAditivo ? 'aditivo' : 'create',
           startDate: meta.dataAbertura || null,
           endDate: meta.dataEnvio || null,
@@ -10663,6 +10741,14 @@ export function OrcamentoPageView({
         origemVersaoId: orcamentoAtivoId,
         revisaoCount: versaoNova,
         statusAprovacao: statusNova,
+        historicoMovimentos: [
+          ...(meta.historicoMovimentos ?? []),
+          {
+            tipo: 'importacao' as const,
+            em: new Date().toISOString(),
+            usuario: currentUserName.trim() || 'Usuário',
+          },
+        ],
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosMesclados);
@@ -10756,6 +10842,7 @@ export function OrcamentoPageView({
           valor: Number.isFinite(valorSnap) ? valorSnap : 0,
           orcamentoId: entry.id,
           descricaoServicoOs: descricaoOsSnap,
+          isAditivo: meta.isAditivo === true,
         });
       }
     } catch (err) {
@@ -14531,6 +14618,75 @@ export function OrcamentoPageView({
     toast.success('Cronograma exportado com sucesso.');
   };
 
+  const osValorSyncBaselineRef = useRef<string | null>(null);
+
+  const gravarTotalOrcamentoNaOs = useCallback(
+    async (valor: number) => {
+      const contractId = (meta.linkedContractId || embeddedContractId || '').trim();
+      const osCodigo = (meta.osCodigo || '').trim();
+      const numeroPasta = (meta.numeroPasta || '').trim();
+      if (!contractId || !osCodigo || !numeroPasta || !orcamentoAtivoId) return;
+      const descricao =
+        (meta.descricao || '').trim() || (nomeOrcamentoRascunho || '').trim() || 'Orçamento';
+      const aditivo = meta.isAditivo === true;
+      await syncOrcamentoOsToContract({
+        contractId,
+        osCodigo,
+        numeroPasta,
+        serviceDescription: descricao,
+        valor,
+        isAditivo: aditivo,
+        confirmValor: true,
+        confirmSomarAditivo: aditivo,
+        mode: aditivo ? 'sync-aditivo' : 'sync-base',
+        orcamentoId: orcamentoAtivoId,
+        aditivoDescricao: (nomeOrcamentoRascunho || descricao).trim(),
+      });
+    },
+    [
+      meta.linkedContractId,
+      meta.osCodigo,
+      meta.numeroPasta,
+      meta.descricao,
+      meta.isAditivo,
+      embeddedContractId,
+      orcamentoAtivoId,
+      nomeOrcamentoRascunho,
+    ]
+  );
+
+  useEffect(() => {
+    if (loadingFromApi || !orcamentoAtivoId) {
+      osValorSyncBaselineRef.current = null;
+      return;
+    }
+    const valor = arredondarMoeda2(resumoFinanceiro.totalComDescontoEBdi);
+    if (!Number.isFinite(valor)) return;
+    const stamp = `${orcamentoAtivoId}:${valor.toFixed(2)}`;
+    if (osValorSyncBaselineRef.current == null) {
+      osValorSyncBaselineRef.current = stamp;
+      return;
+    }
+    if (osValorSyncBaselineRef.current === stamp) return;
+    osValorSyncBaselineRef.current = stamp;
+    if (statusAprovacaoAtivo !== 'finalizado' || versaoCongelada || meta.congelado === true) return;
+    const timer = window.setTimeout(() => {
+      void gravarTotalOrcamentoNaOs(valor).catch((err) => {
+        osValorSyncBaselineRef.current = null;
+        toast.error(syncOrcamentoOsErrorMessage(err));
+      });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    loadingFromApi,
+    orcamentoAtivoId,
+    resumoFinanceiro.totalComDescontoEBdi,
+    statusAprovacaoAtivo,
+    versaoCongelada,
+    meta.congelado,
+    gravarTotalOrcamentoNaOs,
+  ]);
+
   const finalizarOrcamento = async () => {
     if (!centroCustoId || !orcamentoAtivoId) return;
     if (versaoCongelada || meta.congelado === true) {
@@ -14541,7 +14697,11 @@ export function OrcamentoPageView({
     setFinalizandoOrcamento(true);
     const prevMeta = meta;
     const prevSessao = sessaoRef.current;
-    const nextMeta: OrcamentoMeta = { ...meta, statusAprovacao: 'finalizado' };
+    const nextMeta: OrcamentoMeta = anexarMovimentoOrcamento(
+      { ...meta, statusAprovacao: 'finalizado' },
+      'fechamento',
+      currentUserName
+    );
     const nextSessao: SessaoOrcamentoPersist = { ...sessaoRef.current, meta: nextMeta };
     setMeta(nextMeta);
     sessaoRef.current = nextSessao;
@@ -14558,7 +14718,14 @@ export function OrcamentoPageView({
             : o
         )
       );
-      toast.success('Orçamento finalizado. O cronograma foi criado.');
+      const valorOs = arredondarMoeda2(resumoFinanceiro.totalComDescontoEBdi);
+      try {
+        await gravarTotalOrcamentoNaOs(valorOs);
+        osValorSyncBaselineRef.current = `${orcamentoAtivoId}:${valorOs.toFixed(2)}`;
+      } catch (syncErr) {
+        toast.error(syncOrcamentoOsErrorMessage(syncErr));
+      }
+      toast.success('Orçamento finalizado. O cronograma foi criado e o valor foi gravado na OS.');
     } catch {
       setMeta(prevMeta);
       sessaoRef.current = prevSessao;
@@ -14566,6 +14733,48 @@ export function OrcamentoPageView({
     } finally {
       setFinalizandoOrcamento(false);
       setConfirmFinalizarOrcamento(false);
+    }
+  };
+
+  const reabrirOrcamento = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    if (versaoCongelada || meta.congelado === true) {
+      toast.error('Esta revisão está somente leitura.');
+      return;
+    }
+    if (statusAprovacaoAtivo !== 'finalizado' || reabrindoOrcamento) return;
+    setReabrindoOrcamento(true);
+    const prevMeta = meta;
+    const prevSessao = sessaoRef.current;
+    const nextMeta: OrcamentoMeta = anexarMovimentoOrcamento(
+      { ...meta, statusAprovacao: 'rascunho', gradeTravada: undefined },
+      'reabertura',
+      currentUserName
+    );
+    const nextSessao: SessaoOrcamentoPersist = { ...sessaoRef.current, meta: nextMeta };
+    setMeta(nextMeta);
+    sessaoRef.current = nextSessao;
+    try {
+      await saveOrcamentoToApi(
+        centroCustoId,
+        orcamentoAtivoId,
+        montarPayloadSalvarOrcamento(servicos, imports, nextSessao)
+      );
+      setListaOrcamentos((prev) =>
+        prev.map((o) =>
+          o.id === orcamentoAtivoId
+            ? { ...o, statusAprovacao: 'rascunho', updatedAt: new Date().toISOString() }
+            : o
+        )
+      );
+      toast.success('Orçamento reaberto. Edite e finalize de novo para atualizar o valor na OS.');
+    } catch {
+      setMeta(prevMeta);
+      sessaoRef.current = prevSessao;
+      toast.error('Não foi possível reabrir o orçamento.');
+    } finally {
+      setReabrindoOrcamento(false);
+      setConfirmReabrirOrcamento(false);
     }
   };
 
@@ -15518,6 +15727,22 @@ export function OrcamentoPageView({
                           ) : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
+                          {!versaoCongelada && orcamentoFechado ? (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmReabrirOrcamento(true)}
+                              disabled={reabrindoOrcamento}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/50"
+                              title="Reabrir o orçamento para edição"
+                            >
+                              {reabrindoOrcamento ? (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                              ) : (
+                                <Unlock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              )}
+                              Reabrir orçamento
+                            </button>
+                          ) : null}
                           {!versaoCongelada ? (
                             <button
                               type="button"
@@ -15532,10 +15757,16 @@ export function OrcamentoPageView({
                           <button
                             type="button"
                             onClick={abrirEdicaoDados}
-                            disabled={versaoCongelada}
+                            disabled={versaoCongelada || orcamentoFechado}
                             className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:pointer-events-none disabled:opacity-40"
                             aria-label="Editar dados"
-                            title={versaoCongelada ? 'Versão congelada — somente leitura' : 'Editar dados'}
+                            title={
+                              versaoCongelada
+                                ? 'Versão congelada — somente leitura'
+                                : orcamentoFechado
+                                  ? 'Orçamento finalizado. Reabra para editar.'
+                                  : 'Editar dados'
+                            }
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -15567,6 +15798,11 @@ export function OrcamentoPageView({
                           })()}
                         </div>
                       ) : null}
+                    {orcamentoFechado && !versaoCongelada ? (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                        Orçamento finalizado. Reabra para editar. Ao finalizar de novo, o valor da OS é atualizado.
+                      </div>
+                    ) : null}
                     </div>
 
                     <div className="px-4 sm:px-5 py-5 space-y-6">
@@ -15688,6 +15924,44 @@ export function OrcamentoPageView({
                               : '—'}
                           </DadosCampo>
                         </dl>
+                      </div>
+
+                      <div>
+                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+                          Histórico
+                        </p>
+                        {movimentosHistoricoOrcamento(meta).length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            Nenhum movimento registrado ainda.
+                          </p>
+                        ) : (
+                          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-50 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
+                                <tr>
+                                  <th className="px-3 py-2 font-medium">Movimento</th>
+                                  <th className="px-3 py-2 font-medium">Data e hora</th>
+                                  <th className="px-3 py-2 font-medium">Usuário</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                {movimentosHistoricoOrcamento(meta).map((movimento, index) => (
+                                  <tr key={`${movimento.tipo}-${movimento.em}-${index}`}>
+                                    <td className="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100">
+                                      {ROTULO_MOVIMENTO_ORCAMENTO[movimento.tipo]}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums text-gray-700 dark:text-gray-300">
+                                      {formatarDataHoraOrcafascio(movimento.em)}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-gray-700 dark:text-gray-300">
+                                      {movimento.usuario || '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </section>
@@ -18081,6 +18355,22 @@ export function OrcamentoPageView({
                     <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
                   {!fichaDemandaOnly ? (
+                    orcamentoFechado && !versaoCongelada ? (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmReabrirOrcamento(true)}
+                        disabled={reabrindoOrcamento}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-600 bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700 hover:border-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
+                        title="Reabrir orçamento para editar"
+                        aria-label="Reabrir orçamento"
+                      >
+                        {reabrindoOrcamento ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        ) : (
+                          <Unlock className="h-4 w-4 shrink-0" aria-hidden />
+                        )}
+                      </button>
+                    ) : (
                     <button
                       type="button"
                       onClick={() => {
@@ -18114,6 +18404,7 @@ export function OrcamentoPageView({
                         <Check className="h-4 w-4 shrink-0" aria-hidden />
                       )}
                     </button>
+                    )
                   ) : null}
                   {analiticoDisponivel && !fichaDemandaOnly && (
                     <button
@@ -18203,6 +18494,47 @@ export function OrcamentoPageView({
                 className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 disabled:opacity-60"
               >
                 {finalizandoOrcamento ? 'Finalizando...' : 'Finalizar'}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {confirmReabrirOrcamento && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (reabrindoOrcamento) return;
+              setConfirmReabrirOrcamento(false);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <Unlock className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Reabrir orçamento?
+            </h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              O orçamento volta a ficar editável. O valor na OS permanece até você finalizar de novo.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmReabrirOrcamento(false)}
+                disabled={reabrindoOrcamento}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-60 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void reabrirOrcamento()}
+                disabled={reabrindoOrcamento}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+              >
+                {reabrindoOrcamento ? 'Reabrindo...' : 'Reabrir'}
               </button>
             </div>
           </div>
@@ -18581,10 +18913,12 @@ export function OrcamentoPageView({
                         numeroPasta: reajusteOsModal.numeroPasta,
                         serviceDescription: reajusteOsModal.descricaoServicoOs,
                         valor: reajusteOsModal.valor,
-                        isAditivo: false,
+                        isAditivo: reajusteOsModal.isAditivo,
                         confirmValor: true,
-                        mode: 'revisao',
+                        confirmSomarAditivo: reajusteOsModal.isAditivo,
+                        mode: reajusteOsModal.isAditivo ? 'sync-aditivo' : 'sync-base',
                         orcamentoId: reajusteOsModal.orcamentoId,
+                        aditivoDescricao: reajusteOsModal.descricaoServicoOs,
                       });
                       toast.success('Valor da OS atualizado.');
                       setReajusteOsModal(null);
@@ -19782,7 +20116,8 @@ export function OrcamentoPageView({
                     !orcamentoOsDraftValido(
                       importPlanilhaOsDraft,
                       importPlanilhaOsCodigo,
-                      importPlanilhaNumeroPasta
+                      importPlanilhaNumeroPasta,
+                      { exigirValor: false }
                     )
                   }
                   className="flex flex-1 items-center justify-center space-x-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-800"
@@ -20653,7 +20988,7 @@ export function OrcamentoPageView({
               <button
                 type="button"
                 onClick={alternarGradeTravada}
-                disabled={versaoCongelada}
+                disabled={versaoCongelada || orcamentoFechado}
                 className={`inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-40 ${
                   gradeTravada
                     ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50'
@@ -20662,16 +20997,20 @@ export function OrcamentoPageView({
                 title={
                   versaoCongelada
                     ? 'Versão congelada — somente leitura'
-                    : gradeTravada
-                      ? 'Destravar orçamento e memória de cálculo'
-                      : 'Travar orçamento e memória de cálculo'
+                    : orcamentoFechado
+                      ? 'Orçamento finalizado. Reabra para editar.'
+                      : gradeTravada
+                        ? 'Destravar orçamento e memória de cálculo'
+                        : 'Travar orçamento e memória de cálculo'
                 }
                 aria-label={
                   versaoCongelada
                     ? 'Versão congelada'
-                    : gradeTravada
-                      ? 'Destravar orçamento e memória de cálculo'
-                      : 'Travar orçamento e memória de cálculo'
+                    : orcamentoFechado
+                      ? 'Orçamento finalizado. Reabra para editar.'
+                      : gradeTravada
+                        ? 'Destravar orçamento e memória de cálculo'
+                        : 'Travar orçamento e memória de cálculo'
                 }
                 aria-pressed={gradeTravada}
               >
