@@ -229,6 +229,7 @@ export type OcSupplierOption = {
   code: string;
   name: string;
   tradeName?: string | null;
+  cnpj?: string | null;
   bank?: string | null;
   agency?: string | null;
   account?: string | null;

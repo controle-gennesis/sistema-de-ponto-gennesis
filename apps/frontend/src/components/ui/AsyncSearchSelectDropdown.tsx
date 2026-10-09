@@ -36,6 +36,8 @@ export type AsyncSearchSelectDropdownProps<T> = {
   searchFn: (query: string) => Promise<T[]>;
   getOptionId: (option: T) => string;
   getOptionLabel: (option: T) => string;
+  /** Conteúdo da opção na lista. O rótulo do campo fechado continua em getOptionLabel. */
+  renderOption?: (option: T) => React.ReactNode;
   disabled?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -94,6 +96,7 @@ export function AsyncSearchSelectDropdown<T>({
   searchFn,
   getOptionId,
   getOptionLabel,
+  renderOption,
   disabled = false,
   placeholder = 'Digite para buscar...',
   searchPlaceholder = 'Pesquisar...',
@@ -249,9 +252,11 @@ export function AsyncSearchSelectDropdown<T>({
               aria-selected={active}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pickOption(option)}
-              className={optionClassName(active)}
+              className={`${optionClassName(active)}${renderOption ? ' !items-start' : ''}`}
             >
-              <span className="min-w-0 flex-1 truncate">{getOptionLabel(option)}</span>
+              <span className={`min-w-0 flex-1 ${renderOption ? '' : 'truncate'}`}>
+                {renderOption ? renderOption(option) : getOptionLabel(option)}
+              </span>
               {active ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
             </button>
           );
