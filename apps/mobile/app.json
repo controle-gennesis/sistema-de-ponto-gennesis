@@ -11,7 +11,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.engenharia.sistemaponto",
+      "bundleIdentifier": "br.com.gennesis.conecta",
       "infoPlist": {
         "NSCameraUsageDescription": "Este app precisa acessar a câmera para capturar fotos ao bater o ponto.",
         "NSLocationWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
