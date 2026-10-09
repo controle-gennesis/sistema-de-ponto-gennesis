@@ -1,6 +1,6 @@
 import api from '@/lib/api';
 
-export type OrcamentoOsSyncMode = 'create' | 'revisao' | 'aditivo';
+export type OrcamentoOsSyncMode = 'create' | 'revisao' | 'aditivo' | 'sync-base' | 'sync-aditivo';
 
 export type OrcamentoOsSyncInput = {
   contractId: string;
@@ -11,10 +11,13 @@ export type OrcamentoOsSyncInput = {
   isAditivo: boolean;
   confirmValor: boolean;
   confirmSomarAditivo?: boolean;
+  /** Na importação do aditivo, só vincula a OS. O valor entra ao finalizar. */
+  linkOnly?: boolean;
   mode?: OrcamentoOsSyncMode;
   startDate?: string | null;
   endDate?: string | null;
   orcamentoId?: string | null;
+  aditivoDescricao?: string | null;
 };
 
 export type OrcamentoOsSyncResult = {
@@ -70,10 +73,12 @@ export async function syncOrcamentoOsToContract(
     isAditivo: input.isAditivo,
     confirmValor: input.confirmValor,
     confirmSomarAditivo: input.confirmSomarAditivo === true,
+    linkOnly: input.linkOnly === true,
     mode: input.mode || (input.isAditivo ? 'aditivo' : 'create'),
     startDate: input.startDate || null,
     endDate: input.endDate || null,
     orcamentoId: input.orcamentoId || null,
+    aditivoDescricao: input.aditivoDescricao || null,
   });
   return res.data?.data as OrcamentoOsSyncResult;
 }

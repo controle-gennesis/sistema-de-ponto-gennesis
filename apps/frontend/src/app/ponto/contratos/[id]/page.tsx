@@ -7991,10 +7991,6 @@ export default function ContractDetailPage() {
             contract={contract}
             allPleitos={allPleitos}
             billings={billings}
-            onBudgetConfirmChange={() => {
-              void queryClient.invalidateQueries({ queryKey: ['pleito', selectedPleitoId] });
-              void queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
-            }}
           />
           {selectedPleitoModalConfirmUi}
 
