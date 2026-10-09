@@ -2169,7 +2169,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     origem: CopiaCelulaMedicao | null
   ) => {
     const dimBase = clonarDimensoesMemorial(dim);
-    const linhas = (dimBase.linhas ?? []).map(ln => ({
+    const linhas: LinhaMedicao[] = (dimBase.linhas ?? []).map(ln => ({
       ...ln,
       formulas: ln.formulas ? { ...ln.formulas } : undefined,
     }));
