@@ -51,7 +51,8 @@ function parseMesAno(
 
 function resolveValorPrevistoFromPayload(
   b: Record<string, unknown>,
-  fallbackFromServiceOrderValor?: number
+  fallbackFromServiceOrderValor?: number,
+  allowZero = false
 ): number {
   const vp =
     toDecPleito(b.valorPrevisto) ??
@@ -61,6 +62,8 @@ function resolveValorPrevistoFromPayload(
     toDecPleito(b.budgetAmount3) ??
     toDecPleito(b.budgetAmount4) ??
     (fallbackFromServiceOrderValor != null ? fallbackFromServiceOrderValor : null);
+
+  if (allowZero && (vp == null || !Number.isFinite(vp) || vp <= 0)) return 0;
 
   if (vp == null || !Number.isFinite(vp) || vp <= 0) {
     throw createError(
@@ -128,9 +131,11 @@ async function createLinkedServiceOrder(
 export async function resolvePleitoCreateCore(
   b: Record<string, unknown>,
   creationYearParsed: number | null,
-  contractForNewServiceOrder?: ResolvePleitoContractContext | null
+  contractForNewServiceOrder?: ResolvePleitoContractContext | null,
+  options?: { allowZeroValor?: boolean }
 ): Promise<{ mes: number; ano: number; valorPrevisto: Decimal; serviceOrderId: string }> {
   const { mes, ano } = parseMesAno(b, creationYearParsed);
+  const allowZero = options?.allowZeroValor === true;
 
   let incomingId = typeof b.serviceOrderId === 'string' ? b.serviceOrderId.trim() : '';
 
@@ -142,7 +147,7 @@ export async function resolvePleitoCreateCore(
       );
     }
 
-    const vpNum = resolveValorPrevistoFromPayload(b);
+    const vpNum = resolveValorPrevistoFromPayload(b, undefined, allowZero);
     incomingId = await createLinkedServiceOrder(b, ano, vpNum, contractForNewServiceOrder);
   }
 
@@ -151,7 +156,7 @@ export async function resolvePleitoCreateCore(
     throw createError('Ordem de serviço não encontrada', 404);
   }
 
-  const vp = resolveValorPrevistoFromPayload(b, Number(so.valor));
+  const vp = resolveValorPrevistoFromPayload(b, Number(so.valor), allowZero);
 
   return {
     mes,

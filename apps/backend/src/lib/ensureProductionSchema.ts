@@ -64,6 +64,14 @@ async function ensureVehicleReservationBaixaCheckRemindedAt(prisma: PrismaClient
   `);
 }
 
+async function ensurePleitoBudgetAdditives(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'pleitos', 'budgetAdditives')) return;
+  console.warn('[Schema] Coluna pleitos.budgetAdditives ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "budgetAdditives" JSONB;
+  `);
+}
+
 async function ensurePleitoBudgetValueConfirmed(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'pleitos', 'budgetValueConfirmed')) return;
   console.warn('[Schema] Coluna pleitos.budgetValueConfirmed ausente — adicionando.');
@@ -3088,6 +3096,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureContractAddendaTable(prisma);
     await ensureContractBillingImportWithoutOsPleito(prisma);
     await ensureContractOrcafascioClientId(prisma);
+    await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);

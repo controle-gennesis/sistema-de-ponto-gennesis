@@ -6,14 +6,24 @@ import { FluigService, type FluigDatasetValues } from './FluigService';
 const fluigForMirror = new FluigService();
 
 /** Datasets espelhados no Postgres e servidos pela API sem hit no Fluig a cada request. */
-export const FLUIG_MIRRORED_DATASET_IDS = [
-  'G5-Relatorio-DF-GO-DP',
+const FLUIG_MIRROR_DATASETS_G3 = [
   'Processos_Workflow_Aprovacao_G3',
-  'Processos_Workflow_Aprovacao_G5',
   'DataSet_G3FollowUp',
-  'DataSet_G4FollowUp',
+] as const;
+
+const FLUIG_MIRROR_DATASETS_G4 = ['DataSet_G4FollowUp'] as const;
+
+const FLUIG_MIRROR_DATASETS_G5 = [
+  'Processos_Workflow_Aprovacao_G5',
   'G5-Relatorio-DF-GO-TODOS-SETORES',
+  'G5-Relatorio-DF-GO-DP',
   'G5-Relatorio-DF-GO-JURIDICO',
+] as const;
+
+export const FLUIG_MIRRORED_DATASET_IDS = [
+  ...FLUIG_MIRROR_DATASETS_G3,
+  ...FLUIG_MIRROR_DATASETS_G4,
+  ...FLUIG_MIRROR_DATASETS_G5,
 ] as const;
 
 export type FluigMirroredDatasetId = (typeof FLUIG_MIRRORED_DATASET_IDS)[number];
@@ -209,14 +219,21 @@ export async function syncFluigDatasetMirror(
   return promise;
 }
 
-export async function syncAllFluigDatasetMirrors(
+async function syncFluigDatasetIds(
+  ids: readonly string[],
   options: { force?: boolean } = {}
 ): Promise<FluigDatasetMirrorSyncResult[]> {
   const out: FluigDatasetMirrorSyncResult[] = [];
-  for (const id of FLUIG_MIRRORED_DATASET_IDS) {
+  for (const id of ids) {
     out.push(await syncFluigDatasetMirror(id, options));
   }
   return out;
+}
+
+export async function syncAllFluigDatasetMirrors(
+  options: { force?: boolean } = {}
+): Promise<FluigDatasetMirrorSyncResult[]> {
+  return syncFluigDatasetIds(FLUIG_MIRRORED_DATASET_IDS, options);
 }
 
 export async function getFluigDatasetMirrorPayload(
@@ -262,12 +279,25 @@ export async function getFluigDatasetMirrorPayload(
   };
 }
 
-/** Sync todo dia às 3:00 e às 12:30 (America/Sao_Paulo). Não busca na subida do servidor. */
+/** Horário automático só no site no ar. Localhost não busca o Fluig sozinho. */
+function shouldScheduleFluigMirror(): boolean {
+  if (process.env.NODE_ENV !== 'production') return false;
+  const db = process.env.DATABASE_URL || '';
+  if (/localhost|127\.0\.0\.1/i.test(db)) return false;
+  return true;
+}
+
+/** Madrugada: G3 2:00, G4 3:00, G5 4:00. Às 12:30 busca os 7. Sem busca na subida. */
 export function startFluigDatasetMirrorScheduler(): void {
+  if (!shouldScheduleFluigMirror()) {
+    console.log('[fluig-mirror] horário automático desligado neste ambiente (só no site no ar)');
+    return;
+  }
+
   const tz = process.env.TZ || 'America/Sao_Paulo';
 
-  const run = (reason: string) => {
-    void syncAllFluigDatasetMirrors({ force: true })
+  const run = (reason: string, ids: readonly string[]) => {
+    void syncFluigDatasetIds(ids, { force: true })
       .then((results) => {
         const ok = results.filter((r) => !r.error).length;
         console.log(`[fluig-mirror] ${reason}: ${ok}/${results.length} dataset(s) ok`);
@@ -277,8 +307,10 @@ export function startFluigDatasetMirrorScheduler(): void {
       });
   };
 
-  cron.schedule('0 3 * * *', () => run('cron-3h'), { timezone: tz });
-  cron.schedule('30 12 * * *', () => run('cron-12h30'), { timezone: tz });
+  cron.schedule('0 2 * * *', () => run('cron-2h-g3', FLUIG_MIRROR_DATASETS_G3), { timezone: tz });
+  cron.schedule('0 3 * * *', () => run('cron-3h-g4', FLUIG_MIRROR_DATASETS_G4), { timezone: tz });
+  cron.schedule('0 4 * * *', () => run('cron-4h-g5', FLUIG_MIRROR_DATASETS_G5), { timezone: tz });
+  cron.schedule('30 12 * * *', () => run('cron-12h30', FLUIG_MIRRORED_DATASET_IDS), { timezone: tz });
 
-  console.log('[fluig-mirror] agendado: todo dia às 3:00 e às 12:30 (sem busca na subida)');
+  console.log('[fluig-mirror] agendado: G3 2:00, G4 3:00, G5 4:00 e todos às 12:30 (sem busca na subida)');
 }
