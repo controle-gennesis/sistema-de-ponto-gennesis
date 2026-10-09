@@ -435,7 +435,7 @@ export class OrcamentoService {
     centroCustoId: string,
     index: OrcamentoIndex
   ): Promise<OrcamentoIndex> {
-    const LISTA_FIN_VERSION = 3;
+    const LISTA_FIN_VERSION = 4;
     const needsBdiFill = index.orcamentos.some(o => o.bdiPercentual == null);
     const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < 2;
     const needsOsFill = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
@@ -455,6 +455,10 @@ export class OrcamentoService {
         const metaRaw = (file?.sessaoOrcamento as { meta?: Record<string, unknown> } | undefined)?.meta;
         const fin = extractListaFinanceiroFromMeta(metaRaw);
         const osPasta = extractOsPastaFromMeta(metaRaw);
+        const statusArquivo =
+          typeof metaRaw?.statusAprovacao === 'string' && metaRaw.statusAprovacao.trim()
+            ? metaRaw.statusAprovacao.trim()
+            : undefined;
         const orcaComBdi = Number(
           metaRaw?.totaisOrcafascio && typeof metaRaw.totaisOrcafascio === 'object'
             ? (metaRaw.totaisOrcafascio as { comBdi?: unknown }).comBdi
@@ -479,12 +483,14 @@ export class OrcamentoService {
               : fin.totalComBdi ?? o.totalComBdi ?? 0,
           osCodigo: osPasta.osCodigo,
           numeroPasta: osPasta.numeroPasta,
+          ...(statusArquivo ? { statusAprovacao: statusArquivo } : {}),
         };
         if (
           next.bdiPercentual !== o.bdiPercentual ||
           next.totalComBdi !== o.totalComBdi ||
           next.osCodigo !== o.osCodigo ||
-          next.numeroPasta !== o.numeroPasta
+          next.numeroPasta !== o.numeroPasta ||
+          (statusArquivo !== undefined && statusArquivo !== o.statusAprovacao)
         ) {
           changed = true;
         }
@@ -502,9 +508,29 @@ export class OrcamentoService {
     }
 
     if (!changed && (index.listaFinVersion ?? 0) >= LISTA_FIN_VERSION) return index;
+    const latest = (await this.readIndexRaw(centroCustoId)) ?? index;
+    const latestById = new Map(latest.orcamentos.map(o => [o.id, o]));
+    const orcamentosMesclados = orcamentos.map(enriched => {
+      const atual = latestById.get(enriched.id);
+      if (!atual) return enriched;
+      const atualEm = Date.parse(atual.updatedAt || '') || 0;
+      const baseEm = Date.parse(enriched.updatedAt || '') || 0;
+      if (atualEm > baseEm) {
+        return {
+          ...enriched,
+          ...atual,
+          bdiPercentual: atual.bdiPercentual ?? enriched.bdiPercentual,
+          totalComBdi: atual.totalComBdi ?? enriched.totalComBdi,
+          osCodigo: atual.osCodigo || enriched.osCodigo,
+          numeroPasta: atual.numeroPasta || enriched.numeroPasta,
+          statusAprovacao: atual.statusAprovacao || enriched.statusAprovacao,
+        };
+      }
+      return enriched;
+    });
     const nextIndex: OrcamentoIndex = {
-      ...index,
-      orcamentos,
+      ...latest,
+      orcamentos: orcamentosMesclados,
       listaFinVersion: LISTA_FIN_VERSION
     };
     try {
@@ -861,6 +887,7 @@ export class OrcamentoService {
     await this.writeOrcamentoFileRaw(centroCustoId, orcamentoId, payload);
     const updatedAt = new Date().toISOString();
     const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
+    const latestIndex = (await this.readIndexRaw(centroCustoId)) ?? index;
     const statusFromMeta = (() => {
       const s = meta?.statusAprovacao;
       return typeof s === 'string' && s.trim() ? s.trim() : undefined;
@@ -880,10 +907,10 @@ export class OrcamentoService {
     );
     const next: OrcamentoIndex = {
       ultimoOrcamentoId: orcamentoId,
-      ...(typeof index.listaFinVersion === 'number'
-        ? { listaFinVersion: index.listaFinVersion }
+      ...(typeof latestIndex.listaFinVersion === 'number'
+        ? { listaFinVersion: latestIndex.listaFinVersion }
         : {}),
-      orcamentos: index.orcamentos.map(o =>
+      orcamentos: latestIndex.orcamentos.map(o =>
         o.id === orcamentoId
           ? {
               ...o,

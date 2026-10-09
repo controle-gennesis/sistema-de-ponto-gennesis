@@ -835,6 +835,29 @@ function SolicitacoesFerramentasPage() {
                     </div>
                   ) : null}
 
+                  {anexosByKind(selected.attachments, 'fd').length > 0 ? (
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+                      <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          <Paperclip className="h-4 w-4 text-gray-500" />
+                          FD - anexo
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
+                        {anexosByKind(selected.attachments, 'fd').map((anexo) => (
+                          <FilePreviewCard
+                            key={anexo.id}
+                            file={{
+                              originalName: anexo.name || 'Arquivo',
+                              fileUrl: anexo.url,
+                            }}
+                            extra="FD"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {(() => {
                     const anexos = selected.attachments || [];
                     const ordensCompra = anexosByKind(anexos, 'oc');

@@ -301,6 +301,7 @@ export default function OrcamentosPage() {
       return unicos;
     },
     enabled: !loadingContracts && !loadingPermissions && contractsComOrcamento.length > 0,
+    refetchOnMount: 'always',
   });
 
   const orcamentosFiltrados = useMemo(() => {

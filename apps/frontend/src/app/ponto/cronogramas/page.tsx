@@ -16,6 +16,8 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { sincronizarCronogramasRecentes } from '@/lib/cronogramaNovos';
+import { authService } from '@/lib/auth';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -197,6 +199,12 @@ export default function CronogramasPage() {
     },
     enabled: !loadingContracts && !loadingPermissions && contractsLiberados.length > 0,
   });
+
+  useEffect(() => {
+    const userId = authService.getUser()?.id;
+    if (!userId || !Array.isArray(cronogramasData)) return;
+    sincronizarCronogramasRecentes(userId, cronogramasData);
+  }, [cronogramasData]);
 
   const cronogramas = useMemo(() => {
     const list = Array.isArray(cronogramasData) ? cronogramasData : [];

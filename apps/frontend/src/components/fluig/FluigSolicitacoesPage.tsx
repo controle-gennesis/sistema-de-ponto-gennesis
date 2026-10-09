@@ -11,6 +11,7 @@ import {
   Filter,
   RotateCcw,
   Download,
+  Eye,
   ChevronUp,
   ChevronDown,
   Layers,
@@ -727,17 +728,12 @@ type FluigAnexoItem = { id: string; nome: string };
 const ANEXO_LISTA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const anexoListaCache = new Map<string, { at: number; items: FluigAnexoItem[] }>();
 
-function fluigAnexoIsPreviewable(nome: string): boolean {
-  const lower = nome.toLowerCase();
-  return (
-    lower.endsWith('.pdf') ||
-    lower.endsWith('.png') ||
-    lower.endsWith('.jpg') ||
-    lower.endsWith('.jpeg') ||
-    lower.endsWith('.gif') ||
-    lower.endsWith('.webp') ||
-    lower.endsWith('.txt')
-  );
+/** PDF e imagem podem ser vistos na hora. Sem extensão, o conteúdo decide ao abrir. */
+function fluigAnexoPodeVer(nome: string): boolean {
+  const lower = nome.toLowerCase().trim();
+  if (/\.(pdf|png|jpe?g|gif|webp)$/.test(lower)) return true;
+  if (/\.(xlsx?|docx?|csv|zip|rar|7z|txt|xml|json)$/.test(lower)) return false;
+  return !/\.[a-z0-9]{1,8}$/.test(lower);
 }
 
 function sniffBlobKind(buf: ArrayBuffer): { mime: string; ext: string } | null {
@@ -1062,6 +1058,20 @@ export function FluigSolicitacoesPage({
   const [resolvingAnexos, setResolvingAnexos] = useState(false);
   const [anexoBusyKey, setAnexoBusyKey] = useState<string | null>(null);
   const anexoBusyRef = useRef(false);
+  const [anexoPreview, setAnexoPreview] = useState<{
+    url: string;
+    title: string;
+    kind: 'pdf' | 'image';
+  } | null>(null);
+  const anexoPreviewUrlRef = useRef<string | null>(null);
+
+  const closeAnexoPreview = useCallback(() => {
+    if (anexoPreviewUrlRef.current) {
+      URL.revokeObjectURL(anexoPreviewUrlRef.current);
+      anexoPreviewUrlRef.current = null;
+    }
+    setAnexoPreview(null);
+  }, []);
 
   useEffect(() => {
     if (!detail) {
@@ -1143,20 +1153,18 @@ export function FluigSolicitacoesPage({
         blob = new Blob([ab], { type: sniffed.mime });
       }
       const type = (blob.type || '').toLowerCase();
-      const canPreview =
-        type.includes('pdf') ||
-        type.startsWith('image/') ||
-        type.startsWith('text/') ||
-        fluigAnexoIsPreviewable(filename);
+      const isPdf = type.includes('pdf') || filename.toLowerCase().endsWith('.pdf');
+      const isImage = type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(filename);
       const objectUrl = URL.createObjectURL(blob);
-      if (mode === 'view' && canPreview) {
-        const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
-        if (!opened) {
-          toast.error('Permita pop-ups para visualizar o anexo.');
+      if (mode === 'view') {
+        if (!isPdf && !isImage) {
           URL.revokeObjectURL(objectUrl);
+          toast.error('Este arquivo não abre aqui. Use baixar.');
           return;
         }
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
+        if (anexoPreviewUrlRef.current) URL.revokeObjectURL(anexoPreviewUrlRef.current);
+        anexoPreviewUrlRef.current = objectUrl;
+        setAnexoPreview({ url: objectUrl, title: filename, kind: isPdf ? 'pdf' : 'image' });
         return;
       }
       const a = document.createElement('a');
@@ -1166,9 +1174,6 @@ export function FluigSolicitacoesPage({
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
-      if (mode === 'view' && !canPreview) {
-        toast.success('Arquivo baixado — abra no computador para visualizar.');
-      }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: Blob | { message?: string } }; message?: string };
       let message =
@@ -3191,8 +3196,33 @@ export function FluigSolicitacoesPage({
 
       {/* Modal detalhe da solicitação */}
       <Modal
+        isOpen={!!anexoPreview}
+        onClose={closeAnexoPreview}
+        title={anexoPreview?.title || 'Anexo'}
+        size="full"
+        elevated
+      >
+        {anexoPreview?.kind === 'image' ? (
+          <img
+            src={anexoPreview.url}
+            alt={anexoPreview.title}
+            className="mx-auto max-h-[75vh] max-w-full object-contain"
+          />
+        ) : anexoPreview ? (
+          <iframe
+            src={anexoPreview.url}
+            title={anexoPreview.title}
+            className="h-[75vh] w-full rounded-md border border-gray-200 bg-white dark:border-gray-600"
+          />
+        ) : null}
+      </Modal>
+
+      <Modal
         isOpen={!!detail}
-        onClose={() => setDetail(null)}
+        onClose={() => {
+          closeAnexoPreview();
+          setDetail(null);
+        }}
         title={detail ? formatSolicitacaoModalTitle(detail.columns, detail.row) : 'Detalhe'}
         size="xl"
       >
@@ -3271,7 +3301,9 @@ export function FluigSolicitacoesPage({
                           const key = `${anexo.id || 'sem-id'}-${idx}`;
                           const label = anexo.nome || (anexo.id ? `Documento ${anexo.id}` : `Anexo ${idx + 1}`);
                           const downloadBusy = anexoBusyKey === `${anexo.id}:download`;
+                          const viewBusy = anexoBusyKey === `${anexo.id}:view`;
                           const anyBusy = Boolean(anexoBusyKey);
+                          const podeVer = fluigAnexoPodeVer(label);
                           if (!anexo.id) {
                             return (
                               <li
@@ -3294,7 +3326,23 @@ export function FluigSolicitacoesPage({
                                   {label}
                                 </span>
                               </div>
-                              <div className="flex shrink-0 items-center self-end sm:self-auto">
+                              <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
+                                {podeVer ? (
+                                  <button
+                                    type="button"
+                                    disabled={anyBusy}
+                                    onClick={() => void openFluigAnexo(anexo, 'view')}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 transition-colors hover:text-gray-900 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:text-gray-100"
+                                    title="Ver anexo"
+                                    aria-label="Ver anexo"
+                                  >
+                                    {viewBusy ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                    ) : (
+                                      <Eye className="h-4 w-4" aria-hidden />
+                                    )}
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   disabled={anyBusy}

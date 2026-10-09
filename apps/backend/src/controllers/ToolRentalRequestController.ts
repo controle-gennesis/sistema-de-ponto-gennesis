@@ -63,6 +63,10 @@ function parseToolRentalAttachments(value: unknown): ToolRentalAnexo[] {
   return out;
 }
 
+function parseFdAttachmentsInput(value: unknown): ToolRentalAnexo[] {
+  return parseToolRentalAttachments(value).map((item) => ({ ...item, kind: 'fd' }));
+}
+
 function legacyAttachmentsFromRow(row: {
   ocMirrorUrl?: string | null;
   ocMirrorName?: string | null;
@@ -611,6 +615,10 @@ export class ToolRentalRequestController {
       }
       const equipamento = formatEquipamentoSummary(equipamentos);
       const demandType = parseDemandType(body.demandType);
+      const fdAttachments = parseFdAttachmentsInput(body.fdAttachments);
+      if (demandType === ToolRentalDemandType.NOVA_LOCACAO && fdAttachments.length === 0) {
+        throw createError('Anexe a FD na primeira locação', 400);
+      }
       const priority = parsePriority(body.priority);
       const logisticsMode = parseLogisticsMode(body.logisticsMode);
       const periodoInicio = parseDateOnly(body.periodoInicio, 'Data de início');
@@ -677,10 +685,18 @@ export class ToolRentalRequestController {
         });
       });
       await persistEquipamentos(created.id, equipamentos);
+      if (fdAttachments.length > 0) {
+        await prisma.$executeRaw`
+          UPDATE "tool_rental_requests"
+          SET "attachments" = ${JSON.stringify(fdAttachments)}::jsonb,
+              "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = ${created.id}
+        `;
+      }
 
       res.status(201).json({
         success: true,
-        data: { ...created, equipamentos },
+        data: { ...created, equipamentos, attachments: fdAttachments },
       });
     } catch (error) {
       next(error);

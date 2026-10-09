@@ -94,6 +94,7 @@ type ToolRentalRequest = {
   receivedBy?: { id: string; name: string } | null;
   receiptObservation?: string | null;
   receiptAttachments?: Array<{ id: string; name: string; url: string }> | null;
+  attachments?: Array<{ id: string; name: string; url: string; kind?: string }> | null;
   renewedFromId?: string | null;
   renewedFrom?: { id: string; code: string } | null;
   assignedUser?: { id: string; name: string } | null;
@@ -117,6 +118,7 @@ type FormState = {
   equipamentos: FormEquipamentoRow[];
   periodoInicio: string;
   periodoFim: string;
+  fdAttachments: ReceiptAnexo[];
 };
 
 const EMPTY_EQUIPAMENTO_ROW = (): FormEquipamentoRow => ({
@@ -135,6 +137,7 @@ const EMPTY_FORM = (): FormState => ({
   equipamentos: [EMPTY_EQUIPAMENTO_ROW()],
   periodoInicio: '',
   periodoFim: '',
+  fdAttachments: [],
 });
 
 function resolveEquipamentos(row: ToolRentalRequest): EquipamentoItem[] {
@@ -184,6 +187,10 @@ function toLocalDateTimeInput(value?: Date): string {
 
 type ReceiptAnexo = { id: string; name: string; url: string };
 
+function fdAnexosOf(row: ToolRentalRequest): ReceiptAnexo[] {
+  return (row.attachments || []).filter((anexo) => anexo.kind === 'fd' && anexo.url);
+}
+
 function SolicitarLocacoesFerramentasPage() {
   const queryClient = useQueryClient();
   const handleLogout = useLogout();
@@ -221,6 +228,7 @@ function SolicitarLocacoesFerramentasPage() {
     attachments: [] as ReceiptAnexo[],
   });
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [uploadingFd, setUploadingFd] = useState(false);
 
   const { data: listData, isLoading } = useQuery({
     queryKey: ['tool-rental-requests', searchTerm, page],
@@ -308,6 +316,15 @@ function SolicitarLocacoesFerramentasPage() {
         equipamentos,
         periodoInicio: payload.periodoInicio,
         periodoFim: payload.periodoFim,
+        ...(payload.demandType === 'NOVA_LOCACAO'
+          ? {
+              fdAttachments: payload.fdAttachments.map((anexo) => ({
+                id: anexo.id,
+                name: anexo.name,
+                url: anexo.url,
+              })),
+            }
+          : {}),
       });
     },
     onSuccess: () => {
@@ -453,6 +470,36 @@ function SolicitarLocacoesFerramentasPage() {
       toast.error(err?.response?.data?.message || err?.message || 'Falha ao anexar arquivo');
     } finally {
       setUploadingReceipt(false);
+    }
+  };
+
+  const uploadFdFile = async (files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setUploadingFd(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/tool-rental-requests/upload-fd-file', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const data = res.data?.data;
+      if (!data?.url) throw new Error('Falha no upload');
+      setForm((f) => ({
+        ...f,
+        fdAttachments: [
+          ...f.fdAttachments,
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: data.originalName || file.name,
+            url: data.url,
+          },
+        ],
+      }));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Falha ao anexar a FD');
+    } finally {
+      setUploadingFd(false);
     }
   };
 
@@ -613,6 +660,9 @@ function SolicitarLocacoesFerramentasPage() {
     }
     if (!form.periodoInicio) return toast.error('Informe a data de início');
     if (!form.periodoFim) return toast.error('Informe a data de fim');
+    if (form.demandType === 'NOVA_LOCACAO' && form.fdAttachments.length === 0) {
+      return toast.error('Anexe a FD na primeira locação');
+    }
     createMutation.mutate(form);
   };
 
@@ -934,6 +984,23 @@ function SolicitarLocacoesFerramentasPage() {
                       <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">
                         {selected.scNumber}
                       </p>
+                    </div>
+                  ) : null}
+                  {fdAnexosOf(selected).length > 0 ? (
+                    <div className="sm:col-span-2">
+                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">FD - anexo</p>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {fdAnexosOf(selected).map((anexo) => (
+                          <FilePreviewCard
+                            key={anexo.id}
+                            file={{
+                              originalName: anexo.name || 'Arquivo',
+                              fileUrl: anexo.url,
+                            }}
+                            extra="FD"
+                          />
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                   {selected.renewedFrom ? (
@@ -1301,6 +1368,41 @@ function SolicitarLocacoesFerramentasPage() {
               noFocusRing
             />
           </div>
+
+          {form.demandType === 'NOVA_LOCACAO' ? (
+            <div>
+              <label className={labelCls}>FD - anexo{requiredMark}</label>
+              {form.fdAttachments.length > 0 ? (
+                <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {form.fdAttachments.map((anexo) => (
+                    <FilePreviewCard
+                      key={anexo.id}
+                      file={{
+                        originalName: anexo.name || 'Arquivo',
+                        fileUrl: anexo.url,
+                      }}
+                      extra="FD"
+                      onRemove={() =>
+                        setForm((f) => ({
+                          ...f,
+                          fdAttachments: f.fdAttachments.filter((item) => item.id !== anexo.id),
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
+              <FileDropZone
+                label="Adicionar FD"
+                hint="Obrigatório na primeira locação. Clique ou arraste imagem/PDF"
+                uploading={uploadingFd}
+                disabled={createMutation.isPending}
+                onFiles={(files) => {
+                  void uploadFdFile(files);
+                }}
+              />
+            </div>
+          ) : null}
 
           <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button

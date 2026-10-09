@@ -44,7 +44,7 @@ export const TOOL_RENTAL_STATUS_BADGE: Record<ToolRentalRequestStatus, string> =
 };
 
 export const TOOL_RENTAL_DEMAND_LABELS: Record<ToolRentalDemandType, string> = {
-  NOVA_LOCACAO: 'Nova locação',
+  NOVA_LOCACAO: 'Locação',
   RENOVACAO: 'Renovação',
   DEVOLUCAO: 'Devolução',
   COMPRA: 'Compra',
@@ -52,7 +52,7 @@ export const TOOL_RENTAL_DEMAND_LABELS: Record<ToolRentalDemandType, string> = {
 
 export const TOOL_RENTAL_DEMAND_OPTIONS = (
   [
-    { value: 'NOVA_LOCACAO', label: 'Nova locação' },
+    { value: 'NOVA_LOCACAO', label: 'Locação' },
     { value: 'RENOVACAO', label: 'Renovação' },
     { value: 'DEVOLUCAO', label: 'Devolução' },
     { value: 'COMPRA', label: 'Compra' },

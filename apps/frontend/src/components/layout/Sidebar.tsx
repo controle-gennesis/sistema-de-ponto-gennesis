@@ -90,6 +90,8 @@ import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval'
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
+import { authService } from '@/lib/auth';
+import { marcarCronogramasVistos, useCronogramasNovosCount } from '@/lib/cronogramaNovos';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
   readSelectedModuleId,
@@ -570,6 +572,17 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   });
 
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
+  const cronogramasUserId = authService.getUser()?.id || user?.id || null;
+  const cronogramasNovosCount = useCronogramasNovosCount(cronogramasUserId);
+  const cronogramasPathRef = useRef(pathname);
+  useEffect(() => {
+    const previous = cronogramasPathRef.current;
+    cronogramasPathRef.current = pathname;
+    if (!cronogramasUserId) return;
+    if (previous === '/ponto/cronogramas' && pathname !== '/ponto/cronogramas') {
+      marcarCronogramasVistos(cronogramasUserId);
+    }
+  }, [pathname, cronogramasUserId]);
   const { counts: approvalCounts } = useApprovalNotificationCounts();
   const { count: mensalReportPendingCount } = useMensalReportPendingCount(
     !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
@@ -599,6 +612,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
     if (href === '/ponto/contratos') return mensalReportPendingCount;
+    if (href === '/ponto/cronogramas') return cronogramasNovosCount;
     return 0;
   };
 

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, startTransition, memo, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Calculator,
   Upload,
@@ -64,6 +65,8 @@ import {
 } from '@/components/orcamento/OrcamentoRevisaoBadge';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
+import { authService } from '@/lib/auth';
+import { dispensarCronogramaNovo, registrarCronogramaNovo } from '@/lib/cronogramaNovos';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import {
@@ -7255,6 +7258,7 @@ export function OrcamentoPageView({
   fichaDemandaRecord = null,
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isDark } = useTheme();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
   const [centroCustoId, setCentroCustoId] = useState<string | null>(() => lockedCostCenterId ?? null);
@@ -15026,6 +15030,13 @@ export function OrcamentoPageView({
       } catch (syncErr) {
         toast.error(syncOrcamentoOsErrorMessage(syncErr));
       }
+      const userId = authService.getUser()?.id || '';
+      const contractId = resolveContractIdForOsSync() || '';
+      if (userId && orcamentoAtivoId) {
+        registrarCronogramaNovo(userId, { contractId, orcamentoId: orcamentoAtivoId });
+      }
+      void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+      void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
       toast.success('Orçamento finalizado. O cronograma foi criado e o valor foi gravado na OS.');
     } catch {
       setMeta(prevMeta);
@@ -15068,6 +15079,10 @@ export function OrcamentoPageView({
             : o
         )
       );
+      const userId = authService.getUser()?.id || '';
+      if (userId && orcamentoAtivoId) dispensarCronogramaNovo(userId, orcamentoAtivoId);
+      void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+      void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
       toast.success('Orçamento reaberto. Edite e finalize de novo para atualizar o valor na OS.');
     } catch {
       setMeta(prevMeta);
