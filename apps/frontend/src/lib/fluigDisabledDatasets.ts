@@ -9,7 +9,7 @@ export const FLUIG_DISABLE_ALL_DATASET_FETCHES = true;
 
 /**
  * Exceções: download de documento (sob demanda) e datasets espelhados no Postgres
- * (página lê do banco; o job de sync no backend busca no Fluig às 3:00 e às 12:30).
+ * (página lê do banco; o job busca G3 às 2:00, G4 às 3:00, G5 às 4:00 e os 7 às 12:30).
  */
 const FLUIG_FETCH_ALWAYS_ALLOWED = new Set<string>([
   'DS_DownloadDocumento',
