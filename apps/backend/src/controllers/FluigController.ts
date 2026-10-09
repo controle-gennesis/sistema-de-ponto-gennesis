@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { FluigService } from '../services/FluigService';
 import {
+  freshFluigDownloadUrl,
+  resolveFluigDocumentMetas,
+} from '../lib/fluigDocumentMetaCache';
+import {
   getFluigDatasetMirrorPayload,
   isFluigMirroredDataset,
   syncFluigDatasetMirror,
@@ -198,8 +202,11 @@ export async function getDocumentsMeta(req: Request, res: Response) {
     if (ids.length === 0) {
       return res.status(400).json({ success: false, message: 'Informe ids numéricos de documento' });
     }
-    const items = await Promise.all(ids.map((id) => fluigService.getDocumentFileMeta(id)));
-    return res.json({ success: true, data: items });
+    const items = await resolveFluigDocumentMetas(fluigService, ids);
+    return res.json({
+      success: true,
+      data: items.map(({ documentId, filename, empty }) => ({ documentId, filename, empty })),
+    });
   } catch (error: unknown) {
     console.error('Fluig getDocumentsMeta error:', error);
     const { status, message } = fluigErrorResponse(error, 'Erro ao buscar metadados dos anexos');
@@ -222,7 +229,8 @@ export async function downloadDocument(req: Request, res: Response) {
       documentId
     );
 
-    const file = await fluigService.downloadDocumentFile(documentId);
+    const knownUrl = await freshFluigDownloadUrl(documentId);
+    const file = await fluigService.downloadDocumentFile(documentId, { url: knownUrl });
     const contentType =
       guessContentTypeFromFilename(filename) ||
       file.contentType ||

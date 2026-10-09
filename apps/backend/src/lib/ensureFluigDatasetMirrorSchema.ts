@@ -9,8 +9,26 @@ async function tableExists(prisma: PrismaClient, tableName: string): Promise<boo
   return (rows[0]?.c ?? BigInt(0)) > BigInt(0);
 }
 
+/** Cache de metadados de anexo. Roda mesmo quando o espelho já existe. */
+export async function ensureFluigDocumentFileMetaTable(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'fluig_document_file_meta')) return;
+
+  console.warn('[Schema] Tabela fluig_document_file_meta ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "fluig_document_file_meta" (
+      "documentId" TEXT NOT NULL,
+      "filename" TEXT,
+      "downloadUrl" TEXT,
+      "empty" BOOLEAN NOT NULL DEFAULT false,
+      "checkedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "fluig_document_file_meta_pkey" PRIMARY KEY ("documentId")
+    );
+  `);
+}
+
 /** Garante tabelas do espelho Fluig em produção (sem depender só de migrate). */
 export async function ensureFluigDatasetMirrorSchema(prisma: PrismaClient): Promise<void> {
+  await ensureFluigDocumentFileMetaTable(prisma);
   if (await tableExists(prisma, 'fluig_dataset_mirror_meta')) return;
 
   console.warn('[Schema] Tabelas fluig_dataset_mirror_* ausentes — criando.');

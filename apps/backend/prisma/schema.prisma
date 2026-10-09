@@ -5699,3 +5699,15 @@ model FluigDatasetMirrorRow {
   @@index([syncedAt])
   @@map("fluig_dataset_mirror_rows")
 }
+
+/// Nome e situação de um anexo do GED já confirmados no Fluig.
+/// A abertura da solicitação reutiliza este registro em vez de consultar o Fluig de novo.
+model FluigDocumentFileMeta {
+  documentId  String   @id
+  filename    String?
+  downloadUrl String?
+  empty       Boolean  @default(false)
+  checkedAt   DateTime @default(now())
+
+  @@map("fluig_document_file_meta")
+}

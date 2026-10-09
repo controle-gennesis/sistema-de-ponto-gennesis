@@ -804,24 +804,27 @@ export class FluigService {
     documentId: string;
     filename: string | null;
     empty: boolean;
+    /** Link já resolvido; passar para `downloadDocumentFile` evita buscar de novo. */
+    url: string | null;
   }> {
     const id = String(documentId || '').trim();
     if (!/^\d+$/.test(id)) {
-      return { documentId: id, filename: null, empty: true };
+      return { documentId: id, filename: null, empty: true, url: null };
     }
     const fromDataset = await this.getDocumentDownloadUrlViaDataset(id);
     const fromApi = fromDataset ? null : await this.getDocumentDownloadUrl(id);
     const url = fromDataset || fromApi;
     if (!url) {
-      return { documentId: id, filename: null, empty: false };
+      return { documentId: id, filename: null, empty: false, url: null };
     }
     if (this.isEmptyFluigVolumeUrl(url)) {
-      return { documentId: id, filename: null, empty: true };
+      return { documentId: id, filename: null, empty: true, url };
     }
     return {
       documentId: id,
       filename: this.extractFilenameFromFluigVolumeUrl(url),
       empty: false,
+      url,
     };
   }
 
@@ -838,13 +841,55 @@ export class FluigService {
     return /[?&]size=0(\.0+)?(?:&|$)/i.test(url) && /[?&]file=(?:&|$)/i.test(url);
   }
 
-  async downloadDocumentFile(documentId: string): Promise<{
+  /** Tenta cada URL com as autenticações conhecidas. Devolve null se nenhuma baixar. */
+  private async downloadFirstWorking(urls: string[]): Promise<{
+    file: { buffer: Buffer; contentType: string } | null;
+  }> {
+    const authModes: Array<'none' | 'oauth' | 'bearer'> = ['none', 'oauth'];
+    if (this.getBearerAuthHeaders()) authModes.push('bearer');
+    for (const url of urls) {
+      for (const auth of authModes) {
+        try {
+          const file = await this.fetchBinaryFromUrl(url, auth);
+          return {
+            file: {
+              buffer: file.buffer,
+              contentType: file.contentType || 'application/octet-stream',
+            },
+          };
+        } catch (err) {
+          const e = err as Error;
+          console.warn(`Fluig: download falhou (${auth}) ${url.slice(0, 80)}…`, e.message);
+        }
+      }
+    }
+    return { file: null };
+  }
+
+  async downloadDocumentFile(
+    documentId: string,
+    options: { url?: string | null } = {}
+  ): Promise<{
     buffer: Buffer;
     contentType: string;
   }> {
     const id = String(documentId || '').trim();
     if (!/^\d+$/.test(id)) {
       throw Object.assign(new Error('ID de documento inválido'), { status: 400 });
+    }
+
+    const conhecida = options.url?.trim() || '';
+    if (conhecida) {
+      if (this.isEmptyFluigVolumeUrl(conhecida)) {
+        throw Object.assign(
+          new Error(
+            'Este anexo não tem arquivo no Fluig (documento vazio ou só pasta). Tente o PDF/Excel da lista.'
+          ),
+          { status: 404 }
+        );
+      }
+      const reused = await this.downloadFirstWorking([conhecida]);
+      if (reused.file) return reused.file;
     }
 
     const urlCandidates: string[] = [];

@@ -723,6 +723,10 @@ function splitFluigAnexoList(raw: unknown): string[] {
 
 type FluigAnexoItem = { id: string; nome: string };
 
+/** Lista já confirmada nesta aba. Reabrir a solicitação não consulta o Fluig de novo. */
+const ANEXO_LISTA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const anexoListaCache = new Map<string, { at: number; items: FluigAnexoItem[] }>();
+
 function fluigAnexoIsPreviewable(nome: string): boolean {
   const lower = nome.toLowerCase();
   return (
@@ -1072,6 +1076,13 @@ export function FluigSolicitacoesPage({
       setResolvingAnexos(false);
       return;
     }
+    const cacheKey = ids.join('|');
+    const cached = anexoListaCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < ANEXO_LISTA_TTL_MS) {
+      setResolvedAnexos(cached.items);
+      setResolvingAnexos(false);
+      return;
+    }
     let cancelled = false;
     setResolvingAnexos(true);
     setResolvedAnexos(null);
@@ -1098,7 +1109,9 @@ export function FluigSolicitacoesPage({
             `Documento ${id}`;
           next.push({ id, nome });
         }
-        setResolvedAnexos(next.length > 0 ? next : parsed.filter((p) => p.id));
+        const items = next.length > 0 ? next : parsed.filter((p) => p.id);
+        anexoListaCache.set(cacheKey, { at: Date.now(), items });
+        setResolvedAnexos(items);
       } catch {
         if (!cancelled) setResolvedAnexos(parsed);
       } finally {
