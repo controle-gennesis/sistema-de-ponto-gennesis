@@ -1,20 +1,25 @@
 'use client';
 
-import React, { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Info, Plus, Trash2 } from 'lucide-react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Info, ListPlus, Plus, Trash2 } from 'lucide-react';
 import {
   type CampoFormulaMedicao,
   type DimensoesItem,
   type LinhaMedicao,
   type TipoUnidadeFormula
 } from './orcamentoMedicaoTypes';
-import { calcA, calcV, calcularQuantidadeLinha, linhasMedicaoEfetivas } from './orcamentoMedicaoCalc';
+import { areaExibidaLinha, calcularQuantidadeLinha, linhasMedicaoEfetivas, volumeExibidoLinha } from './orcamentoMedicaoCalc';
+import type { CampoExplicacaoMedicao } from './orcamentoMedicaoCalc';
 import {
   gradeTableCls,
   gradeTableRowTrCls,
   inputGradeCls
 } from './orcamentoGradeCellClasses';
+import { currencyDigitsToFormatted } from '@/lib/fichaDemandaApproval';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
+import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 
 /** Painel de medições (C, L, H, %, N, A, V) — aba Memorial de cálculo (layout em tabela, padrão das demais abas). */
 type Props = {
@@ -53,6 +58,8 @@ type Props = {
   ) => void;
   updateObservacaoMedicao?: (texto: string) => void;
   addLinhaMedicao: (itemKey: string, inserirAposIdx?: number) => void;
+  /** Insere várias linhas de uma vez (a colagem cria as que não existem abaixo). `aposIdx` -1 insere no início. */
+  inserirLinhasMedicao: (itemKey: string, aposIdx: number, quantidade: number) => void;
   addLinhaCabecalhoSecaoMedicao: (itemKey: string, inserirAposIdx?: number) => void;
   removeLinhaMedicao: (itemKey: string, idx: number) => void;
   estiloTitulo?: React.CSSProperties;
@@ -63,6 +70,14 @@ type Props = {
    * card-dentro-de-card.
    */
   embedded?: boolean;
+  /** Outras memórias que podem entrar como linha desta composição. */
+  memoriasDisponiveis?: { key: string; rotulo: string; descricao: string }[];
+  onMemoriasIncluidasChange?: (chaves: string[]) => void;
+  /**
+   * Resolve `{rótulo!linha!coluna}` de outra composição (linha 1-based na memória dela).
+   * Colunas: C, L, H, N, %, A, V, SUB.
+   */
+  resolverFormulaExterna?: (rotulo: string, linha: number, campo: string) => number | null;
 };
 
 /**
@@ -93,14 +108,17 @@ const tdRest =
   `${MEMORIAL_ROW_H} px-2 sm:px-3 py-0 align-middle border-b border-r border-gray-200 bg-white text-center dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 /** Corpo da tabela: sem padding no td para o input cobrir a célula inteira (borda de foco = borda da célula). */
 const tdFirstBody =
-  `${MEMORIAL_ROW_H} p-0 align-middle text-left border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colDesc}`;
+  `${MEMORIAL_ROW_H} relative p-0 align-middle text-left border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colDesc}`;
 const tdRestBody =
-  `${MEMORIAL_ROW_H} p-0 align-middle border-b border-r border-gray-200 bg-white text-center dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
+  `${MEMORIAL_ROW_H} relative p-0 align-middle border-b border-r border-gray-200 bg-white text-center focus-within:z-[4] dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const tdCalc =
   `${MEMORIAL_ROW_H} px-2 sm:px-3 py-0 text-center tabular-nums text-sm font-bold text-gray-900 dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const tdCalcBody =
-  `${MEMORIAL_ROW_H} p-0 text-center tabular-nums text-sm font-bold text-gray-900 dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
-const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0`;
+  `${MEMORIAL_ROW_H} relative p-0 text-center tabular-nums text-sm font-bold text-gray-900 focus-within:z-[4] dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
+const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0 focus:!bg-transparent dark:focus:!bg-transparent`;
+/** O foco global zera o box-shadow do input; a borda vermelha fica no contêiner. */
+const caixaFocoDescricaoCls =
+  'relative h-full w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]';
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
 const inputThDescricaoCls =
   'box-border h-full min-h-0 w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-0 text-left text-[11px] font-bold uppercase tracking-wide text-[var(--orc-header-fg,#4b5563)] shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
@@ -109,8 +127,8 @@ const inputThRotuloCls =
 
 const MEMORIAL_COMMIT_MS = 180;
 
-/** Tokens clicáveis na fórmula (=C*L) — mesma linha da memória. */
-type FormulaPickToken = 'C' | 'L' | 'H' | 'N' | '%' | 'A' | 'V';
+/** Tokens clicáveis na fórmula. Na mesma linha: C, L, H, N, %, A, V, SUB. */
+type FormulaPickToken = 'C' | 'L' | 'H' | 'N' | '%' | 'A' | 'V' | 'SUB';
 
 type FormulaRowCtx = {
   C: number;
@@ -120,18 +138,259 @@ type FormulaRowCtx = {
   empolamento: number;
   A: number;
   V: number;
+  SUB: number;
 };
 
-function formatMedicaoNumero(n: number, casasMin = 0, casasMax = 4): string {
-  if (!Number.isFinite(n)) return '';
-  return n.toLocaleString('pt-BR', {
-    minimumFractionDigits: casasMin,
-    maximumFractionDigits: casasMax,
-  });
+type FormulaPickSession = {
+  itemKey: string;
+  idx: number;
+  campo: string;
+  /** Texto atual da fórmula, para marcar só as células já escolhidas. */
+  formula: string;
+  insert: (token: string) => void;
+};
+
+type FormulaPickApi = {
+  session: FormulaPickSession | null;
+  setSession: (session: FormulaPickSession | null) => void;
+  setFormula: (itemKey: string, formula: string) => void;
+  clearIf: (itemKey: string) => void;
+};
+
+const MemorialFormulaPickContext = React.createContext<FormulaPickApi | null>(null);
+
+/** Uma sessão de fórmula compartilhada por todas as memórias da aba. */
+export function MemorialFormulaPickProvider({ children }: { children: React.ReactNode }) {
+  const [session, setSessionState] = useState<FormulaPickSession | null>(null);
+  const setSession = useCallback((next: FormulaPickSession | null) => {
+    setSessionState(next);
+  }, []);
+  const setFormula = useCallback((itemKey: string, formula: string) => {
+    setSessionState(cur => {
+      if (!cur || cur.itemKey !== itemKey || cur.formula === formula) return cur;
+      return { ...cur, formula };
+    });
+  }, []);
+  const clearIf = useCallback((itemKey: string) => {
+    setSessionState(cur => (cur?.itemKey === itemKey ? null : cur));
+  }, []);
+  const value = useMemo(
+    () => ({ session, setSession, setFormula, clearIf }),
+    [session, setSession, setFormula, clearIf]
+  );
+  return (
+    <MemorialFormulaPickContext.Provider value={value}>
+      <style>{`html.medicao-selecionando, html.medicao-selecionando * { user-select: none !important; cursor: cell !important; }
+@keyframes medicao-tracejado-corre { to { stroke-dashoffset: -10; } }
+.medicao-tracejado-corre { animation: medicao-tracejado-corre 0.45s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .medicao-tracejado-corre { animation: none; } }`}</style>
+      {children}
+    </MemorialFormulaPickContext.Provider>
+  );
+}
+
+function useMemorialFormulaPick() {
+  return React.useContext(MemorialFormulaPickContext);
+}
+
+/** Colunas da grade na ordem da tela: descrição, C, L, H, %, N, A, V, subtotal. */
+const COLUNAS_MEDICAO = ['descricao', 'C', 'L', 'H', 'empol', 'N', 'A', 'V', 'subtotal'] as const;
+type ColunaMedicao = (typeof COLUNAS_MEDICAO)[number];
+
+type FaixaMedicao = { idxIni: number; idxFim: number; colIni: number; colFim: number };
+
+type CopiaCelulaMedicao = {
+  rowKey: string;
+  rotulo: string;
+  faixa: FaixaMedicao;
+  /** Posição da primeira linha entre as linhas de dados (a mesma numeração das referências). */
+  linhaDados: number;
+  /** Linhas × colunas, já sem as linhas de cabeçalho de seção. */
+  celulas: string[][];
+  texto: string;
+};
+
+function normalizarFaixa(a: { idx: number; col: number }, b: { idx: number; col: number }): FaixaMedicao {
+  return {
+    idxIni: Math.min(a.idx, b.idx),
+    idxFim: Math.max(a.idx, b.idx),
+    colIni: Math.min(a.col, b.col),
+    colFim: Math.max(a.col, b.col),
+  };
+}
+
+function faixaContem(f: FaixaMedicao | null | undefined, idx: number, col: number) {
+  return !!f && idx >= f.idxIni && idx <= f.idxFim && col >= f.colIni && col <= f.colFim;
+}
+
+/** A área de transferência do Windows troca \n por \r\n e pode acrescentar uma quebra no fim. */
+function mesmoTextoCopiado(colado: string, copiado: string) {
+  const norm = (s: string) => s.replace(/\r/g, '').replace(/\n+$/, '');
+  return norm(colado) === norm(copiado);
+}
+
+/** Texto colado de planilha: linhas por quebra, colunas por tab. */
+function blocoDoTexto(texto: string): string[][] {
+  const linhas = String(texto ?? '').replace(/\r/g, '').split('\n');
+  if (linhas.length > 1 && linhas[linhas.length - 1] === '') linhas.pop();
+  return linhas.map(l => l.split('\t'));
+}
+
+/** Fundo da seleção, célula por célula. O contorno vai num traço só, para o tracejado não quebrar na divisa. */
+function MarcaSelecaoCelula() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-red-500/10 dark:bg-red-400/15" />
+  );
+}
+
+function snapPx(n: number) {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.round(n * dpr) / dpr;
+}
+
+/** Um retângulo contínuo em volta da faixa. O tracejado do CSS, lado a lado, recomeça em cada célula. */
+function ContornoFaixa({
+  faixa,
+  tipo,
+  raizRef,
+}: {
+  faixa: FaixaMedicao;
+  tipo: 'selecao' | 'copia';
+  raizRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const { idxIni, idxFim, colIni, colFim } = faixa;
+
+  const medir = useCallback(() => {
+    const raiz = raizRef.current;
+    if (!raiz) return;
+    const base = raiz.getBoundingClientRect();
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    let achou = false;
+    raiz.querySelectorAll<HTMLElement>('[data-col-medicao]').forEach(el => {
+      const tr = el.closest('[data-linha-medicao]');
+      const idx = Number(tr?.getAttribute('data-linha-medicao'));
+      const col = Number(el.getAttribute('data-col-medicao'));
+      if (idx < idxIni || idx > idxFim || col < colIni || col > colFim) return;
+      const r = el.getBoundingClientRect();
+      const borda = getComputedStyle(el);
+      const bl = parseFloat(borda.borderLeftWidth) || 0;
+      const bt = parseFloat(borda.borderTopWidth) || 0;
+      const br = parseFloat(borda.borderRightWidth) || 0;
+      const bb = parseFloat(borda.borderBottomWidth) || 0;
+      achou = true;
+      // Caixa interna: a borda da grade fica de fora, senão o traço vaza na célula de baixo e na da direita.
+      left = Math.min(left, r.left + bl - base.left + raiz.scrollLeft);
+      top = Math.min(top, r.top + bt - base.top + raiz.scrollTop);
+      right = Math.max(right, r.right - br - base.left + raiz.scrollLeft);
+      bottom = Math.max(bottom, r.bottom - bb - base.top + raiz.scrollTop);
+    });
+    if (!achou) {
+      setBox(null);
+      return;
+    }
+    const x = snapPx(left);
+    const y = snapPx(top);
+    setBox({ left: x, top: y, width: snapPx(right) - x, height: snapPx(bottom) - y });
+  }, [colFim, colIni, idxFim, idxIni, raizRef]);
+
+  useLayoutEffect(() => {
+    medir();
+    const raiz = raizRef.current;
+    if (!raiz) return;
+    const obs = new ResizeObserver(medir);
+    obs.observe(raiz);
+    raiz.addEventListener('scroll', medir, { passive: true });
+    return () => {
+      obs.disconnect();
+      raiz.removeEventListener('scroll', medir);
+    };
+  }, [medir, raizRef]);
+
+  if (!box || box.width < 4 || box.height < 4) return null;
+  const tracejado = tipo === 'copia';
+  const traco = 2;
+  return (
+    <svg
+      aria-hidden
+      className={`pointer-events-none absolute overflow-hidden text-red-600 dark:text-red-400 ${tracejado ? 'z-[7]' : 'z-[6]'}`}
+      style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+    >
+      <rect
+        x={traco / 2}
+        y={traco / 2}
+        width={Math.max(0, box.width - traco)}
+        height={Math.max(0, box.height - traco)}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={traco}
+        strokeDasharray={tracejado ? '6 4' : undefined}
+        className={tracejado ? 'medicao-tracejado-corre' : undefined}
+        strokeLinejoin="miter"
+      />
+    </svg>
+  );
+}
+
+let copiaCelulaMedicao: CopiaCelulaMedicao | null = null;
+const ouvintesCopiaMedicao = new Set<() => void>();
+
+function definirCopiaCelulaMedicao(next: CopiaCelulaMedicao | null) {
+  copiaCelulaMedicao = next;
+  ouvintesCopiaMedicao.forEach(fn => fn());
+}
+
+function useCopiaCelulaMedicao() {
+  return React.useSyncExternalStore(
+    fn => {
+      ouvintesCopiaMedicao.add(fn);
+      return () => {
+        ouvintesCopiaMedicao.delete(fn);
+      };
+    },
+    () => copiaCelulaMedicao,
+    () => null
+  );
+}
+
+/** Referências da mesma composição andam junto com a linha, como no Excel. A linha T não muda. */
+function deslocarFormulaLinhas(formula: string, rotulo: string, delta: number): string {
+  if (!delta || !formula.trimStart().startsWith('=')) return formula;
+  const rot = rotulo.trim();
+  return formula.replace(
+    /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi,
+    (bruto, r: string, lin: string, col: string) => {
+      if (r.trim() !== rot || /^t$/i.test(lin)) return bruto;
+      return `{${r}!${Math.max(1, Number(lin) + delta)}!${col}}`;
+    }
+  );
+}
+
+/** Exibição fixa com duas casas, no mesmo formato dos valores do orçamento (0,00). */
+function formatMedicaoCentavos(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Campo vazio mostra o placeholder. Só escreve o número quando há valor. */
+function formatMedicaoCampo(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '';
+  return formatMedicaoCentavos(n);
+}
+
+/** Digitar 158 vira 1,58. Fórmula (=…) permanece como foi escrita. */
+function mascaraMedicaoCentavos(raw: string): string {
+  const text = String(raw ?? '');
+  if (text.trimStart().startsWith('=')) return text;
+  return currencyDigitsToFormatted(text);
 }
 
 function substituirRefsFormulaLinha(expr: string, ctx: FormulaRowCtx): string {
-  return expr.replace(/%|\b([CLHNAV])\b/gi, match => {
+  const comSub = expr.replace(/\bSUB\b/gi, String(Number(ctx.SUB) || 0));
+  return comSub.replace(/%|\b([CLHNAV])\b/gi, match => {
     if (match === '%') return String(Number(ctx.empolamento) || 0);
     const m = match.toUpperCase();
     if (m === 'C') return String(Number(ctx.C) || 0);
@@ -144,10 +403,40 @@ function substituirRefsFormulaLinha(expr: string, ctx: FormulaRowCtx): string {
   });
 }
 
-function parseMedicaoBlurNumber(raw: string, rowCtx?: FormulaRowCtx): number | null {
+function substituirRefsFormulaExternas(
+  expr: string,
+  resolve: (rotulo: string, linha: number, campo: string) => number | null
+): { expr: string; ok: boolean } {
+  let ok = true;
+  const next = expr.replace(
+    /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi,
+    (_match, rotulo: string, linha: string, campo: string) => {
+      const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
+      const linhaNum = /^t$/i.test(linha) ? 0 : Number(linha);
+      const n = resolve(String(rotulo).trim(), linhaNum, col);
+      if (n == null || !Number.isFinite(n)) {
+        ok = false;
+        return '0';
+      }
+      return String(n);
+    }
+  );
+  return { expr: next, ok };
+}
+
+function parseMedicaoBlurNumber(
+  raw: string,
+  rowCtx?: FormulaRowCtx,
+  resolverExterna?: (rotulo: string, linha: number, campo: string) => number | null
+): number | null {
   const text = String(raw ?? '').trim();
   if (text.startsWith('=')) {
     let s = text.slice(1).trim().replace(/,/g, '.');
+    if (resolverExterna && s.includes('{')) {
+      const externo = substituirRefsFormulaExternas(s, resolverExterna);
+      if (!externo.ok) return null;
+      s = externo.expr;
+    }
     if (rowCtx) s = substituirRefsFormulaLinha(s, rowCtx);
     if (!s || !/^[\d\s+\-*/.()]+$/.test(s)) return null;
     try {
@@ -184,11 +473,758 @@ function tokenDoCampoMedicao(campo: string): FormulaPickToken | null {
   if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') return campo;
   if (campo === 'empol') return '%';
   if (campo === 'A' || campo === 'V') return campo;
+  if (campo === 'subtotal') return 'SUB';
   return null;
 }
 
-const FORMULA_PICK_CELL_CLS =
-  'ring-2 ring-inset ring-sky-400/70 dark:ring-sky-400/50 cursor-cell';
+const COR_FATOR_EXPLICACAO: Record<CampoExplicacaoMedicao, { celula: string; texto: string }> = {
+  C: {
+    celula: '!bg-sky-100 ring-2 ring-inset ring-sky-500 dark:!bg-sky-950/80 dark:ring-sky-400',
+    texto: '!text-sky-800 dark:!text-sky-200',
+  },
+  L: {
+    celula: '!bg-emerald-100 ring-2 ring-inset ring-emerald-500 dark:!bg-emerald-950/80 dark:ring-emerald-400',
+    texto: '!text-emerald-800 dark:!text-emerald-200',
+  },
+  H: {
+    celula: '!bg-amber-100 ring-2 ring-inset ring-amber-500 dark:!bg-amber-950/80 dark:ring-amber-400',
+    texto: '!text-amber-800 dark:!text-amber-200',
+  },
+  N: {
+    celula: '!bg-violet-100 ring-2 ring-inset ring-violet-500 dark:!bg-violet-950/80 dark:ring-violet-400',
+    texto: '!text-violet-800 dark:!text-violet-200',
+  },
+};
+
+const PALETA_FORMULA: { celula: string; texto: string }[] = [
+  COR_FATOR_EXPLICACAO.C,
+  COR_FATOR_EXPLICACAO.L,
+  COR_FATOR_EXPLICACAO.H,
+  COR_FATOR_EXPLICACAO.N,
+  {
+    celula: '!bg-rose-100 ring-2 ring-inset ring-rose-500 dark:!bg-rose-950/80 dark:ring-rose-400',
+    texto: '!text-rose-800 dark:!text-rose-200',
+  },
+  {
+    celula: '!bg-cyan-100 ring-2 ring-inset ring-cyan-500 dark:!bg-cyan-950/80 dark:ring-cyan-400',
+    texto: '!text-cyan-800 dark:!text-cyan-200',
+  },
+  {
+    celula: '!bg-orange-100 ring-2 ring-inset ring-orange-500 dark:!bg-orange-950/80 dark:ring-orange-400',
+    texto: '!text-orange-800 dark:!text-orange-200',
+  },
+  {
+    celula: '!bg-fuchsia-100 ring-2 ring-inset ring-fuchsia-500 dark:!bg-fuchsia-950/80 dark:ring-fuchsia-400',
+    texto: '!text-fuchsia-800 dark:!text-fuchsia-200',
+  },
+];
+
+const COR_FIXA_TOKEN: Record<string, number> = { C: 0, L: 1, H: 2, N: 3 };
+
+type SegmentoFormulaVisivel = {
+  texto: string;
+  classe: string;
+  /** Índice inclusivo no texto da fórmula guardada. */
+  iniFormula: number;
+  /** Índice exclusivo no texto da fórmula guardada. */
+  fimFormula: number;
+};
+
+type FormulaMapEdicao = {
+  segmentos: SegmentoFormulaVisivel[];
+  formula: string;
+};
+
+const formulaMapPorInput = new WeakMap<HTMLInputElement, { current: FormulaMapEdicao | null }>();
+
+function mapaFormulaDoInput(el: HTMLInputElement | null): FormulaMapEdicao | null {
+  if (!el) return null;
+  return formulaMapPorInput.get(el)?.current ?? null;
+}
+
+/** Caret no texto que aparece na tela → posição na fórmula (token inteiro vira uma borda). */
+function posVisivelParaFormula(segmentos: SegmentoFormulaVisivel[], pos: number): number {
+  let vis = 0;
+  for (const seg of segmentos) {
+    const len = seg.texto.length;
+    const atomico = len !== seg.fimFormula - seg.iniFormula;
+    if (pos <= vis + len) {
+      const local = pos - vis;
+      if (!atomico) return seg.iniFormula + local;
+      if (local <= 0) return seg.iniFormula;
+      if (local >= len) return seg.fimFormula;
+      return local * 2 < len ? seg.iniFormula : seg.fimFormula;
+    }
+    vis += len;
+  }
+  const ultimo = segmentos[segmentos.length - 1];
+  return ultimo ? ultimo.fimFormula : pos;
+}
+
+function posFormulaParaVisivel(segmentos: SegmentoFormulaVisivel[], pos: number): number {
+  let vis = 0;
+  for (const seg of segmentos) {
+    if (pos <= seg.iniFormula) return vis;
+    if (pos < seg.fimFormula) {
+      const span = seg.fimFormula - seg.iniFormula;
+      if (seg.texto.length === span) return vis + (pos - seg.iniFormula);
+      return vis + seg.texto.length;
+    }
+    vis += seg.texto.length;
+  }
+  return vis;
+}
+
+function posVisivelExato(segmentos: SegmentoFormulaVisivel[], pos: number): number {
+  let vis = 0;
+  for (const seg of segmentos) {
+    const len = seg.texto.length;
+    if (pos <= vis + len) {
+      const local = pos - vis;
+      const span = seg.fimFormula - seg.iniFormula;
+      if (len === span) return seg.iniFormula + local;
+      if (local <= 0) return seg.iniFormula;
+      return seg.fimFormula;
+    }
+    vis += len;
+  }
+  const ultimo = segmentos[segmentos.length - 1];
+  return ultimo ? ultimo.fimFormula : pos;
+}
+
+/** Edição no texto colorido volta para a fórmula, sem partir uma referência no meio. */
+function aplicarEdicaoVisivel(
+  formula: string,
+  segmentos: SegmentoFormulaVisivel[],
+  antes: string,
+  depois: string,
+): string {
+  if (antes === depois) return formula;
+  if (!segmentos.length) return depois;
+  let i = 0;
+  const minLen = Math.min(antes.length, depois.length);
+  while (i < minLen && antes[i] === depois[i]) i += 1;
+  let suf = 0;
+  while (
+    suf < antes.length - i &&
+    suf < depois.length - i &&
+    antes[antes.length - 1 - suf] === depois[depois.length - 1 - suf]
+  ) {
+    suf += 1;
+  }
+  let iniVis = i;
+  let fimVis = antes.length - suf;
+  let vis = 0;
+  for (const seg of segmentos) {
+    const v0 = vis;
+    const v1 = vis + seg.texto.length;
+    vis = v1;
+    const atomico = seg.texto.length !== seg.fimFormula - seg.iniFormula;
+    if (!atomico) continue;
+    const caretNaBorda = iniVis === fimVis && (iniVis === v0 || iniVis === v1);
+    if (!caretNaBorda && iniVis < v1 && fimVis > v0) {
+      iniVis = Math.min(iniVis, v0);
+      fimVis = Math.max(fimVis, v1);
+    }
+  }
+  const sufAntes = antes.length - fimVis;
+  const meio = depois.slice(iniVis, Math.max(iniVis, depois.length - sufAntes));
+  const iniF = posVisivelExato(segmentos, iniVis);
+  const fimF = posVisivelExato(segmentos, fimVis);
+  return formula.slice(0, iniF) + meio + formula.slice(fimF);
+}
+
+function chaveTokenLocal(token: string): string {
+  const tok = token.toUpperCase() === '%' ? '%' : token.toUpperCase();
+  return `L:${tok}`;
+}
+
+function chaveTokenExterno(rotulo: string, linha: string, campo: string): string {
+  const lin = /^t$/i.test(linha) ? 'T' : String(Number(linha));
+  const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
+  return `E:${rotulo.trim()}!${lin}!${col}`;
+}
+
+const RE_TOKEN_FORMULA =
+  /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}|\bSUB\b|%|\b[CLHNAV]\b/gi;
+
+function mapaCoresFormula(formula: string): Map<string, number> {
+  const map = new Map<string, number>();
+  const usadas = new Set<number>();
+  const demais: string[] = [];
+  const re = new RegExp(RE_TOKEN_FORMULA.source, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(formula))) {
+    const bruto = match[0];
+    const chave = bruto.startsWith('{')
+      ? chaveTokenExterno(match[1]!, match[2]!, match[3]!)
+      : chaveTokenLocal(bruto);
+    if (map.has(chave) || demais.includes(chave)) continue;
+    const tok = bruto.startsWith('{') ? '' : bruto.toUpperCase() === '%' ? '%' : bruto.toUpperCase();
+    if (tok && tok in COR_FIXA_TOKEN) {
+      const idxCor = COR_FIXA_TOKEN[tok]!;
+      map.set(chave, idxCor);
+      usadas.add(idxCor);
+    } else {
+      demais.push(chave);
+    }
+  }
+  let cursor = 0;
+  for (const chave of demais) {
+    while (usadas.has(cursor) && cursor < PALETA_FORMULA.length - 1) cursor += 1;
+    map.set(chave, cursor);
+    usadas.add(cursor);
+    cursor += 1;
+  }
+  return map;
+}
+
+function classeCelulaFormula(formula: string, chave: string): string {
+  const idxCor = mapaCoresFormula(formula).get(chave);
+  if (idxCor == null) return '';
+  return PALETA_FORMULA[idxCor]?.celula ?? '';
+}
+
+function valorTokenLocal(ctx: FormulaRowCtx, token: string): number | null {
+  const tok = token.toUpperCase() === '%' ? '%' : token.toUpperCase();
+  if (tok === 'C') return ctx.C;
+  if (tok === 'L') return ctx.L;
+  if (tok === 'H') return ctx.H;
+  if (tok === 'N') return ctx.N;
+  if (tok === '%') return ctx.empolamento;
+  if (tok === 'A') return ctx.A;
+  if (tok === 'V') return ctx.V;
+  if (tok === 'SUB') return ctx.SUB;
+  return null;
+}
+
+function segmentosFormulaVisivel(
+  formula: string,
+  rowCtx: FormulaRowCtx | undefined,
+  resolver?: (rotulo: string, linha: number, campo: string) => number | null
+): SegmentoFormulaVisivel[] {
+  const mapa = mapaCoresFormula(formula);
+  const re = new RegExp(RE_TOKEN_FORMULA.source, 'gi');
+  const out: SegmentoFormulaVisivel[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(formula))) {
+    if (match.index > last) {
+      out.push({
+        texto: formula.slice(last, match.index),
+        classe: 'text-gray-900 dark:text-gray-100',
+        iniFormula: last,
+        fimFormula: match.index,
+      });
+    }
+    const bruto = match[0];
+    const externo = bruto.startsWith('{');
+    const chave = externo
+      ? chaveTokenExterno(match[1]!, match[2]!, match[3]!)
+      : chaveTokenLocal(bruto);
+    const cor = PALETA_FORMULA[mapa.get(chave) ?? 0];
+    let texto = bruto;
+    if (externo && resolver) {
+      const linhaNum = /^t$/i.test(match[2]!) ? 0 : Number(match[2]);
+      const col = match[3]!.toUpperCase() === '%' ? '%' : match[3]!.toUpperCase();
+      const n = resolver(match[1]!.trim(), linhaNum, col);
+      if (n != null && Number.isFinite(n)) texto = formatMedicaoCentavos(n);
+    } else if (rowCtx) {
+      const n = valorTokenLocal(rowCtx, bruto);
+      if (n != null && Number.isFinite(n)) texto = formatMedicaoCentavos(n);
+    }
+    out.push({
+      texto,
+      classe: cor?.texto ?? '',
+      iniFormula: match.index,
+      fimFormula: match.index + bruto.length,
+    });
+    last = match.index + bruto.length;
+  }
+  if (last < formula.length) {
+    out.push({
+      texto: formula.slice(last),
+      classe: 'text-gray-900 dark:text-gray-100',
+      iniFormula: last,
+      fimFormula: formula.length,
+    });
+  }
+  return out;
+}
+
+function DicaFormulaCompleta({
+  ancora,
+  segmentos,
+  texto,
+}: {
+  ancora: HTMLElement;
+  segmentos: SegmentoFormulaVisivel[] | null;
+  texto: string;
+}) {
+  const caixaRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const colocar = () => {
+      const rect = ancora.getBoundingClientRect();
+      const largura = caixaRef.current?.offsetWidth ?? 0;
+      const margem = 8;
+      let left = rect.left + rect.width / 2 - largura / 2;
+      if (largura > 0) {
+        left = Math.max(margem, Math.min(left, window.innerWidth - margem - largura));
+      } else {
+        left = rect.left;
+      }
+      setPos({ left, top: rect.top - 6 });
+    };
+    colocar();
+    window.addEventListener('scroll', colocar, true);
+    window.addEventListener('resize', colocar);
+    return () => {
+      window.removeEventListener('scroll', colocar, true);
+      window.removeEventListener('resize', colocar);
+    };
+  }, [ancora, texto]);
+
+  return createPortal(
+    <div
+      ref={caixaRef}
+      className="pointer-events-none fixed z-[80] max-w-[min(36rem,calc(100vw-1rem))] -translate-y-full"
+      style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
+    >
+      <div className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-left text-sm font-bold tabular-nums text-gray-900 shadow-lg dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100">
+        <span className="whitespace-pre-wrap break-all">
+          {segmentos && segmentos.length > 0
+            ? segmentos.map((parte, i) => (
+                <span key={i} className={parte.classe}>
+                  {parte.texto}
+                </span>
+              ))
+            : texto}
+        </span>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function pxAtePosicao(el: HTMLInputElement, pos: number) {
+  const estilo = window.getComputedStyle(el);
+  const probe = document.createElement('span');
+  probe.textContent = el.value.slice(0, Math.max(0, pos));
+  probe.style.position = 'absolute';
+  probe.style.visibility = 'hidden';
+  probe.style.whiteSpace = 'pre';
+  probe.style.font = estilo.font;
+  probe.style.letterSpacing = estilo.letterSpacing;
+  document.body.appendChild(probe);
+  const largura = probe.getBoundingClientRect().width;
+  probe.remove();
+  return largura;
+}
+
+/** Mantém o cursor dentro da área visível quando a fórmula é mais larga que a célula. */
+function rolarInputAteCaret(el: HTMLInputElement) {
+  const pos = el.selectionStart ?? el.value.length;
+  const x = pxAtePosicao(el, pos);
+  const estilo = window.getComputedStyle(el);
+  const padL = parseFloat(estilo.paddingLeft) || 0;
+  const padR = parseFloat(estilo.paddingRight) || 0;
+  const visivel = Math.max(0, el.clientWidth - padL - padR);
+  const margem = 10;
+  let scroll = el.scrollLeft;
+  if (x > scroll + visivel - margem) scroll = x - visivel + margem;
+  if (x < scroll + margem) scroll = Math.max(0, x - margem);
+  if (Math.abs(el.scrollLeft - scroll) > 0.5) el.scrollLeft = scroll;
+  return el.scrollLeft;
+}
+
+let alcaMedicaoArrastando = false;
+
+const CURSOR_MAIS = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><path fill='black' stroke='white' stroke-width='1.2' d='M9 1.5h2v6h6v2h-6v6H9v-6H3v-2h6z'/></svg>`
+)}") 10 10, crosshair`;
+
+function linhaMedicaoNoPonto(tabela: HTMLElement | null, y: number): HTMLElement | null {
+  if (!tabela) return null;
+  const linhas = tabela.querySelectorAll<HTMLElement>('[data-linha-medicao]');
+  for (const linha of linhas) {
+    const rect = linha.getBoundingClientRect();
+    if (y >= rect.top && y <= rect.bottom) return linha;
+  }
+  return null;
+}
+
+function AlcaArrastarFormula({
+  ancoraRef,
+  onArrastarAbaixo,
+  onTerminou,
+}: {
+  ancoraRef: React.RefObject<HTMLDivElement | null>;
+  onArrastarAbaixo: (ateIdx: number) => void;
+  onTerminou?: () => void;
+}) {
+  const [canto, setCanto] = useState<{ left: number; top: number } | null>(null);
+  const [faixa, setFaixa] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const limparArrastoRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => limparArrastoRef.current?.();
+  }, []);
+
+  const posicionar = useCallback(() => {
+    const el = ancoraRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setCanto({ left: rect.right, top: rect.bottom });
+  }, [ancoraRef]);
+
+  useLayoutEffect(() => {
+    posicionar();
+    window.addEventListener('scroll', posicionar, true);
+    window.addEventListener('resize', posicionar);
+    return () => {
+      window.removeEventListener('scroll', posicionar, true);
+      window.removeEventListener('resize', posicionar);
+    };
+  }, [posicionar]);
+
+  const iniciar = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    alcaMedicaoArrastando = true;
+    setArrastando(true);
+    const el = e.currentTarget;
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* o ponteiro segue pelos listeners da janela */
+    }
+    document.documentElement.classList.add('medicao-arraste-formula');
+    const origem = ancoraRef.current?.getBoundingClientRect();
+    const tabela = ancoraRef.current?.closest('table') ?? null;
+
+    const atualizarFaixa = (y: number) => {
+      if (!origem) return;
+      const linha = linhaMedicaoNoPonto(tabela, y);
+      if (!linha) {
+        setFaixa(null);
+        return;
+      }
+      const rect = linha.getBoundingClientRect();
+      const topo = Math.min(origem.top, rect.top);
+      const base = Math.max(origem.bottom, rect.bottom);
+      setFaixa({ left: origem.left, top: topo, width: origem.width, height: base - topo });
+    };
+
+    const mover = (ev: PointerEvent) => {
+      atualizarFaixa(ev.clientY);
+    };
+    const encerrar = (ev: Event | null) => {
+      window.removeEventListener('pointermove', mover);
+      window.removeEventListener('pointerup', encerrar);
+      window.removeEventListener('pointercancel', encerrar);
+      limparArrastoRef.current = null;
+      document.documentElement.classList.remove('medicao-arraste-formula');
+      setFaixa(null);
+      setArrastando(false);
+      const ponto = ev instanceof PointerEvent ? ev : null;
+      const linha = ponto ? linhaMedicaoNoPonto(tabela, ponto.clientY) : null;
+      const ate = Number(linha?.getAttribute('data-linha-medicao'));
+      window.setTimeout(() => {
+        alcaMedicaoArrastando = false;
+      }, 0);
+      if (ponto && Number.isFinite(ate)) onArrastarAbaixo(ate);
+      if (ponto) onTerminou?.();
+    };
+    limparArrastoRef.current = () => encerrar(null);
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', encerrar);
+    window.addEventListener('pointercancel', encerrar);
+  };
+
+  if (!canto || typeof document === 'undefined') return null;
+
+  return createPortal(
+    <>
+      {arrastando ? (
+        <style>{`html.medicao-arraste-formula, html.medicao-arraste-formula * { cursor: ${CURSOR_MAIS} !important; }`}</style>
+      ) : null}
+      {faixa ? (
+        <div
+          className="pointer-events-none fixed z-[75] border-2 border-red-600 bg-red-500/10 dark:border-red-400"
+          style={{ left: faixa.left, top: faixa.top, width: faixa.width, height: faixa.height }}
+        />
+      ) : null}
+      <div
+        role="button"
+        aria-label="Arrastar fórmula para as células de baixo"
+        title="Arrastar para copiar a fórmula"
+        onPointerDown={iniciar}
+        className="fixed z-[76] h-[18px] w-[18px] touch-none"
+        style={{ left: canto.left - 9, top: canto.top - 9, cursor: CURSOR_MAIS }}
+      >
+        <span className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 border border-white bg-red-600 shadow-sm dark:border-gray-900 dark:bg-red-400" />
+      </div>
+    </>,
+    document.body
+  );
+}
+
+function CampoNumeroFormula({
+  value,
+  segmentos,
+  className,
+  inputRef,
+  onChange,
+  onFocus,
+  onBlur,
+  onKeyDown,
+  onKeyUp,
+  onSelect,
+  onClick,
+  onArrastarAbaixo,
+  editando = true,
+  onSubstituir,
+  onCopiar,
+  onColar,
+  ...rest
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  segmentos: SegmentoFormulaVisivel[] | null;
+  inputRef?: (el: HTMLInputElement | null) => void;
+  onArrastarAbaixo?: (ateIdx: number) => void;
+  /** Sem edição aberta, a célula só fica selecionada: sem cursor, e digitar troca o conteúdo. */
+  editando?: boolean;
+  onSubstituir?: (texto: string) => void;
+  onCopiar?: () => string;
+  onColar?: (texto: string) => void;
+}) {
+  const formula = String(value ?? '');
+  const colorido = Boolean(segmentos && segmentos.length > 0 && formula.trimStart().startsWith('='));
+  const textoVisivel = colorido ? segmentos!.map(s => s.texto).join('') : formula;
+  const mapHolder = React.useRef<FormulaMapEdicao | null>(null);
+  mapHolder.current = colorido ? { segmentos: segmentos!, formula } : null;
+  const inputElRef = useRef<HTMLInputElement | null>(null);
+  const caixaRef = useRef<HTMLDivElement>(null);
+  const copiaPendenteRef = useRef<string | null>(null);
+  const [focado, setFocado] = useState(false);
+  const [estoura, setEstoura] = useState(false);
+  const [rolagem, setRolagem] = useState(0);
+  const estouraRef = useRef(false);
+
+  const aoMudar = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!onChange) return;
+    if (!colorido || !segmentos) {
+      onChange(e);
+      return;
+    }
+    const formulaNova = aplicarEdicaoVisivel(formula, segmentos, textoVisivel, e.target.value);
+    onChange({
+      ...e,
+      target: { ...e.target, value: formulaNova },
+      currentTarget: { ...e.currentTarget, value: formulaNova },
+    } as React.ChangeEvent<HTMLInputElement>);
+  };
+
+  useLayoutEffect(() => {
+    const el = inputElRef.current;
+    if (!el || !focado) {
+      setEstoura(false);
+      return;
+    }
+    const texto = el.value;
+    if (!texto.trim().startsWith('=')) {
+      setEstoura(false);
+      return;
+    }
+    const estilo = window.getComputedStyle(el);
+    const probe = document.createElement('span');
+    probe.textContent = texto;
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'pre';
+    probe.style.font = estilo.font;
+    probe.style.letterSpacing = estilo.letterSpacing;
+    document.body.appendChild(probe);
+    const largura = probe.getBoundingClientRect().width;
+    probe.remove();
+    const folga =
+      (parseFloat(estilo.paddingLeft) || 0) + (parseFloat(estilo.paddingRight) || 0);
+    const naoCabe = largura > el.clientWidth - folga + 1;
+    estouraRef.current = naoCabe;
+    setEstoura(naoCabe);
+    if (!naoCabe) setRolagem(0);
+  }, [focado, textoVisivel]);
+
+  /** O texto colorido segue a rolagem real do campo; o navegador é quem mantém o cursor à vista. */
+  const acompanharCursor = (el: HTMLInputElement) => {
+    requestAnimationFrame(() => {
+      if (!estouraRef.current && el.scrollLeft !== 0) el.scrollLeft = 0;
+      setRolagem(el.scrollLeft);
+    });
+  };
+
+  useLayoutEffect(() => {
+    const el = inputElRef.current;
+    if (!el || !focado) return;
+    if (estoura) rolarInputAteCaret(el);
+    else if (el.scrollLeft !== 0) el.scrollLeft = 0;
+    setRolagem(el.scrollLeft);
+  }, [focado, estoura, textoVisivel]);
+
+  return (
+    <div
+      ref={caixaRef}
+      className="relative h-full w-full overflow-visible focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]"
+    >
+      {colorido ? (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 z-0 box-border !flex !items-center overflow-hidden whitespace-pre ${className ?? ''} !bg-transparent !shadow-none !ring-0 ${
+            estoura ? '!justify-start !text-left' : ''
+          }`}
+        >
+          <span
+            className={`whitespace-pre ${estoura ? 'w-max' : 'block w-full min-w-0'}`}
+            style={estoura ? { transform: `translateX(-${rolagem}px)` } : undefined}
+          >
+            {segmentos!.map((parte, i) => (
+              <span key={i} className={parte.classe}>
+                {parte.texto}
+              </span>
+            ))}
+          </span>
+        </div>
+      ) : null}
+      <input
+        {...rest}
+        ref={el => {
+          inputElRef.current = el;
+          if (el) formulaMapPorInput.set(el, mapHolder);
+          inputRef?.(el);
+        }}
+        value={textoVisivel}
+        onChange={e => {
+          aoMudar(e);
+          acompanharCursor(e.currentTarget);
+        }}
+        onScroll={e => setRolagem(e.currentTarget.scrollLeft)}
+        onKeyDown={e => {
+          const atalho = e.ctrlKey || e.metaKey;
+          if (!editando && !e.altKey) {
+            if (atalho && e.key.toLowerCase() === 'c' && onCopiar) {
+              copiaPendenteRef.current = onCopiar();
+              void navigator.clipboard?.writeText(copiaPendenteRef.current).catch(() => {});
+              return;
+            }
+            if (!atalho && onSubstituir && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete')) {
+              e.preventDefault();
+              onSubstituir(e.key.length === 1 ? e.key : '');
+              requestAnimationFrame(() => {
+                const el = inputElRef.current;
+                if (!el) return;
+                const fim = el.value.length;
+                el.setSelectionRange(fim, fim);
+              });
+              return;
+            }
+          }
+          onKeyDown?.(e);
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+            acompanharCursor(e.currentTarget);
+          }
+        }}
+        onKeyUp={e => {
+          onKeyUp?.(e);
+          acompanharCursor(e.currentTarget);
+        }}
+        onSelect={e => {
+          onSelect?.(e);
+          acompanharCursor(e.currentTarget);
+        }}
+        onClick={e => {
+          onClick?.(e);
+          acompanharCursor(e.currentTarget);
+        }}
+        onCopy={e => {
+          const texto = copiaPendenteRef.current;
+          copiaPendenteRef.current = null;
+          if (editando || texto == null) return;
+          e.preventDefault();
+          e.clipboardData.setData('text/plain', texto);
+        }}
+        onPaste={e => {
+          if (editando || !onColar) return;
+          e.preventDefault();
+          onColar(e.clipboardData.getData('text/plain'));
+        }}
+        onFocus={e => {
+          setFocado(true);
+          onFocus?.(e);
+        }}
+        onBlur={e => {
+          if (alcaMedicaoArrastando) return;
+          setFocado(false);
+          setRolagem(0);
+          onBlur?.(e);
+        }}
+        className={`${className ?? ''} relative z-[1] bg-transparent ${estoura ? '!text-left' : ''} ${
+          colorido
+            ? '!text-transparent caret-gray-900 selection:bg-sky-400/40 selection:text-transparent dark:caret-gray-100 [&::selection]:[-webkit-text-fill-color:transparent]'
+            : ''
+        } ${editando ? '' : '!caret-transparent cursor-cell selection:bg-transparent'}`}
+      />
+      {focado && onArrastarAbaixo ? (
+        <AlcaArrastarFormula
+          ancoraRef={caixaRef}
+          onArrastarAbaixo={onArrastarAbaixo}
+          onTerminou={() => {
+            requestAnimationFrame(() => inputElRef.current?.focus({ preventScroll: true }));
+          }}
+        />
+      ) : null}
+      {focado && estoura && inputElRef.current
+        ? (
+            <DicaFormulaCompleta
+              ancora={inputElRef.current}
+              segmentos={colorido ? segmentos : null}
+              texto={textoVisivel}
+            />
+          )
+        : null}
+    </div>
+  );
+}
+
+/** `{1.1.2!3!A}` ou `{1.1.2!T!SUB}` — T é a linha de total da composição. */
+function formulaReferenciaCelula(
+  formula: string,
+  rotulo: string,
+  linha: number | 'T',
+  token: string
+): boolean {
+  const rot = rotulo.trim();
+  const alvo = token.toUpperCase() === '%' ? '%' : token.toUpperCase();
+  const re = /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(formula))) {
+    const rotRef = match[1]!.trim();
+    const linRef = /^t$/i.test(match[2]!) ? 'T' : Number(match[2]);
+    const col = match[3]!.toUpperCase() === '%' ? '%' : match[3]!.toUpperCase();
+    if (rotRef === rot && linRef === linha && col === alvo) return true;
+  }
+  return false;
+}
+
+/** Atalho da própria linha (C, A, SUB), ignorando referências entre chaves. */
+function formulaUsaTokenCurto(formula: string, token: string): boolean {
+  const semExternos = formula.replace(/\{[^{}]*\}/g, ' ');
+  if (token === '%') return semExternos.includes('%');
+  if (token.toUpperCase() === 'SUB') return /\bSUB\b/i.test(semExternos);
+  return new RegExp(`\\b${token}\\b`, 'i').test(semExternos);
+}
 
 const MemorialCampoLocal = memo(function MemorialCampoLocal({
   committedValue,
@@ -201,6 +1237,9 @@ const MemorialCampoLocal = memo(function MemorialCampoLocal({
   disabled,
   commitOnChange = true,
   onLocalChange,
+  onKeyDown,
+  onPaste,
+  inputRef,
 }: {
   committedValue: string;
   onCommit: (raw: string) => void;
@@ -212,6 +1251,9 @@ const MemorialCampoLocal = memo(function MemorialCampoLocal({
   disabled?: boolean;
   commitOnChange?: boolean;
   onLocalChange?: (localValue: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
+  inputRef?: (el: HTMLInputElement | null) => void;
 }) {
   const [local, setLocal] = useState(committedValue);
   const focusedRef = useRef(false);
@@ -246,6 +1288,7 @@ const MemorialCampoLocal = memo(function MemorialCampoLocal({
 
   return (
     <input
+      ref={inputRef}
       type="text"
       inputMode={inputMode}
       placeholder={placeholder}
@@ -255,6 +1298,8 @@ const MemorialCampoLocal = memo(function MemorialCampoLocal({
       autoComplete="off"
       className={resolvedClassName}
       value={local}
+      onKeyDown={onKeyDown}
+      onPaste={onPaste}
       onFocus={() => {
         focusedRef.current = true;
       }}
@@ -290,22 +1335,34 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   updateRotuloColunaMedicao,
   updateObservacaoMedicao,
   addLinhaMedicao,
+  inserirLinhasMedicao,
   addLinhaCabecalhoSecaoMedicao,
   removeLinhaMedicao,
   estiloTitulo,
   readOnly = false,
   embedded = false,
+  memoriasDisponiveis = [],
+  onMemoriasIncluidasChange,
+  resolverFormulaExterna,
 }: Props) {
   const tipo = tipoUnidade;
   const linhasEfetivas = linhasMedicaoEfetivas(dim);
+  const [modalMemoriasAberto, setModalMemoriasAberto] = useState(false);
 
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
+  const draftCalcRef = useRef<Record<string, string>>({});
   const [focusedCalcKey, setFocusedCalcKey] = useState<string | null>(null);
   const calcCommitTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const calcInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const calcCommittersRef = useRef<Record<string, (n: number, formulaRaw: string) => void>>({});
   const calcRowCtxRef = useRef<Record<string, FormulaRowCtx>>({});
   const calcSelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const descInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const resolverFormulaRef = useRef(resolverFormulaExterna);
+  resolverFormulaRef.current = resolverFormulaExterna;
+  const pickApi = useMemorialFormulaPick();
+  const pickApiRef = useRef(pickApi);
+  pickApiRef.current = pickApi;
 
   const formulaMode = useMemo(() => {
     if (!focusedCalcKey) return null;
@@ -319,8 +1376,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const syncCalcSelection = (el: HTMLInputElement | null) => {
     if (!el) return;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? start;
+    const map = mapaFormulaDoInput(el);
+    let start = el.selectionStart ?? el.value.length;
+    let end = el.selectionEnd ?? start;
+    if (map?.segmentos.length) {
+      start = posVisivelParaFormula(map.segmentos, start);
+      end = posVisivelParaFormula(map.segmentos, end);
+    }
     calcSelectionRef.current = { start, end };
   };
 
@@ -336,16 +1398,20 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         clearTimeout(pending);
         delete calcCommitTimersRef.current[draftKey];
       }
-      const text = String(raw ?? '');
-      const n = parseMedicaoBlurNumber(text, rowCtx ?? calcRowCtxRef.current[draftKey]);
-      startTransition(() => onCommit(n ?? 0, text));
+      const text = mascaraMedicaoCentavos(String(raw ?? ''));
+      const n = parseMedicaoBlurNumber(
+        text,
+        rowCtx ?? calcRowCtxRef.current[draftKey],
+        resolverFormulaRef.current
+      );
+      onCommit(n ?? 0, text);
       setFocusedCalcKey((k) => (k === draftKey ? null : k));
-      setDraftCalc((p) => {
-        if (!(draftKey in p)) return p;
-        const next = { ...p };
+      if (draftKey in draftCalcRef.current) {
+        const next = { ...draftCalcRef.current };
         delete next[draftKey];
-        return next;
-      });
+        draftCalcRef.current = next;
+        setDraftCalc(next);
+      }
     },
     []
   );
@@ -358,88 +1424,504 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       rowCtx?: FormulaRowCtx
     ) => {
       if (readOnly) return;
-      setDraftCalc((p) => ({ ...p, [draftKey]: raw }));
+      const text = mascaraMedicaoCentavos(String(raw ?? ''));
+      const nextDraft = { ...draftCalcRef.current, [draftKey]: text };
+      draftCalcRef.current = nextDraft;
+      setDraftCalc(nextDraft);
       calcCommittersRef.current[draftKey] = onCommit;
       if (rowCtx) calcRowCtxRef.current[draftKey] = rowCtx;
-      const n = parseMedicaoBlurNumber(raw, rowCtx ?? calcRowCtxRef.current[draftKey]);
-      if (n === null && String(raw ?? '').trim() !== '') return;
       const timers = calcCommitTimersRef.current;
       if (timers[draftKey]) clearTimeout(timers[draftKey]);
       timers[draftKey] = setTimeout(() => {
         delete timers[draftKey];
-        startTransition(() => onCommit(n ?? 0, raw));
+        const atual = draftCalcRef.current[draftKey];
+        if (atual == null) return;
+        const n = parseMedicaoBlurNumber(
+          atual,
+          rowCtx ?? calcRowCtxRef.current[draftKey],
+          resolverFormulaRef.current
+        );
+        if (n === null && atual.trim() !== '') return;
+        onCommit(n ?? 0, atual);
       }, MEMORIAL_COMMIT_MS);
     },
     [readOnly]
   );
 
-  const valorExibicaoCalc = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
+  const valorExibicaoCalc = (draftKey: string, _formula: string | undefined, valorFormatado: string) => {
     if (draftKey in draftCalc) return draftCalc[draftKey];
-    if (focusedCalcKey === draftKey && formula) return formula;
     return valorFormatado;
   };
 
-  const focarCalc = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
+  const focarCalc = (draftKey: string) => {
+    setFocusedCalcKey((k) => (k === draftKey ? k : draftKey));
+  };
+
+  const entrarNoCalculo = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
+    if (readOnly) return;
+    const salva = String(formula ?? '').trim();
+    const texto = salva.startsWith('=') ? salva : (draftCalcRef.current[draftKey] ?? valorFormatado);
     setFocusedCalcKey(draftKey);
-    if (!(draftKey in draftCalc)) {
-      setDraftCalc((p) => ({ ...p, [draftKey]: formula || valorFormatado }));
+    const nextDraft = { ...draftCalcRef.current, [draftKey]: texto };
+    draftCalcRef.current = nextDraft;
+    setDraftCalc(nextDraft);
+    window.setTimeout(() => {
+      const el = calcInputRefs.current[draftKey];
+      if (!el) return;
+      el.focus();
+      const fim = el.value.length;
+      el.setSelectionRange(fim, fim);
+    }, 0);
+  };
+
+  const sairCalc = (
+    draftKey: string,
+    onCommit: (n: number, formulaRaw: string) => void,
+    rowCtx: FormulaRowCtx | undefined
+  ) => {
+    const atual = draftCalcRef.current[draftKey];
+    if (atual == null) {
+      setFocusedCalcKey((k) => (k === draftKey ? null : k));
+      return;
+    }
+    handleCalcBlur(draftKey, atual, onCommit, rowCtx);
+  };
+
+  const copiaCelula = useCopiaCelulaMedicao();
+  const [selecao, setSelecao] = useState<FaixaMedicao | null>(null);
+  const tabelaWrapRef = useRef<HTMLDivElement | null>(null);
+  const tabelaScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const linhaDadosDe = (i: number) =>
+    linhasEfetivas.slice(0, i + 1).filter(l => !l.cabecalhoSecao).length;
+
+  const linhasDadosDaFaixa = (f: FaixaMedicao) => {
+    const out: number[] = [];
+    for (let i = f.idxIni; i <= f.idxFim && i < linhasEfetivas.length; i += 1) {
+      if (linhasEfetivas[i] && !linhasEfetivas[i]!.cabecalhoSecao) out.push(i);
+    }
+    return out;
+  };
+
+  /** Bordas da faixa só nas linhas de dados (o cabeçalho de seção não entra). */
+  const faixaNasLinhasDados = (f: FaixaMedicao | null | undefined): FaixaMedicao | null => {
+    if (!f) return null;
+    const linhas = linhasDadosDaFaixa(f);
+    if (!linhas.length) return null;
+    return { ...f, idxIni: linhas[0]!, idxFim: linhas[linhas.length - 1]! };
+  };
+
+  const textoCelulaMedicao = (ln: LinhaMedicao, col: ColunaMedicao): string => {
+    const f = ln.formulas;
+    const comFormula = (formula: string | undefined, n: number) => {
+      const s = String(formula ?? '').trim();
+      return s.startsWith('=') ? s : formatMedicaoCampo(n);
+    };
+    if (col === 'descricao') return ln.descricao ?? '';
+    if (col === 'C' || col === 'L' || col === 'H' || col === 'N') return comFormula(f?.[col], ln[col] || 0);
+    if (col === 'empol') return comFormula(f?.empolamento, Number(ln.empolamento) || 0);
+    if (col === 'A') return comFormula(f?.valorManual, areaExibidaLinha(ln));
+    if (col === 'V') return comFormula(f?.valorManual, volumeExibidoLinha(ln, tipo));
+    return comFormula(f?.subtotalManual, calcularQuantidadeLinha(ln, tipo));
+  };
+
+  const copiarFaixa = (f: FaixaMedicao) => {
+    const linhas = linhasDadosDaFaixa(f);
+    if (!linhas.length) return '';
+    const celulas = linhas.map(i => {
+      const ln = linhasEfetivas[i]!;
+      const linha: string[] = [];
+      for (let c = f.colIni; c <= f.colFim; c += 1) linha.push(textoCelulaMedicao(ln, COLUNAS_MEDICAO[c]!));
+      return linha;
+    });
+    const texto = celulas.map(l => l.join('\t')).join('\n');
+    definirCopiaCelulaMedicao({
+      rowKey,
+      rotulo: itemRotulo,
+      faixa: f,
+      linhaDados: linhaDadosDe(linhas[0]!),
+      celulas,
+      texto,
+    });
+    return texto;
+  };
+
+  /** Grava uma célula e devolve a linha já atualizada, para as próximas colunas usarem os valores novos. */
+  const gravarCelulaMedicao = (i: number, col: ColunaMedicao, bruto: string, local: LinhaMedicao): LinhaMedicao => {
+    if (col === 'descricao') {
+      updateLinhaMedicao(rowKey, i, 'descricao', bruto);
+      return { ...local, descricao: bruto };
+    }
+    const valor = String(bruto ?? '').trim();
+    const vazio = valor === '' || valor === '=';
+    const n = vazio ? 0 : parseMedicaoBlurNumber(valor, contextoLinhaMedicao(local), resolverFormulaRef.current);
+    if (n === null) return local;
+    const opts = { formulaRaw: vazio ? '' : valor };
+    const vinculada = Boolean(local.origemMemoriaKey);
+    const limparDerivados = (ln: LinhaMedicao): LinhaMedicao =>
+      vinculada ? ln : { ...ln, valorManual: undefined, subtotalManual: undefined, aManual: undefined, vManual: undefined };
+    if (col === 'C' || col === 'L' || col === 'H' || col === 'N') {
+      const v = col === 'N' ? Math.max(0, n) : n;
+      updateLinhaMedicao(rowKey, i, col, v, opts);
+      return limparDerivados({ ...local, [col]: v });
+    }
+    if (col === 'empol') {
+      const v = Math.max(0, n);
+      updateLinhaMedicao(rowKey, i, 'empolamento', v, opts);
+      return limparDerivados({ ...local, empolamento: v });
+    }
+    const campoLinha: keyof LinhaMedicao =
+      col === 'subtotal' ? 'subtotalManual' : vinculada ? (col === 'A' ? 'aManual' : 'vManual') : 'valorManual';
+    updateLinhaMedicao(rowKey, i, campoLinha, vazio ? '' : n, opts);
+    return { ...local, [campoLinha]: vazio ? undefined : n };
+  };
+
+  const colarBloco = (destIdx: number, destCol: number, bloco: string[][], origem: CopiaCelulaMedicao | null) => {
+    if (readOnly || !bloco.length) return;
+    const destinos: number[] = [];
+    for (let i = destIdx; i < linhasEfetivas.length && destinos.length < bloco.length; i += 1) {
+      if (!linhasEfetivas[i]!.cabecalhoSecao) destinos.push(i);
+    }
+    const faltam = bloco.length - destinos.length;
+    /** Última linha já existente que recebe o bloco; as novas entram logo abaixo dela. */
+    const aposIdx = destinos.length > 0
+      ? destinos[destinos.length - 1]!
+      : (destIdx < linhasEfetivas.length ? destIdx : linhasEfetivas.length - 1);
+    if (faltam > 0) {
+      inserirLinhasMedicao(rowKey, aposIdx, faltam);
+      for (let k = 0; k < faltam; k += 1) destinos.push(aposIdx + 1 + k);
+    }
+    if (!destinos.length) return;
+    const mesmaMemoria = origem?.rowKey === rowKey;
+    const dadosAteAncora = aposIdx >= 0 && aposIdx < linhasEfetivas.length ? linhaDadosDe(aposIdx) : 0;
+    const numeroLinhaDados = (i: number) =>
+      faltam > 0 && i > aposIdx ? dadosAteAncora + (i - aposIdx) : linhaDadosDe(i);
+    let colFim = destCol;
+    destinos.forEach((i, r) => {
+      const linhaLocal = i < linhasEfetivas.length ? linhasEfetivas[i]! : { descricao: '', C: 0, L: 0, H: 0, N: 0, empolamento: 0 };
+      let local = linhaLocal;
+      const delta = mesmaMemoria ? numeroLinhaDados(i) - (origem!.linhaDados + r) : 0;
+      bloco[r]!.forEach((texto, c) => {
+        const col = COLUNAS_MEDICAO[destCol + c];
+        if (!col) return;
+        colFim = Math.max(colFim, destCol + c);
+        const t = delta ? deslocarFormulaLinhas(texto, itemRotulo, delta) : texto;
+        local = gravarCelulaMedicao(i, col, t, local);
+      });
+    });
+    if (destinos.length > 1 || colFim > destCol) {
+      setSelecao({ idxIni: destinos[0]!, idxFim: destinos[destinos.length - 1]!, colIni: destCol, colFim });
     }
   };
 
-  /** Enter confirma a célula (como planilha) e evita submit/navegação do formulário pai. */
+  const colarTexto = (idx: number, col: number, textoColado: string) => {
+    const copia = copiaCelulaMedicao;
+    const texto = String(textoColado ?? '');
+    if (copia && (texto.trim() === '' || mesmoTextoCopiado(texto, copia.texto))) {
+      colarBloco(idx, col, copia.celulas, copia);
+      return;
+    }
+    if (!texto) return;
+    colarBloco(idx, col, blocoDoTexto(texto), null);
+  };
+
+  const copiarCelula = (idx: number, col: ColunaMedicao) =>
+    copiarFaixa({ idxIni: idx, idxFim: idx, colIni: COLUNAS_MEDICAO.indexOf(col), colFim: COLUNAS_MEDICAO.indexOf(col) });
+
+  const colarCelula = (idx: number, col: ColunaMedicao, texto: string) =>
+    colarTexto(idx, COLUNAS_MEDICAO.indexOf(col), texto);
+
+  const celulaDoAlvo = (alvo: Element | null) => {
+    const td = alvo?.closest('[data-col-medicao]');
+    const tr = td?.closest('[data-linha-medicao]');
+    if (!td || !tr || !tabelaWrapRef.current?.contains(tr)) return null;
+    const idx = Number(tr.getAttribute('data-linha-medicao'));
+    const col = Number(td.getAttribute('data-col-medicao'));
+    return Number.isFinite(idx) && Number.isFinite(col) ? { idx, col } : null;
+  };
+
+  const iniciarSelecaoFaixa = (e: React.MouseEvent) => {
+    if (e.button !== 0 || readOnly || pickApiRef.current?.session) return;
+    const ini = celulaDoAlvo(e.target as Element);
+    setSelecao(null);
+    if (!ini) return;
+    let arrastou = false;
+    const mover = (ev: MouseEvent) => {
+      const atual = celulaDoAlvo(document.elementFromPoint(ev.clientX, ev.clientY));
+      if (!atual) return;
+      if (!arrastou && atual.idx === ini.idx && atual.col === ini.col) return;
+      if (!arrastou) {
+        arrastou = true;
+        document.documentElement.classList.add('medicao-selecionando');
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      }
+      window.getSelection()?.removeAllRanges();
+      setSelecao(normalizarFaixa(ini, atual));
+    };
+    const soltar = () => {
+      window.removeEventListener('mousemove', mover);
+      window.removeEventListener('mouseup', soltar);
+      document.documentElement.classList.remove('medicao-selecionando');
+    };
+    window.addEventListener('mousemove', mover);
+    window.addEventListener('mouseup', soltar);
+  };
+
+  const selecaoRef = useRef<FaixaMedicao | null>(null);
+  selecaoRef.current = selecao;
+  const acoesFaixaRef = useRef({ copiarFaixa, colarTexto, gravarCelulaMedicao, linhasDadosDaFaixa });
+  acoesFaixaRef.current = { copiarFaixa, colarTexto, gravarCelulaMedicao, linhasDadosDaFaixa };
+
+  useEffect(() => {
+    if (!selecao) return;
+    const editando = () => {
+      const el = document.activeElement;
+      return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+    };
+    const teclas = (ev: KeyboardEvent) => {
+      const f = selecaoRef.current;
+      if (!f || editando()) return;
+      const acoes = acoesFaixaRef.current;
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'c') {
+        const texto = acoes.copiarFaixa(f);
+        void navigator.clipboard?.writeText(texto).catch(() => {});
+      } else if (ev.key === 'Escape') {
+        setSelecao(null);
+        definirCopiaCelulaMedicao(null);
+      } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !readOnly) {
+        ev.preventDefault();
+        for (const i of acoes.linhasDadosDaFaixa(f)) {
+          let local = linhasEfetivas[i]!;
+          for (let c = f.colIni; c <= f.colFim; c += 1) {
+            local = acoes.gravarCelulaMedicao(i, COLUNAS_MEDICAO[c]!, '', local);
+          }
+        }
+      }
+    };
+    const copiar = (ev: ClipboardEvent) => {
+      const f = selecaoRef.current;
+      if (!f || editando() || !ev.clipboardData) return;
+      ev.preventDefault();
+      ev.clipboardData.setData('text/plain', acoesFaixaRef.current.copiarFaixa(f));
+    };
+    const colar = (ev: ClipboardEvent) => {
+      const f = selecaoRef.current;
+      if (!f || editando()) return;
+      ev.preventDefault();
+      acoesFaixaRef.current.colarTexto(f.idxIni, f.colIni, ev.clipboardData?.getData('text/plain') ?? '');
+    };
+    const fora = (ev: MouseEvent) => {
+      if (!tabelaWrapRef.current?.contains(ev.target as Node)) setSelecao(null);
+    };
+    document.addEventListener('keydown', teclas);
+    document.addEventListener('copy', copiar);
+    document.addEventListener('paste', colar);
+    document.addEventListener('mousedown', fora, true);
+    return () => {
+      document.removeEventListener('keydown', teclas);
+      document.removeEventListener('copy', copiar);
+      document.removeEventListener('paste', colar);
+      document.removeEventListener('mousedown', fora, true);
+    };
+  }, [selecao, readOnly, linhasEfetivas]);
+
+  const selecaoVisivel = faixaNasLinhasDados(selecao);
+  const copiaVisivel = copiaCelula?.rowKey === rowKey ? faixaNasLinhasDados(copiaCelula.faixa) : null;
+
+  const marcasCelula = (idx: number, col: ColunaMedicao) => {
+    const c = COLUNAS_MEDICAO.indexOf(col);
+    if (!selecaoVisivel || !faixaContem(selecaoVisivel, idx, c)) return null;
+    return <MarcaSelecaoCelula />;
+  };
+
+  const colarNaDescricao = (idx: number) => (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const texto = e.clipboardData.getData('text/plain');
+    const copia = copiaCelulaMedicao;
+    const ehBloco =
+      /[\t\n]/.test(texto.replace(/\r?\n$/, '')) ||
+      (copia != null &&
+        mesmoTextoCopiado(texto, copia.texto) &&
+        (copia.celulas.length > 1 || (copia.celulas[0]?.length ?? 0) > 1));
+    if (!ehBloco) return;
+    e.preventDefault();
+    e.currentTarget.blur();
+    colarTexto(idx, 0, texto);
+  };
+
+  const textoFonteCelula = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
+    if (draftKey in draftCalc) return draftCalc[draftKey]!;
+    const salva = String(formula ?? '').trim();
+    return salva.startsWith('=') ? salva : valorFormatado;
+  };
+
+  /** Enter confirma a célula e desce para a mesma coluna na linha de baixo. */
+  const focarCampoAbaixo = (idx: number, campo: 'descricao' | string) => {
+    let prox = idx + 1;
+    if (campo !== 'descricao') {
+      while (prox < linhasEfetivas.length && linhasEfetivas[prox]?.cabecalhoSecao) prox += 1;
+    }
+    if (prox >= linhasEfetivas.length) return;
+    window.setTimeout(() => {
+      if (campo === 'descricao') descInputRefs.current[prox]?.focus();
+      else calcInputRefs.current[`${rowKey}|${prox}|${campo}`]?.focus();
+    }, 0);
+  };
+
   const handleCalcKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (copiaCelulaMedicao) definirCopiaCelulaMedicao(null);
+      e.currentTarget.blur();
+      return;
+    }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     e.stopPropagation();
+    const parsed = focusedCalcKey ? parseDraftKeyMedicao(focusedCalcKey) : null;
     e.currentTarget.blur();
+    if (!parsed) return;
+    focarCampoAbaixo(parsed.idx, parsed.campo);
+  };
+
+  const handleDescricaoKeyDown = (idx: number) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' && e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape' && copiaCelulaMedicao) definirCopiaCelulaMedicao(null);
+    e.currentTarget.blur();
+    if (e.key === 'Enter') focarCampoAbaixo(idx, 'descricao');
   };
 
   const inserirTokenFormula = useCallback(
-    (token: FormulaPickToken) => {
+    (token: string) => {
       if (!formulaMode) return;
       const { draftKey, campo } = formulaMode;
       const selfToken = tokenDoCampoMedicao(campo);
-      if (selfToken && selfToken === token) return;
+      if (!token.startsWith('{') && selfToken && selfToken === token) return;
 
       const input = calcInputRefs.current[draftKey];
+      const map = mapaFormulaDoInput(input);
       const current =
-        draftCalc[draftKey] != null
-          ? draftCalc[draftKey]!
-          : String(input?.value ?? '=').startsWith('=')
-            ? String(input?.value ?? '=')
-            : '=';
-      const start = input?.selectionStart ?? calcSelectionRef.current.start ?? current.length;
-      const end = input?.selectionEnd ?? calcSelectionRef.current.end ?? start;
+        draftCalcRef.current[draftKey] != null
+          ? draftCalcRef.current[draftKey]!
+          : map?.formula
+            ? map.formula
+            : String(input?.value ?? '=').startsWith('=')
+              ? String(input?.value ?? '=')
+              : '=';
+      const startVis = input?.selectionStart ?? null;
+      const endVis = input?.selectionEnd ?? null;
+      let start =
+        map?.segmentos.length && startVis != null
+          ? posVisivelParaFormula(map.segmentos, startVis)
+          : startVis ?? calcSelectionRef.current.start ?? current.length;
+      let end =
+        map?.segmentos.length && endVis != null
+          ? posVisivelParaFormula(map.segmentos, endVis)
+          : endVis ?? calcSelectionRef.current.end ?? start;
+      if (start === end) {
+        const antes = current.slice(0, start);
+        const espacos = antes.match(/\s*$/)?.[0].length ?? 0;
+        const nucleo = antes.slice(0, antes.length - espacos);
+        const terminaOperador = nucleo === '' || /[+\-*/(^]$/.test(nucleo) || nucleo.endsWith('=');
+        const ref = nucleo.match(
+          /(\{[^{}!]+!(?:\d+|T)!(?:SUB|C|L|H|N|%|A|V)\}|%|\bSUB\b|\b[CLHNAV]\b)$/i
+        );
+        if (!terminaOperador && ref?.[1]) {
+          start = nucleo.length - ref[1].length;
+          end = antes.length;
+        }
+      }
       const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
       const onCommit = calcCommittersRef.current[draftKey];
       const rowCtx = calcRowCtxRef.current[draftKey];
-      setDraftCalc((p) => ({ ...p, [draftKey]: next }));
+      const nextDraft = { ...draftCalcRef.current, [draftKey]: next };
+      draftCalcRef.current = nextDraft;
+      setDraftCalc(nextDraft);
       if (onCommit) {
-        const n = parseMedicaoBlurNumber(next, rowCtx);
-        if (n !== null || String(next).trim() === '' || String(next).trim() === '=') {
-          const timers = calcCommitTimersRef.current;
-          if (timers[draftKey]) clearTimeout(timers[draftKey]);
-          timers[draftKey] = setTimeout(() => {
-            delete timers[draftKey];
-            if (n !== null) startTransition(() => onCommit(n, next));
-          }, MEMORIAL_COMMIT_MS);
-        }
+        const timers = calcCommitTimersRef.current;
+        if (timers[draftKey]) clearTimeout(timers[draftKey]);
+        timers[draftKey] = setTimeout(() => {
+          delete timers[draftKey];
+          const atual = draftCalcRef.current[draftKey];
+          if (atual == null) return;
+          const n = parseMedicaoBlurNumber(atual, rowCtx, resolverFormulaRef.current);
+          if (n !== null) onCommit(n, atual);
+        }, MEMORIAL_COMMIT_MS);
       }
       requestAnimationFrame(() => {
         const el = calcInputRefs.current[draftKey];
         if (!el) return;
         el.focus();
-        const pos = start + token.length;
+        const posFormula = start + token.length;
+        const mapaNovo = mapaFormulaDoInput(el);
+        const pos = mapaNovo?.segmentos.length
+          ? posFormulaParaVisivel(mapaNovo.segmentos, posFormula)
+          : posFormula;
         el.setSelectionRange(pos, pos);
-        calcSelectionRef.current = { start: pos, end: pos };
+        calcSelectionRef.current = { start: posFormula, end: posFormula };
       });
     },
     [formulaMode, draftCalc]
   );
 
+  const insertTokenRef = useRef<(token: string) => void>(() => {});
+  insertTokenRef.current = (token: string) => {
+    inserirTokenFormula(token);
+  };
+
+  const formulaSessionKey = formulaMode
+    ? `${rowKey}|${formulaMode.idx}|${formulaMode.campo}`
+    : '';
+
+  const formulaAtual = formulaMode ? (draftCalc[formulaMode.draftKey] ?? '') : '';
+
+  useEffect(() => {
+    const api = pickApiRef.current;
+    if (!api) return;
+    if (!formulaMode) {
+      api.clearIf(rowKey);
+      return;
+    }
+    api.setSession({
+      itemKey: rowKey,
+      idx: formulaMode.idx,
+      campo: formulaMode.campo,
+      formula: formulaAtual,
+      insert: token => insertTokenRef.current(token),
+    });
+    return () => {
+      pickApiRef.current?.clearIf(rowKey);
+    };
+    // formulaMode entra só pela chave da célula; o insert vive no ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formulaSessionKey, rowKey]);
+
+  useEffect(() => {
+    if (!formulaSessionKey) return;
+    pickApiRef.current?.setFormula(rowKey, formulaAtual);
+  }, [formulaSessionKey, formulaAtual, rowKey]);
+
   const onPickFormulaCell = useCallback(
-    (e: React.MouseEvent, idx: number, campo: string, token: FormulaPickToken) => {
-      if (!formulaMode || formulaMode.idx !== idx) return false;
+    (e: React.MouseEvent, idx: number | 'T', campo: string, token: FormulaPickToken) => {
+      const session = pickApiRef.current?.session ?? null;
+      if (session) {
+        if (idx !== 'T' && session.itemKey === rowKey && session.idx === idx && session.campo === campo) {
+          return false;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        const mesmaLinha = idx !== 'T' && session.itemKey === rowKey && session.idx === idx;
+        const linhaDados =
+          idx === 'T'
+            ? 'T'
+            : linhasEfetivas.slice(0, idx + 1).filter(ln => !ln.cabecalhoSecao).length;
+        const texto = mesmaLinha ? token : `{${itemRotulo.trim()}!${linhaDados}!${token}}`;
+        session.insert(texto);
+        return true;
+      }
+      if (idx === 'T' || !formulaMode || formulaMode.idx !== idx) return false;
       const selfToken = tokenDoCampoMedicao(formulaMode.campo);
       if (selfToken && selfToken === token) return false;
       if (formulaMode.campo === campo) return false;
@@ -448,7 +1930,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       inserirTokenFormula(token);
       return true;
     },
-    [formulaMode, inserirTokenFormula]
+    [formulaMode, inserirTokenFormula, itemRotulo, linhasEfetivas, rowKey]
   );
 
   const bindCalcInput = (
@@ -543,9 +2025,26 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     return { left, top };
   };
 
+  const pressaoLinhaRef = useRef<{ x: number; y: number; campo: boolean } | null>(null);
+
+  const marcarPressaoLinha = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    pressaoLinhaRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      campo: eventoSobreCampoEditavel(e.target),
+    };
+  };
+
   const abrirMenuCtxMedicao = (e: React.MouseEvent, idx: number) => {
     if (readOnly) return;
-    if (e.type === 'click' && eventoSobreCampoEditavel(e.target)) return;
+    if (e.type === 'click') {
+      const pressao = pressaoLinhaRef.current;
+      pressaoLinhaRef.current = null;
+      if (alcaMedicaoArrastando) return;
+      if (eventoSobreCampoEditavel(e.target) || pressao?.campo) return;
+      if (pressao && (Math.abs(e.clientX - pressao.x) > 4 || Math.abs(e.clientY - pressao.y) > 4)) return;
+    }
     e.preventDefault();
     e.stopPropagation();
     setMenuCtxMedicao({ ...posicaoMenuLinha(e), idx });
@@ -589,6 +2088,20 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             <p className="min-w-0 flex-1 whitespace-normal break-words text-left text-sm font-bold leading-relaxed text-gray-900 dark:text-gray-100">
               {itemDescricao}
             </p>
+            {onMemoriasIncluidasChange && !ehCargaEntulho && !readOnly ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setModalMemoriasAberto(true);
+                }}
+                className="ml-2 inline-flex h-7 w-7 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-gray-500 shadow-none outline-none ring-0 transition-colors hover:text-red-600 focus:outline-none focus:ring-0 dark:text-gray-400 dark:hover:text-red-400"
+                title="Incluir memória"
+                aria-label="Incluir memória"
+              >
+                <ListPlus className="h-4 w-4" aria-hidden />
+              </button>
+            ) : null}
           </div>
         </div>
       </th>
@@ -723,6 +2236,43 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     );
   };
 
+  const contextoLinhaMedicao = (linha: LinhaMedicao): FormulaRowCtx => {
+    const empolVal =
+      linha.empolamento ??
+      ((linha as unknown as { percPerda?: number }).percPerda != null
+        ? 1 + (linha as unknown as { percPerda: number }).percPerda / 100
+        : 0);
+    return {
+      C: linha.C || 0,
+      L: linha.L || 0,
+      H: linha.H || 0,
+      N: linha.N || 0,
+      empolamento: Number(empolVal) || 0,
+      A: areaExibidaLinha(linha),
+      V: volumeExibidoLinha(linha, tipo),
+      SUB: calcularQuantidadeLinha(linha, tipo),
+    };
+  };
+
+  const copiarFormulaParaBaixo = (
+    idxOrigem: number,
+    campo: ColunaMedicao,
+    textoOrigem: string,
+    ateIdx: number
+  ) => {
+    if (readOnly || !Number.isFinite(ateIdx) || ateIdx === idxOrigem) return;
+    const texto = String(textoOrigem ?? '').trim();
+    const inicio = Math.max(0, Math.min(idxOrigem, ateIdx));
+    const fim = Math.min(linhasEfetivas.length - 1, Math.max(idxOrigem, ateIdx));
+    for (let i = inicio; i <= fim; i += 1) {
+      if (i === idxOrigem) continue;
+      const linha = linhasEfetivas[i];
+      if (!linha || linha.cabecalhoSecao) continue;
+      const textoLinha = deslocarFormulaLinhas(texto, itemRotulo, linhaDadosDe(i) - linhaDadosDe(idxOrigem));
+      gravarCelulaMedicao(i, campo, textoLinha, linha);
+    }
+  };
+
   const renderLinhaCabecalhoSecao = (ln: LinhaMedicao, idx: number, ln0Ref: LinhaMedicao) => {
     const podeEditarC0 = ehCargaEntulho && !!ln0Ref.editavelC;
     const podeEditarL0 = ehCargaEntulho && !!ln0Ref.editavelL;
@@ -731,18 +2281,26 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     return (
       <tr
         key={idx}
+        data-linha-medicao={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
+        onMouseDown={ehCargaEntulho ? undefined : marcarPressaoLinha}
         onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={`${thFirst} !p-0 align-middle`}>
-          <MemorialCampoLocal
-            committedValue={ln.descricao ?? 'DESCRIÇÃO: '}
-            onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
-            disabled={readOnly}
-            className={inputThDescricaoCls}
-            ariaLabel="Descrição da linha de cabeçalho de seção"
-          />
+          <div className={caixaFocoDescricaoCls}>
+            <MemorialCampoLocal
+              committedValue={ln.descricao ?? 'DESCRIÇÃO: '}
+              onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
+              disabled={readOnly}
+              className={`${inputThDescricaoCls} focus:!bg-transparent dark:focus:!bg-transparent`}
+              ariaLabel="Descrição da linha de cabeçalho de seção"
+              inputRef={el => {
+                descInputRefs.current[idx] = el;
+              }}
+              onKeyDown={handleDescricaoKeyDown(idx)}
+            />
+          </div>
         </td>
         {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'td')}
         {renderRotuloSelect('L', ehCargaEntulho && !podeEditarL0 ? 'Origem demolição' : undefined, 'td')}
@@ -765,8 +2323,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     if (ln.cabecalhoSecao) {
       return renderLinhaCabecalhoSecao(ln, idx, ln0Ref);
     }
-    const valorA = calcA(ln);
-    const valorV = calcV(ln, tipo);
+    const linhaVinculada = Boolean(ln.origemMemoriaKey);
+    const valorA = areaExibidaLinha(ln);
+    const valorV = volumeExibidoLinha(ln, tipo);
     const valorSubtotal = calcularQuantidadeLinha(ln, tipo);
     const empolVal =
       ln.empolamento ??
@@ -779,61 +2338,111 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       H: ln.H || 0,
       N: ln.N || 0,
       empolamento: Number(empolVal) || 0,
-      A: valorA,
-      V: valorV
+      A: areaExibidaLinha(ln),
+      V: volumeExibidoLinha(ln, tipo),
+      SUB: valorSubtotal
     };
-    const formulaPickAtivo = formulaMode?.idx === idx;
-    const pickCls = (campo: string, token: FormulaPickToken) => {
-      if (!formulaPickAtivo) return '';
-      const selfToken = tokenDoCampoMedicao(formulaMode!.campo);
-      if (formulaMode!.campo === campo || selfToken === token) return '';
-      return FORMULA_PICK_CELL_CLS;
+    const linhaDados = linhasEfetivas
+      .slice(0, idx + 1)
+      .filter(l => !l.cabecalhoSecao).length;
+    const formulaSessao = pickApi?.session ?? null;
+    const destacaCelula = (campo: string, token: FormulaPickToken) => {
+      if (!formulaSessao?.formula) return '';
+      if (
+        formulaSessao.itemKey === rowKey &&
+        formulaSessao.idx === idx &&
+        formulaSessao.campo === campo
+      ) {
+        return '';
+      }
+      if (formulaReferenciaCelula(formulaSessao.formula, itemRotulo, linhaDados, token)) {
+        return classeCelulaFormula(
+          formulaSessao.formula,
+          chaveTokenExterno(itemRotulo, String(linhaDados), token)
+        );
+      }
+      if (
+        formulaSessao.itemKey === rowKey &&
+        formulaSessao.idx === idx &&
+        formulaUsaTokenCurto(formulaSessao.formula, token)
+      ) {
+        return classeCelulaFormula(formulaSessao.formula, chaveTokenLocal(token));
+      }
+      return '';
+    };
+
+    const segmentosDaCelula = (campoCelula: string, valor: string) => {
+      if (!String(valor).trimStart().startsWith('=')) return null;
+      const editandoAqui =
+        formulaMode != null && formulaMode.idx === idx && formulaMode.campo === campoCelula;
+      const sessaoAqui =
+        formulaSessao != null &&
+        formulaSessao.itemKey === rowKey &&
+        formulaSessao.idx === idx &&
+        formulaSessao.campo === campoCelula;
+      if (!editandoAqui && !sessaoAqui) return null;
+      return segmentosFormulaVisivel(valor, rowCtx, resolverFormulaExterna);
     };
 
     const renderDim = (campo: 'C' | 'L' | 'H' | 'N') => {
       const draftKey = `${rowKey}|${idx}|${campo}`;
       const num =
         campo === 'C' ? ln.C : campo === 'L' ? ln.L : campo === 'H' ? ln.H : ln.N;
-      const formatado = (num || 0) === 0 ? '' : formatMedicaoNumero(num);
+      const formatado = formatMedicaoCampo(num || 0);
       const formula = ln.formulas?.[campo];
       const onCommit = (n: number, formulaRaw: string) => {
         if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', Math.max(0, n), { formulaRaw });
         else updateLinhaMedicao(rowKey, idx, campo, n, { formulaRaw });
       };
       const bound = bindCalcInput(draftKey, onCommit, rowCtx);
-      const highlight = pickCls(campo, campo);
+      const highlight = destacaCelula(campo, campo);
       return (
         <td
           className={`${tdRestBody} text-center ${highlight}`}
-          onMouseDown={e => {
+          data-col-medicao={COLUNAS_MEDICAO.indexOf(campo)}
+          onMouseDownCapture={e => {
             if (readOnly) return;
             if (onPickFormulaCell(e, idx, campo, campo)) return;
           }}
         >
-          <input
+          {marcasCelula(idx, campo)}
+          <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder={campo === 'N' ? '1' : '0'}
+            placeholder="0,00"
             value={valorExibicaoCalc(draftKey, formula, formatado)}
+            segmentos={segmentosDaCelula(campo, valorExibicaoCalc(draftKey, formula, formatado))}
             disabled={readOnly}
             onFocus={() => {
               if (readOnly) return;
-              focarCalc(draftKey, formula, formatado);
+              focarCalc(draftKey);
             }}
+            onDoubleClick={() => entrarNoCalculo(draftKey, formula, formatado)}
             onChange={e => {
               if (readOnly) return;
               handleCalcChange(draftKey, e.target.value, onCommit, rowCtx);
             }}
             onKeyDown={handleCalcKeyDown}
-            onBlur={e =>
-              handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, onCommit, rowCtx)
-            }
+            onBlur={() => sairCalc(draftKey, onCommit, rowCtx)}
+            editando={draftKey in draftCalc}
+            onSubstituir={texto => handleCalcChange(draftKey, texto, onCommit, rowCtx)}
+            onCopiar={() => copiarCelula(idx, campo)}
+            onColar={texto => colarCelula(idx, campo, texto)}
             className={`${inputCls} text-center`}
-            title={formula ? `Fórmula: ${formula}` : undefined}
-            ref={bound.ref}
+            title={
+              linhaVinculada
+                ? 'Vem da memória de origem. Apague para voltar ao automático.'
+                : formula
+                  ? `Fórmula: ${formula}`
+                  : undefined
+            }
+            inputRef={bound.ref}
             onSelect={bound.onSelect}
             onKeyUp={bound.onKeyUp}
             onClick={bound.onClick}
+            onArrastarAbaixo={ateIdx =>
+              copiarFormulaParaBaixo(idx, campo, textoFonteCelula(draftKey, formula, formatado), ateIdx)
+            }
           />
         </td>
       );
@@ -843,129 +2452,189 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       const draftKey = `${rowKey}|${idx}|${campo}`;
       const persistCampo: CampoFormulaMedicao =
         campo === 'subtotal' ? 'subtotalManual' : 'valorManual';
+      const persistCampoLinha: keyof LinhaMedicao = linhaVinculada
+        ? campo === 'subtotal'
+          ? 'subtotalManual'
+          : campo === 'A'
+            ? 'aManual'
+            : 'vManual'
+        : persistCampo;
+      const temA = ln.aManual != null && Number.isFinite(ln.aManual);
+      const temV = ln.vManual != null && Number.isFinite(ln.vManual);
+      const temValor = ln.valorManual != null && Number.isFinite(ln.valorManual);
       const temManual =
         campo === 'subtotal'
           ? ln.subtotalManual != null && Number.isFinite(ln.subtotalManual)
-          : ln.valorManual != null && Number.isFinite(ln.valorManual);
-      const valorManualExibir = campo === 'subtotal' ? ln.subtotalManual : ln.valorManual;
+          : campo === 'A'
+            ? temA || temValor
+            : temV || temValor;
+      const valorManualExibir =
+        campo === 'subtotal'
+          ? ln.subtotalManual
+          : campo === 'A'
+            ? temA
+              ? ln.aManual
+              : ln.valorManual
+            : temV
+              ? ln.vManual
+              : ln.valorManual;
       const exibir = temManual
-        ? formatMedicaoNumero(Number(valorManualExibir), 2, 4)
-        : calculado === 0
-          ? ''
-          : formatMedicaoNumero(calculado, 2, 4);
+        ? formatMedicaoCampo(Number(valorManualExibir) || 0)
+        : formatMedicaoCampo(calculado || 0);
       const formula = ln.formulas?.[persistCampo];
       const persistir = (n: number, formulaRaw: string) => {
         const raw = String(formulaRaw ?? '').trim();
-        /** Apagou o override → volta o valor automático (C×L / A×H / subtotal). */
         if (raw === '' || raw === '=') {
-          updateLinhaMedicao(rowKey, idx, persistCampo, '', { formulaRaw: '' });
+          updateLinhaMedicao(rowKey, idx, persistCampoLinha, '', { formulaRaw: '' });
           return;
         }
-        updateLinhaMedicao(rowKey, idx, persistCampo, n, { formulaRaw });
+        updateLinhaMedicao(rowKey, idx, persistCampoLinha, n, { formulaRaw });
       };
       const bound = bindCalcInput(draftKey, persistir, rowCtx);
-      const pickToken: FormulaPickToken | null = campo === 'A' || campo === 'V' ? campo : null;
-      const highlight = pickToken ? pickCls(campo, pickToken) : '';
+      const pickToken: FormulaPickToken | null =
+        campo === 'A' || campo === 'V' ? campo : campo === 'subtotal' ? 'SUB' : null;
+      const highlight = pickToken ? destacaCelula(campo, pickToken) : '';
       return (
         <td
           className={`${tdCalcBody} ${highlight}`}
-          title={formula ? `${title} · ${formula}` : title}
-          onMouseDown={e => {
+          title={
+            linhaVinculada
+              ? 'Vem da memória de origem. Apague para voltar ao automático.'
+              : formula
+                ? `${title} · ${formula}`
+                : title
+          }
+          data-col-medicao={COLUNAS_MEDICAO.indexOf(campo)}
+          onMouseDownCapture={e => {
+            if (readOnly) return;
             if (pickToken && onPickFormulaCell(e, idx, campo, pickToken)) return;
           }}
         >
-          <input
+          {marcasCelula(idx, campo)}
+          <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder="0"
+            placeholder="0,00"
             value={valorExibicaoCalc(draftKey, formula, exibir)}
+            segmentos={segmentosDaCelula(campo, valorExibicaoCalc(draftKey, formula, exibir))}
             disabled={readOnly}
             onFocus={() => {
               if (readOnly) return;
-              focarCalc(draftKey, formula, exibir);
+              focarCalc(draftKey);
             }}
+            onDoubleClick={() => entrarNoCalculo(draftKey, formula, exibir)}
             onChange={e => {
               if (readOnly) return;
               handleCalcChange(draftKey, e.target.value, persistir, rowCtx);
             }}
             onKeyDown={handleCalcKeyDown}
-            onBlur={e =>
-              handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, persistir, rowCtx)
-            }
+            onBlur={() => sairCalc(draftKey, persistir, rowCtx)}
+            editando={draftKey in draftCalc}
+            onSubstituir={texto => handleCalcChange(draftKey, texto, persistir, rowCtx)}
+            onCopiar={() => copiarCelula(idx, campo)}
+            onColar={texto => colarCelula(idx, campo, texto)}
             className={`${inputCls} text-center`}
-            ref={bound.ref}
+            inputRef={bound.ref}
             onSelect={bound.onSelect}
             onKeyUp={bound.onKeyUp}
             onClick={bound.onClick}
+            onArrastarAbaixo={ateIdx =>
+              copiarFormulaParaBaixo(idx, campo, textoFonteCelula(draftKey, formula, exibir), ateIdx)
+            }
           />
         </td>
       );
     };
 
     const empolDraftKey = `${rowKey}|${idx}|empol`;
-    const empolFormatado =
-      empolVal === 0 ? '0' : empolVal === 1 ? '1' : formatMedicaoNumero(empolVal);
+    const empolFormatado = formatMedicaoCampo(Number(empolVal) || 0);
     const empolFormula = ln.formulas?.empolamento;
     const empolOnCommit = (n: number, formulaRaw: string) =>
       updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n), { formulaRaw });
     const empolBound = bindCalcInput(empolDraftKey, empolOnCommit, rowCtx);
-    const empolHighlight = pickCls('empol', '%');
+    const empolHighlight = destacaCelula('empol', '%');
 
     return (
       <tr
         key={idx}
+        data-linha-medicao={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
+        onMouseDown={marcarPressaoLinha}
         onClick={e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td className={tdFirstBody}>
-          <MemorialCampoLocal
-            committedValue={ln.descricao || ''}
-            onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
-            disabled={readOnly}
-            placeholder="Ex: COBERTURA DAS CALDEIRAS"
-            className={`${inputCls} !px-3 text-left sm:!px-3.5`}
-          />
+        <td className={tdFirstBody} data-col-medicao={0}>
+          {marcasCelula(idx, 'descricao')}
+          <div className={caixaFocoDescricaoCls}>
+            <MemorialCampoLocal
+              committedValue={ln.descricao || ''}
+              onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
+              disabled={readOnly}
+              title={linhaVinculada ? 'Vem da memória de origem. Apague para voltar ao automático.' : undefined}
+              placeholder="Ex: COBERTURA DAS CALDEIRAS"
+              className={`${inputCls} !px-3 text-left sm:!px-3.5`}
+              inputRef={el => {
+                descInputRefs.current[idx] = el;
+              }}
+              onKeyDown={handleDescricaoKeyDown(idx)}
+              onPaste={colarNaDescricao(idx)}
+            />
+          </div>
         </td>
         {renderDim('C')}
         {renderDim('L')}
         {renderDim('H')}
         <td
           className={`${tdRestBody} text-center ${empolHighlight}`}
-          onMouseDown={e => {
+          data-col-medicao={COLUNAS_MEDICAO.indexOf('empol')}
+          onMouseDownCapture={e => {
             if (readOnly) return;
             if (onPickFormulaCell(e, idx, 'empol', '%')) return;
           }}
         >
-          <input
+          {marcasCelula(idx, 'empol')}
+          <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder="1"
+            placeholder="0,00"
             value={valorExibicaoCalc(empolDraftKey, empolFormula, empolFormatado)}
+            segmentos={segmentosDaCelula('empol', valorExibicaoCalc(empolDraftKey, empolFormula, empolFormatado))}
             disabled={readOnly}
             onFocus={() => {
               if (readOnly) return;
-              focarCalc(empolDraftKey, empolFormula, empolFormatado);
+              focarCalc(empolDraftKey);
             }}
+            onDoubleClick={() => entrarNoCalculo(empolDraftKey, empolFormula, empolFormatado)}
             onChange={e => {
               if (readOnly) return;
               handleCalcChange(empolDraftKey, e.target.value, empolOnCommit, rowCtx);
             }}
             onKeyDown={handleCalcKeyDown}
-            onBlur={e =>
-              handleCalcBlur(
-                empolDraftKey,
-                draftCalc[empolDraftKey] ?? e.target.value,
-                empolOnCommit,
-                rowCtx
-              )
-            }
+            onBlur={() => sairCalc(empolDraftKey, empolOnCommit, rowCtx)}
+            editando={empolDraftKey in draftCalc}
+            onSubstituir={texto => handleCalcChange(empolDraftKey, texto, empolOnCommit, rowCtx)}
+            onCopiar={() => copiarCelula(idx, 'empol')}
+            onColar={texto => colarCelula(idx, 'empol', texto)}
             className={`${inputCls} text-center`}
-            title={empolFormula ? `Fórmula: ${empolFormula}` : undefined}
-            ref={empolBound.ref}
+            title={
+              linhaVinculada
+                ? 'Vem da memória de origem. Apague para voltar ao automático.'
+                : empolFormula
+                  ? `Fórmula: ${empolFormula}`
+                  : undefined
+            }
+            inputRef={empolBound.ref}
             onSelect={empolBound.onSelect}
             onKeyUp={empolBound.onKeyUp}
             onClick={empolBound.onClick}
+            onArrastarAbaixo={ateIdx =>
+              copiarFormulaParaBaixo(
+                idx,
+                'empol',
+                textoFonteCelula(empolDraftKey, empolFormula, empolFormatado),
+                ateIdx
+              )
+            }
           />
         </td>
         {renderDim('N')}
@@ -1025,37 +2694,33 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const renderLinhaTotalMedicao = () => {
     const linhas = (linhasEfetivas ?? []).filter(ln => !ln.cabecalhoSecao);
-    const fmt = (n: number) =>
-      n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-    const totalA = linhas.reduce((s, ln) => s + calcA(ln), 0);
-    const totalV = linhas.reduce((s, ln) => s + calcV(ln, tipo), 0);
     const totalSub = linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipo), 0);
-    const mostraA = true;
-    const mostraV = true;
-    const celulaTot = (mostrar: boolean, valor: number, title: string) =>
-      mostrar ? (
-        <td className={tdCalc} title={title}>
-          {fmt(valor)}
-        </td>
-      ) : (
-        celulaVazia()
-      );
+    const marcaSub = (() => {
+      const formula = pickApi?.session?.formula;
+      if (!formula || !formulaReferenciaCelula(formula, itemRotulo, 'T', 'SUB')) return '';
+      return classeCelulaFormula(formula, chaveTokenExterno(itemRotulo, 'T', 'SUB'));
+    })();
+    const podeEscolherSub = Boolean(pickApi?.session) && !marcaSub;
+    const corItemClasse = estiloTitulo ? '' : 'bg-red-600 text-white dark:bg-red-950/90';
     return (
       <tr className={gradeTableRowTrCls}>
-        <td className={tdFirst}>
+        <td colSpan={8} className={`${tdFirst} !border-r-0`}>
           <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
             Total
           </span>
         </td>
-        {celulaVazia()}
-        {celulaVazia()}
-        {celulaVazia()}
-        {celulaVazia()}
-        {celulaVazia()}
-        {celulaTot(mostraA, totalA, 'Área total (m²)')}
-        {celulaTot(mostraV, totalV, 'Volume total (m³)')}
-        <td className={tdCalc} title="Quantidade total">
-          {fmt(totalSub)}
+        <td
+          className={`${tdCalc} !border-l border-gray-200 dark:border-gray-600 ${
+            marcaSub || corItemClasse
+          } ${podeEscolherSub ? 'cursor-cell' : ''}`}
+          style={marcaSub ? undefined : estiloTitulo}
+          title="Quantidade total"
+          onMouseDownCapture={e => {
+            if (readOnly) return;
+            onPickFormulaCell(e, 'T', 'subtotal', 'SUB');
+          }}
+        >
+          {formatMedicaoCentavos(totalSub)}
         </td>
       </tr>
     );
@@ -1069,13 +2734,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const tabelaEnvoltorio = (children: React.ReactNode) => (
     <div
+      ref={tabelaWrapRef}
+      onMouseDown={iniciarSelecaoFaixa}
       className={
         embedded
           ? 'overflow-hidden bg-white dark:bg-gray-900'
           : 'overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
       }
     >
-      <div className="overflow-x-auto">
+      <div ref={tabelaScrollRef} className="relative overflow-x-auto">
       <table
         className={`w-full min-w-[56rem] table-fixed border-separate border-spacing-0 text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}
       >
@@ -1087,6 +2754,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         </colgroup>
         {children}
       </table>
+      {selecaoVisivel ? (
+        <ContornoFaixa faixa={selecaoVisivel} tipo="selecao" raizRef={tabelaScrollRef} />
+      ) : null}
+      {copiaVisivel ? (
+        <ContornoFaixa faixa={copiaVisivel} tipo="copia" raizRef={tabelaScrollRef} />
+      ) : null}
       </div>
     </div>
   );
@@ -1102,6 +2775,54 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {body}
       </div>
       {readOnly ? null : portalMenuCtxMedicao}
+      {modalMemoriasAberto && onMemoriasIncluidasChange ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setModalMemoriasAberto(false)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`incluir-memoria-${rowKey}`}
+            className="relative mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800"
+          >
+            <h3
+              id={`incluir-memoria-${rowKey}`}
+              className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+            >
+              Incluir memória de cálculo
+            </h3>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              Cada composição marcada entra como uma linha, no formato item - descrição, com os totais dela.
+            </p>
+            <div className="mt-4">
+              <MultiSelectSearchDropdown
+                menuInline
+                listMaxHeight={280}
+                placeholder="Selecione as memórias"
+                searchPlaceholder="Buscar composição..."
+                emptyOptionsMessage="Nenhuma outra memória neste orçamento."
+                options={memoriasDisponiveis.map((m) => ({
+                  value: m.key,
+                  label: `${m.rotulo} - ${m.descricao || 'Sem descrição'}`,
+                  searchText: `${m.rotulo} ${m.descricao}`,
+                }))}
+                selected={linhasEfetivas
+                  .map((ln) => ln.origemMemoriaKey)
+                  .filter((k): k is string => Boolean(k))}
+                onChange={onMemoriasIncluidasChange}
+              />
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalMemoriasAberto(false)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      ) : null}
     </>
   );
 

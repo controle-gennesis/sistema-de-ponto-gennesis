@@ -37,6 +37,28 @@ export interface LinhaMedicao {
   tipoOrigemMedicao?: TipoUnidadeFormula;
   /** Linha gerada pela agregação automática da carga (não é detalhe por medição). */
   linhaAgregadaCarga?: boolean;
+  /** Memória de outra composição incluída nesta grade (chave do item de origem). */
+  origemMemoriaKey?: string;
+  /** Totais automáticos da memória de origem. Apagar a célula volta a estes números. */
+  autoMemoria?: {
+    descricao: string;
+    C: number;
+    L: number;
+    H: number;
+    N: number;
+    empolamento: number;
+    a: number;
+    v: number;
+    subtotal: number;
+  };
+  /** Campos que o usuário editou nesta linha incluída. Sem a marca, o campo segue o automático. */
+  overrideMemoria?: Partial<
+    Record<'descricao' | 'C' | 'L' | 'H' | 'N' | 'empolamento' | 'a' | 'v' | 'subtotal', true>
+  >;
+  /** Área total da composição de origem, exibida na coluna A. */
+  aManual?: number;
+  /** Volume total da composição de origem, exibido na coluna V. */
+  vManual?: number;
   editavelC?: boolean;
   editavelL?: boolean;
   editavelH?: boolean;

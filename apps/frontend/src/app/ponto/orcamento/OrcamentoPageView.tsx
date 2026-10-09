@@ -121,7 +121,7 @@ import {
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
+import { MemorialFormulaPickProvider, OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
 import {
@@ -159,12 +159,17 @@ import {
   planilhaTipoVazioCls
 } from './orcamentoGradeCellClasses';
 import {
-  calcA,
-  calcV,
+  areaExibidaLinha,
   calcularQuantidadeLinha,
   inferirTipoUnidadePorDimensao,
-  linhasMedicaoEfetivas
+  linhaMemoriaComPadraoUm,
+  linhasMedicaoEfetivas,
+  volumeExibidoLinha,
+  zerarPadraoUmLinha,
+  sincronizarLinhasMemoriaIncluidas,
+  snapshotMemoriaIncluida
 } from './orcamentoMedicaoCalc';
+import type { MetaMemoriaIncluida } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula, RotulosColunasMedicao } from './orcamentoMedicaoTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
@@ -6449,17 +6454,19 @@ function parseUnidadeComposicao(und: string | undefined): TipoUnidadeFormula | n
   return null;
 }
 
-/** Exibe unidade como m³ / m² / m / UN (igual à memória e à carga; M^3 do cadastro vira m³). */
+/** Exibe a unidade da composição. C, L e H da memória não trocam esse texto. */
 function unidadeComposicaoParaExibicao(und: string | undefined, tipoFallback: TipoUnidadeFormula): string {
-  const parsed = parseUnidadeComposicao(und);
-  const t = parsed ?? (tipoFallback !== 'un' ? tipoFallback : null);
-  if (t === 'm3') return 'm³';
-  if (t === 'm2') return 'm²';
-  if (t === 'm') return 'm';
-  if (t === 'un') return 'UN';
   const raw = und?.trim();
+  const parsed = parseUnidadeComposicao(raw);
+  if (parsed === 'm3') return 'm³';
+  if (parsed === 'm2') return 'm²';
+  if (parsed === 'm') return 'm';
+  if (parsed === 'un') return 'UN';
   if (raw) return raw;
-  return tipoFallback === 'm3' ? 'm³' : tipoFallback === 'm2' ? 'm²' : tipoFallback === 'm' ? 'm' : 'UN';
+  if (tipoFallback === 'm3') return 'm³';
+  if (tipoFallback === 'm2') return 'm²';
+  if (tipoFallback === 'm') return 'm';
+  return 'UN';
 }
 
 /** Verifica se a descrição indica composição de Carga Manual de Entulho (UI da memória). */
@@ -7512,6 +7519,8 @@ export function OrcamentoPageView({
   const autosaveProtecaoAvisadaRef = useRef<string | null>(null);
   const loadingFromApiRef = useRef(loadingFromApi);
   loadingFromApiRef.current = loadingFromApi;
+  const metaMemoriaIncluidaRef = useRef<Map<string, MetaMemoriaIncluida>>(new Map());
+  const seedMemoriaTokenRef = useRef('');
   const orcamentoPersistIdsRef = useRef<{
     centroCustoId: string | null;
     orcamentoId: string | null;
@@ -11985,6 +11994,51 @@ export function OrcamentoPageView({
     return m;
   }, [linhasAnaliticoOrcamento]);
 
+  /** Célula de outra memória na fórmula: `{1.1.2!3!A}` (linha 1-based da composição). */
+  const resolverFormulaMemoria = useCallback(
+    (rotulo: string, linha: number, campo: string): number | null => {
+      const rot = rotulo.trim();
+      if (!rot || !Number.isFinite(linha) || linha < 0) return null;
+      const alvo = itensCalculados.find(
+        r => (rotuloItemComposicaoPorKey.get(r.key) ?? '').trim() === rot
+      );
+      if (!alvo) return null;
+      const linhas = linhasMedicaoEfetivas(dimensoesPorItem[alvo.key]).filter(l => !l.cabecalhoSecao);
+      const tipo = alvo.tipoUnidade;
+      const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
+      const valorColuna = (ln: LinhaMedicao): number | null => {
+        if (col === 'C') return ln.C || 0;
+        if (col === 'L') return ln.L || 0;
+        if (col === 'H') return ln.H || 0;
+        if (col === 'N') return ln.N || 0;
+        if (col === '%') return Number(ln.empolamento) || 0;
+        if (col === 'A') return areaExibidaLinha(ln);
+        if (col === 'V') return volumeExibidoLinha(ln, tipo);
+        if (col === 'SUB') return calcularQuantidadeLinha(ln, tipo);
+        return null;
+      };
+      if (linha === 0) {
+        if (
+          col !== 'C' &&
+          col !== 'L' &&
+          col !== 'H' &&
+          col !== 'N' &&
+          col !== '%' &&
+          col !== 'A' &&
+          col !== 'V' &&
+          col !== 'SUB'
+        ) {
+          return null;
+        }
+        return linhas.reduce((s, ln) => s + (valorColuna(ln) ?? 0), 0);
+      }
+      const ln = linhas[linha - 1];
+      if (!ln || ln.cabecalhoSecao) return null;
+      return valorColuna(ln);
+    },
+    [itensCalculados, rotuloItemComposicaoPorKey, dimensoesPorItem]
+  );
+
   const linhasCronograma = useMemo((): CronogramaLinhaServico[] => {
     type Acc = CronogramaLinhaServico & { blocosMap: Map<string, CronogramaLinhaSubtitulo> };
     const map = new Map<string, Acc>();
@@ -13164,12 +13218,47 @@ export function OrcamentoPageView({
     });
   }, []);
 
+  metaMemoriaIncluidaRef.current = (() => {
+    const meta = new Map<string, MetaMemoriaIncluida>();
+    for (const row of itensCalculados) {
+      meta.set(row.key, {
+        tipo: row.tipoUnidade,
+        rotulo: rotuloItemComposicaoPorKey.get(row.key) ?? '',
+        descricao: (row.item.descricao || '').trim(),
+      });
+    }
+    return meta;
+  })();
+
+  /** Atualiza linhas incluídas no mesmo setState, sem efeito que grave de novo a cada render. */
+  const aplicarVinculosMemoria = (prev: Record<string, DimensoesItem>) => {
+    let atual = prev;
+    let chaves: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const aplicado = sincronizarLinhasMemoriaIncluidas(atual, metaMemoriaIncluidaRef.current);
+      if (!aplicado) break;
+      atual = aplicado.next;
+      chaves = aplicado.chavesAlteradas;
+    }
+    if (atual !== prev && chaves.length > 0) {
+      const dims = atual;
+      const keys = chaves;
+      queueMicrotask(() => {
+        for (const key of keys) {
+          const dim = dims[key];
+          if (dim) syncQuantidadeOrcamentoDaMemoria(key, dim);
+        }
+      });
+    }
+    return atual;
+  };
+
   const setDimensoesItem = (itemKey: string, d: DimensoesItem | null) => {
     if (!d) {
       setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });
       return;
     }
-    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: d }));
+    setDimensoesPorItem(prev => aplicarVinculosMemoria({ ...prev, [itemKey]: d }));
     syncQuantidadeOrcamentoDaMemoria(itemKey, d);
   };
 
@@ -13181,7 +13270,7 @@ export function OrcamentoPageView({
       prevDim,
       rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
     );
-    const linhaVazia = () => ({ descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 });
+    const linhaVazia = () => ({ descricao: '', C: 0, L: 0, H: 0, N: 0, empolamento: 0 });
     const linhas = [...atual.linhas];
     if (
       inserirAposIdx !== undefined &&
@@ -13195,10 +13284,79 @@ export function OrcamentoPageView({
       linhas.push(linhaVazia());
     }
     const nextDim = { ...atual, linhas };
-    setDimensoesPorItem(prev => ({
+    setDimensoesPorItem(prev => aplicarVinculosMemoria({
       ...prev,
       [itemKey]: nextDim
     }));
+    syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
+  };
+
+  const inserirLinhasMedicao = (itemKey: string, aposIdx: number, quantidade: number) => {
+    if (gradeTravadaRef.current || quantidade <= 0) return;
+    const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
+    const fallback = rowTipo && rowTipo !== 'un' ? rowTipo : 'm3';
+    const linhaVazia = (): LinhaMedicao => ({ descricao: '', C: 0, L: 0, H: 0, N: 0, empolamento: 0 });
+    setDimensoesPorItem(prev => {
+      const atual = dimensoesComLinhasEfetivas(prev[itemKey], fallback);
+      const linhas = [...atual.linhas];
+      const novas = Array.from({ length: quantidade }, linhaVazia);
+      const em = aposIdx + 1;
+      if (em >= 0 && em <= linhas.length) linhas.splice(em, 0, ...novas);
+      else linhas.push(...novas);
+      return aplicarVinculosMemoria({ ...prev, [itemKey]: { ...atual, linhas } });
+    });
+  };
+
+  const definirMemoriasIncluidas = (itemKey: string, chaves: string[]) => {
+    if (gradeTravadaRef.current) return;
+    const escolhidas = new Set(chaves.filter((k) => k && k !== itemKey));
+    const rowTipo = itensCalculados.find((r) => r.key === itemKey)?.tipoUnidade;
+    const prevDim = dimensoesPorItem[itemKey];
+    const atual = dimensoesComLinhasEfetivas(
+      prevDim,
+      rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
+    );
+    const mantidas = atual.linhas.filter(
+      (ln) => !ln.origemMemoriaKey || escolhidas.has(ln.origemMemoriaKey)
+    );
+    const jaIncluidas = new Set(
+      mantidas.map((ln) => ln.origemMemoriaKey).filter((k): k is string => Boolean(k))
+    );
+    const metaMemoria = new Map<string, MetaMemoriaIncluida>();
+    for (const row of itensCalculados) {
+      metaMemoria.set(row.key, {
+        tipo: row.tipoUnidade,
+        rotulo: rotuloItemComposicaoPorKey.get(row.key) ?? '',
+        descricao: (row.item.descricao || '').trim(),
+      });
+    }
+    const novas: LinhaMedicao[] = [];
+    for (const origemKey of escolhidas) {
+      if (jaIncluidas.has(origemKey)) continue;
+      const snap = snapshotMemoriaIncluida(
+        origemKey,
+        dimensoesPorItem,
+        metaMemoria,
+        new Set([itemKey])
+      );
+      if (!snap) continue;
+      novas.push({
+        descricao: snap.descricao,
+        origemMemoriaKey: origemKey,
+        origemComposicaoRotulo: snap.origemComposicaoRotulo,
+        origemComposicaoDescricao: snap.origemComposicaoDescricao,
+        C: snap.C,
+        L: snap.L,
+        H: snap.H,
+        N: snap.N,
+        empolamento: 1,
+        aManual: snap.aManual,
+        vManual: snap.vManual,
+        subtotalManual: snap.subtotalManual,
+      });
+    }
+    const nextDim = { ...atual, linhas: [...mantidas, ...novas] };
+    setDimensoesPorItem((prev) => aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim }));
     syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
   };
 
@@ -13216,8 +13374,8 @@ export function OrcamentoPageView({
       C: 0,
       L: 0,
       H: 0,
-      N: 1,
-      empolamento: 1
+      N: 0,
+      empolamento: 0
     };
     const linhas = [...atual.linhas];
     if (
@@ -13230,7 +13388,7 @@ export function OrcamentoPageView({
       linhas.push(novaLinha);
     }
     const nextDim = { ...atual, linhas };
-    setDimensoesPorItem(prev => ({
+    setDimensoesPorItem(prev => aplicarVinculosMemoria({
       ...prev,
       [itemKey]: nextDim
     }));
@@ -13245,13 +13403,99 @@ export function OrcamentoPageView({
     opts?: { formulaRaw?: string }
   ) => {
     if (gradeTravadaRef.current) return;
-    startTransition(() => {
-      setDimensoesPorItem(prev => {
-        const base = prev[itemKey];
-        const linhasBase = linhasMedicaoEfetivas(base);
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey];
+      const linhasBase = linhasMedicaoEfetivas(base);
         if (!linhasBase[idx]) return prev;
         const atual = dimensoesComLinhasEfetivas(base, 'un');
         const novaLinhas = [...atual.linhas];
+        const linhaVinculada = novaLinhas[idx];
+        if (linhaVinculada?.origemMemoriaKey) {
+          const campoOv =
+            campo === 'descricao' ||
+            campo === 'C' ||
+            campo === 'L' ||
+            campo === 'H' ||
+            campo === 'N' ||
+            campo === 'empolamento'
+              ? campo
+              : campo === 'aManual'
+                ? 'a'
+                : campo === 'vManual'
+                  ? 'v'
+                  : campo === 'subtotalManual'
+                    ? 'subtotal'
+                    : null;
+          if (campoOv) {
+            const auto = linhaVinculada.autoMemoria;
+            const texto = String(campo === 'descricao' ? valor : (opts?.formulaRaw ?? '')).trim();
+            const override = { ...(linhaVinculada.overrideMemoria ?? {}) };
+            const numero = typeof valor === 'number' ? valor : parseFloat(String(valor));
+            const autoNumero = () => {
+              if (!auto || campoOv === 'descricao') return null;
+              if (campoOv === 'a') return auto.a;
+              if (campoOv === 'v') return auto.v;
+              if (campoOv === 'subtotal') return auto.subtotal;
+              return auto[campoOv];
+            };
+            const baseAuto = autoNumero();
+            const igualAuto =
+              !!auto &&
+              !texto.startsWith('=') &&
+              (campoOv === 'descricao'
+                ? texto === auto.descricao
+                : baseAuto != null && Number.isFinite(numero) && Math.abs(numero - baseAuto) < 1e-6);
+            const limpar = texto === '' || texto === '=';
+            const updated: LinhaMedicao = { ...linhaVinculada };
+            if (limpar || igualAuto) {
+              delete override[campoOv];
+              if (auto) {
+                if (campoOv === 'descricao') updated.descricao = auto.descricao;
+                else if (campoOv === 'C') updated.C = auto.C;
+                else if (campoOv === 'L') updated.L = auto.L;
+                else if (campoOv === 'H') updated.H = auto.H;
+                else if (campoOv === 'N') updated.N = auto.N;
+                else if (campoOv === 'empolamento') updated.empolamento = auto.empolamento;
+                else if (campoOv === 'a') updated.aManual = auto.a;
+                else if (campoOv === 'v') updated.vManual = auto.v;
+                else updated.subtotalManual = auto.subtotal;
+              }
+            } else {
+              override[campoOv] = true;
+              const n = Number.isFinite(numero) ? numero : 0;
+              if (campoOv === 'descricao') updated.descricao = String(valor);
+              else if (campoOv === 'C') updated.C = n;
+              else if (campoOv === 'L') updated.L = n;
+              else if (campoOv === 'H') updated.H = n;
+              else if (campoOv === 'N') updated.N = n;
+              else if (campoOv === 'empolamento') updated.empolamento = n;
+              else if (campoOv === 'a') updated.aManual = n;
+              else if (campoOv === 'v') updated.vManual = n;
+              else updated.subtotalManual = n;
+            }
+            const formulaCampo =
+              campoOv === 'C' || campoOv === 'L' || campoOv === 'H' || campoOv === 'N' || campoOv === 'empolamento'
+                ? campoOv
+                : campoOv === 'subtotal'
+                  ? 'subtotalManual'
+                  : campoOv === 'a' || campoOv === 'v'
+                    ? 'valorManual'
+                    : null;
+            if (formulaCampo) {
+              const formulas = { ...(updated.formulas ?? {}) };
+              if (!limpar && !igualAuto && texto.startsWith('=')) formulas[formulaCampo] = texto;
+              else delete formulas[formulaCampo];
+              updated.formulas = Object.keys(formulas).length > 0 ? formulas : undefined;
+            }
+            updated.overrideMemoria = Object.keys(override).length > 0 ? override : undefined;
+            novaLinhas[idx] = updated;
+            const nextDim = { ...atual, linhas: novaLinhas };
+            if (campo !== 'descricao') {
+              queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
+            }
+            return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+          }
+        }
         const limparSubtotal =
           campo === 'subtotalManual' && (valor === '' || (typeof valor === 'number' && !Number.isFinite(valor)));
         const limparValorManual =
@@ -13279,6 +13523,8 @@ export function OrcamentoPageView({
           campo === 'valorManual'
         ) {
           updated.subtotalManual = undefined;
+          updated.aManual = undefined;
+          updated.vManual = undefined;
         }
         const campoFormula =
           campo === 'C' ||
@@ -13330,14 +13576,11 @@ export function OrcamentoPageView({
         }
         novaLinhas[idx] = updated;
         const nextDim = { ...atual, linhas: novaLinhas };
-        // Sync dentro do updater: com startTransition o updater pode não rodar
-        // sincronamente — ler nextDimSync “depois” do setState falhava e a qtd ficava 0.
         if (campo !== 'descricao') {
           queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
         }
-        return { ...prev, [itemKey]: nextDim };
+        return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
       });
-    });
   }, [syncQuantidadeOrcamentoDaMemoria]);
 
   const updateRotuloColunaMedicao = (
@@ -13618,7 +13861,11 @@ export function OrcamentoPageView({
     const atual = dimensoesComLinhasEfetivas(prevDim, 'un');
     const novaLinhas = atual.linhas.filter((_, i) => i !== idx);
     if (novaLinhas.length === 0) {
-      setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });
+      setDimensoesPorItem(prev => {
+        const n = { ...prev };
+        delete n[itemKey];
+        return aplicarVinculosMemoria(n);
+      });
       setQuantidadesPorItem(prev => {
         if (!Object.prototype.hasOwnProperty.call(prev, itemKey)) return prev;
         const n = { ...prev };
@@ -13627,7 +13874,7 @@ export function OrcamentoPageView({
       });
     } else {
       const nextDim = { ...atual, linhas: novaLinhas };
-      setDimensoesPorItem(prev => ({ ...prev, [itemKey]: nextDim }));
+      setDimensoesPorItem(prev => aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim }));
       syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
     }
   };
@@ -13964,8 +14211,53 @@ export function OrcamentoPageView({
     }
   }, [fichaDemandaOnly, orcamentoViewTab, statusAprovacaoAtivo]);
 
+  const memoriaTemPadraoUm = useMemo(
+    () => Object.values(dimensoesPorItem).some((dim) => dim?.linhas?.some(linhaMemoriaComPadraoUm)),
+    [dimensoesPorItem]
+  );
+
+  useEffect(() => {
+    if (loadingFromApi || gradeTravada || !memoriaTemPadraoUm) return;
+    setDimensoesPorItem((prev) => {
+      const keys: string[] = [];
+      const next = { ...prev };
+      let changed = false;
+      for (const key of Object.keys(prev)) {
+        const dim = prev[key];
+        if (!dim?.linhas?.length) continue;
+        let rowChanged = false;
+        const linhas = dim.linhas.map((ln) => {
+          const z = zerarPadraoUmLinha(ln);
+          if (z !== ln) rowChanged = true;
+          return z;
+        });
+        if (!rowChanged) continue;
+        changed = true;
+        next[key] = { ...dim, linhas };
+        keys.push(key);
+      }
+      if (!changed) return prev;
+      const vinculado = aplicarVinculosMemoria(next);
+      queueMicrotask(() => {
+        for (const key of keys) {
+          const dim = vinculado[key];
+          if (dim) syncQuantidadeOrcamentoDaMemoria(key, dim);
+        }
+      });
+      return vinculado;
+    });
+  }, [loadingFromApi, gradeTravada, memoriaTemPadraoUm, syncQuantidadeOrcamentoDaMemoria]);
+
   useEffect(() => {
     if (loadingFromApi || gradeTravada || !memorialDisponivel || !orcamentoAtivoId) return;
+    const token = `${orcamentoAtivoId}:${itensCalculados.map((row) => row.key).join('\n')}`;
+    if (seedMemoriaTokenRef.current === token) return;
+    const faltam = itensCalculados.some((row) => {
+      if (ehComposicaoCargaEntulho(row.item.descricao)) return false;
+      return linhasMedicaoEfetivas(dimensoesPorItem[row.key]).length === 0;
+    });
+    seedMemoriaTokenRef.current = token;
+    if (!faltam) return;
     setDimensoesPorItem((prev) => {
       let changed = false;
       const next = { ...prev };
@@ -13981,13 +14273,14 @@ export function OrcamentoPageView({
             C: 0,
             L: 0,
             H: 0,
-            N: 1,
-            empolamento: 1,
+            N: 0,
+            empolamento: 0,
           })),
         };
         changed = true;
       }
-      return changed ? next : prev;
+      if (!changed) return prev;
+      return aplicarVinculosMemoria(next);
     });
   }, [
     loadingFromApi,
@@ -13995,7 +14288,6 @@ export function OrcamentoPageView({
     memorialDisponivel,
     orcamentoAtivoId,
     itensCalculados,
-    dimensoesPorItem,
   ]);
 
   useEffect(() => {
@@ -14402,11 +14694,11 @@ export function OrcamentoPageView({
             ((ln as unknown as { percPerda?: number }).percPerda != null
               ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100
               : 0);
-          const empol = empolRaw != null && empolRaw > 0 ? empolRaw : 1;
+          const empol = Number(empolRaw) || 0;
           const tipo = tipoAuto;
-          const n = ln.N && ln.N > 0 ? ln.N : 1;
-          const a = calcA(ln);
-          const v = calcV(ln, tipo);
+          const n = ln.N || 0;
+          const a = areaExibidaLinha(ln);
+          const v = volumeExibidoLinha(ln, tipo);
           const sub = calcularQuantidadeLinha(ln, tipo);
           totalA += a;
           totalV += v;
@@ -16898,6 +17190,7 @@ export function OrcamentoPageView({
                         className={`space-y-5 bg-transparent${gradeTravada ? ' pointer-events-none select-none' : ''}`}
                         aria-disabled={gradeTravada || undefined}
                       >
+                        <MemorialFormulaPickProvider>
                         {(() => {
                           const idxPorKey = new Map(
                             itensMemoriaCalculoLista.map((r, i) => [r.key, i] as const)
@@ -16993,6 +17286,7 @@ export function OrcamentoPageView({
                                                 updateObservacaoMedicao(row.key, texto)
                                               }
                                               addLinhaMedicao={addLinhaMedicao}
+                                              inserirLinhasMedicao={inserirLinhasMedicao}
                                               addLinhaCabecalhoSecaoMedicao={
                                                 addLinhaCabecalhoSecaoMedicao
                                               }
@@ -17003,6 +17297,19 @@ export function OrcamentoPageView({
                                               )}
                                               readOnly={gradeTravada}
                                               embedded
+                                              memoriasDisponiveis={itensMemoriaCalculoLista
+                                                .filter((m) => m.key !== row.key)
+                                                .map((m, i) => ({
+                                                  key: m.key,
+                                                  rotulo:
+                                                    rotuloItemComposicaoPorKey.get(m.key) ??
+                                                    String(i + 1),
+                                                  descricao: m.item.descricao || '',
+                                                }))}
+                                              onMemoriasIncluidasChange={(chaves) =>
+                                                definirMemoriasIncluidas(row.key, chaves)
+                                              }
+                                              resolverFormulaExterna={resolverFormulaMemoria}
                                             />
                                           </div>
                                         );
@@ -17015,6 +17322,7 @@ export function OrcamentoPageView({
                             );
                           });
                         })()}
+                        </MemorialFormulaPickProvider>
                       </div>
                     )}
                   </div>

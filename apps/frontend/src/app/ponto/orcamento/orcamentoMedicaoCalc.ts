@@ -39,8 +39,28 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
       return Number(linha.N) || 0;
     }
     default:
-      return 1;
+      return 0;
   }
+}
+
+/** Linha em branco que ainda traz o padrão antigo: N = 1 e % = 1. */
+export function linhaMemoriaComPadraoUm(ln: LinhaMedicao): boolean {
+  if (ln.cabecalhoSecao || ln.origemMemoriaKey) return false;
+  if ((ln.descricao || '').trim()) return false;
+  if ((ln.C || 0) !== 0 || (ln.L || 0) !== 0 || (ln.H || 0) !== 0) return false;
+  if (ln.aManual != null || ln.vManual != null || ln.subtotalManual != null || ln.valorManual != null) {
+    return false;
+  }
+  if (ln.formulas && Object.values(ln.formulas).some((v) => v != null && String(v).trim() !== '')) {
+    return false;
+  }
+  if (ln.overrideMemoria && Object.values(ln.overrideMemoria).some(Boolean)) return false;
+  return ln.N === 1 && (ln.empolamento == null || ln.empolamento === 1);
+}
+
+export function zerarPadraoUmLinha(ln: LinhaMedicao): LinhaMedicao {
+  if (!linhaMemoriaComPadraoUm(ln)) return ln;
+  return { ...ln, N: 0, empolamento: 0 };
 }
 
 /** Calcula SUBTOTAL = V × empolamento. Se C,L,H vazios e valorManual preenchido, usa valorManual. */
@@ -66,7 +86,10 @@ export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFo
       return linha.valorManual * fator;
     }
   }
-  return calcV(linha, tipo) * fator;
+  if (linha.vManual != null && Number.isFinite(linha.vManual)) {
+    return linha.vManual * fator;
+  }
+  return 0;
 }
 
 /** Converte a lista antiga de UN (local + quantidade) para o mesmo formato das outras unidades. */
@@ -78,7 +101,7 @@ export function linhasContagemParaMedicao(linhas: LinhaContagem[] | undefined): 
     L: 0,
     H: 0,
     N: Number.isFinite(ln.quantidade) ? ln.quantidade : 0,
-    empolamento: 1
+    empolamento: 0
   }));
 }
 
@@ -91,6 +114,230 @@ export function linhasMedicaoEfetivas(dim: { linhas?: LinhaMedicao[]; linhasCont
 export function calcularQuantidadeContagem(linhas: LinhaContagem[] | undefined): number {
   if (!linhas?.length) return 0;
   return linhas.reduce((s, ln) => s + (Number.isFinite(ln.quantidade) ? ln.quantidade : 0), 0);
+}
+
+export type CampoExplicacaoMedicao = 'C' | 'L' | 'H' | 'N';
+
+/** Área mostrada na célula: valor digitado, fórmula ou total da carga. Sem conta automática de C×L×N. */
+export function areaExibidaLinha(linha: LinhaMedicao): number {
+  if (linha.cabecalhoSecao) return 0;
+  if (linha.aManual != null && Number.isFinite(linha.aManual)) return linha.aManual;
+  if (linha.valorManual != null && Number.isFinite(linha.valorManual)) return linha.valorManual;
+  const tipoOrig = linha.tipoOrigemMedicao ?? 'm3';
+  if (linha.linhaAgregadaCarga && tipoOrig === 'm2' && linha.volumeM3BrutoSomado != null) {
+    return linha.volumeM3BrutoSomado;
+  }
+  return 0;
+}
+
+/** Volume mostrado na célula: valor digitado, fórmula ou total da carga. Sem conta automática. */
+export function volumeExibidoLinha(linha: LinhaMedicao, _tipo: TipoUnidadeFormula): number {
+  if (linha.cabecalhoSecao) return 0;
+  if (linha.vManual != null && Number.isFinite(linha.vManual)) return linha.vManual;
+  if (linha.valorManual != null && Number.isFinite(linha.valorManual)) return linha.valorManual;
+  const tipoOrig = linha.tipoOrigemMedicao ?? 'm3';
+  if (linha.linhaAgregadaCarga && linha.volumeM3BrutoSomado != null) {
+    if (tipoOrig === 'm2') return linha.volumeM3BrutoSomado * (linha.H || 0);
+    if (tipoOrig === 'm3') return linha.volumeM3BrutoSomado;
+  }
+  return 0;
+}
+
+export type MetaMemoriaIncluida = {
+  tipo: TipoUnidadeFormula;
+  rotulo: string;
+  descricao: string;
+};
+
+export type SnapshotMemoriaIncluida = {
+  descricao: string;
+  origemComposicaoRotulo: string;
+  origemComposicaoDescricao: string;
+  C: number;
+  L: number;
+  H: number;
+  N: number;
+  aManual: number;
+  vManual: number;
+  subtotalManual: number;
+};
+
+type DimensoesParaSnapshot = {
+  linhas?: LinhaMedicao[];
+  linhasContagem?: LinhaContagem[];
+};
+
+function numeroMemoriaIgual(atual: number | undefined, proximo: number): boolean {
+  const n = Number(atual);
+  if (!Number.isFinite(n)) return proximo === 0;
+  return Math.abs(n - proximo) < 1e-6;
+}
+
+/**
+ * Totais atuais de uma memória, para a linha que a inclui em outra composição.
+ * Memórias incluídas dentro da origem entram com o valor ao vivo. Ciclo é ignorado.
+ */
+export function snapshotMemoriaIncluida(
+  origemKey: string,
+  dimensoes: Record<string, DimensoesParaSnapshot | undefined>,
+  metaPorKey: ReadonlyMap<string, MetaMemoriaIncluida>,
+  visitando: ReadonlySet<string>
+): SnapshotMemoriaIncluida | null {
+  if (!origemKey || visitando.has(origemKey)) return null;
+  const meta = metaPorKey.get(origemKey);
+  if (!meta) return null;
+  const proximos = new Set(visitando);
+  proximos.add(origemKey);
+  const linhas = linhasMedicaoEfetivas(dimensoes[origemKey]).filter((ln) => !ln.cabecalhoSecao);
+  const tipo: TipoUnidadeFormula = meta.tipo || inferirTipoUnidadePorDimensao(linhas);
+  let C = 0;
+  let L = 0;
+  let H = 0;
+  let N = 0;
+  let aManual = 0;
+  let vManual = 0;
+  let subtotalManual = 0;
+  for (const ln of linhas) {
+    if (ln.origemMemoriaKey && proximos.has(ln.origemMemoriaKey)) continue;
+    C += ln.C || 0;
+    L += ln.L || 0;
+    H += ln.H || 0;
+    N += ln.N || 0;
+    aManual += areaExibidaLinha(ln);
+    vManual += volumeExibidoLinha(ln, tipo);
+    subtotalManual += calcularQuantidadeLinha(ln, tipo);
+  }
+  const rotulo = meta.rotulo.trim();
+  const descricaoOrigem = meta.descricao.trim();
+  return {
+    descricao: [rotulo, descricaoOrigem].filter(Boolean).join(' - '),
+    origemComposicaoRotulo: rotulo,
+    origemComposicaoDescricao: descricaoOrigem,
+    C,
+    L,
+    H,
+    N,
+    aManual,
+    vManual,
+    subtotalManual,
+  };
+}
+
+function autoMemoriaDoSnapshot(snap: SnapshotMemoriaIncluida): NonNullable<LinhaMedicao['autoMemoria']> {
+  return {
+    descricao: snap.descricao,
+    C: snap.C,
+    L: snap.L,
+    H: snap.H,
+    N: snap.N,
+    empolamento: 1,
+    a: snap.aManual,
+    v: snap.vManual,
+    subtotal: snap.subtotalManual,
+  };
+}
+
+function formulasVinculoDesatualizadas(ln: LinhaMedicao): boolean {
+  const f = ln.formulas;
+  if (!f) return false;
+  const over = ln.overrideMemoria ?? {};
+  if (!over.C && f.C != null) return true;
+  if (!over.L && f.L != null) return true;
+  if (!over.H && f.H != null) return true;
+  if (!over.N && f.N != null) return true;
+  if (!over.empolamento && f.empolamento != null) return true;
+  if (!over.subtotal && f.subtotalManual != null) return true;
+  if (!over.a && !over.v && f.valorManual != null) return true;
+  return false;
+}
+
+function linhaMemoriaIncluidaMudou(ln: LinhaMedicao, snap: SnapshotMemoriaIncluida): boolean {
+  const auto = autoMemoriaDoSnapshot(snap);
+  const prev = ln.autoMemoria;
+  const over = ln.overrideMemoria ?? {};
+  if (!prev) return true;
+  if ((ln.origemComposicaoRotulo ?? '') !== snap.origemComposicaoRotulo) return true;
+  if ((ln.origemComposicaoDescricao ?? '') !== snap.origemComposicaoDescricao) return true;
+  if (prev.descricao !== auto.descricao) return true;
+  if (!numeroMemoriaIgual(prev.C, auto.C)) return true;
+  if (!numeroMemoriaIgual(prev.L, auto.L)) return true;
+  if (!numeroMemoriaIgual(prev.H, auto.H)) return true;
+  if (!numeroMemoriaIgual(prev.N, auto.N)) return true;
+  if (!numeroMemoriaIgual(prev.empolamento, auto.empolamento)) return true;
+  if (!numeroMemoriaIgual(prev.a, auto.a)) return true;
+  if (!numeroMemoriaIgual(prev.v, auto.v)) return true;
+  if (!numeroMemoriaIgual(prev.subtotal, auto.subtotal)) return true;
+  if (!over.descricao && (ln.descricao ?? '') !== auto.descricao) return true;
+  if (!over.C && !numeroMemoriaIgual(ln.C, auto.C)) return true;
+  if (!over.L && !numeroMemoriaIgual(ln.L, auto.L)) return true;
+  if (!over.H && !numeroMemoriaIgual(ln.H, auto.H)) return true;
+  if (!over.N && !numeroMemoriaIgual(ln.N, auto.N)) return true;
+  if (!over.empolamento && !numeroMemoriaIgual(ln.empolamento, auto.empolamento)) return true;
+  if (!over.a && !numeroMemoriaIgual(ln.aManual, auto.a)) return true;
+  if (!over.v && !numeroMemoriaIgual(ln.vManual, auto.v)) return true;
+  if (!over.subtotal && !numeroMemoriaIgual(ln.subtotalManual, auto.subtotal)) return true;
+  return formulasVinculoDesatualizadas(ln);
+}
+
+function aplicarSnapshotNaLinha(ln: LinhaMedicao, snap: SnapshotMemoriaIncluida): LinhaMedicao {
+  const auto = autoMemoriaDoSnapshot(snap);
+  const over = ln.overrideMemoria ?? {};
+  const formulas = { ...(ln.formulas ?? {}) };
+  if (!over.C) delete formulas.C;
+  if (!over.L) delete formulas.L;
+  if (!over.H) delete formulas.H;
+  if (!over.N) delete formulas.N;
+  if (!over.empolamento) delete formulas.empolamento;
+  if (!over.subtotal) delete formulas.subtotalManual;
+  if (!over.a && !over.v) delete formulas.valorManual;
+  return {
+    ...ln,
+    autoMemoria: auto,
+    origemComposicaoRotulo: snap.origemComposicaoRotulo,
+    origemComposicaoDescricao: snap.origemComposicaoDescricao,
+    descricao: over.descricao ? ln.descricao : auto.descricao,
+    C: over.C ? ln.C : auto.C,
+    L: over.L ? ln.L : auto.L,
+    H: over.H ? ln.H : auto.H,
+    N: over.N ? ln.N : auto.N,
+    empolamento: over.empolamento ? ln.empolamento : auto.empolamento,
+    aManual: over.a ? ln.aManual : auto.a,
+    vManual: over.v ? ln.vManual : auto.v,
+    subtotalManual: over.subtotal ? ln.subtotalManual : auto.subtotal,
+    formulas: Object.keys(formulas).length > 0 ? formulas : undefined,
+  };
+}
+
+/** Reescreve as linhas incluídas com os totais atuais da memória de origem. */
+export function sincronizarLinhasMemoriaIncluidas<T extends DimensoesParaSnapshot>(
+  dimensoes: Record<string, T>,
+  metaPorKey: ReadonlyMap<string, MetaMemoriaIncluida>
+): { next: Record<string, T>; chavesAlteradas: string[] } | null {
+  let changed = false;
+  const next: Record<string, T> = { ...dimensoes };
+  const chavesAlteradas: string[] = [];
+  for (const [itemKey, dim] of Object.entries(dimensoes)) {
+    const linhas = dim?.linhas;
+    if (!linhas?.some((ln) => ln.origemMemoriaKey)) continue;
+    let itemChanged = false;
+    const novas = linhas.map((ln) => {
+      if (!ln.origemMemoriaKey || ln.origemMemoriaKey === itemKey) return ln;
+      const snap = snapshotMemoriaIncluida(
+        ln.origemMemoriaKey,
+        dimensoes,
+        metaPorKey,
+        new Set([itemKey])
+      );
+      if (!snap || !linhaMemoriaIncluidaMudou(ln, snap)) return ln;
+      itemChanged = true;
+      return aplicarSnapshotNaLinha(ln, snap);
+    });
+    if (!itemChanged || !dim) continue;
+    changed = true;
+    next[itemKey] = { ...dim, linhas: novas };
+    chavesAlteradas.push(itemKey);
+  }
+  return changed ? { next, chavesAlteradas } : null;
 }
 
 export function inferirTipoUnidadePorDimensao(linhas: LinhaMedicao[] | undefined): TipoUnidadeFormula {
