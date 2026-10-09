@@ -12939,7 +12939,7 @@ export function OrcamentoPageView({
   }, []);
 
   useEffect(() => {
-    if (!orcamentoAtivoId || subtitulosAdicionados.length === 0) return;
+    if (!orcamentoAtivoId || (!cronogramaOnly && subtitulosAdicionados.length === 0)) return;
     const root = document.documentElement;
     let raf = 0;
     const sync = () => {
@@ -12966,7 +12966,7 @@ export function OrcamentoPageView({
       if (raf) window.cancelAnimationFrame(raf);
       root.style.removeProperty('--orc-footer-left');
     };
-  }, [orcamentoAtivoId, subtitulosAdicionados.length]);
+  }, [orcamentoAtivoId, subtitulosAdicionados.length, cronogramaOnly]);
 
   const irParaTopoDasAbas = useCallback(() => {
     const scroller = document.querySelector('.app-page-scroll');
@@ -15429,9 +15429,8 @@ export function OrcamentoPageView({
         <div
           className={
             orcamentoAtivoId
-              ? orcamentoViewTab === 'memorial' ||
-                orcamentoViewTab === 'cronograma' ||
-                cronogramaOnly
+              ? !cronogramaOnly &&
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
                 ? 'flex w-full min-w-0 flex-col'
                 : 'flex h-[calc(100dvh-6rem)] flex-col overflow-hidden lg:h-[calc(100dvh-8rem)]'
               : 'space-y-6'
@@ -15440,6 +15439,7 @@ export function OrcamentoPageView({
           {/* Teste: título e subtítulo da página ocultos temporariamente */}
 
           {orcamentoAtivoId &&
+            !cronogramaOnly &&
             orcamentoViewTab === 'cronograma' &&
             !loadingFromApi &&
             linhasCronograma.length > 0 && (
@@ -15893,9 +15893,8 @@ export function OrcamentoPageView({
             ) : (
             <div
               className={
-                orcamentoViewTab === 'memorial' ||
-                orcamentoViewTab === 'cronograma' ||
-                cronogramaOnly
+                !cronogramaOnly &&
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
                   ? 'flex w-full min-w-0 flex-col !animate-none [transform:none]'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !animate-none [transform:none]'
               }
@@ -15906,9 +15905,8 @@ export function OrcamentoPageView({
             <Card
               padding="none"
               className={
-                orcamentoViewTab === 'memorial' ||
-                orcamentoViewTab === 'cronograma' ||
-                cronogramaOnly
+                !cronogramaOnly &&
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
                   ? 'flex w-full min-w-0 flex-col !border-0 !bg-transparent shadow-none dark:!bg-transparent'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !border-0 !bg-transparent shadow-none dark:!bg-transparent'
               }
@@ -15919,9 +15917,8 @@ export function OrcamentoPageView({
             >
               <CardContent
                 className={
-                  orcamentoViewTab === 'memorial' ||
-                  orcamentoViewTab === 'cronograma' ||
-                  cronogramaOnly
+                  !cronogramaOnly &&
+                  (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
                     ? 'flex w-full min-w-0 flex-col !p-0 !pt-0'
                     : 'flex min-h-0 flex-1 flex-col overflow-hidden !p-0 !pt-0'
                 }
@@ -17413,7 +17410,7 @@ export function OrcamentoPageView({
 
 
                 {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
-                  <div className="flex w-full min-w-0 flex-col">
+                  <div className={cronogramaOnly ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'flex w-full min-w-0 flex-col'}>
                   {!orcamentoComCronograma(statusAprovacaoAtivo) ? (
                     <OrcamentoSecaoVazia
                       titulo="Cronograma ainda não criado"
@@ -17446,7 +17443,7 @@ export function OrcamentoPageView({
                       }}
                     />
                   ) : (
-                    <div className={`w-full min-w-0 ${gradeHideVerticalScrollbarCls}`}>
+                    <div className={cronogramaOnly ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : `w-full min-w-0 ${gradeHideVerticalScrollbarCls}`}>
                     <OrcamentoCronogramaPainel
                       linhas={linhasCronograma}
                       cronograma={cronograma}
@@ -17459,6 +17456,7 @@ export function OrcamentoPageView({
                         setMeta((m) => ({ ...m, dataEnvio }))
                       }
                       onExport={exportarCronogramaExcel}
+                      telaFixa={cronogramaOnly}
                     />
                     </div>
                   )}
@@ -18520,7 +18518,7 @@ export function OrcamentoPageView({
                 )}
               </CardContent>
             </Card>
-            {orcamentoAtivoId && !cronogramaOnly && (
+            {orcamentoAtivoId && (
               <div className="h-14 shrink-0" aria-hidden />
             )}
             </div>

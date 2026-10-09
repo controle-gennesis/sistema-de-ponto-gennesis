@@ -1,6 +1,8 @@
 import {
+  agregarDadosComposicoes,
   calcularStatusCronograma,
-  agregarDatasSubServicosNoServicoPai,
+  itemKeyComposicaoCronograma,
+  listarComposicoesCronogramaLinha,
   agruparSubServicosPorBloco,
   cronogramaUsaHierarquiaSubtitulos,
   diasEntre,
@@ -44,6 +46,8 @@ export type CronogramaResumo = {
 type EtapaCronogramaResumo = {
   servicoKey: string;
   subId?: string;
+  blocoKey?: string;
+  composicaoChave?: string;
   dados: CronogramaItemData;
   peso: number;
 };
@@ -114,14 +118,9 @@ function listarEtapasCronograma(
 ): EtapaCronogramaResumo[] {
   const etapas: EtapaCronogramaResumo[] = [];
   for (const linha of servicos) {
-    const subs = ordenarSubServicosSequenciaObra(
-      filtrarSubServicosOperacionaisCronograma(
-        linha,
-        listarSubServicos(cronograma, linha.servicoKey)
-      )
-    );
+    const comps = listarComposicoesCronogramaLinha(linha);
     const pesoBase = Math.max(linha.valorTotal, 1);
-    if (subs.length === 0) {
+    if (comps.length === 0) {
       etapas.push({
         servicoKey: linha.servicoKey,
         dados: resolverDadosCronogramaServico(cronograma, linha.servicoKey),
@@ -129,15 +128,16 @@ function listarEtapasCronograma(
       });
       continue;
     }
-    const pesoSub = pesoBase / subs.length;
-    subs.forEach((sub, idx) => {
+    const pesoComp = pesoBase / comps.length;
+    for (const { blocoKey, comp } of comps) {
       etapas.push({
         servicoKey: linha.servicoKey,
-        subId: sub.id,
-        dados: resolverDadosCronogramaSubServico(cronograma, linha.servicoKey, sub, idx, subs.length),
-        peso: pesoSub
+        blocoKey,
+        composicaoChave: comp.chave,
+        dados: resolverDadosCronogramaComposicao(cronograma, blocoKey, comp),
+        peso: pesoComp
       });
-    });
+    }
   }
   return etapas;
 }
@@ -168,7 +168,7 @@ function alocarDiasPorPeso(totalDias: number, pesos: number[]): number[] {
   return dias;
 }
 
-function sincronizarDatasServicosPaiComSubs(
+function sincronizarDatasServicosPaiComComposicoes(
   linhas: CronogramaLinhaServico[],
   cronograma: CronogramaPersist
 ): CronogramaPersist {
@@ -178,8 +178,9 @@ function sincronizarDatasServicosPaiComSubs(
   };
 
   for (const linha of linhas) {
-    const agg = agregarDatasSubServicosNoServicoPai(next, linha.servicoKey);
-    if (!agg) continue;
+    const comps = listarComposicoesCronogramaLinha(linha);
+    if (comps.length === 0) continue;
+    const agg = agregarDadosComposicoes(next, comps);
     next.porServico[linha.servicoKey] = {
       ...(next.porServico[linha.servicoKey] ?? {}),
       ...agg
@@ -197,12 +198,12 @@ export function copiarDatasPlanParaRealCronograma(
   const next: CronogramaPersist = {
     ...cronograma,
     porServico: { ...cronograma.porServico },
-    subServicosPorServico: { ...(cronograma.subServicosPorServico ?? {}) }
+    porItem: { ...(cronograma.porItem ?? {}) }
   };
 
   for (const linha of linhas) {
-    const subs = listarSubServicos(cronograma, linha.servicoKey);
-    if (subs.length === 0) {
+    const comps = listarComposicoesCronogramaLinha(linha);
+    if (comps.length === 0) {
       const dados = resolverDadosCronogramaServico(cronograma, linha.servicoKey);
       if (!dados.dataInicio || !dados.dataFim) continue;
       next.porServico[linha.servicoKey] = {
@@ -212,19 +213,19 @@ export function copiarDatasPlanParaRealCronograma(
       };
       continue;
     }
-
-    next.subServicosPorServico![linha.servicoKey] = subs.map((sub, idx) => {
-      const dados = resolverDadosCronogramaSubServico(cronograma, linha.servicoKey, sub, idx, subs.length);
-      if (!dados.dataInicio || !dados.dataFim) return sub;
-      return {
-        ...sub,
+    for (const { blocoKey, comp } of comps) {
+      const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
+      if (!dados.dataInicio || !dados.dataFim) continue;
+      const itemKey = itemKeyComposicaoCronograma(blocoKey, comp.chave);
+      next.porItem![itemKey] = {
+        ...(next.porItem![itemKey] ?? {}),
         dataInicioReal: dados.dataInicio,
         dataFimReal: dados.dataFim
       };
-    });
+    }
   }
 
-  return sincronizarDatasServicosPaiComSubs(linhas, next);
+  return sincronizarDatasServicosPaiComComposicoes(linhas, next);
 }
 
 /** Distribui o prazo geral da obra entre etapas, sequencial e proporcional ao peso (valor ou estimativa). */
@@ -255,7 +256,7 @@ export function distribuirPrazoGeralCronograma(
   const next: CronogramaPersist = {
     ...cronograma,
     porServico: { ...cronograma.porServico },
-    subServicosPorServico: { ...(cronograma.subServicosPorServico ?? {}) }
+    porItem: { ...(cronograma.porItem ?? {}) }
   };
 
   let cursor = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate(), 12, 0, 0, 0);
@@ -274,12 +275,22 @@ export function distribuirPrazoGeralCronograma(
     );
     const fimStr = formatDataIso(fimEtapa);
 
-    if (etapa.subId) {
+    if (etapa.composicaoChave && etapa.blocoKey) {
+      const itemKey = itemKeyComposicaoCronograma(etapa.blocoKey, etapa.composicaoChave);
+      next.porItem![itemKey] = {
+        ...(next.porItem![itemKey] ?? {}),
+        dataInicio: inicio,
+        dataFim: fimStr
+      };
+    } else if (etapa.subId) {
       const subs = [...listarSubServicos(next, etapa.servicoKey)];
       const subIdx = subs.findIndex((s) => s.id === etapa.subId);
       if (subIdx >= 0) {
         subs[subIdx] = { ...subs[subIdx], dataInicio: inicio, dataFim: fimStr };
-        next.subServicosPorServico![etapa.servicoKey] = subs;
+        next.subServicosPorServico = {
+          ...(next.subServicosPorServico ?? {}),
+          [etapa.servicoKey]: subs
+        };
       }
     } else {
       next.porServico[etapa.servicoKey] = {
@@ -300,7 +311,7 @@ export function distribuirPrazoGeralCronograma(
     );
   });
 
-  return sincronizarDatasServicosPaiComSubs(linhas, next);
+  return sincronizarDatasServicosPaiComComposicoes(linhas, next);
 }
 
 export function calcularResumoCronograma(
@@ -411,8 +422,8 @@ export function gerarColunasDiasTimeline(inicio: Date, fim: Date): CronogramaTim
   while (cur <= limite) {
     const mesKey = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
     const mesLabel = cur.toLocaleDateString('pt-BR', {
-      month: 'short',
-      year: '2-digit',
+      month: 'long',
+      year: 'numeric',
       timeZone: 'America/Sao_Paulo'
     });
     colunas.push({
@@ -686,20 +697,41 @@ function montarFilhasSubtituloTimeline(
   });
 }
 
+function pushComposicaoTimeline(
+  rows: CronogramaTimelineLinha[],
+  linha: CronogramaLinhaServico,
+  cronograma: CronogramaPersist,
+  blocoKey: string,
+  comp: CronogramaComposicaoRef,
+  indentLevel: 1 | 2
+) {
+  const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
+  rows.push({
+    key: `${linha.servicoKey}::${blocoKey}::${comp.chave}`,
+    servicoKey: linha.servicoKey,
+    blocoKey,
+    composicaoChave: comp.chave,
+    label: comp.descricao,
+    isSub: true,
+    isCabecalhoServico: false,
+    indentLevel,
+    dados,
+    showBar: cronogramaTemDatasTimeline(dados),
+    editavel: true
+  });
+}
+
 export function montarLinhasTimeline(
   linhas: CronogramaLinhaServico[],
   cronograma: CronogramaPersist
 ): CronogramaTimelineLinha[] {
   const rows: CronogramaTimelineLinha[] = [];
   for (const linha of linhas) {
-    const subs = filtrarSubServicosOperacionaisCronograma(
-      linha,
-      listarSubServicos(cronograma, linha.servicoKey)
-    );
+    const comps = listarComposicoesCronogramaLinha(linha);
     const dados = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
     const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
     const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
-    const temFilhas = subs.length > 0;
+    const temFilhas = comps.length > 0;
 
     rows.push({
       key: linha.servicoKey,
@@ -714,43 +746,24 @@ export function montarLinhasTimeline(
     });
 
     if (!usaHierarquia) {
-      const subsOrdenados = ordenarSubServicosSequenciaObra(subs);
-      subsOrdenados.forEach((sub, idx) => {
-        const subDados = resolverDadosCronogramaSubServico(
-          cronograma,
-          linha.servicoKey,
-          sub,
-          idx,
-          subsOrdenados.length
-        );
-        rows.push({
-          key: `${linha.servicoKey}::${sub.id}`,
-          servicoKey: linha.servicoKey,
-          subId: sub.id,
-          label: sub.nome,
-          isSub: true,
-          isCabecalhoServico: false,
-          indentLevel: 1,
-          dados: subDados,
-          showBar: cronogramaTemDatasTimeline(subDados),
-          editavel: true
-        });
-      });
+      for (const { blocoKey, comp } of comps) {
+        pushComposicaoTimeline(rows, linha, cronograma, blocoKey, comp, 1);
+      }
       continue;
     }
 
-    const subsPorBloco = agruparSubServicosPorBloco(linha, subs);
+    const visiveis = new Set(subtitulosVisiveis.map((st) => st.blocoKey));
+    for (const item of comps) {
+      if (!visiveis.has(item.blocoKey)) {
+        pushComposicaoTimeline(rows, linha, cronograma, item.blocoKey, item.comp, 1);
+      }
+    }
 
     for (const st of subtitulosVisiveis) {
-      const subsDoBloco = ordenarSubServicosSequenciaObra(subsPorBloco.get(st.blocoKey) ?? []);
-      const etapasBloco = listarEtapasCronogramaBloco(st, subsDoBloco);
-      const dadosBloco = resolverDadosCronogramaBloco(
+      const dadosBloco = agregarDadosComposicoes(
         cronograma,
-        st.blocoKey,
-        etapasBloco,
-        linha.servicoKey
+        st.composicoes.map((comp) => ({ blocoKey: st.blocoKey, comp }))
       );
-
       rows.push({
         key: `${st.blocoKey}::cabecalho`,
         servicoKey: linha.servicoKey,
@@ -761,11 +774,12 @@ export function montarLinhasTimeline(
         isCabecalhoSubtitulo: true,
         indentLevel: 1,
         dados: dadosBloco,
-        showBar: etapasBloco.length > 0 && cronogramaTemDatasTimeline(dadosBloco),
+        showBar: false,
         editavel: false
       });
-
-      montarFilhasSubtituloTimeline(rows, linha, cronograma, st, subsDoBloco);
+      for (const comp of st.composicoes) {
+        pushComposicaoTimeline(rows, linha, cronograma, st.blocoKey, comp, 2);
+      }
     }
   }
   return rows;
@@ -785,23 +799,11 @@ export function calcularTimelineRange(
     if (!dataFimMax || d > dataFimMax) dataFimMax = d;
   };
 
-  for (const linha of linhas) {
-    const subs = listarSubServicos(cronograma, linha.servicoKey);
-    if (subs.length === 0) {
-      const dados = resolverDadosCronogramaServico(cronograma, linha.servicoKey);
-      considerar(dados.dataInicio);
-      considerar(dados.dataFim);
-      considerar(dados.dataInicioReal);
-      considerar(dados.dataFimReal);
-      continue;
-    }
-    subs.forEach((sub, idx) => {
-      const subDados = resolverDadosCronogramaSubServico(cronograma, linha.servicoKey, sub, idx, subs.length);
-      considerar(subDados.dataInicio);
-      considerar(subDados.dataFim);
-      considerar(subDados.dataInicioReal);
-      considerar(subDados.dataFimReal);
-    });
+  for (const etapa of listarEtapasCronograma(linhas, cronograma)) {
+    considerar(etapa.dados.dataInicio);
+    considerar(etapa.dados.dataFim);
+    considerar(etapa.dados.dataInicioReal);
+    considerar(etapa.dados.dataFimReal);
   }
 
   if (!dataInicioMin) dataInicioMin = parseDataIso(cronograma.config?.dataInicioObra);

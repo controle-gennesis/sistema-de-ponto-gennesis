@@ -1,21 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calendar,
   CalendarRange,
-  Copy,
   Download,
-  Eye,
-  EyeOff,
-  GanttChart,
-  LineChart,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Table2,
-  Trash2,
-  X
+  Loader2
 } from 'lucide-react';
 import { estimarPrazosCronograma, gerarSubServicosCronograma } from './orcamentoCronogramaApi';
 import toast from 'react-hot-toast';
@@ -26,29 +17,29 @@ import {
   calcularResumoCronograma,
   calcularTimelineRange,
   calcularTimelineRangeVisivel,
-  copiarDatasPlanParaRealCronograma,
   distribuirPrazoGeralCronograma,
   montarPayloadEstimativaPrazoCronograma,
   formatDesvioDiasCurto,
   formatDesvioDiasLabel,
   montarLinhasTimeline,
-  posicaoBarraTimeline,
+  posicaoBarraTimelinePx,
   type CronogramaTimelineLinha,
+  type CronogramaTimelineRange,
   type CronogramaTimelineZoom
 } from './orcamentoCronogramaCalc';
-import { CronogramaCurvaSPanel } from './orcamentoCronogramaCurvaS';
+import { CronogramaGraficosPainel } from './orcamentoCronogramaGraficos';
 import {
-  TimelineDesvioVisual,
   TimelineEtapaEditor,
   TimelineZoomControls,
-  TIMELINE_ROW_HEIGHT_PX,
   type TimelineEtapaEditorTarget
 } from './orcamentoCronogramaTimelineUi';
 import {
   CRONOGRAMA_STATUS_CLASS,
   CRONOGRAMA_STATUS_LABEL,
+  agregarDadosComposicoes,
   agruparSubServicosPorBloco,
   calcularStatusCronograma,
+  listarComposicoesCronogramaLinha,
   criarSubServicoManual,
   cronogramaUsaHierarquiaSubtitulos,
   diasEntre,
@@ -65,6 +56,7 @@ import {
   resolverDadosCronogramaComposicao,
   resolverDadosCronogramaServicoParaLinha,
   resolverDadosCronogramaSubServico,
+  type CronogramaComposicaoRef,
   type CronogramaItemData,
   type CronogramaLinhaServico,
   type CronogramaLinhaSubtitulo,
@@ -74,13 +66,14 @@ import {
 import {
   gradeHideVerticalScrollbarCls,
   gradeTableCls,
+  gradeTableViewportCls,
   gradeTableRowTrCls,
   gradeThStickyCls,
   tdGradeDateCls
 } from './orcamentoGradeCellClasses';
 import { DatePickerField } from '@/components/ui/DatePickerField';
-import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { Modal } from '@/components/ui/Modal';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 
 type Props = {
   linhas: CronogramaLinhaServico[];
@@ -94,23 +87,23 @@ type Props = {
   /** Persiste a data de fim da obra (meta.dataEnvio) quando informada na modal. */
   onDataFimObraChange?: (dataFimIso: string) => void;
   onExport?: () => void;
+  /** Tela cheia: a grade rola por dentro e as ações ficam na barra de baixo. */
+  telaFixa?: boolean;
 };
 
 const thCls =
-  'px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600 first:border-l-0';
+  '!h-auto !min-h-0 px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600 first:border-l-0';
 const tdCls =
-  'px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-600 align-middle';
+  'h-[2.75rem] px-2 py-0 text-sm leading-none text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-600 align-middle';
 const tdServicoColCls =
-  'min-w-0 px-3 py-0 text-sm border-l-0 align-middle overflow-hidden';
+  'min-h-[2.75rem] w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-sm border-l-0 align-middle';
 const thServicoColCls =
-  'min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l-0';
+  '!h-auto !min-h-0 w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l-0';
 const thDateColCls = `${thCls} w-[9rem]`;
 const thDiasColCls = `${thCls} w-[4rem]`;
 const thStatusColCls = `${thCls} w-[7rem]`;
-const tdPctColCls = `${tdCls} text-center w-[4.75rem] px-1 whitespace-nowrap`;
-const thPctColCls = `${thCls} w-[4.75rem] px-1 whitespace-nowrap`;
-const inputPctCls =
-  'w-full rounded-md border border-gray-300 bg-white px-1 py-1 text-center text-xs tabular-nums text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
+const tdPctColCls = `${tdCls} text-center w-[6.5rem] px-1 whitespace-nowrap`;
+const thPctColCls = `${thCls} w-[6.5rem] px-1 whitespace-nowrap`;
 const statusBarCls = (status: keyof typeof CRONOGRAMA_STATUS_CLASS) =>
   status === 'concluido'
     ? 'bg-green-500'
@@ -121,21 +114,37 @@ const statusBarCls = (status: keyof typeof CRONOGRAMA_STATUS_CLASS) =>
         : 'bg-gray-400 dark:bg-gray-500';
 const statusSpanCls = (status: keyof typeof CRONOGRAMA_STATUS_CLASS) =>
   `inline-flex items-center text-sm font-semibold ${CRONOGRAMA_STATUS_CLASS[status]}`;
-const timelineLabelColCls =
-  'shrink-0 pr-4 py-2 text-xs text-gray-800 dark:text-gray-200 whitespace-nowrap';
-const TIMELINE_LABEL_MIN_W_PX = 360;
 const actionBtnCls =
   'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 const iconBtnCls =
   'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900';
 
-function calcularLarguraColunaServicoTimeline(
-  linhas: { label: string; indentLevel?: 0 | 1 | 2 }[]
-): number {
-  const longest = linhas.reduce((max, row) => Math.max(max, row.label.length), 0);
-  const maxIndent = linhas.reduce((max, row) => Math.max(max, row.indentLevel ?? (row as { isSub?: boolean }).isSub ? 1 : 0), 0);
-  const indentExtra = maxIndent * 16;
-  return Math.min(720, Math.max(TIMELINE_LABEL_MIN_W_PX, longest * 7 + indentExtra + 40));
+
+function deltaRolagemPx(e: WheelEvent): number {
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return e.deltaY * 16;
+  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return e.deltaY * window.innerHeight;
+  return e.deltaY;
+}
+
+/** A grade só rola na horizontal. O giro vertical vai para a página. */
+function encaminharRolagemVertical(el: HTMLElement, e: WheelEvent) {
+  if (e.ctrlKey) return;
+  const dy = deltaRolagemPx(e);
+  if (dy === 0 || Math.abs(dy) <= Math.abs(e.deltaX)) return;
+  const cabeNaVertical = el.scrollHeight <= el.clientHeight + 1;
+  const noTopo = el.scrollTop <= 0 && dy < 0;
+  const noFim = el.scrollTop + el.clientHeight >= el.scrollHeight - 1 && dy > 0;
+  if (!cabeNaVertical && !noTopo && !noFim) return;
+  let pai: HTMLElement | null = el.parentElement;
+  while (pai) {
+    const oy = getComputedStyle(pai).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && pai.scrollHeight > pai.clientHeight + 1) {
+      pai.scrollTop += dy;
+      e.preventDefault();
+      return;
+    }
+    pai = pai.parentElement;
+  }
 }
 
 function paddingServicoColCls(indentLevel: 0 | 1 | 2 = 0): string {
@@ -144,87 +153,10 @@ function paddingServicoColCls(indentLevel: 0 | 1 | 2 = 0): string {
   return 'pl-4';
 }
 
-function SubServicoNomeCell({
-  sub,
-  onPatch,
-  onRemove
-}: {
-  sub: CronogramaSubServico;
-  onPatch: (nome: string) => void;
-  onRemove: () => void;
-}) {
-  const [editando, setEditando] = useState(false);
-  const [draft, setDraft] = useState(sub.nome);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!editando) setDraft(sub.nome);
-  }, [sub.nome, editando]);
-
-  useEffect(() => {
-    if (editando) inputRef.current?.focus();
-  }, [editando]);
-
-  const commit = () => {
-    const nome = draft.trim() || sub.nome;
-    onPatch(nome);
-    setDraft(nome);
-    setEditando(false);
-  };
-
-  return (
-    <div className="flex min-h-[2.75rem] items-center gap-2 min-w-0">
-      {editando ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              commit();
-            }
-            if (e.key === 'Escape') {
-              setDraft(sub.nome);
-              setEditando(false);
-            }
-          }}
-          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-          aria-label={`Editar subserviço — ${sub.nome}`}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setEditando(true)}
-          className="min-w-0 flex-1 truncate py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200 cursor-pointer"
-          title={sub.nome}
-        >
-          {sub.nome}
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onRemove}
-        className="shrink-0 rounded p-1 text-gray-400 opacity-0 transition-opacity group-hover/subrow:opacity-100 focus:opacity-100 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-        aria-label={`Excluir subserviço ${sub.nome}`}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
 function ComposicaoResumoNomeCell({ nome }: { nome: string }) {
   return (
-    <div className="flex min-h-[2.75rem] items-center gap-2 min-w-0">
-      <span
-        className="min-w-0 flex-1 truncate py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200"
-        title={nome}
-      >
-        {nome}
-      </span>
+    <div className="min-w-0 whitespace-normal break-words text-left text-sm font-normal leading-snug text-gray-900 dark:text-gray-100">
+      {nome}
     </div>
   );
 }
@@ -233,7 +165,7 @@ function DataCronogramaSomenteLeitura({ value }: { value: string | undefined }) 
   const texto = formatDataBr(value);
   return (
     <span
-      className="flex w-full min-h-[1.75rem] items-center justify-center px-1 py-1 text-center text-xs sm:text-sm tabular-nums font-normal text-gray-500 dark:text-gray-400"
+      className="flex h-full w-full items-center justify-center px-1 text-center text-sm font-semibold tabular-nums leading-none text-gray-900 dark:text-gray-100"
       title={texto !== '—' ? texto : undefined}
     >
       {texto}
@@ -246,15 +178,19 @@ function CelulasEtapaCronograma({
   status,
   readOnly,
   ariaPrefix,
-  onPatch
+  onPatch,
+  modo
 }: {
   resolvido: CronogramaItemData;
   status: ReturnType<typeof calcularStatusCronograma>;
   readOnly: boolean;
   ariaPrefix: string;
   onPatch: (patch: Partial<CronogramaItemData>) => void;
+  modo: 'plan' | 'real';
 }) {
   const observacao = resolvido.observacao?.trim() || '';
+  const inicio = modo === 'real' ? resolvido.dataInicioReal : resolvido.dataInicio;
+  const fim = modo === 'real' ? resolvido.dataFimReal : resolvido.dataFim;
 
   const celulaData = (
     value: string | undefined,
@@ -270,6 +206,7 @@ function CelulasEtapaCronograma({
           appearance="inline"
           hideIcon
           textAlign="center"
+          className="!h-[2.75rem] !py-0 !leading-none"
           value={value ?? ''}
           onChange={onChange}
           placeholder="dd/mm/aaaa"
@@ -281,38 +218,33 @@ function CelulasEtapaCronograma({
 
   return (
     <>
-      {celulaData(resolvido.dataInicio, (v) => onPatch({ dataInicio: v }), `Início plan. — ${ariaPrefix}`)}
-      {celulaData(resolvido.dataFim, (v) => onPatch({ dataFim: v }), `Fim plan. — ${ariaPrefix}`)}
       {celulaData(
-        resolvido.dataInicioReal,
-        (v) => onPatch({ dataInicioReal: v }),
-        `Início real — ${ariaPrefix}`
+        inicio,
+        (v) => onPatch(modo === 'real' ? { dataInicioReal: v } : { dataInicio: v }),
+        `Início — ${ariaPrefix}`
       )}
-      {celulaData(resolvido.dataFimReal, (v) => onPatch({ dataFimReal: v }), `Fim real — ${ariaPrefix}`)}
+      {celulaData(
+        fim,
+        (v) => onPatch(modo === 'real' ? { dataFimReal: v } : { dataFim: v }),
+        `Fim — ${ariaPrefix}`
+      )}
       <td
         className={`${tdCls} w-[4rem] text-center tabular-nums text-xs ${
           readOnly ? 'text-gray-500 dark:text-gray-400' : ''
         }`}
       >
-        {diasEntre(resolvido.dataInicio, resolvido.dataFim) ?? '—'}
+        {diasEntre(inicio, fim) ?? '—'}
       </td>
       <td className={tdPctColCls}>
-        <PercentualExecCell
-          value={resolvido.percentualExecutado}
-          readOnly={readOnly}
-          onChange={
-            readOnly
-              ? undefined
-              : (v) => onPatch({ percentualExecutado: v })
-          }
-          ariaLabel={`% executado — ${ariaPrefix}`}
-        />
+        <span className="block w-full text-center text-sm tabular-nums text-gray-900 dark:text-gray-100">
+          {resolvido.percentualExecutado != null && Number.isFinite(resolvido.percentualExecutado)
+            ? `${Math.round(resolvido.percentualExecutado)}%`
+            : '0%'}
+        </span>
       </td>
       <td className={`${tdCls} w-[7rem] text-center`}>
         <span
-          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}${
-            readOnly ? ' !font-medium text-gray-500 dark:text-gray-400' : ''
-          }`}
+          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
           title={observacao || undefined}
         >
           {CRONOGRAMA_STATUS_LABEL[status]}
@@ -322,96 +254,121 @@ function CelulasEtapaCronograma({
   );
 }
 
-function PercentualExecCell({
-  value,
-  onChange,
-  ariaLabel,
-  readOnly = false
+function gradeDiasTimeline(totalDias: number, diaPx: number): string {
+  return `repeat(${totalDias}, ${diaPx}px)`;
+}
+
+function CelulaLinhaTimeline({
+  row,
+  timelineRange,
+  largura,
+  diaPx,
+  modo,
+  onEdit
 }: {
-  value: number | undefined;
-  onChange?: (v: number | undefined) => void;
-  ariaLabel: string;
-  readOnly?: boolean;
+  row: CronogramaTimelineLinha | undefined;
+  timelineRange: CronogramaTimelineRange | null;
+  largura: number;
+  diaPx: number;
+  modo: 'plan' | 'real';
+  onEdit: (row: CronogramaTimelineLinha, e: React.MouseEvent) => void;
 }) {
-  const [editando, setEditando] = useState(false);
-  const [draft, setDraft] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!editando) {
-      setDraft(value != null && Number.isFinite(value) ? String(Math.round(value)) : '');
-    }
-  }, [value, editando]);
-
-  useEffect(() => {
-    if (editando) inputRef.current?.focus();
-  }, [editando]);
-
-  const commit = () => {
-    if (readOnly || !onChange) {
-      setEditando(false);
-      return;
-    }
-    if (draft.trim() === '') {
-      onChange(undefined);
-    } else {
-      const n = Number(draft);
-      onChange(Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : undefined);
-    }
-    setEditando(false);
-  };
-
-  const exibir =
-    value != null && Number.isFinite(value) ? `${Math.round(value)}%` : '0%';
-
-  if (readOnly) {
-    return (
-      <span
-        className="block w-full py-1 text-center text-xs tabular-nums text-gray-500 dark:text-gray-400"
-        aria-label={ariaLabel}
-        title="Calculado automaticamente a partir das etapas"
-      >
-        {exibir}
-      </span>
-    );
+  const tdClsTimeline = 'relative h-px border-l border-gray-200 p-0 align-middle dark:border-gray-600';
+  const tdStyle = { width: largura || undefined, minWidth: largura || undefined, maxWidth: largura || undefined };
+  if (!timelineRange || largura <= 0 || diaPx <= 0) {
+    return <td className={tdClsTimeline} style={tdStyle} />;
   }
 
-  if (editando) {
-    return (
-      <input
-        ref={inputRef}
-        type="number"
-        min={0}
-        max={100}
-        step={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commit();
-          }
-          if (e.key === 'Escape') {
-            setDraft(value != null && Number.isFinite(value) ? String(Math.round(value)) : '');
-            setEditando(false);
-          }
-        }}
-        className={inputPctCls}
-        aria-label={ariaLabel}
-      />
-    );
-  }
+  const linha = row && !row.isCabecalhoServico && !row.isCabecalhoSubtitulo ? row : null;
+  const status = linha ? calcularStatusCronograma(linha.dados) : 'pendente';
+  const iniPlan = linha ? parseDataIso(linha.dados.dataInicio) : null;
+  const fimPlan = linha ? parseDataIso(linha.dados.dataFim) : null;
+  const iniReal = linha ? parseDataIso(linha.dados.dataInicioReal) : null;
+  const fimReal = linha ? parseDataIso(linha.dados.dataFimReal) : null;
+  const barPlan =
+    linha?.showBar && iniPlan && fimPlan
+      ? posicaoBarraTimelinePx(timelineRange.inicio, timelineRange.fim, iniPlan, fimPlan, diaPx)
+      : null;
+  const barReal =
+    linha?.showBar && iniReal && fimReal
+      ? posicaoBarraTimelinePx(timelineRange.inicio, timelineRange.fim, iniReal, fimReal, diaPx)
+      : null;
+  const pct = Math.min(100, Math.max(0, Math.round(linha?.dados.percentualExecutado ?? 0)));
+  const desvio = linha ? calcularDesvioTimeline(linha.dados) : null;
+  const mostrarBarraPlan = modo === 'plan' && Boolean(barPlan && barPlan.widthPx > 0);
+  const mostrarBarraReal = modo === 'real' && Boolean(barReal && barReal.widthPx > 0);
 
   return (
-    <button
-      type="button"
-      onClick={() => setEditando(true)}
-      className="w-full py-1 text-center text-xs tabular-nums text-gray-800 dark:text-gray-200 cursor-pointer"
-      aria-label={ariaLabel}
-    >
-      {exibir}
-    </button>
+    <td className={tdClsTimeline} style={tdStyle}>
+      <div className="absolute inset-0" style={{ width: largura }}>
+        <div
+          className="absolute inset-0 grid"
+          style={{ width: largura, gridTemplateColumns: gradeDiasTimeline(timelineRange.colunas.length, diaPx) }}
+        >
+          {timelineRange.colunas.map((col) => (
+            <div
+              key={`${row?.key ?? 'vazio'}-${col.key}`}
+              className="h-full border-l border-gray-100 first:border-l-0 dark:border-gray-800"
+            />
+          ))}
+        </div>
+        {mostrarBarraPlan && barPlan && linha ? (
+          <button
+            type="button"
+            disabled={!linha.editavel}
+            onClick={(e) => onEdit(linha, e)}
+            className={`absolute top-1 bottom-1 overflow-visible rounded-sm ${
+              linha.editavel
+                ? 'cursor-pointer transition-[filter] duration-150 hover:brightness-110'
+                : 'pointer-events-none'
+            }`}
+            style={{ left: barPlan.leftPx, width: barPlan.widthPx }}
+            title={`Planejado: ${formatDataBr(linha.dados.dataInicio)} → ${formatDataBr(linha.dados.dataFim)}${
+              desvio?.temDesvio ? ` · ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? ''}` : ''
+            }`}
+          >
+            <div className="h-full rounded-sm border border-dashed border-gray-400/70 bg-gray-400/[0.06] dark:border-gray-500/60 dark:bg-gray-500/10" />
+          </button>
+        ) : null}
+        {mostrarBarraReal && barReal && linha ? (
+          <button
+            type="button"
+            disabled={!linha.editavel}
+            onClick={(e) => onEdit(linha, e)}
+            className={`absolute z-[2] rounded overflow-visible text-left transition-[filter] duration-150 ${
+              linha.editavel
+                ? 'cursor-pointer hover:brightness-110 dark:hover:brightness-125'
+                : 'pointer-events-none'
+            } top-1 bottom-1`}
+            style={{ left: barReal.leftPx, width: barReal.widthPx }}
+            title={`Real: ${formatDataBr(linha.dados.dataInicioReal)} → ${formatDataBr(linha.dados.dataFimReal)} · ${pct}%${
+              desvio?.temDesvio ? ` · desvio fim: ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? '—'}` : ''
+            }`}
+          >
+            <div className="relative h-full overflow-visible rounded-sm ring-1 ring-inset ring-gray-900/10 dark:ring-white/10">
+              <div className={`absolute inset-0 rounded-sm ${statusBarCls(status)} opacity-20 dark:opacity-25`} />
+              <div
+                className={`absolute inset-y-0 left-0 rounded-sm ${statusBarCls(status)}`}
+                style={{ width: `${pct}%`, minWidth: pct > 0 ? 3 : undefined }}
+              />
+              {pct > 0 ? (
+                <span className="pointer-events-none absolute left-1 top-1/2 z-[1] -translate-y-1/2 whitespace-nowrap text-[9px] font-semibold tabular-nums leading-none text-white drop-shadow-[0_0_3px_rgba(0,0,0,0.85)]">
+                  {pct}%
+                </span>
+              ) : null}
+            </div>
+          </button>
+        ) : linha?.editavel && (modo === 'plan' ? !mostrarBarraPlan : !mostrarBarraReal) ? (
+          <button
+            type="button"
+            onClick={(e) => onEdit(linha, e)}
+            className="absolute inset-0 z-[1] cursor-pointer opacity-0"
+            title="Clique para definir datas e progresso"
+            aria-label={`Editar etapa — ${linha.label}`}
+          />
+        ) : null}
+      </div>
+    </td>
   );
 }
 
@@ -424,31 +381,45 @@ export function OrcamentoCronogramaPainel({
   dataInicioObra = '',
   dataFimObra = '',
   onDataFimObraChange,
-  onExport
+  onExport,
+  telaFixa = false
 }: Props) {
-  const [viewMode, setViewMode] = useState<'tabela' | 'timeline'>('tabela');
-  const [mostrarPlanejamentoTimeline, setMostrarPlanejamentoTimeline] = useState(true);
   const [timelineZoom, setTimelineZoom] = useState<CronogramaTimelineZoom>('obra');
   const [timelinePanOffset, setTimelinePanOffset] = useState(0);
   const [editorTarget, setEditorTarget] = useState<TimelineEtapaEditorTarget | null>(null);
   const [gerandoServicoKey, setGerandoServicoKey] = useState<string | null>(null);
   const [gerandoBlocoKey, setGerandoBlocoKey] = useState<string | null>(null);
   const [distribuindoPrazo, setDistribuindoPrazo] = useState(false);
-  const [showCurvaSModal, setShowCurvaSModal] = useState(false);
+  const [abaCronograma, setAbaCronograma] = useState<'planejado' | 'real' | 'graficos'>('planejado');
   const [showDataFimModal, setShowDataFimModal] = useState(false);
   const [draftDataFim, setDraftDataFim] = useState('');
   const cronogramaRef = useRef(cronograma);
-  const autoGeradoRef = useRef<Set<string>>(new Set());
+  const gradeScrollRef = useRef<HTMLDivElement>(null);
+  const [larguraViewport, setLarguraViewport] = useState(0);
   cronogramaRef.current = cronograma;
+
+  const [barraPronta, setBarraPronta] = useState(false);
+  useEffect(() => {
+    setBarraPronta(true);
+  }, []);
+
+  useEffect(() => {
+    if (telaFixa) return;
+    const el = gradeScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => encaminharRolagemVertical(el, e);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [telaFixa]);
 
   const resumo = useMemo(() => calcularResumoCronograma(linhas, cronograma), [linhas, cronograma]);
 
   const linhasTimeline = useMemo(() => montarLinhasTimeline(linhas, cronograma), [linhas, cronograma]);
-
-  const timelineLabelWidthPx = useMemo(
-    () => calcularLarguraColunaServicoTimeline(linhasTimeline),
-    [linhasTimeline]
-  );
+  const timelinePorKey = useMemo(() => {
+    const map = new Map<string, CronogramaTimelineLinha>();
+    for (const row of linhasTimeline) map.set(row.key, row);
+    return map;
+  }, [linhasTimeline]);
 
   const timelineRangeObra = useMemo(
     () => calcularTimelineRange(linhas, cronograma),
@@ -478,13 +449,27 @@ export function OrcamentoCronogramaPainel({
     [timelineRange, agora]
   );
 
-  const timelineGridCols = useMemo(() => {
-    if (!timelineRange) return null;
-    return {
-      linha: `${timelineLabelWidthPx}px minmax(0, 1fr)`,
-      dias: `repeat(${timelineRange.colunas.length}, minmax(0, 1fr))`
-    };
-  }, [timelineRange, timelineLabelWidthPx]);
+  useEffect(() => {
+    const el = gradeScrollRef.current;
+    if (!el) return;
+    const medir = () => setLarguraViewport(el.clientWidth);
+    medir();
+    const obs = new ResizeObserver(medir);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [timelineRange, telaFixa]);
+
+  const timelineLayout = useMemo(() => {
+    if (!timelineRange || timelineRange.colunas.length === 0) return null;
+    const rootPx =
+      typeof document !== 'undefined'
+        ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+        : 16;
+    const colunasFixasPx = 57.5 * rootPx;
+    const disponivel = larguraViewport > colunasFixasPx + 48 ? larguraViewport - colunasFixasPx : 0;
+    const largura = Math.max(timelineRange.larguraTotalPx, Math.floor(disponivel));
+    return { largura, diaPx: largura / timelineRange.colunas.length };
+  }, [timelineRange, larguraViewport]);
 
   const patchServico = (servicoKey: string, patch: Partial<CronogramaItemData>) => {
     const prev = cronograma.porServico[servicoKey] ?? {};
@@ -649,10 +634,6 @@ export function OrcamentoCronogramaPainel({
     void distribuirPrazoGeral(fim);
   };
 
-  const copiarPlanParaReal = () => {
-    onChange(copiarDatasPlanParaRealCronograma(linhas, cronograma));
-  };
-
   const patchEtapaDados = (row: CronogramaTimelineLinha, patch: Partial<CronogramaItemData>) => {
     if (row.subId) {
       patchSubServico(row.servicoKey, row.subId, patch);
@@ -760,35 +741,86 @@ export function OrcamentoCronogramaPainel({
     }
   };
 
-  useEffect(() => {
-    if (!centroCustoId || !orcamentoId || linhas.length === 0) return;
-
-    let cancelled = false;
-
-    (async () => {
-      for (const linha of linhas) {
-        if (cancelled) return;
-        if (listarSubServicos(cronogramaRef.current, linha.servicoKey).length > 0) continue;
-        if (autoGeradoRef.current.has(linha.servicoKey)) continue;
-        autoGeradoRef.current.add(linha.servicoKey);
-
-        const ok = await gerarSubServicosParaLinha(linha);
-        if (!ok && !cancelled) autoGeradoRef.current.delete(linha.servicoKey);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [linhas, centroCustoId, orcamentoId, cronograma.subServicosPorServico]);
-
   if (linhas.length === 0) {
     return null;
   }
 
+  const modoFolha: 'plan' | 'real' = abaCronograma === 'real' ? 'real' : 'plan';
+
+  const renderTimeline = (key: string) => (
+    <CelulaLinhaTimeline
+      row={timelinePorKey.get(key)}
+      timelineRange={timelineRange}
+      largura={timelineLayout?.largura ?? 0}
+      diaPx={timelineLayout?.diaPx ?? 0}
+      modo={modoFolha}
+      onEdit={abrirEditorEtapa}
+    />
+  );
+
+  const botoesAcao = (
+    <>
+      <button
+        type="button"
+        onClick={abrirDistribuirPrazo}
+        disabled={distribuindoPrazo}
+        className={iconBtnCls}
+        title="Estima a duração de cada etapa (IA quando disponível) e distribui o prazo da obra em sequência"
+        aria-label={distribuindoPrazo ? 'Estimando prazos…' : 'Distribuir prazo'}
+      >
+        {distribuindoPrazo ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+        ) : (
+          <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+        )}
+      </button>
+      {onExport ? (
+        <button
+          type="button"
+          onClick={onExport}
+          className={iconBtnCls}
+          title="Exportar cronograma (.xlsx)"
+          aria-label="Exportar cronograma"
+        >
+          <Download className="h-4 w-4 shrink-0" aria-hidden />
+        </button>
+      ) : null}
+      {abaCronograma !== 'graficos' ? (
+      <TimelineZoomControls
+            zoom={timelineZoom}
+            panOffset={timelinePanOffset}
+            onZoomChange={(z) => {
+              setTimelineZoom(z);
+              setTimelinePanOffset(0);
+            }}
+            onPanChange={(d) => setTimelinePanOffset((p) => p + d)}
+          />
+      ) : null}
+    </>
+  );
+
+  const abasCronograma = (
+    <SegmentedControl
+      aria-label="Abas do cronograma"
+      value={abaCronograma}
+      onChange={setAbaCronograma}
+      className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800"
+      pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+      buttonClassName="px-2.5 py-1.5 text-xs sm:px-3.5 sm:text-sm"
+      activeButtonClassName="font-semibold text-white"
+      inactiveButtonClassName="font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+      options={[
+        { value: 'planejado', label: 'Planejado' },
+        { value: 'real', label: 'Real' },
+        { value: 'graficos', label: 'Gráficos' }
+      ]}
+    />
+  );
+
   return (
     <>
-    <div className="w-full min-w-0 space-y-4">
+    <div className={telaFixa ? 'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3' : 'w-full min-w-0 space-y-4'}>
+      {!telaFixa ? (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center space-x-3">
           <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
@@ -802,74 +834,13 @@ export function OrcamentoCronogramaPainel({
           </div>
         </div>
         <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-          <button
-            type="button"
-            onClick={abrirDistribuirPrazo}
-            disabled={distribuindoPrazo}
-            className={iconBtnCls}
-            title="Estima a duração de cada etapa (IA quando disponível) e distribui o prazo da obra em sequência"
-            aria-label={distribuindoPrazo ? 'Estimando prazos…' : 'Distribuir prazo'}
-          >
-            {distribuindoPrazo ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-            ) : (
-              <Calendar className="h-4 w-4 shrink-0" aria-hidden />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={copiarPlanParaReal}
-            disabled={resumo.servicosComDatas === 0}
-            className={iconBtnCls}
-            title="Copia início/fim plan. para início/fim real de cada etapa"
-            aria-label="Copiar plan → real"
-          >
-            <Copy className="h-4 w-4 shrink-0" aria-hidden />
-          </button>
-          {onExport ? (
-            <button
-              type="button"
-              onClick={onExport}
-              className={iconBtnCls}
-              title="Exportar cronograma (.xlsx)"
-              aria-label="Exportar cronograma"
-            >
-              <Download className="h-4 w-4 shrink-0" aria-hidden />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setShowCurvaSModal(true)}
-            className={iconBtnCls}
-            title="Abrir Curva S"
-            aria-label="Abrir Curva S"
-          >
-            <LineChart className="h-4 w-4 shrink-0" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode((m) => (m === 'tabela' ? 'timeline' : 'tabela'))}
-            className={iconBtnCls}
-            title={
-              viewMode === 'tabela'
-                ? 'Alternar para linha do tempo'
-                : 'Alternar para planilha'
-            }
-            aria-label={
-              viewMode === 'tabela'
-                ? 'Alternar para linha do tempo'
-                : 'Alternar para planilha'
-            }
-          >
-            {viewMode === 'tabela' ? (
-              <GanttChart className="h-4 w-4 shrink-0" aria-hidden />
-            ) : (
-              <Table2 className="h-4 w-4 shrink-0" aria-hidden />
-            )}
-          </button>
+          {abasCronograma}
+          {botoesAcao}
         </div>
       </div>
+      ) : null}
 
+      {!telaFixa ? (
       <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/40 sm:px-4">
         <div className="min-w-0 space-y-1">
           {dataInicioObra || dataFimObra ? (
@@ -883,8 +854,7 @@ export function OrcamentoCronogramaPainel({
           ) : null}
           {resumo.etapasSemDatasReais > 0 ? (
             <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
-              {resumo.etapasSemDatasReais} etapa(s) sem datas reais — preencha na planilha ou use{' '}
-              <strong className="font-semibold">Copiar plan → real</strong> para ver a execução na linha do tempo.
+              {resumo.etapasSemDatasReais} etapa(s) sem datas reais — preencha na planilha para ver a execução na linha do tempo.
             </p>
           ) : (
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -893,376 +863,128 @@ export function OrcamentoCronogramaPainel({
           )}
         </div>
       </div>
+      ) : null}
 
-        {viewMode === 'timeline' && timelineRange && timelineGridCols && (
-          <div className="w-full overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/50 px-4 py-2.5 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/30 dark:text-gray-300">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-2.5 w-3.5 rounded-sm bg-gray-400" /> Pendente
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-2.5 w-3.5 rounded-sm bg-sky-500" /> Em andamento
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-2.5 w-3.5 rounded-sm bg-green-500" /> Concluído
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-2.5 w-3.5 rounded-sm bg-red-500" /> Atrasado
-                  </span>
-                  {mostrarPlanejamentoTimeline ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2.5 w-3.5 rounded-sm border border-dashed border-gray-400 bg-transparent dark:border-gray-500" />{' '}
-                      Planejamento
-                    </span>
-                  ) : null}
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-2.5 w-3.5 rounded-sm bg-sky-500/80" /> Execução (real)
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-0.5 w-3.5 rounded-sm bg-red-500/70" aria-hidden /> Desvio (atraso)
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-0.5 w-3.5 rounded-sm bg-green-500/70" aria-hidden /> Desvio (adiant.)
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <TimelineZoomControls
-                    zoom={timelineZoom}
-                    panOffset={timelinePanOffset}
-                    onZoomChange={(z) => {
-                      setTimelineZoom(z);
-                      setTimelinePanOffset(0);
-                    }}
-                    onPanChange={(d) => setTimelinePanOffset((p) => p + d)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setMostrarPlanejamentoTimeline((v) => !v)}
-                    className={iconBtnCls}
-                    aria-pressed={mostrarPlanejamentoTimeline}
-                    title={
-                      mostrarPlanejamentoTimeline
-                        ? 'Ocultar planejamento'
-                        : 'Mostrar planejamento'
-                    }
-                    aria-label={
-                      mostrarPlanejamentoTimeline
-                        ? 'Ocultar planejamento'
-                        : 'Mostrar planejamento'
-                    }
-                  >
-                    {mostrarPlanejamentoTimeline ? (
-                      <EyeOff className="h-4 w-4 shrink-0" aria-hidden />
-                    ) : (
-                      <Eye className="h-4 w-4 shrink-0" aria-hidden />
-                    )}
-                  </button>
-                </div>
-              </div>
 
-              <div className="relative w-full">
-                {hojeMarcador ? (
-                  <div
-                    className="pointer-events-none absolute z-[5]"
-                    style={{
-                      left: timelineLabelWidthPx,
-                      right: 0,
-                      top: 0,
-                      bottom: 0
-                    }}
-                    aria-hidden
-                  >
-                    <div
-                      className="absolute top-0 bottom-0 w-px bg-red-500/85"
-                      style={{ left: `${hojeMarcador.leftPct}%` }}
-                    />
-                  </div>
-                ) : null}
-
-              <div
-                className="grid sticky top-0 z-10 w-full bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700"
-                style={{ gridTemplateColumns: timelineGridCols.linha }}
-              >
-                <div
-                  className={`${timelineLabelColCls} pl-4 flex items-center text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300 border-r border-gray-200/70 dark:border-gray-700/70`}
-                >
-                  Serviço
-                </div>
-                <div className="flex min-w-0 w-full flex-col">
-                  <div
-                    className="grid w-full border-b border-gray-200/70 dark:border-gray-700/70"
-                    style={{ gridTemplateColumns: timelineGridCols.dias }}
-                  >
-                    {timelineRange.meses.map((mes) => (
-                      <div
-                        key={mes.key}
-                        className="text-center text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400 truncate border-l border-gray-200/70 dark:border-gray-700/70 first:border-l-0 py-1"
-                        style={{ gridColumn: `span ${mes.span}` }}
-                      >
-                        {mes.label}
-                      </div>
-                    ))}
-                  </div>
-                  <div
-                    className="grid w-full"
-                    style={{ gridTemplateColumns: timelineGridCols.dias }}
-                  >
-                    {timelineRange.colunas.map((col) => {
-                      const isHoje = hojeMarcador?.colIndex === col.index;
-                      return (
-                      <div
-                        key={col.key}
-                        className={`border-l border-gray-200/70 py-1 text-center text-[10px] font-semibold tabular-nums first:border-l-0 dark:border-gray-700/70 ${
-                          isHoje
-                            ? 'bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400'
-                            : 'text-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        {col.label}
-                      </div>
-                    );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative w-full">
-              {linhasTimeline.map((row) => {
-                const status = calcularStatusCronograma(row.dados);
-                const iniPlan = parseDataIso(row.dados.dataInicio);
-                const fimPlan = parseDataIso(row.dados.dataFim);
-                const iniReal = parseDataIso(row.dados.dataInicioReal);
-                const fimReal = parseDataIso(row.dados.dataFimReal);
-                const barPlan =
-                  row.showBar && iniPlan && fimPlan
-                    ? posicaoBarraTimeline(timelineRange.inicio, timelineRange.fim, iniPlan, fimPlan)
-                    : null;
-                const barReal =
-                  row.showBar && iniReal && fimReal
-                    ? posicaoBarraTimeline(timelineRange.inicio, timelineRange.fim, iniReal, fimReal)
-                    : null;
-                const pct = Math.min(100, Math.max(0, Math.round(row.dados.percentualExecutado ?? 0)));
-                const desvio = calcularDesvioTimeline(row.dados);
-                const mostrarBarraPlan =
-                  barPlan &&
-                  barPlan.widthPct > 0 &&
-                  (mostrarPlanejamentoTimeline ||
-                    (barReal && barReal.widthPct > 0 && desvio.temDesvio));
-                const planSomenteDesvio = Boolean(
-                  mostrarBarraPlan && !mostrarPlanejamentoTimeline && desvio.temDesvio
-                );
-                const desvioFimLabel = formatDesvioDiasCurto(desvio.desvioFimDias);
-
-                return (
-                  <div
-                    key={row.key}
-                    className={`group/tlrow grid border-b border-gray-100 dark:border-gray-800 ${
-                      row.isCabecalhoServico
-                        ? 'bg-gray-50/80 dark:bg-gray-800/40'
-                        : row.isCabecalhoSubtitulo
-                          ? 'bg-slate-100/90 dark:bg-gray-900/70'
-                          : 'bg-white dark:bg-gray-900/80'
-                    }`}
-                    style={{
-                      gridTemplateColumns: timelineGridCols.linha,
-                      height: TIMELINE_ROW_HEIGHT_PX
-                    }}
-                  >
-                    <div
-                      className={`${timelineLabelColCls} flex flex-col justify-center border-r border-gray-200/70 dark:border-gray-700/70 ${paddingServicoColCls(row.indentLevel ?? (row.isSub ? 1 : 0))}`}
-                    >
-                      <div
-                        className={`flex items-center min-w-0 gap-1 ${
-                          row.isCabecalhoServico || row.isCabecalhoSubtitulo || row.showBar
-                            ? 'justify-between'
-                            : ''
-                        }`}
-                      >
-                        <span
-                          className={`min-w-0 truncate leading-snug ${
-                            row.isCabecalhoServico
-                              ? 'font-semibold text-gray-900 dark:text-gray-100'
-                              : row.isCabecalhoSubtitulo
-                                ? 'text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200'
-                                : row.isSub
-                                  ? 'font-normal text-gray-700 dark:text-gray-300'
-                                  : 'font-semibold text-gray-900 dark:text-gray-100'
-                          }`}
-                          title={row.label}
-                        >
-                          {row.label}
-                        </span>
-                        {row.isCabecalhoServico || row.isCabecalhoSubtitulo || row.showBar ? (
-                          <span className="flex shrink-0 items-center gap-1">
-                            {desvioFimLabel ? (
-                              <span
-                                className={`text-[9px] font-bold tabular-nums leading-none ${
-                                  (desvio.desvioFimDias ?? 0) > 0
-                                    ? 'text-red-500 dark:text-red-400'
-                                    : 'text-green-600 dark:text-green-400'
-                                }`}
-                                title={formatDesvioDiasLabel(desvio.desvioFimDias) ?? undefined}
-                              >
-                                {desvioFimLabel}
-                              </span>
-                            ) : null}
-                            <span
-                              className={`text-xs tabular-nums font-semibold ${
-                                row.isSub
-                                  ? 'font-normal text-gray-500 dark:text-gray-400'
-                                  : 'text-gray-600 dark:text-gray-300'
-                              }`}
-                            >
-                              {pct}%
-                            </span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {row.isCabecalhoServico || row.isCabecalhoSubtitulo ? (
-                      <div className="min-w-0" />
-                    ) : (
-                      <div
-                        className="relative min-w-0 w-full grid"
-                        style={{ gridTemplateColumns: timelineGridCols.dias }}
-                      >
-                        {timelineRange.colunas.map((col) => (
-                          <div
-                            key={`${row.key}-${col.key}`}
-                            className="border-l border-gray-100 dark:border-gray-800 first:border-l-0 h-full"
-                            style={{ height: TIMELINE_ROW_HEIGHT_PX }}
-                          />
-                        ))}
-                        {mostrarBarraPlan ? (
-                          <button
-                            type="button"
-                            disabled={!row.editavel}
-                            onClick={(e) => abrirEditorEtapa(row, e)}
-                            className={`absolute top-1 bottom-1 overflow-visible rounded-sm ${
-                              row.editavel && !(barReal && barReal.widthPct > 0)
-                                ? 'cursor-pointer transition-[filter] duration-150 hover:brightness-110'
-                                : 'pointer-events-none'
-                            } ${planSomenteDesvio ? 'opacity-50' : ''}`}
-                            style={{
-                              left: `calc(${barPlan!.leftPct}% + 2px)`,
-                              width: `calc(${Math.max(barPlan!.widthPct, 0.4)}% - 4px)`
-                            }}
-                            title={`Planejado: ${formatDataBr(row.dados.dataInicio)} → ${formatDataBr(row.dados.dataFim)}${
-                              desvio.temDesvio ? ` · ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? ''}` : ''
-                            }`}
-                          >
-                            <div className="h-full rounded-sm border border-dashed border-gray-400/70 bg-gray-400/[0.06] dark:border-gray-500/60 dark:bg-gray-500/10" />
-                          </button>
-                        ) : null}
-                        {barPlan && barReal && barPlan.widthPct > 0 && barReal.widthPct > 0 && desvio.temDesvio ? (
-                          <TimelineDesvioVisual
-                            barPlan={barPlan}
-                            barReal={barReal}
-                            desvio={desvio}
-                            rowHeightPx={TIMELINE_ROW_HEIGHT_PX}
-                          />
-                        ) : null}
-                        {barReal && barReal.widthPct > 0 ? (
-                          <button
-                            type="button"
-                            disabled={!row.editavel}
-                            onClick={(e) => abrirEditorEtapa(row, e)}
-                            className={`absolute z-[2] rounded overflow-visible text-left transition-[filter] duration-150 ${
-                              row.editavel
-                                ? 'cursor-pointer hover:brightness-110 dark:hover:brightness-125'
-                                : 'pointer-events-none'
-                            } ${mostrarBarraPlan ? 'top-2 bottom-2' : 'top-1 bottom-1'}`}
-                            style={{
-                              left: `calc(${barReal.leftPct}% + 2px)`,
-                              width: `calc(${Math.max(barReal.widthPct, 0.4)}% - 4px)`
-                            }}
-                            title={`Real: ${formatDataBr(row.dados.dataInicioReal)} → ${formatDataBr(row.dados.dataFimReal)} · ${pct}%${
-                              desvio.temDesvio ? ` · desvio fim: ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? '—'}` : ''
-                            }`}
-                          >
-                            <div className="relative h-full overflow-visible rounded-sm ring-1 ring-inset ring-gray-900/10 dark:ring-white/10">
-                              <div
-                                className={`absolute inset-0 rounded-sm ${statusBarCls(status)} opacity-20 dark:opacity-25`}
-                              />
-                              <div
-                                className={`absolute inset-y-0 left-0 rounded-sm ${statusBarCls(status)}`}
-                                style={{ width: `${pct}%`, minWidth: pct > 0 ? 3 : undefined }}
-                              />
-                              {pct > 0 ? (
-                                <span className="pointer-events-none absolute left-1 top-1/2 z-[1] -translate-y-1/2 whitespace-nowrap text-[9px] font-semibold tabular-nums leading-none text-white drop-shadow-[0_0_3px_rgba(0,0,0,0.85)]">
-                                  {pct}%
-                                </span>
-                              ) : null}
-                            </div>
-                          </button>
-                        ) : row.editavel && row.showBar ? (
-                          <button
-                            type="button"
-                            onClick={(e) => abrirEditorEtapa(row, e)}
-                            className="absolute inset-0 z-[1] cursor-pointer opacity-0"
-                            title="Clique para definir datas e progresso"
-                            aria-label={`Editar etapa — ${row.label}`}
-                          />
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              </div>
-              </div>
-            {editorTarget ? (
-              <TimelineEtapaEditor
-                target={{
-                  ...editorTarget,
-                  row: linhasTimeline.find((r) => r.key === editorTarget.row.key) ?? editorTarget.row
-                }}
-                onClose={() => setEditorTarget(null)}
-                onPatchDados={patchEtapaDados}
-              />
-            ) : null}
-          </div>
-        )}
-
-        {viewMode === 'timeline' && !timelineRange && (
-          <p className="px-4 sm:px-5 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
-            Defina datas reais (ou planejadas) nos serviços ou no prazo geral da obra para visualizar a linha do tempo.
-          </p>
-        )}
-
-        {viewMode === 'tabela' && (
+        {abaCronograma === 'graficos' ? (
           <div
-            data-orc-table-viewport
-            className={`w-full min-w-0 overflow-x-auto overscroll-contain rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`}
+            className={
+              telaFixa
+                ? gradeTableViewportCls
+                : 'w-full min-w-0 overflow-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+            }
           >
-            <table className={`w-full min-w-0 border-separate border-spacing-0 ${gradeTableCls}`}>
+            <CronogramaGraficosPainel
+              linhas={linhas}
+              cronograma={cronograma}
+              dataInicioObra={dataInicioObra}
+              dataFimObra={dataFimObra}
+              hoje={agora}
+            />
+          </div>
+        ) : (
+        <div
+            ref={gradeScrollRef}
+            data-orc-table-viewport
+            className={
+              telaFixa
+                ? gradeTableViewportCls
+                : `w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`
+            }
+          >
+            <div className="relative w-max">
+            <table
+              className={`table-fixed border-separate border-spacing-0 ${gradeTableCls}`}
+              style={
+                timelineLayout
+                  ? { width: `calc(57.5rem + ${timelineLayout.largura}px)` }
+                  : { width: '100%' }
+              }
+            >
+              <colgroup>
+                <col className="w-[22rem]" />
+                <col className="w-[9rem]" />
+                <col className="w-[9rem]" />
+                <col className="w-[4rem]" />
+                <col className="w-[6.5rem]" />
+                <col className="w-[7rem]" />
+                <col style={timelineLayout ? { width: timelineLayout.largura } : undefined} />
+              </colgroup>
               <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr className={gradeTableRowTrCls}>
                   <th className={`${gradeThStickyCls} ${thServicoColCls}`}>Serviço</th>
-                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início Plan.</th>
-                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim Plan.</th>
-                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início Real</th>
-                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim Real</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início</th>
+                  <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim</th>
                   <th className={`${gradeThStickyCls} ${thDiasColCls}`}>Dias</th>
-                  <th className={`${gradeThStickyCls} ${thPctColCls}`}>% Exec.</th>
+                  <th className={`${gradeThStickyCls} ${thPctColCls}`}>Executado</th>
                   <th className={`${gradeThStickyCls} ${thStatusColCls}`}>Status</th>
+                  <th
+                    className={`${gradeThStickyCls} border-l border-gray-300 p-0 align-bottom dark:border-gray-600`}
+                    style={
+                      timelineLayout
+                        ? {
+                            width: timelineLayout.largura,
+                            minWidth: timelineLayout.largura,
+                            maxWidth: timelineLayout.largura
+                          }
+                        : undefined
+                    }
+                  >
+                    {timelineRange && timelineLayout ? (
+                      <div className="flex flex-col" style={{ width: timelineLayout.largura }}>
+                        <div
+                          className="grid border-b border-gray-200/70 dark:border-gray-700/70"
+                          style={{
+                            width: timelineLayout.largura,
+                            gridTemplateColumns: gradeDiasTimeline(timelineRange.colunas.length, timelineLayout.diaPx)
+                          }}
+                        >
+                          {timelineRange.meses.map((mes) => (
+                            <div
+                              key={mes.key}
+                              className="whitespace-nowrap border-l border-gray-200/70 py-1 text-center text-[10px] font-semibold uppercase text-gray-500 first:border-l-0 dark:border-gray-700/70 dark:text-gray-400"
+                              style={{ gridColumn: `span ${mes.span}` }}
+                            >
+                              {mes.label}
+                            </div>
+                          ))}
+                        </div>
+                        <div
+                          className="grid"
+                          style={{
+                            width: timelineLayout.largura,
+                            gridTemplateColumns: gradeDiasTimeline(timelineRange.colunas.length, timelineLayout.diaPx)
+                          }}
+                        >
+                          {timelineRange.colunas.map((col) => {
+                            const isHoje = hojeMarcador?.colIndex === col.index;
+                            return (
+                              <div
+                                key={col.key}
+                                className={`overflow-hidden border-l py-1 text-center text-[10px] font-semibold tabular-nums first:border-l-0 ${
+                                  isHoje
+                                    ? 'bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400'
+                                    : 'border-gray-200/70 text-gray-600 dark:border-gray-700/70 dark:text-gray-300'
+                                }`}
+                              >
+                                {col.label}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
                 {linhas.flatMap((linha) => {
+                  const comps = listarComposicoesCronogramaLinha(linha);
                   const resolvido = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
                   const status = calcularStatusCronograma(resolvido);
-                  const subs = filtrarSubServicosOperacionaisCronograma(
-                    linha,
-                    listarSubServicos(cronograma, linha.servicoKey)
-                  );
-                  const gerando = gerandoServicoKey === linha.servicoKey;
                   const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
                   const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
-                  const subsPorBloco = agruparSubServicosPorBloco(linha, subs);
-                  const servicoComFilhas = subs.length > 0;
+                  const servicoComFilhas = comps.length > 0;
 
                   const linhaServico = (
                     <tr
@@ -1270,32 +992,13 @@ export function OrcamentoCronogramaPainel({
                       className={`bg-white dark:bg-gray-900/80 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                     >
                       <td className={`${tdServicoColCls} text-left pl-4`}>
-                        <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1">
-                          <div className="min-w-0 flex-1 overflow-hidden">
-                            <span
-                              className="block min-w-0 truncate text-sm font-semibold leading-normal text-gray-900 dark:text-gray-100"
-                              title={linha.servicoNome}
-                            >
-                              {linha.servicoNome}
-                            </span>
-                            {gerando ? (
-                              <span className="mt-0.5 flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
-                                <Loader2 className="h-3 w-3 animate-spin text-violet-500" aria-hidden />
-                                Gerando etapas…
-                              </span>
-                            ) : null}
-                          </div>
-                          {!gerando && !usaHierarquia ? (
-                            <button
-                              type="button"
-                              onClick={() => adicionarSubServico(linha.servicoKey)}
-                              className="shrink-0 rounded p-1 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
-                              title="Adicionar subserviço"
-                              aria-label={`Adicionar subserviço — ${linha.servicoNome}`}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          ) : null}
+                        <div className="flex h-full min-h-0 min-w-0 items-center gap-1">
+                          <span
+                            className="block min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100"
+                            title={linha.servicoNome}
+                          >
+                            {linha.servicoNome}
+                          </span>
                         </div>
                       </td>
                       <CelulasEtapaCronograma
@@ -1303,195 +1006,145 @@ export function OrcamentoCronogramaPainel({
                         status={status}
                         readOnly={servicoComFilhas}
                         ariaPrefix={linha.servicoNome}
+                        modo={modoFolha}
                         onPatch={(patch) => patchServico(linha.servicoKey, patch)}
                       />
+                      {renderTimeline(linha.servicoKey)}
                     </tr>
                   );
 
-                  const renderLinhaSub = (
-                    sub: CronogramaSubServico,
-                    idx: number,
-                    total: number,
-                    indentLevel: 0 | 1 | 2,
-                    blocoKey?: string
+                  const renderComposicao = (
+                    blocoKey: string,
+                    comp: CronogramaComposicaoRef,
+                    indentLevel: 0 | 1 | 2
                   ) => {
-                    const sintetica = etapaCronogramaEhSintetica(sub);
-                    const subResolvido = (() => {
-                      if (sintetica && blocoKey && sub.composicaoChave) {
-                        const porItem = resolverDadosCronogramaComposicao(cronograma, blocoKey, {
-                          chave: sub.composicaoChave,
-                          codigo: '',
-                          descricao: sub.nome,
-                          subtituloNome: '',
-                          quantidade: 0
-                        });
-                        if (porItem.dataInicio && porItem.dataFim) return porItem;
-                      }
-                      return resolverDadosCronogramaSubServico(
-                        cronograma,
-                        linha.servicoKey,
-                        sub,
-                        idx,
-                        total
-                      );
-                    })();
-                    const subStatus = calcularStatusCronograma(subResolvido);
+                    const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
+                    const compStatus = calcularStatusCronograma(dados);
                     return (
                       <tr
-                        key={`${linha.servicoKey}-${sub.id}`}
-                        className="group/subrow bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200/60 dark:border-gray-700/80"
+                        key={`${linha.servicoKey}-${blocoKey}-${comp.chave}`}
+                        className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200/60 dark:border-gray-700/80"
                       >
                         <td className={`${tdServicoColCls} text-left ${paddingServicoColCls(indentLevel)}`}>
-                          {sintetica ? (
-                            <ComposicaoResumoNomeCell nome={sub.nome} />
-                          ) : (
-                            <SubServicoNomeCell
-                              sub={sub}
-                              onPatch={(nome) => patchSubServico(linha.servicoKey, sub.id, { nome })}
-                              onRemove={() => removerSubServico(linha.servicoKey, sub.id)}
-                            />
-                          )}
+                          <ComposicaoResumoNomeCell nome={comp.descricao} />
                         </td>
                         <CelulasEtapaCronograma
-                          resolvido={subResolvido}
-                          status={subStatus}
+                          resolvido={dados}
+                          status={compStatus}
                           readOnly={false}
-                          ariaPrefix={sub.nome}
-                          onPatch={(patch) => {
-                            if (sintetica && blocoKey && sub.composicaoChave) {
-                              patchComposicaoEtapa(blocoKey, sub.composicaoChave, patch);
-                              return;
-                            }
-                            patchSubServico(linha.servicoKey, sub.id, patch);
-                          }}
+                          ariaPrefix={comp.descricao}
+                          modo={modoFolha}
+                          onPatch={(patch) => patchComposicaoEtapa(blocoKey, comp.chave, patch)}
                         />
+                        {renderTimeline(`${linha.servicoKey}::${blocoKey}::${comp.chave}`)}
                       </tr>
                     );
                   };
 
                   if (!usaHierarquia) {
-                    if (subs.length === 0) return [linhaServico];
-                    const subsOrdenados = ordenarSubServicosSequenciaObra(subs);
+                    if (comps.length === 0) return [linhaServico];
                     return [
                       linhaServico,
-                      ...subsOrdenados.map((sub, idx) =>
-                        renderLinhaSub(sub, idx, subsOrdenados.length, 1)
-                      )
+                      ...comps.map(({ blocoKey, comp }) => renderComposicao(blocoKey, comp, 1))
                     ];
                   }
 
                   const rows: React.ReactElement[] = [linhaServico];
+                  const visiveis = new Set(subtitulosVisiveis.map((st) => st.blocoKey));
+                  for (const item of comps) {
+                    if (!visiveis.has(item.blocoKey)) {
+                      rows.push(renderComposicao(item.blocoKey, item.comp, 1));
+                    }
+                  }
 
                   for (const st of subtitulosVisiveis) {
-                    const subsDoBloco = ordenarSubServicosSequenciaObra(
-                      subsPorBloco.get(st.blocoKey) ?? []
-                    );
-                    const etapasBloco = listarEtapasCronogramaBloco(st, subsDoBloco);
-                    const blocoResolvido = resolverDadosCronogramaBloco(
+                    const blocoResolvido = agregarDadosComposicoes(
                       cronograma,
-                      st.blocoKey,
-                      etapasBloco,
-                      linha.servicoKey
+                      st.composicoes.map((comp) => ({ blocoKey: st.blocoKey, comp }))
                     );
                     const blocoStatus = calcularStatusCronograma(blocoResolvido);
-                    const blocoComFilhas = etapasBloco.length > 0;
-
                     rows.push(
                       <tr
                         key={`${st.blocoKey}::cabecalho`}
                         className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
                       >
                         <td className={`${tdServicoColCls} text-left pl-6`}>
-                          <div className="flex min-h-[2rem] min-w-0 items-center gap-1">
-                            <span
-                              className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200"
-                              title={st.subtituloNome}
-                            >
-                              {st.subtituloNome}
-                            </span>
-                            {gerandoBlocoKey === st.blocoKey ? (
-                              <Loader2
-                                className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-                                aria-hidden
-                              />
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => adicionarSubServico(linha.servicoKey, st.blocoKey)}
-                                  className="shrink-0 rounded p-1 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
-                                  title="Adicionar subserviço neste subtítulo"
-                                  aria-label={`Adicionar subserviço — ${st.subtituloNome}`}
-                                >
-                                  <Plus className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => regerarSubServicosBloco(linha, st)}
-                                  className="shrink-0 rounded p-1 text-gray-500 hover:text-violet-600 dark:text-gray-400 dark:hover:text-violet-400"
-                                  title="Regenerar etapas com IA"
-                                  aria-label={`Regenerar etapas — ${st.subtituloNome}`}
-                                >
-                                  <RefreshCw className="h-3.5 w-3.5" />
-                                </button>
-                              </>
-                            )}
-                          </div>
+                          <span
+                            className="block min-w-0 whitespace-normal break-words text-xs font-semibold uppercase leading-snug tracking-wide text-gray-800 dark:text-gray-200"
+                            title={st.subtituloNome}
+                          >
+                            {st.subtituloNome}
+                          </span>
                         </td>
                         <CelulasEtapaCronograma
                           resolvido={blocoResolvido}
                           status={blocoStatus}
-                          readOnly={blocoComFilhas}
+                          readOnly={st.composicoes.length > 0}
                           ariaPrefix={st.subtituloNome}
+                          modo={modoFolha}
                           onPatch={() => {}}
                         />
+                        {renderTimeline(`${st.blocoKey}::cabecalho`)}
                       </tr>
                     );
-
-                    etapasBloco.forEach((sub, idx) => {
-                      rows.push(renderLinhaSub(sub, idx, etapasBloco.length, 2, st.blocoKey));
-                    });
+                    for (const comp of st.composicoes) {
+                      rows.push(renderComposicao(st.blocoKey, comp, 2));
+                    }
                   }
 
                   return rows;
                 })}
               </tbody>
             </table>
+            {hojeMarcador && timelineLayout ? (
+              <div
+                className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-red-500"
+                style={{
+                  left: `calc(57.5rem + ${(hojeMarcador.leftPct / 100) * timelineLayout.largura}px)`
+                }}
+                aria-hidden
+              />
+            ) : null}
+            </div>
           </div>
         )}
-    </div>
-
-      {showCurvaSModal ? (
-        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCurvaSModal(false)} />
-          <div className="relative mx-4 w-full max-w-3xl rounded-lg bg-white p-5 shadow-xl dark:bg-gray-800 sm:p-6">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Curva S</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Avanço físico planejado vs real
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCurvaSModal(false)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                aria-label="Fechar"
-              >
-                <X className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-            <CronogramaCurvaSPanel
-              linhas={linhas}
-              cronograma={cronograma}
-              dataInicioObra={dataInicioObra}
-              dataFimObra={dataFimObra}
-              hoje={agora}
-              inModal
-            />
-          </div>
-        </AppModalOverlay>
+      {editorTarget && abaCronograma !== 'graficos' ? (
+        <TimelineEtapaEditor
+          target={{
+            ...editorTarget,
+            row: linhasTimeline.find((r) => r.key === editorTarget.row.key) ?? editorTarget.row
+          }}
+          onClose={() => setEditorTarget(null)}
+          onPatchDados={patchEtapaDados}
+        />
       ) : null}
+    </div>
+    {telaFixa && barraPronta
+      ? createPortal(
+          <div
+            className="fixed bottom-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 left-0 lg:left-[var(--orc-footer-left,5rem)]"
+            role="toolbar"
+            aria-label="Ações do cronograma"
+          >
+            <div className="flex items-center gap-3 overflow-x-auto p-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="min-w-0 flex-1">
+                {dataInicioObra || dataFimObra ? (
+                  <p className="truncate text-sm tabular-nums text-gray-700 dark:text-gray-300">
+                    {formatDataBr(dataInicioObra) || '—'}
+                    <span className="mx-1.5 text-gray-400 dark:text-gray-500" aria-hidden>
+                      →
+                    </span>
+                    {formatDataBr(dataFimObra) || '—'}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 justify-center">{abasCronograma}</div>
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-2">{botoesAcao}</div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null}
 
       <Modal
         isOpen={showDataFimModal}

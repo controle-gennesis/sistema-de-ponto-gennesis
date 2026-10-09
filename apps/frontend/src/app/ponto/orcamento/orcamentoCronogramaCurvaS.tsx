@@ -104,7 +104,7 @@ export function CronogramaCurvaSPanel({
 
       <div className={inModal ? 'h-[320px] w-full sm:h-[380px]' : 'h-[220px] w-full'}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={pontos as CronogramaCurvaSPonto[]} margin={{ top: 8, right: 12, left: -8, bottom: 0 }}>
+          <LineChart data={pontos as CronogramaCurvaSPonto[]} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
             <XAxis
               dataKey="label"
@@ -118,7 +118,7 @@ export function CronogramaCurvaSPanel({
               tick={{ fontSize: 10, fill: 'currentColor' }}
               className="text-gray-500 dark:text-gray-400"
               tickFormatter={(v) => `${v}%`}
-              width={36}
+              width={44}
             />
             <Tooltip
               formatter={tooltipFormatter}

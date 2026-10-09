@@ -524,6 +524,49 @@ export function cronogramaUsaHierarquiaSubtitulos(linha: CronogramaLinhaServico)
   return listarSubtitulosVisiveisCronograma(linha).length > 0;
 }
 
+/** Composições do orçamento que entram no cronograma, com o bloco em que foram gravadas. */
+export function listarComposicoesCronogramaLinha(
+  linha: CronogramaLinhaServico
+): Array<{ blocoKey: string; comp: CronogramaComposicaoRef }> {
+  const blocos = linha.subtitulos ?? [];
+  if (blocos.length > 0) {
+    return blocos.flatMap((st) =>
+      st.composicoes.map((comp) => ({ blocoKey: st.blocoKey, comp }))
+    );
+  }
+  return (linha.composicoes ?? []).map((comp) => ({ blocoKey: linha.servicoKey, comp }));
+}
+
+export function agregarDadosComposicoes(
+  cronograma: CronogramaPersist,
+  itens: Array<{ blocoKey: string; comp: CronogramaComposicaoRef }>
+): CronogramaItemData {
+  let minIni = '';
+  let maxFim = '';
+  let minIniReal = '';
+  let maxFimReal = '';
+  let somaPct = 0;
+  itens.forEach(({ blocoKey, comp }) => {
+    const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
+    if (dados.dataInicio && (!minIni || dados.dataInicio < minIni)) minIni = dados.dataInicio;
+    if (dados.dataFim && (!maxFim || dados.dataFim > maxFim)) maxFim = dados.dataFim;
+    if (dados.dataInicioReal && (!minIniReal || dados.dataInicioReal < minIniReal)) {
+      minIniReal = dados.dataInicioReal;
+    }
+    if (dados.dataFimReal && (!maxFimReal || dados.dataFimReal > maxFimReal)) {
+      maxFimReal = dados.dataFimReal;
+    }
+    somaPct += dados.percentualExecutado ?? 0;
+  });
+  return {
+    dataInicio: minIni,
+    dataFim: maxFim,
+    dataInicioReal: minIniReal,
+    dataFimReal: maxFimReal,
+    percentualExecutado: itens.length > 0 ? somaPct / itens.length : undefined
+  };
+}
+
 export function itemKeyComposicaoCronograma(blocoKey: string, chave: string): string {
   return `${blocoKey}|${chave}`;
 }
@@ -888,6 +931,8 @@ export function resolverDadosCronogramaServicoParaLinha(
   cronograma: CronogramaPersist,
   linha: CronogramaLinhaServico
 ): CronogramaItemData {
+  const comps = listarComposicoesCronogramaLinha(linha);
+  if (comps.length > 0) return agregarDadosComposicoes(cronograma, comps);
   const subs = filtrarSubServicosOperacionaisCronograma(
     linha,
     listarSubServicos(cronograma, linha.servicoKey)
