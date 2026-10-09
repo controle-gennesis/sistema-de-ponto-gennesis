@@ -13262,6 +13262,12 @@ export function OrcamentoPageView({
     syncQuantidadeOrcamentoDaMemoria(itemKey, d);
   };
 
+  const restaurarDimensoesItem = (itemKey: string, dimRestaurar: DimensoesItem) => {
+    if (gradeTravadaRef.current) return;
+    setDimensoesPorItem(prev => aplicarVinculosMemoria({ ...prev, [itemKey]: dimRestaurar }));
+    queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, dimRestaurar));
+  };
+
   const addLinhaMedicao = (itemKey: string, inserirAposIdx?: number) => {
     if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
@@ -13349,10 +13355,15 @@ export function OrcamentoPageView({
         L: snap.L,
         H: snap.H,
         N: snap.N,
-        empolamento: 1,
+        empolamento: snap.C || snap.aManual || snap.vManual ? 1 : 0,
         aManual: snap.aManual,
         vManual: snap.vManual,
         subtotalManual: snap.subtotalManual,
+        formulas:
+          snap.vManual ? { subtotalManual: '=V*%' }
+          : snap.aManual ? { subtotalManual: '=A*%' }
+          : snap.C ? { subtotalManual: '=C*%' }
+          : undefined,
       });
     }
     const nextDim = { ...atual, linhas: [...mantidas, ...novas] };
@@ -13360,7 +13371,11 @@ export function OrcamentoPageView({
     syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
   };
 
-  const addLinhaCabecalhoSecaoMedicao = (itemKey: string, inserirAposIdx?: number) => {
+  const addLinhaCabecalhoSecaoMedicao = (
+    itemKey: string,
+    inserirAposIdx?: number,
+    descricao?: string | string[]
+  ) => {
     if (gradeTravadaRef.current) return;
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const prevDim = dimensoesPorItem[itemKey];
@@ -13368,24 +13383,27 @@ export function OrcamentoPageView({
       prevDim,
       rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
     );
-    const novaLinha: LinhaMedicao = {
+    const textos = (Array.isArray(descricao) ? descricao : [descricao ?? 'DESCRIÇÃO: ']).map(
+      t => String(t ?? '').trim() || 'DESCRIÇÃO: '
+    );
+    const novas: LinhaMedicao[] = textos.map(texto => ({
       cabecalhoSecao: true,
-      descricao: 'DESCRIÇÃO: ',
+      descricao: texto,
       C: 0,
       L: 0,
       H: 0,
       N: 0,
       empolamento: 0
-    };
+    }));
     const linhas = [...atual.linhas];
     if (
       inserirAposIdx !== undefined &&
-      inserirAposIdx >= 0 &&
+      inserirAposIdx >= -1 &&
       inserirAposIdx < linhas.length
     ) {
-      linhas.splice(inserirAposIdx + 1, 0, novaLinha);
+      linhas.splice(inserirAposIdx + 1, 0, ...novas);
     } else {
-      linhas.push(novaLinha);
+      linhas.push(...novas);
     }
     const nextDim = { ...atual, linhas };
     setDimensoesPorItem(prev => aplicarVinculosMemoria({
@@ -13478,9 +13496,11 @@ export function OrcamentoPageView({
                 ? campoOv
                 : campoOv === 'subtotal'
                   ? 'subtotalManual'
-                  : campoOv === 'a' || campoOv === 'v'
-                    ? 'valorManual'
-                    : null;
+                  : campoOv === 'a'
+                    ? 'aManual'
+                    : campoOv === 'v'
+                      ? 'vManual'
+                      : null;
             if (formulaCampo) {
               const formulas = { ...(updated.formulas ?? {}) };
               if (!limpar && !igualAuto && texto.startsWith('=')) formulas[formulaCampo] = texto;
@@ -13496,36 +13516,25 @@ export function OrcamentoPageView({
             return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
           }
         }
-        const limparSubtotal =
-          campo === 'subtotalManual' && (valor === '' || (typeof valor === 'number' && !Number.isFinite(valor)));
-        const limparValorManual =
-          campo === 'valorManual' && (valor === '' || (typeof valor === 'number' && !Number.isFinite(valor)));
-        const limparOverrideManual = limparSubtotal || limparValorManual;
+        const campoVazio = valor === '' || (typeof valor === 'number' && !Number.isFinite(valor));
+        const limparSubtotal = campo === 'subtotalManual' && campoVazio;
+        const limparValorManual = campo === 'valorManual' && campoVazio;
+        const limparA = campo === 'aManual' && campoVazio;
+        const limparV = campo === 'vManual' && campoVazio;
+        const limparCampoManual = limparSubtotal || limparValorManual || limparA || limparV;
         const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
-        const updated: LinhaMedicao = limparOverrideManual
+        const updated: LinhaMedicao = limparCampoManual
           ? { ...novaLinhas[idx] }
           : ({ ...novaLinhas[idx], [campo]: v } as LinhaMedicao);
-        if (limparSubtotal) {
-          delete updated.subtotalManual;
-        }
-        if (limparValorManual) {
+        if ((campo === 'aManual' || campo === 'vManual') && updated.valorManual != null) {
+          if (updated.aManual == null) updated.aManual = updated.valorManual;
+          if (updated.vManual == null) updated.vManual = updated.valorManual;
           delete updated.valorManual;
         }
-        if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
-          updated.valorManual = undefined;
-        }
-        if (
-          campo === 'C' ||
-          campo === 'L' ||
-          campo === 'H' ||
-          campo === 'N' ||
-          campo === 'empolamento' ||
-          campo === 'valorManual'
-        ) {
-          updated.subtotalManual = undefined;
-          updated.aManual = undefined;
-          updated.vManual = undefined;
-        }
+        if (limparSubtotal) delete updated.subtotalManual;
+        if (limparValorManual) delete updated.valorManual;
+        if (limparA) delete updated.aManual;
+        if (limparV) delete updated.vManual;
         const campoFormula =
           campo === 'C' ||
           campo === 'L' ||
@@ -13533,12 +13542,20 @@ export function OrcamentoPageView({
           campo === 'N' ||
           campo === 'empolamento' ||
           campo === 'valorManual' ||
+          campo === 'aManual' ||
+          campo === 'vManual' ||
           campo === 'subtotalManual'
             ? campo
             : null;
         if (campoFormula) {
           const formulas = { ...(updated.formulas ?? {}) };
           const rawFormula = String(opts?.formulaRaw ?? '').trim();
+          if ((campo === 'aManual' || campo === 'vManual') && formulas.valorManual != null) {
+            if (formulas.aManual == null) formulas.aManual = formulas.valorManual;
+            if (formulas.vManual == null) formulas.vManual = formulas.valorManual;
+            delete formulas.valorManual;
+            updated.formulas = formulas;
+          }
           if (rawFormula.startsWith('=')) {
             formulas[campoFormula] = rawFormula;
             updated.formulas = formulas;
@@ -13554,23 +13571,12 @@ export function OrcamentoPageView({
             delete formulas.valorManual;
             updated.formulas = Object.keys(formulas).length > 0 ? formulas : undefined;
           }
-          if (
-            (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') &&
-            formulas.valorManual != null
-          ) {
-            delete formulas.valorManual;
+          if (limparA && formulas.aManual != null) {
+            delete formulas.aManual;
             updated.formulas = Object.keys(formulas).length > 0 ? formulas : undefined;
           }
-          if (
-            (campo === 'C' ||
-              campo === 'L' ||
-              campo === 'H' ||
-              campo === 'N' ||
-              campo === 'empolamento' ||
-              campo === 'valorManual') &&
-            formulas.subtotalManual != null
-          ) {
-            delete formulas.subtotalManual;
+          if (limparV && formulas.vManual != null) {
+            delete formulas.vManual;
             updated.formulas = Object.keys(formulas).length > 0 ? formulas : undefined;
           }
         }
@@ -13593,16 +13599,19 @@ export function OrcamentoPageView({
     const atual =
       dimensoesPorItem[itemKey] ||
       ({ tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] } as DimensoesItem);
-    setDimensoesPorItem(prev => ({
-      ...prev,
-      [itemKey]: {
-        ...atual,
-        rotulosColunas: {
-          ...(atual.rotulosColunas ?? {}),
-          [campo]: rotulo
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey] || atual;
+      return {
+        ...prev,
+        [itemKey]: {
+          ...base,
+          rotulosColunas: {
+            ...(base.rotulosColunas ?? {}),
+            [campo]: rotulo
+          }
         }
-      }
-    }));
+      };
+    });
   };
 
   const updateObservacaoMedicao = (itemKey: string, observacao: string) => {
@@ -17305,11 +17314,18 @@ export function OrcamentoPageView({
                                                     rotuloItemComposicaoPorKey.get(m.key) ??
                                                     String(i + 1),
                                                   descricao: m.item.descricao || '',
+                                                  unidade: unidadeComposicaoParaExibicao(
+                                                    m.unidadeComposicao,
+                                                    m.tipoUnidade
+                                                  ),
                                                 }))}
                                               onMemoriasIncluidasChange={(chaves) =>
                                                 definirMemoriasIncluidas(row.key, chaves)
                                               }
                                               resolverFormulaExterna={resolverFormulaMemoria}
+                                              restaurarDimensoes={dimRestaurar =>
+                                                restaurarDimensoesItem(row.key, dimRestaurar)
+                                              }
                                             />
                                           </div>
                                         );

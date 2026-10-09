@@ -9,6 +9,8 @@ export type CampoFormulaMedicao =
   | 'N'
   | 'empolamento'
   | 'valorManual'
+  | 'aManual'
+  | 'vManual'
   | 'subtotalManual';
 
 export interface LinhaMedicao {

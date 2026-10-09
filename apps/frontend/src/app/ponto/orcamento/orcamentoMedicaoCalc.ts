@@ -174,7 +174,8 @@ function numeroMemoriaIgual(atual: number | undefined, proximo: number): boolean
 }
 
 /**
- * Totais atuais de uma memória, para a linha que a inclui em outra composição.
+ * Total da memória de origem, colocado numa coluna só, conforme a unidade dela.
+ * Metro → C. Metro quadrado → área. Metro cúbico → volume. O restante fica vazio.
  * Memórias incluídas dentro da origem entram com o valor ao vivo. Ciclo é ignorado.
  */
 export function snapshotMemoriaIncluida(
@@ -190,22 +191,10 @@ export function snapshotMemoriaIncluida(
   proximos.add(origemKey);
   const linhas = linhasMedicaoEfetivas(dimensoes[origemKey]).filter((ln) => !ln.cabecalhoSecao);
   const tipo: TipoUnidadeFormula = meta.tipo || inferirTipoUnidadePorDimensao(linhas);
-  let C = 0;
-  let L = 0;
-  let H = 0;
-  let N = 0;
-  let aManual = 0;
-  let vManual = 0;
-  let subtotalManual = 0;
+  let total = 0;
   for (const ln of linhas) {
     if (ln.origemMemoriaKey && proximos.has(ln.origemMemoriaKey)) continue;
-    C += ln.C || 0;
-    L += ln.L || 0;
-    H += ln.H || 0;
-    N += ln.N || 0;
-    aManual += areaExibidaLinha(ln);
-    vManual += volumeExibidoLinha(ln, tipo);
-    subtotalManual += calcularQuantidadeLinha(ln, tipo);
+    total += calcularQuantidadeLinha(ln, tipo);
   }
   const rotulo = meta.rotulo.trim();
   const descricaoOrigem = meta.descricao.trim();
@@ -213,13 +202,13 @@ export function snapshotMemoriaIncluida(
     descricao: [rotulo, descricaoOrigem].filter(Boolean).join(' - '),
     origemComposicaoRotulo: rotulo,
     origemComposicaoDescricao: descricaoOrigem,
-    C,
-    L,
-    H,
-    N,
-    aManual,
-    vManual,
-    subtotalManual,
+    C: tipo === 'm' ? total : 0,
+    L: 0,
+    H: 0,
+    N: 0,
+    aManual: tipo === 'm2' ? total : 0,
+    vManual: tipo === 'm3' ? total : 0,
+    subtotalManual: total,
   };
 }
 
@@ -230,24 +219,33 @@ function autoMemoriaDoSnapshot(snap: SnapshotMemoriaIncluida): NonNullable<Linha
     L: snap.L,
     H: snap.H,
     N: snap.N,
-    empolamento: 1,
+    empolamento: snap.C || snap.aManual || snap.vManual ? 1 : 0,
     a: snap.aManual,
     v: snap.vManual,
     subtotal: snap.subtotalManual,
   };
 }
 
-function formulasVinculoDesatualizadas(ln: LinhaMedicao): boolean {
+/** Fórmula padrão do subtotal incluído: o total entra por C, A ou V. */
+function formulaSubtotalMemoria(snap: SnapshotMemoriaIncluida): string | undefined {
+  if (snap.vManual) return '=V*%';
+  if (snap.aManual) return '=A*%';
+  if (snap.C) return '=C*%';
+  return undefined;
+}
+
+function formulasVinculoDesatualizadas(ln: LinhaMedicao, snap: SnapshotMemoriaIncluida): boolean {
   const f = ln.formulas;
-  if (!f) return false;
+  if (!f) return formulaSubtotalMemoria(snap) != null && !ln.overrideMemoria?.subtotal;
   const over = ln.overrideMemoria ?? {};
   if (!over.C && f.C != null) return true;
   if (!over.L && f.L != null) return true;
   if (!over.H && f.H != null) return true;
   if (!over.N && f.N != null) return true;
   if (!over.empolamento && f.empolamento != null) return true;
-  if (!over.subtotal && f.subtotalManual != null) return true;
-  if (!over.a && !over.v && f.valorManual != null) return true;
+  if (!over.subtotal && (f.subtotalManual ?? '') !== (formulaSubtotalMemoria(snap) ?? '')) return true;
+  if (!over.a && (f.aManual != null || f.valorManual != null)) return true;
+  if (!over.v && f.vManual != null) return true;
   return false;
 }
 
@@ -276,7 +274,7 @@ function linhaMemoriaIncluidaMudou(ln: LinhaMedicao, snap: SnapshotMemoriaInclui
   if (!over.a && !numeroMemoriaIgual(ln.aManual, auto.a)) return true;
   if (!over.v && !numeroMemoriaIgual(ln.vManual, auto.v)) return true;
   if (!over.subtotal && !numeroMemoriaIgual(ln.subtotalManual, auto.subtotal)) return true;
-  return formulasVinculoDesatualizadas(ln);
+  return formulasVinculoDesatualizadas(ln, snap);
 }
 
 function aplicarSnapshotNaLinha(ln: LinhaMedicao, snap: SnapshotMemoriaIncluida): LinhaMedicao {
@@ -288,8 +286,16 @@ function aplicarSnapshotNaLinha(ln: LinhaMedicao, snap: SnapshotMemoriaIncluida)
   if (!over.H) delete formulas.H;
   if (!over.N) delete formulas.N;
   if (!over.empolamento) delete formulas.empolamento;
-  if (!over.subtotal) delete formulas.subtotalManual;
-  if (!over.a && !over.v) delete formulas.valorManual;
+  if (!over.subtotal) {
+    const esperada = formulaSubtotalMemoria(snap);
+    if (esperada) formulas.subtotalManual = esperada;
+    else delete formulas.subtotalManual;
+  }
+  if (!over.a) {
+    delete formulas.aManual;
+    delete formulas.valorManual;
+  }
+  if (!over.v) delete formulas.vManual;
   return {
     ...ln,
     autoMemoria: auto,
