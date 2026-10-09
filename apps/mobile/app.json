@@ -16,7 +16,8 @@
         "NSCameraUsageDescription": "Este app precisa acessar a câmera para capturar fotos ao bater o ponto.",
         "NSLocationWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
-        "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso."
+        "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -133,6 +134,13 @@
     "extra": {
       "eas": {
         "projectId": "208f8118-e466-4554-97db-2e26271dd4fa"
+      },
+      "expo-status-bar": {
+        "style": "light"
+      },
+      "expo-navigation-bar": {
+        "style": "light",
+        "hidden": false
       }
     },
     "owner": "lucassouzss"
