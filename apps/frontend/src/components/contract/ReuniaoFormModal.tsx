@@ -199,6 +199,21 @@ function pickNome(identificacao?: { nome?: string; contrato?: string } | null): 
   return identificacao.nome || identificacao.contrato || '';
 }
 
+function normalizeFillLabel(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/** No relatório mensal do contrato, estes blocos podem ficar em branco. */
+function isOptionalMensalFill(sectionTitle: string, questionTitle: string): boolean {
+  const optional = (label: string) =>
+    label === 'frota por locadora' || label === 'observacao' || label === 'observacoes';
+  return optional(normalizeFillLabel(sectionTitle)) || optional(normalizeFillLabel(questionTitle));
+}
+
 function isAnswerEmpty(question: Question, answer: ReuniaoAnswer | undefined): boolean {
   if (question.type === 'signature') {
     return isBlankSignature(typeof answer?.value === 'string' ? answer.value : '');
@@ -1160,6 +1175,7 @@ export function ReuniaoFormModal({
   ): string | null => {
     for (const section of sections) {
       for (const q of section.questions) {
+        if (kind === 'mensal' && isOptionalMensalFill(section.title, q.title)) continue;
         if (!opts?.requireAll && !q.required) continue;
         if (isAnswerEmpty(q, answers[q.id])) {
           return `Preencha: ${q.title}`;
@@ -1254,10 +1270,14 @@ export function ReuniaoFormModal({
       <div className={`grid grid-cols-1 gap-5 ${compact ? '' : 'sm:grid-cols-2'}`}>
         {section.questions.map((q) => {
           const full = resolveFieldWidth(q as FormQuestion) === 'full';
+          const question =
+            kind === 'mensal' && isOptionalMensalFill(section.title, q.title)
+              ? { ...q, required: false }
+              : q;
           return (
             <div key={q.id} className={`min-w-0 ${!compact && full ? 'sm:col-span-2' : ''}`}>
           <QuestionField
-            question={q}
+            question={question}
             answer={form.answers[q.id]}
                 allAnswers={form.answers}
                 profileOptions={profileSelectOptions}
