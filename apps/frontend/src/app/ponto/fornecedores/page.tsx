@@ -207,7 +207,7 @@ function getSupplierDetailSections(s: Supplier): DetailSection[] {
         { label: 'ID', value: formatSupplierListId(s.code) },
         { label: 'Tipo', value: cell(s.partyType) },
         { label: 'Nome Fantasia', value: cell(s.tradeName) },
-        { label: 'Nome', value: cell(s.name) },
+        { label: 'Razão Social', value: cell(s.name) },
         { label: 'CPF/CNPJ', value: cell(s.cnpj) },
         { label: 'Inscrição Estadual', value: cell(s.stateRegistration) },
         { label: 'Inscrição Municipal', value: cell(s.municipalRegistration) },
@@ -458,7 +458,7 @@ export default function FornecedoresPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      toast.error('Nome é obrigatório');
+      toast.error('Razão Social é obrigatória');
       return;
     }
     if (editingSupplier) {
@@ -975,7 +975,7 @@ export default function FornecedoresPage() {
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>Nome *</label>
+                      <label className={labelClass}>Razão Social *</label>
                       <input
                         type="text"
                         value={formData.name}
