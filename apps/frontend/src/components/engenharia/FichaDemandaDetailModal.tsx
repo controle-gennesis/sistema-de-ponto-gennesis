@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Paperclip } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import {
   anexosDemais,
   anexosOrdemCompra,
@@ -112,6 +114,15 @@ export function FichaDemandaDetailModal({
 }: Props) {
   const queryClient = useQueryClient();
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
+  const [scNumero, setScNumero] = useState('');
+  const [scId, setScId] = useState('');
+  const [ocId, setOcId] = useState('');
+
+  useEffect(() => {
+    setScNumero(record?.scNumero || '');
+    setScId(record?.scId || '');
+    setOcId(record?.ocId || '');
+  }, [record?.id, record?.scNumero, record?.scId, record?.ocId]);
 
   const anexos = useMemo(() => {
     if (!record?.anexos?.length) return [];
@@ -167,6 +178,33 @@ export function FichaDemandaDetailModal({
     onSettled: () => setUploadingAnexoId(null),
   });
 
+  const refsMutation = useMutation({
+    mutationFn: async () => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-refs`, {
+        scNumero,
+        scId,
+        ocId,
+      });
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onSuccess: async (updated) => {
+      toast.success('Dados de compra salvos');
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível salvar os dados de compra.');
+    },
+  });
+
   if (!record) return null;
 
   return (
@@ -197,6 +235,13 @@ export function FichaDemandaDetailModal({
           <Field label="Polo">{record.polo || '—'}</Field>
           <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
           <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+          {!allowAddOrdemCompra && (record.scNumero || record.scId || record.ocId) ? (
+            <>
+              <Field label="Nº da SC">{record.scNumero || '—'}</Field>
+              <Field label="ID da SC">{record.scId || '—'}</Field>
+              <Field label="ID da OC">{record.ocId || '—'}</Field>
+            </>
+          ) : null}
           <Field label="Faturamento estimado">
             {formatCurrencyDisplay(record.faturamentoEstimado)}
           </Field>
@@ -218,6 +263,60 @@ export function FichaDemandaDetailModal({
             <Field label="Observação">{record.observacao || '—'}</Field>
           </div>
         </dl>
+
+        {allowAddOrdemCompra ? (
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Solicitação e ordem de compra
+              </p>
+            </div>
+            <div className="grid gap-4 p-4 sm:grid-cols-3">
+              <label className="block min-w-0">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Nº da SC
+                </span>
+                <input
+                  value={scNumero}
+                  onChange={(e) => setScNumero(e.target.value)}
+                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
+                  placeholder="Número da SC"
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  ID da SC
+                </span>
+                <input
+                  value={scId}
+                  onChange={(e) => setScId(e.target.value)}
+                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
+                  placeholder="ID da SC"
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  ID da OC
+                </span>
+                <input
+                  value={ocId}
+                  onChange={(e) => setOcId(e.target.value)}
+                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
+                  placeholder="ID da OC"
+                />
+              </label>
+              <div className="sm:col-span-3 flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => refsMutation.mutate()}
+                  disabled={refsMutation.isPending}
+                >
+                  {refsMutation.isPending ? 'Salvando...' : 'Salvar'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="space-y-4">
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">

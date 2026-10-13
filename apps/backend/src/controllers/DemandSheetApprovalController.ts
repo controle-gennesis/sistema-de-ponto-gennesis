@@ -152,6 +152,17 @@ const purchaseStatusSchema = z.object({
   purchaseStatus: z.enum(PURCHASE_STATUS_VALUES),
 });
 
+const purchaseRefsSchema = z.object({
+  scNumero: z.string().optional().nullable(),
+  scId: z.string().optional().nullable(),
+  ocId: z.string().optional().nullable(),
+});
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = String(value ?? '').trim();
+  return trimmed || null;
+}
+
 const fichaDemandaPctSchema = z.object({
   fichaDemandaPct: z.number().finite(),
 });
@@ -191,6 +202,9 @@ function serializeRow(row: {
   id: string;
   numMovRm: string;
   idMovRm: string;
+  scNumero?: string | null;
+  scId?: string | null;
+  ocId?: string | null;
   codigoPedido: string;
   solicitanteId: string;
   solicitanteNome?: string | null;
@@ -319,6 +333,9 @@ export class DemandSheetApprovalController {
               { codFichaDemanda: { contains: search, mode: 'insensitive' } },
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
+              { scNumero: { contains: search, mode: 'insensitive' } },
+              { scId: { contains: search, mode: 'insensitive' } },
+              { ocId: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
               { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
@@ -743,6 +760,9 @@ export class DemandSheetApprovalController {
               { codFichaDemanda: { contains: search, mode: 'insensitive' } },
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
+              { scNumero: { contains: search, mode: 'insensitive' } },
+              { scId: { contains: search, mode: 'insensitive' } },
+              { ocId: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
               { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
@@ -803,6 +823,46 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao atualizar status de compras' });
+    }
+  }
+
+  /** Número da SC, ID da SC e ID da OC preenchidos em Suprimentos. */
+  async updatePurchaseRefs(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const canAccess = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!canAccess) {
+        throw createError('Sem permissão para atualizar os dados de compra', 403);
+      }
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (row.status !== 'APPROVED') {
+        throw createError('Somente fichas aprovadas podem receber número e ID de SC e OC', 400);
+      }
+
+      const body = purchaseRefsSchema.parse(req.body);
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: {
+          scNumero: emptyToNull(body.scNumero),
+          scId: emptyToNull(body.scId),
+          ocId: emptyToNull(body.ocId),
+        },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao salvar número e ID de SC e OC' });
     }
   }
 

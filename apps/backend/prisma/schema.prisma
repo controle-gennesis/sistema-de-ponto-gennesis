@@ -1493,6 +1493,12 @@ model DemandSheetApproval {
   externalId              String?                    @unique
   numMovRm                String
   idMovRm                 String
+  /// Número da solicitação de compra (preenchido em Suprimentos).
+  scNumero                String?
+  /// ID da solicitação de compra (preenchido em Suprimentos).
+  scId                    String?
+  /// ID da ordem de compra (preenchido em Suprimentos).
+  ocId                    String?
   codigoPedido            String
   solicitanteId           String
   /// Nome exibido do solicitante (ex.: import da aba COLABORADORES). Se vazio, usa User.name.

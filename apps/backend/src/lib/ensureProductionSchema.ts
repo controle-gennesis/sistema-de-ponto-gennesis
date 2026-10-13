@@ -450,6 +450,12 @@ async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
   }
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "demand_sheet_approvals"
+      ADD COLUMN IF NOT EXISTS "scNumero" TEXT,
+      ADD COLUMN IF NOT EXISTS "scId" TEXT,
+      ADD COLUMN IF NOT EXISTS "ocId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
   `);
   await prisma.$executeRawUnsafe(`

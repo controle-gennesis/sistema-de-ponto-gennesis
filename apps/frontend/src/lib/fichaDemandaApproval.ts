@@ -130,6 +130,9 @@ export interface FichaDemandaApprovalRecord {
   id: string;
   numMovRm: string;
   idMovRm: string;
+  scNumero?: string | null;
+  scId?: string | null;
+  ocId?: string | null;
   codigoPedido: string;
   solicitanteId: string;
   solicitanteNome: string;
