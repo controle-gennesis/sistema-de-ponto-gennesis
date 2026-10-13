@@ -94,6 +94,7 @@ type SupplierOption = {
   code?: string | null;
   name?: string | null;
   tradeName?: string | null;
+  cnpj?: string | null;
   isActive?: boolean;
 };
 
@@ -101,6 +102,36 @@ function supplierStoreLabel(supplier: SupplierOption) {
   const legalName = String(supplier.name || '').trim();
   const tradeName = String(supplier.tradeName || '').trim();
   return tradeName || legalName;
+}
+
+function formatSupplierDocument(value: string | null | undefined) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  }
+  return String(value || '').trim() || '—';
+}
+
+function SupplierOptionLines({ supplier }: { supplier: SupplierOption }) {
+  const nome = supplierStoreLabel(supplier) || '—';
+  const razao = String(supplier.name || '').trim() || '—';
+  const documento = formatSupplierDocument(supplier.cnpj);
+  return (
+    <span className="block min-w-0 leading-snug">
+      <span className="block truncate font-medium" title={nome}>
+        {nome}
+      </span>
+      <span className="block truncate text-xs text-gray-500 dark:text-gray-400" title={razao}>
+        {razao}
+      </span>
+      <span className="block truncate text-xs text-gray-500 dark:text-gray-400" title={documento}>
+        {documento}
+      </span>
+    </span>
+  );
 }
 
 function nomeContratoSemCodigo(nome: string): string {
@@ -866,6 +897,9 @@ export default function CaixinhaPageClient() {
                   searchFn={searchOcSuppliers}
                   getOptionId={(supplier) => supplier.id}
                   getOptionLabel={(supplier) => supplierStoreLabel(supplier as SupplierOption)}
+                  renderOption={(supplier) => (
+                    <SupplierOptionLines supplier={supplier as SupplierOption} />
+                  )}
                   queryKeyPrefix="caixinha-supplier"
                   placeholder="Selecionar fornecedor..."
                   searchPlaceholder="Digite o nome ou CNPJ para encontrar..."
