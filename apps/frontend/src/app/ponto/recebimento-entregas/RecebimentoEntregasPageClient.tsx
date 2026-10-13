@@ -498,7 +498,7 @@ export default function RecebimentoEntregasPageClient() {
         <PageStack>
           <ListPageHeader
             title="Recebimento de Entregas"
-            description="Confirme o recebimento de material na obra. Esta tela é exclusiva para a engenharia."
+            description="Confirme o recebimento de material na obra."
           />
 
           <div className={pageStatCardsGrid3Class}>
