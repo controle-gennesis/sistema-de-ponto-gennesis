@@ -13,6 +13,7 @@ import {
   Fuel,
   Gauge,
   Loader2,
+  MoreVertical,
   TrendingUp,
   Users,
   Wallet,
@@ -20,6 +21,11 @@ import {
 } from 'lucide-react';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { Modal } from '@/components/ui/Modal';
+import {
+  downloadFuelAnalysesPdf,
+  downloadFuelAnalysesWord,
+  type FuelAnalysesExport,
+} from '@/lib/exportFuelAnalysesReport';
 import {
   Area,
   AreaChart,
@@ -685,6 +691,7 @@ function AnalisesCombustivelContent() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [rankDrillDown, setRankDrillDown] = useState<RankDrillDown | null>(null);
 
   const { data: rows = [], isLoading, isError, refetch } = useQuery({
@@ -756,6 +763,74 @@ function AnalisesCombustivelContent() {
 
   const insights = useMemo(() => buildInsights(filteredRows), [filteredRows]);
   const hasPeriodFilter = Boolean(dateFrom || dateTo);
+  const exportReport: FuelAnalysesExport = {
+    periodLabel: urgencyPeriodLabel || 'Todo o período',
+    summary: [
+      { label: 'Gasto total', value: formatCurrency(insights.totalSpend) },
+      { label: 'Litros abastecidos', value: formatLiters(insights.totalLiters) },
+      { label: 'Ticket médio', value: formatCurrency(insights.avgTicket) },
+      { label: 'Preço médio / L', value: formatPrice(insights.weightedAvgPrice) },
+      { label: 'Média simples / L', value: formatPrice(insights.avgPrice) },
+      { label: 'Concluídas', value: String(insights.completedCount) },
+      { label: 'Concluídas com valor', value: String(insights.reportedCount) },
+    ],
+    tables: [
+      {
+        title: 'Urgências por contrato',
+        headers: ['Contrato', 'Urgência', 'Cota semanal'],
+        rows: urgencyGroups
+          .filter((group) => !group.unlimited && (group.urgencyReais ?? 0) > 0)
+          .map((group) => [
+            quotaContractNames(group).join(' · '),
+            formatCurrency(group.urgencyReais ?? 0),
+            formatCurrency(group.weeklyBudgetReais ?? 0),
+          ]),
+      },
+      {
+        title: 'Gasto por contrato',
+        headers: ['Contrato', 'Gasto', 'Abastecimentos'],
+        rows: insights.topContracts.map((item) => [
+          item.label,
+          formatCurrency(item.value),
+          item.meta,
+        ]),
+      },
+      {
+        title: 'Evolução mensal',
+        headers: ['Mês', 'Gasto', 'Litros', 'Preço médio', 'Abastecimentos'],
+        rows: insights.monthly.map((item) => [
+          item.label,
+          formatCurrency(item.gasto),
+          formatLiters(item.litros),
+          formatPrice(item.precoMedio),
+          String(item.abastecimentos),
+        ]),
+      },
+      {
+        title: 'Frota e particular',
+        headers: ['Tipo', 'Gasto'],
+        rows: insights.vehiclePie.map((item) => [item.name, formatCurrency(item.value)]),
+      },
+      {
+        title: 'Condutores',
+        headers: ['Condutor', 'Gasto', 'Abastecimentos'],
+        rows: insights.topDrivers.map((item) => [
+          item.label,
+          formatCurrency(item.value),
+          item.meta,
+        ]),
+      },
+      {
+        title: 'Veículos',
+        headers: ['Placa', 'Gasto', 'Litros'],
+        rows: insights.topPlates.map((item) => [
+          item.label,
+          formatCurrency(item.value),
+          item.meta,
+        ]),
+      },
+    ],
+  };
 
   const drillDownRequests = useMemo(() => {
     if (!rankDrillDown) return [];
@@ -878,7 +953,7 @@ function AnalisesCombustivelContent() {
   }
 
   const periodFilterBar = (
-    <div className="flex justify-center">
+    <div className="relative flex items-center justify-center">
       <div className={cadastroListClasses.filterIconButtonWrap}>
         <button
           type="button"
@@ -896,6 +971,59 @@ function AnalisesCombustivelContent() {
             <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
           ) : null}
         </button>
+      </div>
+      <div className="absolute right-0 top-0">
+        <div className="relative">
+          <div className={cadastroListClasses.filterIconButtonWrap}>
+            <button
+              type="button"
+              onClick={() => setExportMenuOpen((open) => !open)}
+              className={`${cadastroListClasses.filterIconButton} border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700`}
+              aria-label="Exportar relatório"
+              aria-expanded={exportMenuOpen}
+              aria-haspopup="menu"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          </div>
+          {exportMenuOpen ? (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-40 cursor-default"
+                aria-label="Fechar menu"
+                onClick={() => setExportMenuOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-1 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setExportMenuOpen(false);
+                    void downloadFuelAnalysesWord(exportReport);
+                  }}
+                  className="flex w-full items-center px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Word
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setExportMenuOpen(false);
+                    void downloadFuelAnalysesPdf(exportReport);
+                  }}
+                  className="flex w-full items-center border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  PDF
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );
