@@ -15,6 +15,7 @@ import {
 } from './orcamentoCronogramaTypes';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { Modal } from '@/components/ui/Modal';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 
 export const TIMELINE_ROW_HEIGHT_PX = 40;
@@ -227,24 +228,23 @@ export function TimelineZoomControls({
   onZoomChange: (z: CronogramaTimelineZoom) => void;
   onPanChange: (delta: number) => void;
 }) {
-  const btnCls = (active: boolean) =>
-    `px-3 py-1.5 rounded-md text-sm font-semibold transition-colors ${
-      active
-        ? 'bg-red-600 text-white'
-        : 'text-gray-700 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700'
-    }`;
-
   return (
-    <div className="inline-flex h-10 items-center gap-1 rounded-lg border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-600 dark:bg-gray-800/70">
-      <button type="button" className={btnCls(zoom === 'semana')} onClick={() => onZoomChange('semana')}>
-        Semana
-      </button>
-      <button type="button" className={btnCls(zoom === 'mes')} onClick={() => onZoomChange('mes')}>
-        Mês
-      </button>
-      <button type="button" className={btnCls(zoom === 'obra')} onClick={() => onZoomChange('obra')}>
-        Obra
-      </button>
+    <div className="inline-flex h-10 items-center gap-1">
+      <SegmentedControl
+        aria-label="Zoom da linha do tempo"
+        value={zoom}
+        onChange={onZoomChange}
+        className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800"
+        pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+        buttonClassName="px-2.5 py-1.5 text-xs sm:px-3.5 sm:text-sm"
+        activeButtonClassName="font-semibold text-white"
+        inactiveButtonClassName="font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+        options={[
+          { value: 'semana', label: 'Semana' },
+          { value: 'mes', label: 'Mês' },
+          { value: 'obra', label: 'Obra' },
+        ]}
+      />
       {zoom !== 'obra' ? (
         <>
           <span className="mx-0.5 h-5 w-px bg-gray-300 dark:bg-gray-600" aria-hidden />
