@@ -7533,6 +7533,7 @@ export function OrcamentoPageView({
       }
     | null
   >(null);
+  const [composicaoFocoKey, setComposicaoFocoKey] = useState<string | null>(null);
   const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(() =>
     embeddedContractId ? embeddedOrcamentoIdFromRoute ?? null : null
   );
@@ -12085,6 +12086,38 @@ export function OrcamentoPageView({
     return m;
   }, [linhasAnaliticoOrcamento]);
 
+  useEffect(() => {
+    const marcarComposicao = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return;
+      const memorial = target.closest('[id^="memorial-medicoes-"]');
+      if (memorial?.id.startsWith('memorial-medicoes-')) {
+        setComposicaoFocoKey(memorial.id.slice('memorial-medicoes-'.length));
+        return;
+      }
+      const key = target.closest('tr[data-item-key]')?.getAttribute('data-item-key');
+      if (key) setComposicaoFocoKey(key);
+    };
+    const onFocus = (e: FocusEvent) => marcarComposicao(e.target);
+    const onPointer = (e: PointerEvent) => marcarComposicao(e.target);
+    document.addEventListener('focusin', onFocus);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('focusin', onFocus);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, []);
+
+  const composicaoNaBarra = useMemo(() => {
+    if (!composicaoFocoKey) return null;
+    const row = itensCalculados.find((r) => r.key === composicaoFocoKey);
+    if (!row) return null;
+    const desconto = parsePercentualMeta(meta.descontoPercentual);
+    return {
+      rotulo: rotuloItemComposicaoPorKey.get(row.key) ?? '',
+      valor: row.totalComBdi * (1 - desconto)
+    };
+  }, [composicaoFocoKey, itensCalculados, meta.descontoPercentual, rotuloItemComposicaoPorKey]);
+
   /** Célula de outra memória na fórmula: `{1.1.2!3!A}` (linha 1-based da composição). */
   const resolverFormulaMemoria = useCallback(
     (rotulo: string, linha: number, campo: string): number | null => {
@@ -12133,6 +12166,7 @@ export function OrcamentoPageView({
   const linhasCronograma = useMemo((): CronogramaLinhaServico[] => {
     type Acc = CronogramaLinhaServico & { blocosMap: Map<string, CronogramaLinhaSubtitulo> };
     const map = new Map<string, Acc>();
+    const descontoPct = parsePercentualMeta(meta.descontoPercentual);
     for (const row of itensCalculados) {
       const blocoKey = row.blocoKey;
       const sep = blocoKey.lastIndexOf('|');
@@ -12143,7 +12177,8 @@ export function OrcamentoPageView({
         descricao: row.item.descricao,
         subtituloNome: row.subtituloNome,
         quantidade: row.quantidade,
-        unidade: row.item.unidade
+        unidade: unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade),
+        valorTotal: row.totalComBdi * (1 - descontoPct)
       };
       let linha = map.get(servicoKey);
       if (!linha) {
@@ -12181,7 +12216,7 @@ export function OrcamentoPageView({
       ...linha,
       subtitulos: Array.from(blocosMap.values())
     }));
-  }, [itensCalculados]);
+  }, [itensCalculados, meta.descontoPercentual]);
 
   const resumoCronograma = useMemo(
     () => calcularResumoCronograma(linhasCronograma, cronograma),
@@ -16341,7 +16376,7 @@ export function OrcamentoPageView({
                                   )} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                                   style={estiloLinhaSubtituloOrc(aparenciaAnalitico, isDark)}
                                 >
-                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
+                                  <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
                                   </td>
                                   <td colSpan={9} className="px-3 py-2.5 align-middle">
@@ -16356,6 +16391,7 @@ export function OrcamentoPageView({
                               return (
                                   <tr
                                     key={l.key}
+                                    data-item-key={l.key}
                                     className={`${clsComposicaoOrc(aparenciaAnalitico)} border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                                     style={estiloLinhaComposicaoOrc(aparenciaAnalitico, isDark)}
                                   >
@@ -16366,9 +16402,9 @@ export function OrcamentoPageView({
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{nomeBancoParaExibicao(l.banco)}</td>
                                     <td className="px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
-                                      <div className="whitespace-normal break-words">{l.descricao}</div>
+                                      <div className="whitespace-normal break-words uppercase">{l.descricao}</div>
                                     </td>
-                                    <td className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
+                                    <td className="px-3 py-2.5 text-center text-sm font-medium uppercase text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
                                     <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
                                     <td className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
                                       <MoedaCelula
@@ -16405,9 +16441,9 @@ export function OrcamentoPageView({
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
-                                  <div className="whitespace-normal break-words">{l.descricao}</div>
+                                  <div className="whitespace-normal break-words uppercase">{l.descricao}</div>
                                 </td>
-                                <td className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
+                                <td className="px-3 py-2.5 text-center text-sm uppercase text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
                                 <td className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
                                   <MoedaCelula valor={l.valorUnit} className="text-gray-700 dark:text-gray-300" />
@@ -16709,6 +16745,7 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
+                                      data-item-key={l.key}
                                       className={`${clsComposicaoOrc(aparenciaFichaDemanda)} border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                                       style={estiloLinhaComposicaoOrc(aparenciaFichaDemanda, isDark)}
                                       onContextMenuCapture={(e) => {
@@ -16750,7 +16787,7 @@ export function OrcamentoPageView({
                                         title={PLANILHA_ANALITICA_TOOLTIP.servico}
                                         className="min-w-0 px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
                                       >
-                                        <div className="min-w-0 whitespace-normal break-words">
+                                        <div className="min-w-0 whitespace-normal break-words uppercase">
                                           {l.descricao}
                                         </div>
                                       </td>
@@ -16764,7 +16801,7 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                        className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-center text-sm font-medium uppercase text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {l.und}
                                       </td>
@@ -16990,7 +17027,7 @@ export function OrcamentoPageView({
                                                 e.target.value,
                                               )
                                             }
-                                            className={`${inputGradeCls} text-left`}
+                                            className={`${inputGradeCls} text-left uppercase`}
                                             placeholder="Descrição do insumo"
                                           />
                                         </td>
@@ -17013,7 +17050,7 @@ export function OrcamentoPageView({
                                           title={PLANILHA_ANALITICA_TOOLTIP.servico}
                                           className="min-w-0 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                         >
-                                          <div className="min-w-0 whitespace-normal break-words">
+                                          <div className="min-w-0 whitespace-normal break-words uppercase">
                                             {l.descricao}
                                           </div>
                                         </td>
@@ -17150,7 +17187,7 @@ export function OrcamentoPageView({
                                       <>
                                         <td
                                           title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                          className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                          className="px-3 py-2.5 text-center text-sm uppercase text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
                                         >
                                           {l.und || '—'}
                                         </td>
@@ -17500,7 +17537,7 @@ export function OrcamentoPageView({
                               className="scroll-mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
                             >
                               <div
-                                className={`px-3 py-2.5 text-sm font-bold text-white ${clsTituloOrc(aparenciaMemorial)}`}
+                                className={`px-3 py-2.5 text-sm font-bold uppercase text-white ${clsTituloOrc(aparenciaMemorial)}`}
                                 style={estiloLinhaTituloOrc(aparenciaMemorial, isDark)}
                               >
                                 {servicoGrupo.servicoNome || 'Serviço'}
@@ -17525,7 +17562,7 @@ export function OrcamentoPageView({
                                       className="flex flex-col gap-4"
                                     >
                                       {!mesmoTituloSubtitulo && etapa.subtituloNome.trim() ? (
-                                        <div className="border-t border-gray-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                        <div className="border-t border-gray-200 bg-slate-100 px-3 py-2 text-sm font-semibold uppercase text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                                           {etapa.subtituloNome}
                                         </div>
                                       ) : null}
@@ -17811,7 +17848,9 @@ export function OrcamentoPageView({
                                   />
                                 </div>
                               </td>
-                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`} />
+                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`}>
+                                {main}
+                              </td>
                               <td data-orc-col="codigo" className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td data-orc-col="banco" className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td data-orc-col="descricao" className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderTitulo}`}>
@@ -17897,7 +17936,7 @@ export function OrcamentoPageView({
                                   />
                                 </div>
                               </td>
-                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200 ${borderSub}`}>
+                              <td data-orc-col="item" className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-gray-800 dark:text-gray-200 ${borderSub}`}>
                                 {`${main}.${subIdx}`}
                               </td>
                               <td data-orc-col="codigo" className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
@@ -18047,10 +18086,10 @@ export function OrcamentoPageView({
                                       <td data-orc-col="codigo" style={estiloFundoPinturaOrc(row.key, 'codigo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
                                       <td data-orc-col="banco" style={estiloFundoPinturaOrc(row.key, 'banco', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{nomeBancoParaExibicao(row.item.banco)}</td>
                                       <td data-orc-col="descricao" style={estiloFundoPinturaOrc(row.key, 'descricao', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle border-l border-gray-200 dark:border-gray-700">
-                                        <div className="whitespace-normal break-words">{row.item.descricao}</div>
+                                        <div className="whitespace-normal break-words uppercase">{row.item.descricao}</div>
                                       </td>
                                       <td data-orc-col="und" style={estiloFundoPinturaOrc(row.key, 'und', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-center align-middle border-l border-gray-200 dark:border-gray-700">
-                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                                        <span className="text-sm font-medium uppercase text-gray-700 dark:text-gray-200">
                                           {unidadeComposicaoParaExibicao(
                                             row.unidadeComposicao,
                                             usaDimensoes ? tipoAuto : 'un'
@@ -18591,6 +18630,16 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
                     </p>
                   </div>
+                  {composicaoNaBarra ? (
+                    <div className="shrink-0" title="Valor da composição selecionada, já com quantidade, BDI e desconto">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        {composicaoNaBarra.rotulo ? `Item ${composicaoNaBarra.rotulo}` : 'Composição'}
+                      </p>
+                      <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-red-600 dark:text-red-400 sm:text-base whitespace-nowrap">
+                        {formatarBRLExport(composicaoNaBarra.valor)}
+                      </p>
+                    </div>
+                  ) : null}
                   {fichaDemandaOnly ? (
                     <>
                       <div

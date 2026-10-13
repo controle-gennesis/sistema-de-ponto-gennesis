@@ -402,6 +402,8 @@ export type CronogramaTimelineMesGrupo = {
 };
 
 export const TIMELINE_LARGURA_DIA_PX = 34;
+/** Cabe o percentual e o valor do dia (ex.: 100,00% e R$ 7.022,92) sem sobrepor o dia ao lado. */
+export const TIMELINE_LARGURA_DIA_MIN_PX = 88;
 
 function indiceDiaNoRange(inicioRange: Date, data: Date): number {
   const a = new Date(inicioRange.getFullYear(), inicioRange.getMonth(), inicioRange.getDate(), 12, 0, 0, 0);
@@ -451,6 +453,118 @@ export function gerarGruposMesTimeline(colunas: CronogramaTimelineColunaDia[]): 
     }
   }
   return grupos;
+}
+
+export type FatiaValorSemana = {
+  leftPx: number;
+  widthPx: number;
+  percentual: number;
+  valor: number;
+};
+
+export type FatiaUsoDia = {
+  data: Date;
+  quantidade: number;
+  valor: number;
+  percentual: number;
+};
+
+/** Divide quantidade, valor e percentual em partes iguais pelos dias do prazo, inclusive. */
+export function repartirUsoPorDiasCronograma(
+  inicio: Date,
+  fim: Date,
+  quantidade: number,
+  valor: number,
+  percentual: number
+): FatiaUsoDia[] {
+  const ini = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate(), 12, 0, 0, 0);
+  const limite = new Date(fim.getFullYear(), fim.getMonth(), fim.getDate(), 12, 0, 0, 0);
+  if (limite < ini) return [];
+  const dias: Date[] = [];
+  const cur = new Date(ini);
+  while (cur <= limite && dias.length < 400) {
+    dias.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  if (dias.length === 0) return [];
+  const n = dias.length;
+  return dias.map((data, indice) => ({
+    data,
+    quantidade: parcelaIgual(quantidade, n, indice, 4),
+    valor: parcelaIgual(valor, n, indice, 2),
+    percentual: parcelaIgual(percentual, n, indice, 2)
+  }));
+}
+
+export function isoDiaCronograma(data: Date): string {
+  const mes = String(data.getMonth() + 1).padStart(2, '0');
+  const dia = String(data.getDate()).padStart(2, '0');
+  return `${data.getFullYear()}-${mes}-${dia}`;
+}
+
+export function listarDiasPrazoCronograma(inicio: Date, fim: Date): Date[] {
+  return repartirUsoPorDiasCronograma(inicio, fim, 0, 0, 0).map((fatia) => fatia.data);
+}
+
+function parcelaIgual(total: number, partes: number, indice: number, casas: number): number {
+  const fator = 10 ** casas;
+  const totalUn = Math.round((total + Number.EPSILON) * fator);
+  const base = Math.floor(totalUn / partes);
+  const resto = totalUn - base * partes;
+  return (base + (indice < resto ? 1 : 0)) / fator;
+}
+
+function meioDia(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+}
+
+function somarDias(d: Date, dias: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + dias, 12, 0, 0, 0);
+}
+
+/** Reparte o valor em partes iguais pelas semanas (segunda a domingo) que o prazo toca. */
+export function distribuirValorPorSemanasCronograma(
+  inicioRange: Date,
+  fimRange: Date,
+  inicioItem: Date,
+  fimItem: Date,
+  valor: number,
+  larguraDiaPx: number
+): FatiaValorSemana[] {
+  const ini = meioDia(inicioItem);
+  const fim = meioDia(fimItem);
+  if (fim < ini || !(valor > 0)) return [];
+
+  const semanas: { ini: Date; fim: Date }[] = [];
+  let cursor = inicioSemana(ini);
+  while (cursor <= fim && semanas.length < 260) {
+    semanas.push({ ini: cursor, fim: somarDias(cursor, 6) });
+    cursor = somarDias(cursor, 7);
+  }
+  if (semanas.length === 0) return [];
+
+  const percentual = 100 / semanas.length;
+  const parte = valor / semanas.length;
+  const faixaIni = meioDia(inicioRange);
+  const faixaFim = meioDia(fimRange);
+  const fatias: FatiaValorSemana[] = [];
+
+  for (const semana of semanas) {
+    const visIni = semana.ini > faixaIni ? semana.ini : faixaIni;
+    const visFim = semana.fim < faixaFim ? semana.fim : faixaFim;
+    const iniFatia = visIni > ini ? visIni : ini;
+    const fimFatia = visFim < fim ? visFim : fim;
+    if (fimFatia < iniFatia) continue;
+    const pos = posicaoBarraTimelinePx(inicioRange, fimRange, iniFatia, fimFatia, larguraDiaPx);
+    if (!pos || pos.widthPx < 8) continue;
+    fatias.push({
+      leftPx: pos.leftPx,
+      widthPx: pos.widthPx,
+      percentual,
+      valor: parte
+    });
+  }
+  return fatias;
 }
 
 export function posicaoBarraTimelinePx(
@@ -599,6 +713,8 @@ export type CronogramaTimelineLinha = {
   blocoKey?: string;
   composicaoChave?: string;
   label: string;
+  /** Número do item na grade (1, 1.1, 1.2). */
+  item?: string;
   isSub: boolean;
   /** Serviço pai — exibe só o título, sem faixa de barra. */
   isCabecalhoServico: boolean;
@@ -608,6 +724,10 @@ export type CronogramaTimelineLinha = {
   dados: CronogramaItemData;
   showBar: boolean;
   editavel: boolean;
+  /** Custo da composição com BDI e desconto. */
+  valorTotal?: number;
+  quantidade?: number;
+  unidade?: string;
 };
 
 export type CronogramaTimelineZoom = 'semana' | 'mes' | 'obra';
@@ -619,10 +739,27 @@ export type CronogramaTimelineRange = {
   meses: CronogramaTimelineMesGrupo[];
   larguraDiaPx: number;
   larguraTotalPx: number;
+  /** Primeiro dia do contrato. Semana, mês e obra não mostram dias anteriores. */
+  inicioContrato?: Date | null;
 };
 
 export const TIMELINE_LARGURA_DIA_SEMANA_PX = 96;
 export const TIMELINE_LARGURA_DIA_MES_PX = 40;
+
+function recortarInicioContrato(
+  inicio: Date,
+  fim: Date,
+  contrato: Date | null | undefined
+): { inicio: Date; fim: Date } {
+  if (!contrato) return { inicio, fim };
+  const limite = meioDia(contrato);
+  if (fim < limite) {
+    const dias = Math.max(0, diffDiasAssinado(inicio, fim));
+    return { inicio: limite, fim: somarDias(limite, dias) };
+  }
+  if (inicio < limite) return { inicio: limite, fim };
+  return { inicio, fim };
+}
 
 function inicioSemana(d: Date): Date {
   const day = d.getDay();
@@ -703,7 +840,8 @@ function pushComposicaoTimeline(
   cronograma: CronogramaPersist,
   blocoKey: string,
   comp: CronogramaComposicaoRef,
-  indentLevel: 1 | 2
+  indentLevel: 1 | 2,
+  itemRotulo: string
 ) {
   const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
   rows.push({
@@ -712,12 +850,16 @@ function pushComposicaoTimeline(
     blocoKey,
     composicaoChave: comp.chave,
     label: comp.descricao,
+    item: itemRotulo,
     isSub: true,
     isCabecalhoServico: false,
     indentLevel,
     dados,
     showBar: cronogramaTemDatasTimeline(dados),
-    editavel: true
+    editavel: true,
+    valorTotal: comp.valorTotal,
+    quantidade: comp.quantidade,
+    unidade: comp.unidade
   });
 }
 
@@ -726,17 +868,24 @@ export function montarLinhasTimeline(
   cronograma: CronogramaPersist
 ): CronogramaTimelineLinha[] {
   const rows: CronogramaTimelineLinha[] = [];
-  for (const linha of linhas) {
+  linhas.forEach((linha, servicoIdx) => {
     const comps = listarComposicoesCronogramaLinha(linha);
     const dados = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
     const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
     const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
     const temFilhas = comps.length > 0;
+    const itemServico = String(servicoIdx + 1);
+    let seqComposicao = 0;
+    const proximoItem = () => {
+      seqComposicao += 1;
+      return `${itemServico}.${seqComposicao}`;
+    };
 
     rows.push({
       key: linha.servicoKey,
       servicoKey: linha.servicoKey,
       label: linha.servicoNome,
+      item: itemServico,
       isSub: false,
       isCabecalhoServico: temFilhas,
       indentLevel: 0,
@@ -747,15 +896,15 @@ export function montarLinhasTimeline(
 
     if (!usaHierarquia) {
       for (const { blocoKey, comp } of comps) {
-        pushComposicaoTimeline(rows, linha, cronograma, blocoKey, comp, 1);
+        pushComposicaoTimeline(rows, linha, cronograma, blocoKey, comp, 1, proximoItem());
       }
-      continue;
+      return;
     }
 
     const visiveis = new Set(subtitulosVisiveis.map((st) => st.blocoKey));
     for (const item of comps) {
       if (!visiveis.has(item.blocoKey)) {
-        pushComposicaoTimeline(rows, linha, cronograma, item.blocoKey, item.comp, 1);
+        pushComposicaoTimeline(rows, linha, cronograma, item.blocoKey, item.comp, 1, proximoItem());
       }
     }
 
@@ -778,16 +927,17 @@ export function montarLinhasTimeline(
         editavel: false
       });
       for (const comp of st.composicoes) {
-        pushComposicaoTimeline(rows, linha, cronograma, st.blocoKey, comp, 2);
+        pushComposicaoTimeline(rows, linha, cronograma, st.blocoKey, comp, 2, proximoItem());
       }
     }
-  }
+  });
   return rows;
 }
 
 export function calcularTimelineRange(
   linhas: CronogramaLinhaServico[],
-  cronograma: CronogramaPersist
+  cronograma: CronogramaPersist,
+  dataInicioObra?: string
 ): CronogramaTimelineRange | null {
   let dataInicioMin: Date | null = null;
   let dataFimMax: Date | null = null;
@@ -810,6 +960,8 @@ export function calcularTimelineRange(
   if (!dataFimMax) dataFimMax = parseDataIso(cronograma.config?.dataFimObra);
   if (!dataInicioMin || !dataFimMax) return null;
 
+  const inicioContrato = parseDataIso(dataInicioObra) ?? parseDataIso(cronograma.config?.dataInicioObra);
+
   const padIni = new Date(
     dataInicioMin.getFullYear(),
     dataInicioMin.getMonth(),
@@ -828,15 +980,17 @@ export function calcularTimelineRange(
     0,
     0
   );
-  const colunas = gerarColunasDiasTimeline(padIni, padFim);
+  const recorteObra = recortarInicioContrato(padIni, padFim, inicioContrato);
+  const colunas = gerarColunasDiasTimeline(recorteObra.inicio, recorteObra.fim);
   const larguraDiaPx = larguraDiaParaObra(colunas.length);
   return {
-    inicio: padIni,
-    fim: padFim,
+    inicio: recorteObra.inicio,
+    fim: recorteObra.fim,
     colunas,
     meses: gerarGruposMesTimeline(colunas),
     larguraDiaPx,
-    larguraTotalPx: colunas.length * larguraDiaPx
+    larguraTotalPx: colunas.length * larguraDiaPx,
+    inicioContrato: inicioContrato ? meioDia(inicioContrato) : null
   };
 }
 
@@ -876,6 +1030,10 @@ export function calcularTimelineRangeVisivel(
     larguraDiaPx = TIMELINE_LARGURA_DIA_MES_PX;
   }
 
+  const recorte = recortarInicioContrato(inicio, fim, rangeObra.inicioContrato);
+  inicio = recorte.inicio;
+  fim = recorte.fim;
+
   const colunas = gerarColunasDiasTimeline(inicio, fim);
   return {
     inicio,
@@ -883,7 +1041,8 @@ export function calcularTimelineRangeVisivel(
     colunas,
     meses: gerarGruposMesTimeline(colunas),
     larguraDiaPx,
-    larguraTotalPx: colunas.length * larguraDiaPx
+    larguraTotalPx: colunas.length * larguraDiaPx,
+    inicioContrato: rangeObra.inicioContrato
   };
 }
 

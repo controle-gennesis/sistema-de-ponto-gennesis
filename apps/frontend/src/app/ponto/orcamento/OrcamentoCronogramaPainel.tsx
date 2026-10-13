@@ -17,6 +17,11 @@ import {
   calcularResumoCronograma,
   calcularTimelineRange,
   calcularTimelineRangeVisivel,
+  distribuirValorPorSemanasCronograma,
+  isoDiaCronograma,
+  listarDiasPrazoCronograma,
+  repartirUsoPorDiasCronograma,
+  TIMELINE_LARGURA_DIA_MIN_PX,
   distribuirPrazoGeralCronograma,
   montarPayloadEstimativaPrazoCronograma,
   formatDesvioDiasCurto,
@@ -95,10 +100,28 @@ const thCls =
   '!h-auto !min-h-0 px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600 first:border-l-0';
 const tdCls =
   'h-[2.75rem] px-2 py-0 text-sm leading-none text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-600 align-middle';
+/** Item 6.5 + Serviço 22 + Unidade 5.5 + Quantidade 7 + Custo 11 + Início 9 + Fim 9 + Dias 4 + Executado 6.5 + Status 7. */
+const COLUNAS_FIXAS_REM = 87.5;
+const tdItemColCls =
+  'min-h-[2.75rem] w-[6.5rem] max-w-[6.5rem] min-w-0 px-2 py-2.5 text-center text-xs font-medium tabular-nums border-l-0 align-middle whitespace-normal break-words text-gray-700 dark:text-gray-300';
+const thItemColCls =
+  '!h-auto !min-h-0 w-[6.5rem] max-w-[6.5rem] min-w-0 px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l-0';
 const tdServicoColCls =
-  'min-h-[2.75rem] w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-sm border-l-0 align-middle';
+  'min-h-[2.75rem] w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-sm border-l border-gray-200 dark:border-gray-600 align-middle';
 const thServicoColCls =
-  '!h-auto !min-h-0 w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l-0';
+  '!h-auto !min-h-0 w-[22rem] max-w-[22rem] min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600';
+const stickyItemThCls = 'left-0 z-30';
+const stickyServicoThCls =
+  'left-[6.5rem] z-30 border-r border-gray-300 dark:border-gray-600';
+const stickyItemTdCls = 'sticky left-0 z-10';
+const stickyServicoTdCls =
+  'sticky left-[6.5rem] z-10 border-r border-gray-200 dark:border-gray-600';
+const thUnidadeColCls = `${thCls} w-[5.5rem] !border-l-0 px-2`;
+const thQtdColCls = `${thCls} w-[7rem] px-2`;
+const thCustoColCls = `${thCls} w-[11rem] whitespace-normal leading-tight`;
+const tdUnidadeColCls = `${tdCls} w-[5.5rem] !border-l-0 px-2 text-center`;
+const tdQtdColCls = `${tdCls} w-[7rem] px-2 text-center tabular-nums`;
+const tdCustoColCls = `${tdCls} w-[11rem] px-2 tabular-nums`;
 const thDateColCls = `${thCls} w-[9rem]`;
 const thDiasColCls = `${thCls} w-[4rem]`;
 const thStatusColCls = `${thCls} w-[7rem]`;
@@ -158,6 +181,50 @@ function ComposicaoResumoNomeCell({ nome }: { nome: string }) {
     <div className="min-w-0 whitespace-normal break-words text-left text-sm font-normal leading-snug text-gray-900 dark:text-gray-100">
       {nome}
     </div>
+  );
+}
+
+function formatQtdCronograma(n: number): string {
+  return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+}
+
+function formatMoedaCronograma(n: number): string {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function somaCustoComposicoes(comps: Array<{ comp: CronogramaComposicaoRef }>): number {
+  return comps.reduce((acc, item) => acc + (item.comp.valorTotal ?? 0), 0);
+}
+
+function CelulasQtdCusto({
+  unidade,
+  quantidade,
+  custo,
+  destaque = false
+}: {
+  unidade?: string;
+  quantidade?: number | null;
+  custo?: number | null;
+  destaque?: boolean;
+}) {
+  const peso = destaque ? 'font-semibold' : '';
+  return (
+    <>
+      <td className={`${tdUnidadeColCls} ${peso}`}>{unidade?.trim() || '—'}</td>
+      <td className={`${tdQtdColCls} ${peso}`}>
+        {quantidade != null && Number.isFinite(quantidade) ? formatQtdCronograma(quantidade) : '—'}
+      </td>
+      <td className={`${tdCustoColCls} ${peso}`}>
+        {custo != null && Number.isFinite(custo) ? (
+          <div className="flex w-full items-baseline justify-between gap-1.5">
+            <span className="shrink-0 opacity-80">R$</span>
+            <span className="shrink-0 whitespace-nowrap text-right">{formatMoedaCronograma(custo)}</span>
+          </div>
+        ) : (
+          '—'
+        )}
+      </td>
+    </>
   );
 }
 
@@ -238,7 +305,9 @@ function CelulasEtapaCronograma({
       <td className={tdPctColCls}>
         <span className="block w-full text-center text-sm tabular-nums text-gray-900 dark:text-gray-100">
           {resolvido.percentualExecutado != null && Number.isFinite(resolvido.percentualExecutado)
-            ? `${Math.round(resolvido.percentualExecutado)}%`
+            ? `${resolvido.percentualExecutado.toLocaleString('pt-BR', {
+                maximumFractionDigits: 2
+              })}%`
             : '0%'}
         </span>
       </td>
@@ -297,6 +366,65 @@ function CelulaLinhaTimeline({
   const desvio = linha ? calcularDesvioTimeline(linha.dados) : null;
   const mostrarBarraPlan = modo === 'plan' && Boolean(barPlan && barPlan.widthPx > 0);
   const mostrarBarraReal = modo === 'real' && Boolean(barReal && barReal.widthPx > 0);
+  const iniValor = modo === 'real' ? iniReal : iniPlan;
+  const fimValor = modo === 'real' ? fimReal : fimPlan;
+  const qtdOrcada = linha?.quantidade ?? 0;
+  const mapaDias = linha?.dados.quantidadesPorDia;
+  const temMapa = Boolean(mapaDias && Object.keys(mapaDias).length > 0);
+  const qtdUsada = linha?.dados.quantidadeExecutada;
+  const temUsoLegado = !temMapa && qtdUsada != null && Number.isFinite(qtdUsada) && qtdOrcada > 0;
+  const custoLinha = linha?.valorTotal ?? 0;
+  const diasDoMapa =
+    temMapa && iniValor && fimValor && qtdOrcada > 0
+      ? listarDiasPrazoCronograma(iniValor, fimValor).flatMap((data) => {
+          const qtdDia = mapaDias?.[isoDiaCronograma(data)] ?? 0;
+          if (!(qtdDia > 0)) return [];
+          const razao = qtdDia / qtdOrcada;
+          return [
+            {
+              data,
+              quantidade: qtdDia,
+              valor: razao * custoLinha,
+              percentual: Math.min(100, Math.max(0, razao * 100))
+            }
+          ];
+        })
+      : [];
+  const temUso = diasDoMapa.length > 0 || temUsoLegado;
+  const razaoUso = temUsoLegado ? (qtdUsada ?? 0) / qtdOrcada : null;
+  const valorUsado = razaoUso != null ? razaoUso * custoLinha : null;
+  const pctUsado = razaoUso != null ? Math.min(100, Math.max(0, razaoUso * 100)) : null;
+  const valorBarra = valorUsado != null && valorUsado > 0 ? valorUsado : custoLinha;
+  const diasUso = temUsoLegado && iniValor && fimValor
+    ? repartirUsoPorDiasCronograma(iniValor, fimValor, qtdUsada ?? 0, valorUsado ?? 0, pctUsado ?? 0)
+    : diasDoMapa;
+  const fatiasDia = diasUso.flatMap((dia) => {
+    const pos = posicaoBarraTimelinePx(timelineRange.inicio, timelineRange.fim, dia.data, dia.data, diaPx);
+    if (!pos || pos.widthPx <= 0) return [];
+    return [{ ...dia, leftPx: pos.leftPx + pos.widthPx / 2 }];
+  });
+  const fatiasValor =
+    !temUso && linha && iniValor && fimValor && valorBarra > 0
+      ? distribuirValorPorSemanasCronograma(
+          timelineRange.inicio,
+          timelineRange.fim,
+          iniValor,
+          fimValor,
+          valorBarra,
+          diaPx
+        )
+      : [];
+  const rotulosBarra = temUso
+    ? fatiasDia.map((fatia) => ({
+        leftPx: fatia.leftPx,
+        percentual: fatia.percentual,
+        valor: fatia.valor
+      }))
+    : fatiasValor.map((fatia) => ({
+        leftPx: fatia.leftPx + fatia.widthPx / 2,
+        percentual: fatia.percentual,
+        valor: fatia.valor
+      }));
 
   return (
     <td className={tdClsTimeline} style={tdStyle}>
@@ -367,6 +495,31 @@ function CelulaLinhaTimeline({
             aria-label={`Editar etapa — ${linha.label}`}
           />
         ) : null}
+        {rotulosBarra.map((fatia, indice) => {
+          const alternar = temUso && rotulosBarra.length > 1 && diaPx < 72 && indice % 2 === 1;
+          return (
+          <div
+            key={`${linha?.key ?? 'valor'}-rot-${indice}`}
+            className={`pointer-events-none absolute z-[4] flex w-max max-w-[5.5rem] -translate-x-1/2 flex-col items-center justify-center px-0.5 text-center leading-none ${
+              alternar ? 'bottom-0.5' : 'top-1/2 -translate-y-1/2'
+            }`}
+            style={{ left: fatia.leftPx }}
+          >
+            <span className="max-w-full truncate text-[10px] font-semibold tabular-nums text-red-600 dark:text-red-400">
+              {fatia.percentual.toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}%
+            </span>
+            <span className="mt-0.5 max-w-full truncate text-[9px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+              {fatia.valor.toLocaleString('pt-BR', {
+                style: 'currency',
+                currency: 'BRL'
+              })}
+            </span>
+          </div>
+          );
+        })}
       </div>
     </td>
   );
@@ -422,8 +575,8 @@ export function OrcamentoCronogramaPainel({
   }, [linhasTimeline]);
 
   const timelineRangeObra = useMemo(
-    () => calcularTimelineRange(linhas, cronograma),
-    [linhas, cronograma]
+    () => calcularTimelineRange(linhas, cronograma, dataInicioObra),
+    [linhas, cronograma, dataInicioObra]
   );
 
   const [agora, setAgora] = useState(() => new Date());
@@ -465,9 +618,10 @@ export function OrcamentoCronogramaPainel({
       typeof document !== 'undefined'
         ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
         : 16;
-    const colunasFixasPx = 57.5 * rootPx;
+    const colunasFixasPx = COLUNAS_FIXAS_REM * rootPx;
     const disponivel = larguraViewport > colunasFixasPx + 48 ? larguraViewport - colunasFixasPx : 0;
-    const largura = Math.max(timelineRange.larguraTotalPx, Math.floor(disponivel));
+    const larguraMinima = timelineRange.colunas.length * TIMELINE_LARGURA_DIA_MIN_PX;
+    const largura = Math.max(timelineRange.larguraTotalPx, larguraMinima, Math.floor(disponivel));
     return { largura, diaPx: largura / timelineRange.colunas.length };
   }, [timelineRange, larguraViewport]);
 
@@ -897,12 +1051,16 @@ export function OrcamentoCronogramaPainel({
               className={`table-fixed border-separate border-spacing-0 ${gradeTableCls}`}
               style={
                 timelineLayout
-                  ? { width: `calc(57.5rem + ${timelineLayout.largura}px)` }
+                  ? { width: `calc(${COLUNAS_FIXAS_REM}rem + ${timelineLayout.largura}px)` }
                   : { width: '100%' }
               }
             >
               <colgroup>
+                <col className="w-[6.5rem]" />
                 <col className="w-[22rem]" />
+                <col className="w-[5.5rem]" />
+                <col className="w-[7rem]" />
+                <col className="w-[11rem]" />
                 <col className="w-[9rem]" />
                 <col className="w-[9rem]" />
                 <col className="w-[4rem]" />
@@ -912,7 +1070,11 @@ export function OrcamentoCronogramaPainel({
               </colgroup>
               <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr className={gradeTableRowTrCls}>
-                  <th className={`${gradeThStickyCls} ${thServicoColCls}`}>Serviço</th>
+                  <th className={`${gradeThStickyCls} ${stickyItemThCls} ${thItemColCls}`}>Item</th>
+                  <th className={`${gradeThStickyCls} ${stickyServicoThCls} ${thServicoColCls}`}>Serviço</th>
+                  <th className={`${gradeThStickyCls} ${thUnidadeColCls}`}>Unidade</th>
+                  <th className={`${gradeThStickyCls} ${thQtdColCls}`}>Quantidade</th>
+                  <th className={`${gradeThStickyCls} ${thCustoColCls}`}>Custo c/ BDI e desconto</th>
                   <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início</th>
                   <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim</th>
                   <th className={`${gradeThStickyCls} ${thDiasColCls}`}>Dias</th>
@@ -978,20 +1140,29 @@ export function OrcamentoCronogramaPainel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                {linhas.flatMap((linha) => {
+                {linhas.flatMap((linha, servicoIdx) => {
                   const comps = listarComposicoesCronogramaLinha(linha);
                   const resolvido = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
                   const status = calcularStatusCronograma(resolvido);
                   const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
                   const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
                   const servicoComFilhas = comps.length > 0;
+                  const itemServico = String(servicoIdx + 1);
+                  let seqComposicao = 0;
+                  const proximoItemComposicao = () => {
+                    seqComposicao += 1;
+                    return `${itemServico}.${seqComposicao}`;
+                  };
 
                   const linhaServico = (
                     <tr
                       key={linha.servicoKey}
                       className={`bg-white dark:bg-gray-900/80 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                     >
-                      <td className={`${tdServicoColCls} text-left pl-4`}>
+                      <td className={`${tdItemColCls} ${stickyItemTdCls} bg-white !text-sm font-semibold text-gray-900 dark:bg-gray-900 dark:text-gray-100`}>
+                        {itemServico}
+                      </td>
+                      <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-white text-left pl-4 dark:bg-gray-900`}>
                         <div className="flex h-full min-h-0 min-w-0 items-center gap-1">
                           <span
                             className="block min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100"
@@ -1001,6 +1172,10 @@ export function OrcamentoCronogramaPainel({
                           </span>
                         </div>
                       </td>
+                      <CelulasQtdCusto
+                        custo={somaCustoComposicoes(comps)}
+                        destaque
+                      />
                       <CelulasEtapaCronograma
                         resolvido={resolvido}
                         status={status}
@@ -1016,7 +1191,8 @@ export function OrcamentoCronogramaPainel({
                   const renderComposicao = (
                     blocoKey: string,
                     comp: CronogramaComposicaoRef,
-                    indentLevel: 0 | 1 | 2
+                    indentLevel: 0 | 1 | 2,
+                    rotuloItem: string
                   ) => {
                     const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
                     const compStatus = calcularStatusCronograma(dados);
@@ -1025,9 +1201,15 @@ export function OrcamentoCronogramaPainel({
                         key={`${linha.servicoKey}-${blocoKey}-${comp.chave}`}
                         className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200/60 dark:border-gray-700/80"
                       >
-                        <td className={`${tdServicoColCls} text-left ${paddingServicoColCls(indentLevel)}`}>
+                        <td className={`${tdItemColCls} ${stickyItemTdCls} bg-gray-50 dark:bg-gray-800`}>{rotuloItem}</td>
+                        <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-gray-50 text-left dark:bg-gray-800 ${paddingServicoColCls(indentLevel)}`}>
                           <ComposicaoResumoNomeCell nome={comp.descricao} />
                         </td>
+                        <CelulasQtdCusto
+                          unidade={comp.unidade}
+                          quantidade={comp.quantidade}
+                          custo={comp.valorTotal}
+                        />
                         <CelulasEtapaCronograma
                           resolvido={dados}
                           status={compStatus}
@@ -1045,7 +1227,9 @@ export function OrcamentoCronogramaPainel({
                     if (comps.length === 0) return [linhaServico];
                     return [
                       linhaServico,
-                      ...comps.map(({ blocoKey, comp }) => renderComposicao(blocoKey, comp, 1))
+                      ...comps.map(({ blocoKey, comp }) =>
+                        renderComposicao(blocoKey, comp, 1, proximoItemComposicao())
+                      )
                     ];
                   }
 
@@ -1053,11 +1237,13 @@ export function OrcamentoCronogramaPainel({
                   const visiveis = new Set(subtitulosVisiveis.map((st) => st.blocoKey));
                   for (const item of comps) {
                     if (!visiveis.has(item.blocoKey)) {
-                      rows.push(renderComposicao(item.blocoKey, item.comp, 1));
+                      rows.push(
+                        renderComposicao(item.blocoKey, item.comp, 1, proximoItemComposicao())
+                      );
                     }
                   }
 
-                  for (const st of subtitulosVisiveis) {
+                  subtitulosVisiveis.forEach((st) => {
                     const blocoResolvido = agregarDadosComposicoes(
                       cronograma,
                       st.composicoes.map((comp) => ({ blocoKey: st.blocoKey, comp }))
@@ -1068,7 +1254,8 @@ export function OrcamentoCronogramaPainel({
                         key={`${st.blocoKey}::cabecalho`}
                         className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
                       >
-                        <td className={`${tdServicoColCls} text-left pl-6`}>
+                        <td className={`${tdItemColCls} ${stickyItemTdCls} bg-slate-200 text-xs font-semibold text-gray-800 dark:bg-gray-900 dark:text-gray-200`} />
+                        <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-slate-200 text-left pl-6 dark:bg-gray-900`}>
                           <span
                             className="block min-w-0 whitespace-normal break-words text-xs font-semibold uppercase leading-snug tracking-wide text-gray-800 dark:text-gray-200"
                             title={st.subtituloNome}
@@ -1076,6 +1263,10 @@ export function OrcamentoCronogramaPainel({
                             {st.subtituloNome}
                           </span>
                         </td>
+                        <CelulasQtdCusto
+                          custo={st.composicoes.reduce((acc, comp) => acc + (comp.valorTotal ?? 0), 0)}
+                          destaque
+                        />
                         <CelulasEtapaCronograma
                           resolvido={blocoResolvido}
                           status={blocoStatus}
@@ -1087,10 +1278,12 @@ export function OrcamentoCronogramaPainel({
                         {renderTimeline(`${st.blocoKey}::cabecalho`)}
                       </tr>
                     );
-                    for (const comp of st.composicoes) {
-                      rows.push(renderComposicao(st.blocoKey, comp, 2));
-                    }
-                  }
+                    st.composicoes.forEach((comp) => {
+                      rows.push(
+                        renderComposicao(st.blocoKey, comp, 2, proximoItemComposicao())
+                      );
+                    });
+                  });
 
                   return rows;
                 })}
@@ -1098,9 +1291,9 @@ export function OrcamentoCronogramaPainel({
             </table>
             {hojeMarcador && timelineLayout ? (
               <div
-                className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-red-500"
+                className="pointer-events-none absolute top-0 bottom-0 z-[1] w-px bg-red-500"
                 style={{
-                  left: `calc(57.5rem + ${(hojeMarcador.leftPct / 100) * timelineLayout.largura}px)`
+                  left: `calc(${COLUNAS_FIXAS_REM}rem + ${(hojeMarcador.leftPct / 100) * timelineLayout.largura}px)`
                 }}
                 aria-hidden
               />
@@ -1110,10 +1303,12 @@ export function OrcamentoCronogramaPainel({
         )}
       {editorTarget && abaCronograma !== 'graficos' ? (
         <TimelineEtapaEditor
+          key={editorTarget.row.key}
           target={{
             ...editorTarget,
             row: linhasTimeline.find((r) => r.key === editorTarget.row.key) ?? editorTarget.row
           }}
+          modo={modoFolha}
           onClose={() => setEditorTarget(null)}
           onPatchDados={patchEtapaDados}
         />

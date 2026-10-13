@@ -6,6 +6,10 @@ export interface CronogramaItemData {
   dataFimReal?: string;
   /** 0–100 */
   percentualExecutado?: number;
+  /** Quantidade já executada da composição. O percentual sai daqui. */
+  quantidadeExecutada?: number;
+  /** Quantidade usada em cada dia do prazo (`aaaa-mm-dd`). */
+  quantidadesPorDia?: Record<string, number>;
   observacao?: string;
 }
 
@@ -61,6 +65,8 @@ export type CronogramaComposicaoRef = {
   subtituloNome: string;
   quantidade: number;
   unidade?: string;
+  /** Total da composição com BDI e desconto, usado na distribuição semanal. */
+  valorTotal?: number;
 };
 
 export type EtapaPrazoPayload = {
@@ -247,6 +253,16 @@ export function normalizarCronograma(raw: unknown): CronogramaPersist {
   };
 }
 
+function normalizarQuantidadesPorDia(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) continue;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function normalizarMapaCronograma(map: Record<string, unknown>): Record<string, CronogramaItemData> {
   const out: Record<string, CronogramaItemData> = {};
   for (const [k, v] of Object.entries(map)) {
@@ -261,6 +277,15 @@ function normalizarMapaCronograma(map: Record<string, unknown>): Record<string, 
         typeof d.percentualExecutado === 'number' && Number.isFinite(d.percentualExecutado)
           ? Math.min(100, Math.max(0, d.percentualExecutado))
           : undefined,
+      quantidadeExecutada:
+        typeof d.quantidadeExecutada === 'number' &&
+        Number.isFinite(d.quantidadeExecutada) &&
+        d.quantidadeExecutada >= 0
+          ? d.quantidadeExecutada
+          : undefined,
+      quantidadesPorDia: normalizarQuantidadesPorDia(
+        (v as { quantidadesPorDia?: unknown }).quantidadesPorDia
+      ),
       observacao: typeof d.observacao === 'string' ? d.observacao : ''
     };
   }
@@ -991,6 +1016,8 @@ export function resolverDadosCronogramaComposicao(
     dataInicioReal: item.dataInicioReal || '',
     dataFimReal: item.dataFimReal || '',
     percentualExecutado: item.percentualExecutado ?? bloco.percentualExecutado ?? undefined,
+    quantidadeExecutada: item.quantidadeExecutada,
+    quantidadesPorDia: item.quantidadesPorDia,
     observacao: item.observacao || bloco.observacao || ''
   };
 }

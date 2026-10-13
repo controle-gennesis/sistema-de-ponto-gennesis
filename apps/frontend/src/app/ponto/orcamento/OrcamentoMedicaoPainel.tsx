@@ -16,7 +16,6 @@ import {
   gradeTableRowTrCls,
   inputGradeCls
 } from './orcamentoGradeCellClasses';
-import { currencyDigitsToFormatted } from '@/lib/fichaDemandaApproval';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
@@ -426,13 +425,6 @@ function formatMedicaoCentavos(n: number): string {
 function formatMedicaoCampo(n: number): string {
   if (!Number.isFinite(n) || n === 0) return '';
   return formatMedicaoCentavos(n);
-}
-
-/** Digitar 158 vira 1,58. Fórmula (=…) permanece como foi escrita. */
-function mascaraMedicaoCentavos(raw: string): string {
-  const text = String(raw ?? '');
-  if (text.trimStart().startsWith('=')) return text;
-  return currencyDigitsToFormatted(text);
 }
 
 function substituirRefsFormulaLinha(expr: string, ctx: FormulaRowCtx): string {
@@ -1720,7 +1712,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         clearTimeout(pending);
         delete calcCommitTimersRef.current[draftKey];
       }
-      const text = mascaraMedicaoCentavos(String(raw ?? ''));
+      const text = String(raw ?? '').trim();
       const n = parseMedicaoBlurNumber(
         text,
         rowCtx ?? calcRowCtxRef.current[draftKey],
@@ -1746,7 +1738,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       rowCtx?: FormulaRowCtx
     ) => {
       if (readOnly) return;
-      const text = mascaraMedicaoCentavos(String(raw ?? ''));
+      const text = String(raw ?? '');
       const anterior =
         draftKey in draftCalcRef.current
           ? draftCalcRef.current[draftKey]!
@@ -2865,7 +2857,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             {itemRotulo || '—'}
           </div>
           <div className="flex min-w-0 flex-1 items-center border-l border-gray-200 bg-white px-3 py-2.5 dark:border-gray-600 dark:bg-gray-900 sm:px-3.5">
-            <p className="min-w-0 flex-1 whitespace-normal break-words text-left text-sm font-bold leading-relaxed text-gray-900 dark:text-gray-100">
+            <p className="min-w-0 flex-1 whitespace-normal break-words text-left text-sm font-bold uppercase leading-relaxed text-gray-900 dark:text-gray-100">
               {itemDescricao}
             </p>
             {onMemoriasIncluidasChange && !ehCargaEntulho && !readOnly ? (

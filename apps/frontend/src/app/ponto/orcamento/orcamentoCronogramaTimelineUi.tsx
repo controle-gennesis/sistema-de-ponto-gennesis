@@ -1,23 +1,49 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { useState } from 'react';
 import {
+  isoDiaCronograma,
+  repartirUsoPorDiasCronograma,
   type CronogramaDesvioTimeline,
   type CronogramaTimelineLinha,
   type CronogramaTimelineZoom
 } from './orcamentoCronogramaCalc';
 import {
   calcularStatusCronograma,
+  parseDataIso,
   type CronogramaItemData
 } from './orcamentoCronogramaTypes';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { Modal } from '@/components/ui/Modal';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 
 export const TIMELINE_ROW_HEIGHT_PX = 40;
 
-const EDITOR_PANEL_W = 304;
-const EDITOR_PANEL_MAX_H = 420;
+const editorLabelCls =
+  'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
+const editorInputCls = `${FORM_FIELD_INPUT_CLS} h-10 shadow-none`;
+const editorTextareaCls = `${FORM_FIELD_TEXTAREA_CLS} shadow-none`;
+
+function parseQuantidadeUsada(raw: string): number | null {
+  const limpo = raw.trim().replace(/\s/g, '').replace(',', '.');
+  if (!limpo) return null;
+  const n = Number(limpo);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function formatQtdEditor(n: number): string {
+  return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+}
+
+function usoDaComposicao(qtdUsada: number, qtdOrcada: number, custo: number) {
+  if (!(qtdOrcada > 0)) return { percentual: 0, valorUsado: 0 };
+  const razao = qtdUsada / qtdOrcada;
+  return {
+    percentual: Math.min(100, Math.max(0, razao * 100)),
+    valorUsado: razao * custo
+  };
+}
 
 export type TimelineEtapaEditorTarget = {
   row: CronogramaTimelineLinha;
@@ -26,190 +52,168 @@ export type TimelineEtapaEditorTarget = {
 
 type TimelineEtapaEditorProps = {
   target: TimelineEtapaEditorTarget;
+  modo: 'plan' | 'real';
   onClose: () => void;
   onPatchDados: (row: CronogramaTimelineLinha, patch: Partial<CronogramaItemData>) => void;
 };
 
 export function TimelineEtapaEditor({
   target,
+  modo,
   onClose,
   onPatchDados
 }: TimelineEtapaEditorProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { row, anchorEl } = target;
+  const { row } = target;
   const status = calcularStatusCronograma(row.dados);
-  const [coords, setCoords] = useState({ left: 0, top: 0 });
-
-  const updatePosition = useCallback(() => {
-    if (!anchorEl.isConnected) {
-      onClose();
-      return;
+  const datasReais = modo === 'real';
+  const qtdOrcada = row.quantidade ?? 0;
+  const custo = row.valorTotal ?? 0;
+  const medeQuantidade = qtdOrcada > 0;
+  const [textosDia, setTextosDia] = useState<Record<string, string>>({});
+  const inicioPrazo = parseDataIso(datasReais ? row.dados.dataInicioReal : row.dados.dataInicio);
+  const fimPrazo = parseDataIso(datasReais ? row.dados.dataFimReal : row.dados.dataFim);
+  const mapaSalvo = row.dados.quantidadesPorDia;
+  const temMapa = Boolean(mapaSalvo && Object.keys(mapaSalvo).length > 0);
+  const diasPrazo =
+    inicioPrazo && fimPrazo ? repartirUsoPorDiasCronograma(inicioPrazo, fimPrazo, 0, 0, 0) : [];
+  const legadoPorDia =
+    !temMapa && row.dados.quantidadeExecutada != null && inicioPrazo && fimPrazo
+      ? repartirUsoPorDiasCronograma(inicioPrazo, fimPrazo, row.dados.quantidadeExecutada, 0, 0)
+      : [];
+  const qtdInicialDia = (iso: string) => {
+    if (temMapa) return mapaSalvo?.[iso];
+    return legadoPorDia.find((fatia) => isoDiaCronograma(fatia.data) === iso)?.quantidade;
+  };
+  const textoDoDia = (iso: string) => {
+    if (Object.prototype.hasOwnProperty.call(textosDia, iso)) return textosDia[iso];
+    const inicial = qtdInicialDia(iso);
+    return inicial != null && inicial > 0 ? formatQtdEditor(inicial) : '';
+  };
+  const aplicarQuantidadeDia = (iso: string, raw: string) => {
+    setTextosDia((prev) => ({ ...prev, [iso]: raw }));
+    if (raw.trim() !== '' && parseQuantidadeUsada(raw) == null) return;
+    const mapa: Record<string, number> = { ...(mapaSalvo ?? {}) };
+    if (!temMapa) {
+      for (const fatia of legadoPorDia) {
+        if (fatia.quantidade > 0) mapa[isoDiaCronograma(fatia.data)] = fatia.quantidade;
+      }
     }
-    const rect = anchorEl.getBoundingClientRect();
-    const gap = 8;
-    let left = rect.right + gap;
-    if (left + EDITOR_PANEL_W > window.innerWidth - 8) {
-      left = rect.left - EDITOR_PANEL_W - gap;
-    }
-    if (left < 8) {
-      left = Math.max(8, Math.min(rect.left, window.innerWidth - EDITOR_PANEL_W - 8));
-    }
+    const n = raw.trim() === '' ? null : parseQuantidadeUsada(raw);
+    if (n == null || n === 0) delete mapa[iso];
+    else mapa[iso] = n;
+    const soma = Object.values(mapa).reduce((acc, qtd) => acc + qtd, 0);
+    const calc = soma > 0 ? usoDaComposicao(soma, qtdOrcada, custo) : null;
+    onPatchDados(row, {
+      quantidadesPorDia: Object.keys(mapa).length > 0 ? mapa : undefined,
+      quantidadeExecutada: soma > 0 ? soma : undefined,
+      percentualExecutado: calc ? calc.percentual : undefined
+    });
+  };
 
-    let top = rect.top;
-    if (top + EDITOR_PANEL_MAX_H > window.innerHeight - 8) {
-      top = Math.max(8, window.innerHeight - EDITOR_PANEL_MAX_H - 8);
-    }
-    top = Math.max(8, top);
-    setCoords({ left, top });
-  }, [anchorEl, onClose]);
-
-  useEffect(() => {
-    updatePosition();
-    const onScrollOrResize = () => updatePosition();
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
-    return () => {
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    };
-  }, [updatePosition]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const onClick = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (panelRef.current?.contains(t) || anchorEl.contains(t)) return;
-      if (t instanceof Element && t.closest('[role="dialog"][aria-label="Calendário"]')) return;
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onClick);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onClick);
-    };
-  }, [onClose, anchorEl]);
-
-  const panel = (
-    <div
-      ref={panelRef}
-      className="fixed z-[200] w-[19rem] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-900"
-      style={{ left: coords.left, top: coords.top }}
-      role="dialog"
-      aria-label={`Editar etapa — ${row.label}`}
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={row.item || row.label}
+      panelClassName="!transform-none"
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-semibold text-gray-900 dark:text-gray-100">{row.label}</p>
-          <p className="text-[10px] text-gray-500 dark:text-gray-400">Clique na barra para editar execução</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-          aria-label="Fechar"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div className="space-y-2">
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
-              Início plan.
-            </span>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 items-start gap-4">
+          <label className="block min-w-0">
+            <span className={editorLabelCls}>Início</span>
             <DatePickerField
-              size="table"
-              value={row.dados.dataInicio ?? ''}
-              onChange={(v) => onPatchDados(row, { dataInicio: v })}
+              value={(datasReais ? row.dados.dataInicioReal : row.dados.dataInicio) ?? ''}
+              onChange={(v) =>
+                onPatchDados(row, datasReais ? { dataInicioReal: v } : { dataInicio: v })
+              }
               placeholder="dd/mm/aaaa"
-              aria-label={`Início plan. — ${row.label}`}
+              className="shadow-none"
+              aria-label={`${datasReais ? 'Início real' : 'Início planejado'} — ${row.label}`}
             />
           </label>
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
-              Fim plan.
-            </span>
+          <label className="block min-w-0">
+            <span className={editorLabelCls}>Fim</span>
             <DatePickerField
-              size="table"
-              value={row.dados.dataFim ?? ''}
-              onChange={(v) => onPatchDados(row, { dataFim: v })}
+              value={(datasReais ? row.dados.dataFimReal : row.dados.dataFim) ?? ''}
+              onChange={(v) =>
+                onPatchDados(row, datasReais ? { dataFimReal: v } : { dataFim: v })
+              }
               placeholder="dd/mm/aaaa"
-              aria-label={`Fim plan. — ${row.label}`}
-            />
-          </label>
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
-              Início real
-            </span>
-            <DatePickerField
-              size="table"
-              value={row.dados.dataInicioReal ?? ''}
-              onChange={(v) => onPatchDados(row, { dataInicioReal: v })}
-              placeholder="dd/mm/aaaa"
-              aria-label={`Início real — ${row.label}`}
-            />
-          </label>
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
-              Fim real
-            </span>
-            <DatePickerField
-              size="table"
-              value={row.dados.dataFimReal ?? ''}
-              onChange={(v) => onPatchDados(row, { dataFimReal: v })}
-              placeholder="dd/mm/aaaa"
-              aria-label={`Fim real — ${row.label}`}
+              className="shadow-none"
+              aria-label={`${datasReais ? 'Fim real' : 'Fim planejado'} — ${row.label}`}
             />
           </label>
         </div>
-
+        {medeQuantidade ? (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Orçada: {formatQtdEditor(qtdOrcada)}
+              {row.unidade ? ` ${row.unidade}` : ''}
+            </p>
+            {diasPrazo.map((dia) => {
+              const iso = isoDiaCronograma(dia.data);
+              const texto = textoDoDia(iso);
+              const qtdDia = parseQuantidadeUsada(texto);
+              const usoDia = qtdDia != null ? usoDaComposicao(qtdDia, qtdOrcada, custo) : null;
+              return (
+                <div key={iso} className="space-y-2">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {dia.data.toLocaleDateString('pt-BR')}
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <label className="block min-w-0">
+                      <span className={editorLabelCls}>Quantidade</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={texto}
+                        onChange={(e) => aplicarQuantidadeDia(iso, e.target.value)}
+                        placeholder="0"
+                        className={editorInputCls}
+                        aria-label={`Quantidade em ${dia.data.toLocaleDateString('pt-BR')} — ${row.label}`}
+                      />
+                    </label>
+                    <div className="min-w-0">
+                      <p className={editorLabelCls}>Valor usado</p>
+                      <div className={`${editorInputCls} flex items-center tabular-nums`}>
+                        {usoDia
+                          ? usoDia.valorUsado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <p className={editorLabelCls}>Executado</p>
+                      <div className={`${editorInputCls} flex items-center tabular-nums`}>
+                        {usoDia
+                          ? `${usoDia.percentual.toLocaleString('pt-BR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}%`
+                          : '—'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
-            % executado
-          </span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={1}
-            value={row.dados.percentualExecutado ?? ''}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw.trim() === '') {
-                onPatchDados(row, { percentualExecutado: undefined });
-                return;
-              }
-              const n = Number(raw);
-              if (Number.isFinite(n)) {
-                onPatchDados(row, { percentualExecutado: Math.min(100, Math.max(0, Math.round(n))) });
-              }
-            }}
-            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs tabular-nums text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium text-gray-500 dark:text-gray-400">
+          <span className={editorLabelCls}>
             Observação {status === 'atrasado' ? '(motivo do atraso)' : ''}
           </span>
           <textarea
             value={row.dados.observacao ?? ''}
             onChange={(e) => onPatchDados(row, { observacao: e.target.value })}
-            rows={2}
+            rows={3}
             placeholder={status === 'atrasado' ? 'Ex.: chuva, falta de material…' : 'Comentário da etapa…'}
-            className="w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            className={editorTextareaCls}
           />
         </label>
       </div>
-    </div>
+    </Modal>
   );
-
-  if (typeof document === 'undefined') return null;
-  return createPortal(panel, document.body);
 }
 
 export function TimelineZoomControls({
