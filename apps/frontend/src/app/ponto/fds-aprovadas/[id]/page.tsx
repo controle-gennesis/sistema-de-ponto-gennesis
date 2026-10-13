@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense } from 'react';
+import React from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -9,17 +9,10 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
-import { OrcamentoPageView } from '@/app/ponto/orcamento/OrcamentoPageView';
+import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
 import api from '@/lib/api';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
-import {
-  fdOrcamentoVinculo,
-  FD_STATUS_LABELS,
-  formatCurrencyDisplay,
-  purchaseStatusLabel,
-  type FichaDemandaApprovalRecord,
-} from '@/lib/fichaDemandaApproval';
+import type { FichaDemandaApprovalRecord } from '@/lib/fichaDemandaApproval';
 
 export default function FichaDemandaAprovadaDetalhePage() {
   const params = useParams();
@@ -46,7 +39,6 @@ export default function FichaDemandaAprovadaDetalhePage() {
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const record = fdRes ?? null;
-  const vinculo = record ? fdOrcamentoVinculo(record) : null;
   const codigoFd = record?.codFichaDemanda?.trim() || '';
 
   useBreadcrumbEntity(codigoFd ? [{ label: codigoFd }] : null);
@@ -56,6 +48,8 @@ export default function FichaDemandaAprovadaDetalhePage() {
     sessionStorage.removeItem('token');
     router.push('/auth/login');
   };
+
+  const voltar = () => router.push('/ponto/fds-aprovadas');
 
   if (!id || loadingUser || loadingFd) {
     return <Loading message="Carregando ficha de demanda..." fullScreen size="lg" />;
@@ -82,90 +76,24 @@ export default function FichaDemandaAprovadaDetalhePage() {
     );
   }
 
-  if (vinculo) {
-    return (
-      <Suspense fallback={<Loading message="Carregando ficha de demanda..." fullScreen size="lg" />}>
-        <OrcamentoPageView
-          lockedCostCenterId={vinculo.centroCustoId}
-          embeddedContractId={record.contratoId}
-          embeddedContractName={record.contratoNome}
-          embeddedOrcamentoIdFromRoute={vinculo.orcamentoId}
-          fichaDemandaOnly
-          fichaDemandaRecord={record}
-        />
-      </Suspense>
-    );
-  }
-
   return (
     <ProtectedRoute route="/ponto/fds-aprovadas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div className="mx-auto w-full max-w-4xl space-y-4">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              {record.codFichaDemanda || 'Ficha de demanda'}
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Pedido {record.codigoPedido || '—'} · {record.polo || '—'}
-            </p>
-          </div>
-          <Card>
-            <CardContent className="space-y-5 p-5 sm:p-6">
-              <div className="flex justify-end">
-                <FdStatusBadges record={record} />
-              </div>
-              <dl className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Contrato</dt>
-                  <dd className="mt-1 text-sm uppercase text-gray-900 dark:text-gray-100">{record.contratoNome || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Obra</dt>
-                  <dd className="mt-1 text-sm uppercase text-gray-900 dark:text-gray-100">{record.obra || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Solicitante</dt>
-                  <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{record.solicitanteNome || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Faturamento estimado</dt>
-                  <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">
-                    {formatCurrencyDisplay(record.faturamentoEstimado)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Custo estimado</dt>
-                  <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">
-                    {formatCurrencyDisplay(record.custoEstimado)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Status</dt>
-                  <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {FD_STATUS_LABELS[record.status] || record.status}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Status compras</dt>
-                  <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {purchaseStatusLabel(record.purchaseStatus)}
-                  </dd>
-                </div>
-                <div className="sm:col-span-2">
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Observação</dt>
-                  <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{record.observacao || '—'}</dd>
-                </div>
-              </dl>
-              <Link
-                href="/ponto/fds-aprovadas"
-                className="inline-flex items-center gap-2 text-sm text-red-600 hover:underline dark:text-red-400"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Voltar às fichas
-              </Link>
-            </CardContent>
-          </Card>
+        <div className="mx-auto w-full max-w-4xl">
+          <Link
+            href="/ponto/fds-aprovadas"
+            className="inline-flex items-center gap-2 text-sm text-red-600 hover:underline dark:text-red-400"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar às fichas
+          </Link>
         </div>
+        <FichaDemandaDetailModal
+          isOpen
+          record={record}
+          onClose={voltar}
+          allowAddOrdemCompra
+        />
       </MainLayout>
     </ProtectedRoute>
   );
