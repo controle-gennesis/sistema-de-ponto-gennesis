@@ -1,4 +1,9 @@
-import type { LinhaContagem, LinhaMedicao, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
+import type {
+  CampoFormulaMedicao,
+  LinhaContagem,
+  LinhaMedicao,
+  TipoUnidadeFormula,
+} from './orcamentoMedicaoTypes';
 
 /** Calcula A (área) = C×L×N, V (volume) = A×H ou C×L×H×N */
 export function calcA(linha: LinhaMedicao): number {
@@ -108,6 +113,64 @@ export function linhasContagemParaMedicao(linhas: LinhaContagem[] | undefined): 
 export function linhasMedicaoEfetivas(dim: { linhas?: LinhaMedicao[]; linhasContagem?: LinhaContagem[] } | undefined): LinhaMedicao[] {
   if (dim?.linhas?.length) return dim.linhas;
   return linhasContagemParaMedicao(dim?.linhasContagem);
+}
+
+/** Linha de medida sem descrição, número ou fórmula. Cabeçalho e memória incluída ficam. */
+export function linhaMedicaoEstaVazia(ln: LinhaMedicao): boolean {
+  if (ln.cabecalhoSecao || ln.origemMemoriaKey || ln.linhaAgregadaCarga) return false;
+  if ((ln.descricao ?? '').trim()) return false;
+  const numeros = [
+    ln.C,
+    ln.L,
+    ln.H,
+    ln.N,
+    ln.empolamento,
+    ln.valorManual,
+    ln.subtotalManual,
+    ln.aManual,
+    ln.vManual,
+    ln.volumeM3BrutoSomado,
+  ];
+  for (const n of numeros) {
+    if (typeof n === 'number' && Number.isFinite(n) && Math.abs(n) > 1e-9) return false;
+  }
+  const formulas = ln.formulas;
+  if (formulas) {
+    for (const texto of Object.values(formulas)) {
+      if (String(texto ?? '').trim()) return false;
+    }
+  }
+  return true;
+}
+
+const REF_LINHA_FORMULA = /\{([^{}!]+)!(\d+)!(SUB|C|L|H|N|%|A|V)\}/gi;
+
+/** Atualiza `{rótulo!linha!coluna}` depois que linhas vazias saem e a numeração muda. */
+export function remapearFormulasDaLinha(
+  ln: LinhaMedicao,
+  rotulo: string,
+  linhaNovaPorAntiga: ReadonlyMap<number, number>
+): LinhaMedicao {
+  const alvo = rotulo.trim();
+  if (!alvo || !ln.formulas) return ln;
+  let mudou = false;
+  const formulas: NonNullable<LinhaMedicao['formulas']> = { ...ln.formulas };
+  for (const campo of Object.keys(formulas) as CampoFormulaMedicao[]) {
+    const atual = formulas[campo];
+    if (!atual || !atual.includes('{')) continue;
+    const prox = atual.replace(REF_LINHA_FORMULA, (match, rot: string, linha: string, campoRef: string) => {
+      if (String(rot).trim() !== alvo) return match;
+      const nova = linhaNovaPorAntiga.get(Number(linha));
+      if (nova == null) return '0';
+      if (nova === Number(linha)) return match;
+      return `{${String(rot).trim()}!${nova}!${campoRef}}`;
+    });
+    if (prox !== atual) {
+      formulas[campo] = prox;
+      mudou = true;
+    }
+  }
+  return mudou ? { ...ln, formulas } : ln;
 }
 
 /** Soma simples das quantidades por local — memória de cálculo de itens "un". */
@@ -344,6 +407,288 @@ export function sincronizarLinhasMemoriaIncluidas<T extends DimensoesParaSnapsho
     chavesAlteradas.push(itemKey);
   }
   return changed ? { next, chavesAlteradas } : null;
+}
+
+export type ContextoFormulaMedicao = {
+  C: number;
+  L: number;
+  H: number;
+  N: number;
+  empolamento: number;
+  A: number;
+  V: number;
+  SUB: number;
+};
+
+export type ResolverFormulaExterna = (
+  rotulo: string,
+  linha: number,
+  campo: string
+) => number | null;
+
+function substituirRefsFormulaLinha(expr: string, ctx: ContextoFormulaMedicao): string {
+  const comSub = expr.replace(/\bSUB\b/gi, String(Number(ctx.SUB) || 0));
+  return comSub.replace(/%|\b([CLHNAV])\b/gi, (match) => {
+    if (match === '%') return String(Number(ctx.empolamento) || 0);
+    const m = match.toUpperCase();
+    if (m === 'C') return String(Number(ctx.C) || 0);
+    if (m === 'L') return String(Number(ctx.L) || 0);
+    if (m === 'H') return String(Number(ctx.H) || 0);
+    if (m === 'N') return String(Number(ctx.N) || 0);
+    if (m === 'A') return String(Number(ctx.A) || 0);
+    if (m === 'V') return String(Number(ctx.V) || 0);
+    return match;
+  });
+}
+
+function substituirRefsFormulaExternas(
+  expr: string,
+  resolve: ResolverFormulaExterna
+): { expr: string; ok: boolean } {
+  let ok = true;
+  const next = expr.replace(
+    /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi,
+    (_match, rotulo: string, linha: string, campo: string) => {
+      const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
+      const linhaNum = /^t$/i.test(linha) ? 0 : Number(linha);
+      const n = resolve(String(rotulo).trim(), linhaNum, col);
+      if (n == null || !Number.isFinite(n)) {
+        ok = false;
+        return '0';
+      }
+      return String(n);
+    }
+  );
+  return { expr: next, ok };
+}
+
+/** Valor de uma fórmula da memória (`=C+L+N`) ou de um número digitado. */
+export function avaliarFormulaMedicao(
+  raw: string,
+  rowCtx?: ContextoFormulaMedicao,
+  resolverExterna?: ResolverFormulaExterna
+): number | null {
+  const text = String(raw ?? '').trim();
+  if (text.startsWith('=')) {
+    let s = text.slice(1).trim().replace(/,/g, '.');
+    if (resolverExterna && s.includes('{')) {
+      const externo = substituirRefsFormulaExternas(s, resolverExterna);
+      if (!externo.ok) return null;
+      s = externo.expr;
+    }
+    if (rowCtx) s = substituirRefsFormulaLinha(s, rowCtx);
+    if (!s || !/^[\d\s+\-*/.()]+$/.test(s)) return null;
+    try {
+      const result = new Function(`return (${s})`)();
+      return typeof result === 'number' && isFinite(result) ? result : null;
+    } catch {
+      return null;
+    }
+  }
+  const t = text.replace(/^=/, '').trim();
+  if (!t) return null;
+  if (t.includes(',')) {
+    const n = Number(t.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  }
+  if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
+    const n = Number(t.replace(/\./g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function contextoFormulaLinha(ln: LinhaMedicao, tipo: TipoUnidadeFormula): ContextoFormulaMedicao {
+  const empolVal =
+    ln.empolamento ??
+    ((ln as unknown as { percPerda?: number }).percPerda != null
+      ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100
+      : 0);
+  return {
+    C: ln.C || 0,
+    L: ln.L || 0,
+    H: ln.H || 0,
+    N: ln.N || 0,
+    empolamento: Number(empolVal) || 0,
+    A: areaExibidaLinha(ln),
+    V: volumeExibidoLinha(ln, tipo),
+    SUB: calcularQuantidadeLinha(ln, tipo),
+  };
+}
+
+const ORDEM_CAMPOS_FORMULA: CampoFormulaMedicao[] = [
+  'C',
+  'L',
+  'H',
+  'N',
+  'empolamento',
+  'aManual',
+  'vManual',
+  'valorManual',
+  'subtotalManual',
+];
+
+function tokenColunaFormula(campo: CampoFormulaMedicao): string {
+  if (campo === 'empolamento') return '%';
+  if (campo === 'aManual' || campo === 'valorManual') return 'A';
+  if (campo === 'vManual') return 'V';
+  if (campo === 'subtotalManual') return 'SUB';
+  return campo;
+}
+
+function aplicarNumeroFormula(
+  ln: LinhaMedicao,
+  campo: CampoFormulaMedicao,
+  n: number
+): LinhaMedicao {
+  if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
+    const v = campo === 'N' ? Math.max(0, n) : n;
+    if (numeroMemoriaIgual(ln[campo], v)) return ln;
+    return { ...ln, [campo]: v };
+  }
+  if (campo === 'empolamento') {
+    const v = Math.max(0, n);
+    if (numeroMemoriaIgual(ln.empolamento, v)) return ln;
+    return { ...ln, empolamento: v };
+  }
+  if (numeroMemoriaIgual(ln[campo], n)) return ln;
+  return { ...ln, [campo]: n };
+}
+
+function valorColunaFormula(
+  ln: LinhaMedicao,
+  col: string,
+  tipo: TipoUnidadeFormula
+): number | null {
+  if (col === 'C') return ln.C || 0;
+  if (col === 'L') return ln.L || 0;
+  if (col === 'H') return ln.H || 0;
+  if (col === 'N') return ln.N || 0;
+  if (col === '%') return Number(ln.empolamento) || 0;
+  if (col === 'A') return areaExibidaLinha(ln);
+  if (col === 'V') return volumeExibidoLinha(ln, tipo);
+  if (col === 'SUB') return calcularQuantidadeLinha(ln, tipo);
+  return null;
+}
+
+type DimensoesComFormula = {
+  tipoUnidade?: TipoUnidadeFormula;
+  linhas?: LinhaMedicao[];
+  linhasContagem?: LinhaContagem[];
+};
+
+/**
+ * Recalcula o número gravado de cada fórmula quando C, L, H, N ou outra célula
+ * referenciada muda. Sem isso o texto da fórmula acompanha o N novo, mas o
+ * valor da célula só muda ao abrir e fechar a fórmula.
+ */
+export function propagarFormulasMemoria<T extends DimensoesComFormula>(
+  dimensoes: Record<string, T | undefined>,
+  metaPorKey: ReadonlyMap<string, { tipo: TipoUnidadeFormula; rotulo: string }>
+): { next: Record<string, T>; chavesAlteradas: string[] } | null {
+  const presentes = Object.fromEntries(
+    Object.entries(dimensoes).filter((entry): entry is [string, T] => entry[1] != null)
+  ) as Record<string, T>;
+  let next: Record<string, T> = { ...presentes };
+  const origemPorItem = new Map<string, LinhaMedicao[]>();
+  for (const [key, dim] of Object.entries(presentes)) {
+    if (dim.linhas) origemPorItem.set(key, dim.linhas);
+  }
+  const keyPorRotulo = new Map<string, string>();
+  for (const [key, meta] of metaPorKey) {
+    const rot = meta.rotulo.trim();
+    if (rot && !keyPorRotulo.has(rot)) keyPorRotulo.set(rot, key);
+  }
+  const chavesAlteradas: string[] = [];
+  let any = false;
+  let lendo: { itemKey: string; linhaDados: number; col: string; origem: LinhaMedicao } | null = null;
+
+  const tipoDe = (key: string, dim: T): TipoUnidadeFormula =>
+    metaPorKey.get(key)?.tipo || dim.tipoUnidade || inferirTipoUnidadePorDimensao(dim.linhas);
+
+  const linhasDadosDe = (key: string): LinhaMedicao[] =>
+    (next[key]?.linhas ?? []).filter((ln) => !ln.cabecalhoSecao);
+
+  const resolver: ResolverFormulaExterna = (rotulo, linha, campo) => {
+    const rot = rotulo.trim();
+    if (!rot || !Number.isFinite(linha) || linha < 0) return null;
+    const alvoKey = keyPorRotulo.get(rot);
+    if (!alvoKey || !next[alvoKey]) return null;
+    const tipo = tipoDe(alvoKey, next[alvoKey]!);
+    const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
+    const linhas = linhasDadosDe(alvoKey);
+    if (linha === 0) {
+      if (valorColunaFormula(linhas[0] ?? { C: 0, L: 0, H: 0, N: 0, empolamento: 0 }, col, tipo) == null) {
+        return null;
+      }
+      return linhas.reduce((s, ln) => s + (valorColunaFormula(ln, col, tipo) ?? 0), 0);
+    }
+    if (lendo && alvoKey === lendo.itemKey && linha === lendo.linhaDados && col === lendo.col) {
+      return valorColunaFormula(lendo.origem, col, tipo);
+    }
+    const ln = linhas[linha - 1];
+    if (!ln) return null;
+    return valorColunaFormula(ln, col, tipo);
+  };
+
+  for (let pass = 0; pass < 8; pass += 1) {
+    let passChanged = false;
+    for (const itemKey of Object.keys(next)) {
+      const dim = next[itemKey];
+      if (!dim?.linhas?.some((ln) => ln.formulas && Object.keys(ln.formulas).length > 0)) continue;
+      const tipo = tipoDe(itemKey, dim);
+      let linhas = dim.linhas;
+      let itemChanged = false;
+      for (let i = 0; i < linhas.length; i += 1) {
+        const ln = linhas[i]!;
+        if (ln.cabecalhoSecao || !ln.formulas) continue;
+        let atual = ln;
+        const origem = origemPorItem.get(itemKey)?.[i] ?? ln;
+        let linhaDados = 0;
+        for (let j = 0; j <= i; j += 1) {
+          if (!linhas[j]?.cabecalhoSecao) linhaDados += 1;
+        }
+        for (const campo of ORDEM_CAMPOS_FORMULA) {
+          const formula = String(atual.formulas?.[campo] ?? '').trim();
+          if (!formula.startsWith('=')) continue;
+          const ctx = contextoFormulaLinha(atual, tipo);
+          const antigo = contextoFormulaLinha(origem, tipo);
+          const token = tokenColunaFormula(campo);
+          if (token === 'C') ctx.C = antigo.C;
+          else if (token === 'L') ctx.L = antigo.L;
+          else if (token === 'H') ctx.H = antigo.H;
+          else if (token === 'N') ctx.N = antigo.N;
+          else if (token === '%') ctx.empolamento = antigo.empolamento;
+          else if (token === 'A') ctx.A = antigo.A;
+          else if (token === 'V') ctx.V = antigo.V;
+          else if (token === 'SUB') ctx.SUB = antigo.SUB;
+          if (campo === 'valorManual') ctx.V = antigo.V;
+          lendo = { itemKey, linhaDados, col: token, origem };
+          const n = avaliarFormulaMedicao(formula, ctx, resolver);
+          lendo = null;
+          if (n == null) continue;
+          const aplicado = aplicarNumeroFormula(atual, campo, n);
+          if (aplicado === atual) continue;
+          atual = aplicado;
+          if (!itemChanged) {
+            linhas = linhas.slice();
+            itemChanged = true;
+          }
+          linhas[i] = atual;
+          next = { ...next, [itemKey]: { ...dim, linhas } };
+        }
+      }
+      if (itemChanged) {
+        passChanged = true;
+        any = true;
+        if (!chavesAlteradas.includes(itemKey)) chavesAlteradas.push(itemKey);
+      }
+    }
+    if (!passChanged) break;
+  }
+
+  return any ? { next, chavesAlteradas } : null;
 }
 
 export function inferirTipoUnidadePorDimensao(linhas: LinhaMedicao[] | undefined): TipoUnidadeFormula {

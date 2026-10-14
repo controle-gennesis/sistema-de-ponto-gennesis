@@ -9,7 +9,13 @@ import {
   type LinhaMedicao,
   type TipoUnidadeFormula
 } from './orcamentoMedicaoTypes';
-import { areaExibidaLinha, calcularQuantidadeLinha, linhasMedicaoEfetivas, volumeExibidoLinha } from './orcamentoMedicaoCalc';
+import {
+  areaExibidaLinha,
+  avaliarFormulaMedicao,
+  calcularQuantidadeLinha,
+  linhasMedicaoEfetivas,
+  volumeExibidoLinha,
+} from './orcamentoMedicaoCalc';
 import type { CampoExplicacaoMedicao } from './orcamentoMedicaoCalc';
 import {
   gradeTableCls,
@@ -427,76 +433,12 @@ function formatMedicaoCampo(n: number): string {
   return formatMedicaoCentavos(n);
 }
 
-function substituirRefsFormulaLinha(expr: string, ctx: FormulaRowCtx): string {
-  const comSub = expr.replace(/\bSUB\b/gi, String(Number(ctx.SUB) || 0));
-  return comSub.replace(/%|\b([CLHNAV])\b/gi, match => {
-    if (match === '%') return String(Number(ctx.empolamento) || 0);
-    const m = match.toUpperCase();
-    if (m === 'C') return String(Number(ctx.C) || 0);
-    if (m === 'L') return String(Number(ctx.L) || 0);
-    if (m === 'H') return String(Number(ctx.H) || 0);
-    if (m === 'N') return String(Number(ctx.N) || 0);
-    if (m === 'A') return String(Number(ctx.A) || 0);
-    if (m === 'V') return String(Number(ctx.V) || 0);
-    return match;
-  });
-}
-
-function substituirRefsFormulaExternas(
-  expr: string,
-  resolve: (rotulo: string, linha: number, campo: string) => number | null
-): { expr: string; ok: boolean } {
-  let ok = true;
-  const next = expr.replace(
-    /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi,
-    (_match, rotulo: string, linha: string, campo: string) => {
-      const col = campo.toUpperCase() === '%' ? '%' : campo.toUpperCase();
-      const linhaNum = /^t$/i.test(linha) ? 0 : Number(linha);
-      const n = resolve(String(rotulo).trim(), linhaNum, col);
-      if (n == null || !Number.isFinite(n)) {
-        ok = false;
-        return '0';
-      }
-      return String(n);
-    }
-  );
-  return { expr: next, ok };
-}
-
 function parseMedicaoBlurNumber(
   raw: string,
   rowCtx?: FormulaRowCtx,
   resolverExterna?: (rotulo: string, linha: number, campo: string) => number | null
 ): number | null {
-  const text = String(raw ?? '').trim();
-  if (text.startsWith('=')) {
-    let s = text.slice(1).trim().replace(/,/g, '.');
-    if (resolverExterna && s.includes('{')) {
-      const externo = substituirRefsFormulaExternas(s, resolverExterna);
-      if (!externo.ok) return null;
-      s = externo.expr;
-    }
-    if (rowCtx) s = substituirRefsFormulaLinha(s, rowCtx);
-    if (!s || !/^[\d\s+\-*/.()]+$/.test(s)) return null;
-    try {
-      const result = new Function(`return (${s})`)();
-      return typeof result === 'number' && isFinite(result) ? result : null;
-    } catch {
-      return null;
-    }
-  }
-  const t = text.replace(/^=/, '').trim();
-  if (!t) return null;
-  if (t.includes(',')) {
-    const n = Number(t.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  }
-  if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
-    const n = Number(t.replace(/\./g, ''));
-    return Number.isFinite(n) ? n : null;
-  }
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+  return avaliarFormulaMedicao(raw, rowCtx, resolverExterna);
 }
 
 function parseDraftKeyMedicao(draftKey: string): { idx: number; campo: string } | null {
@@ -3250,7 +3192,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder="0,00"
             value={valorExibicaoCalc(draftKey, formula, formatado)}
             segmentos={segmentosDaCelula(campo, valorExibicaoCalc(draftKey, formula, formatado))}
             disabled={readOnly}
@@ -3361,7 +3302,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder="0,00"
             value={textoCampo}
             segmentos={segmentosDaCelula(campo, textoCampo)}
             disabled={readOnly}
@@ -3420,7 +3360,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
               disabled={readOnly}
               title={linhaVinculada ? 'Vem da memória de origem. Apague para voltar ao automático.' : undefined}
-              placeholder="Ex: COBERTURA DAS CALDEIRAS"
               className={`${inputCls} !px-3 text-left sm:!px-3.5`}
               inputRef={el => {
                 descInputRefs.current[idx] = el;
@@ -3445,7 +3384,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
-            placeholder="0,00"
             value={valorExibicaoCalc(empolDraftKey, empolFormula, empolFormatado)}
             segmentos={segmentosDaCelula('empol', valorExibicaoCalc(empolDraftKey, empolFormula, empolFormatado))}
             disabled={readOnly}

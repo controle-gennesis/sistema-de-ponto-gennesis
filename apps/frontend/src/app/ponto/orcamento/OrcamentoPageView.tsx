@@ -166,11 +166,14 @@ import {
   calcularQuantidadeLinha,
   inferirTipoUnidadePorDimensao,
   linhaMemoriaComPadraoUm,
+  linhaMedicaoEstaVazia,
   linhasMedicaoEfetivas,
+  remapearFormulasDaLinha,
   volumeExibidoLinha,
   zerarPadraoUmLinha,
   sincronizarLinhasMemoriaIncluidas,
-  snapshotMemoriaIncluida
+  snapshotMemoriaIncluida,
+  propagarFormulasMemoria
 } from './orcamentoMedicaoCalc';
 import type { MetaMemoriaIncluida } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula, RotulosColunasMedicao } from './orcamentoMedicaoTypes';
@@ -13548,6 +13551,21 @@ export function OrcamentoPageView({
   ) => {
     if (gradeTravadaRef.current) return;
     setDimensoesPorItem(prev => {
+      const concluirEdicao = (mapaBase: Record<string, DimensoesItem>, sincronizar: boolean) => {
+        const propagado = propagarFormulasMemoria(mapaBase, metaMemoriaIncluidaRef.current);
+        const baseMapa = propagado?.next ?? mapaBase;
+        const vinculado = aplicarVinculosMemoria(baseMapa);
+        if (sincronizar) {
+          const keys = new Set<string>([itemKey, ...(propagado?.chavesAlteradas ?? [])]);
+          queueMicrotask(() => {
+            for (const key of keys) {
+              const dim = vinculado[key];
+              if (dim) syncQuantidadeOrcamentoDaMemoria(key, dim);
+            }
+          });
+        }
+        return vinculado;
+      };
       const base = prev[itemKey];
       const linhasBase = linhasMedicaoEfetivas(base);
         if (!linhasBase[idx]) return prev;
@@ -13636,10 +13654,7 @@ export function OrcamentoPageView({
             updated.overrideMemoria = Object.keys(override).length > 0 ? override : undefined;
             novaLinhas[idx] = updated;
             const nextDim = { ...atual, linhas: novaLinhas };
-            if (campo !== 'descricao') {
-              queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
-            }
-            return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+            return concluirEdicao({ ...prev, [itemKey]: nextDim }, campo !== 'descricao');
           }
         }
         const campoVazio = valor === '' || (typeof valor === 'number' && !Number.isFinite(valor));
@@ -13708,10 +13723,7 @@ export function OrcamentoPageView({
         }
         novaLinhas[idx] = updated;
         const nextDim = { ...atual, linhas: novaLinhas };
-        if (campo !== 'descricao') {
-          queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
-        }
-        return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+        return concluirEdicao({ ...prev, [itemKey]: nextDim }, campo !== 'descricao');
       });
   }, [syncQuantidadeOrcamentoDaMemoria]);
 
@@ -14012,6 +14024,78 @@ export function OrcamentoPageView({
       setDimensoesPorItem(prev => aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim }));
       syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
     }
+  };
+
+  const limparLinhasVaziasTodasMemorias = () => {
+    if (gradeTravadaRef.current) return;
+    const meta = metaMemoriaIncluidaRef.current;
+    setDimensoesPorItem(prev => {
+      const mapasPorRotulo = new Map<string, Map<number, number>>();
+      const chavesLimpas: string[] = [];
+      let next: Record<string, DimensoesItem> = { ...prev };
+      for (const [itemKey, dim] of Object.entries(prev)) {
+        const linhas = linhasMedicaoEfetivas(dim);
+        if (!linhas.length) continue;
+        let indiceDados = 0;
+        let proximo = 0;
+        const mapa = new Map<number, number>();
+        const mantidas: LinhaMedicao[] = [];
+        for (const ln of linhas) {
+          if (ln.cabecalhoSecao) {
+            mantidas.push(ln);
+            continue;
+          }
+          indiceDados += 1;
+          if (linhaMedicaoEstaVazia(ln)) continue;
+          proximo += 1;
+          mapa.set(indiceDados, proximo);
+          mantidas.push(ln);
+        }
+        if (mantidas.length === linhas.length) continue;
+        chavesLimpas.push(itemKey);
+        const rotulo = (meta.get(itemKey)?.rotulo ?? '').trim();
+        if (rotulo) mapasPorRotulo.set(rotulo, mapa);
+        next = {
+          ...next,
+          [itemKey]: {
+            ...dim,
+            linhas: mantidas,
+            ...(mantidas.length ? {} : { linhasContagem: [] }),
+          },
+        };
+      }
+      if (!chavesLimpas.length) return prev;
+      if (mapasPorRotulo.size) {
+        const remapTodas = (ln: LinhaMedicao): LinhaMedicao => {
+          let atual = ln;
+          for (const [rotulo, mapa] of mapasPorRotulo) {
+            atual = remapearFormulasDaLinha(atual, rotulo, mapa);
+          }
+          return atual;
+        };
+        for (const [itemKey, dim] of Object.entries(next)) {
+          if (!dim.linhas?.length) continue;
+          let mudou = false;
+          const linhas = dim.linhas.map(ln => {
+            const nova = remapTodas(ln);
+            if (nova !== ln) mudou = true;
+            return nova;
+          });
+          if (mudou) next = { ...next, [itemKey]: { ...dim, linhas } };
+        }
+      }
+      const propagado = propagarFormulasMemoria(next, meta);
+      const base = propagado?.next ?? next;
+      const vinculado = aplicarVinculosMemoria(base);
+      const keys = new Set<string>([...chavesLimpas, ...(propagado?.chavesAlteradas ?? [])]);
+      queueMicrotask(() => {
+        for (const key of keys) {
+          const dim = vinculado[key];
+          if (dim) syncQuantidadeOrcamentoDaMemoria(key, dim);
+        }
+      });
+      return vinculado;
+    });
   };
 
   /**
@@ -21405,6 +21489,25 @@ export function OrcamentoPageView({
                 ) : (
                   <Unlock className="h-5 w-5 shrink-0" aria-hidden />
                 )}
+              </button>
+            )}
+            {!fichaDemandaOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  limparLinhasVaziasTodasMemorias();
+                }}
+                disabled={versaoCongelada || orcamentoFechado || gradeTravada}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-700"
+                title={
+                  gradeTravada
+                    ? 'Destrave o orçamento para apagar as linhas vazias'
+                    : 'Apagar linhas vazias de todas as memórias'
+                }
+                aria-label="Apagar linhas vazias de todas as memórias"
+              >
+                <Trash2 className="h-5 w-5 shrink-0" aria-hidden />
               </button>
             )}
             {!fichaDemandaOnly && (
