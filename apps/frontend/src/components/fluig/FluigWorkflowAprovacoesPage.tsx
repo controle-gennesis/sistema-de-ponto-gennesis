@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
@@ -327,8 +327,41 @@ export function FluigWorkflowAprovacoesPage() {
   const hasCentroCustoFilter = Boolean(filterCentroCusto);
   const hasActiveModalFilter = hasPeriodFilter || hasNaturezaFilter || hasCentroCustoFilter;
 
+  // A busca roda em segundo plano (o campo responde na hora) e o texto de cada linha é montado uma vez.
+  const deferredSearch = useDeferredValue(search);
+  const textoPorLinha = useMemo(
+    () => new WeakMap<object, { natureza: string; centroCusto: string; busca: string }>(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows]
+  );
+  const textosDaLinha = (row: (typeof rows)[number]) => {
+    let t = textoPorLinha.get(row);
+    if (!t) {
+      const natureza = formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria) ?? '';
+      const centroCusto = formatFluigBudgetFieldDisplay(row.centroCusto) ?? '';
+      t = {
+        natureza,
+        centroCusto,
+        busca: [
+          row.processId,
+          row.title,
+          row.filial ?? '',
+          natureza,
+          centroCusto,
+          row.currentStage ?? '',
+          row.currentPendingWith ?? '',
+          ...row.steps.flatMap((s) => [s.approver ?? '', s.pendingWith ?? '', s.detail ?? '']),
+        ]
+          .join(' ')
+          .toLowerCase(),
+      };
+      textoPorLinha.set(row, t);
+    }
+    return t;
+  };
+
   const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     return rows.filter((row) => {
       if (cardFilter === 'approved' && !row.fullyApproved) return false;
       if (cardFilter === 'compras' && row.currentPendingSector !== 'compras') return false;
@@ -336,16 +369,11 @@ export function FluigWorkflowAprovacoesPage() {
       if (cardFilter === 'diretoria' && row.currentPendingSector !== 'diretoria') return false;
       if (cardFilter === 'other' && (row.fullyApproved || row.currentPendingSector)) return false;
 
-      if (
-        hasNaturezaFilter &&
-        formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria) !== filterNatureza
-      ) {
+      const textos = textosDaLinha(row);
+      if (hasNaturezaFilter && (textos.natureza || undefined) !== filterNatureza) {
         return false;
       }
-      if (
-        filterCentroCusto &&
-        formatFluigBudgetFieldDisplay(row.centroCusto) !== filterCentroCusto
-      ) {
+      if (filterCentroCusto && (textos.centroCusto || undefined) !== filterCentroCusto) {
         return false;
       }
       if (hasPeriodFilter && !isWorkflowApprovalDateInRange(row.createdAt, periodFrom, periodTo)) {
@@ -353,23 +381,12 @@ export function FluigWorkflowAprovacoesPage() {
       }
 
       if (!term) return true;
-      const hay = [
-        row.processId,
-        row.title,
-        row.filial ?? '',
-        formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria) ?? '',
-        formatFluigBudgetFieldDisplay(row.centroCusto) ?? '',
-        row.currentStage ?? '',
-        row.currentPendingWith ?? '',
-        ...row.steps.flatMap((s) => [s.approver ?? '', s.pendingWith ?? '', s.detail ?? '']),
-      ]
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(term);
+      return textos.busca.includes(term);
     });
   }, [
     rows,
-    search,
+    deferredSearch,
+    textoPorLinha,
     cardFilter,
     filterNatureza,
     filterCentroCusto,

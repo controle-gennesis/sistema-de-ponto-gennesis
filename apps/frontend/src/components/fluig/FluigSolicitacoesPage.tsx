@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import {
@@ -929,6 +929,12 @@ type FluigSolicitacoesPageConfig = {
   /** Filtro e coluna de empreiteiro a partir do Nome Social da solicitação. */
   showEmpreitaFilter?: boolean;
   empreitaColumn?: string;
+  /**
+   * Filtros rápidos (ligado por padrão; `false` desliga): busca e seleções passam por
+   * `useDeferredValue`, o texto de busca de cada linha e os valores de filtro/ordenação são
+   * calculados uma vez e reaproveitados.
+   */
+  otimizarFiltros?: boolean;
 };
 
 /** Histórico / título com “Ver mais”, no padrão PNCP. */
@@ -2137,80 +2143,181 @@ export function FluigSolicitacoesPage({
       selectedNaturezasOrcamentarias
     );
 
+  const otimizarFiltros = config?.otimizarFiltros !== false;
+  const deferredSearchText = useDeferredValue(searchText);
+  const selecoesFiltro = useMemo(
+    () => ({
+      filiais: selectedFiliais,
+      ccs: selectedCCs,
+      setores: selectedSetoresSolicitantes,
+      responsaveis: selectedResponsaveis,
+      urgencias: selectedUrgencias,
+      fornecedores: selectedFornecedores,
+      empreitas: selectedEmpreitas,
+      naturezas: selectedNaturezasOrcamentarias,
+    }),
+    [
+      selectedFiliais,
+      selectedCCs,
+      selectedSetoresSolicitantes,
+      selectedResponsaveis,
+      selectedUrgencias,
+      selectedFornecedores,
+      selectedEmpreitas,
+      selectedNaturezasOrcamentarias,
+    ]
+  );
+  const deferredSelecoesFiltro = useDeferredValue(selecoesFiltro);
+  // Com otimização, a lista é refeita em segundo plano e o campo/checkbox responde na hora.
+  const buscaEfetiva = otimizarFiltros ? deferredSearchText : searchText;
+  const selecoesEfetivas = otimizarFiltros ? deferredSelecoesFiltro : selecoesFiltro;
+
+  /** Valores de filtro e data de cada linha, calculados uma vez por linha (e não a cada filtro). */
+  const facetasPorLinha = useMemo(
+    () =>
+      new WeakMap<
+        Record<string, unknown>,
+        {
+          filial: string;
+          cc: string;
+          setor: string;
+          responsavel: string;
+          urgencia: string;
+          fornecedor: string;
+          empreita: string;
+          natureza: string;
+          criadoEm: number;
+          criadoEmDate: Date | null;
+        }
+      >(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      filialCol,
+      ccColResolved,
+      ccColumnsCandidates,
+      setorSolicitanteCol,
+      responsavelCol,
+      responsavelMemberToLabel,
+      urgenciaCol,
+      fornecedorCol,
+      empreitaCol,
+      naturezaOrcamentariaCol,
+      movimentoDataHoraCol,
+    ]
+  );
+  /** Texto pesquisável da linha (todas as colunas, minúsculo), para a busca não reformatar tudo a cada tecla. */
+  const textoBuscaPorLinha = useMemo(
+    () => new WeakMap<Record<string, unknown>, string>(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentColumns]
+  );
+
   const filteredStatusList = useMemo(() => {
-    const search = searchText.trim().toLowerCase();
+    const search = buscaEfetiva.trim().toLowerCase();
+    const sel = selecoesEfetivas;
     // Todos os filtros escolhidos são combinados (E lógico). Uma categoria só é
     // ignorada quando não existe coluna/opção para ela ou quando o usuário nunca
     // mexeu nela e a seleção inicial ainda não foi preenchida com os dados.
     const applyFilial =
-      !!filialCol && filiais.length > 0 && (touchedFilters.filial || selectedFiliais.length > 0);
+      !!filialCol && filiais.length > 0 && (touchedFilters.filial || sel.filiais.length > 0);
     const applyCC =
-      !!ccColResolved && centrosCusto.length > 0 && (touchedFilters.cc || selectedCCs.length > 0);
+      !!ccColResolved && centrosCusto.length > 0 && (touchedFilters.cc || sel.ccs.length > 0);
     const applySetorSolicitante =
       !hideSetorSolicitanteFilter
       && !!setorSolicitanteCol
       && setoresSolicitantes.length > 0
-      && (touchedFilters.setorSolicitante || selectedSetoresSolicitantes.length > 0);
+      && (touchedFilters.setorSolicitante || sel.setores.length > 0);
     const applyResponsavel =
       !!responsavelCol
       && responsaveis.length > 0
-      && (touchedFilters.responsavel || selectedResponsaveis.length > 0);
+      && (touchedFilters.responsavel || sel.responsaveis.length > 0);
     const applyUrgencia =
-      !!urgenciaCol && urgencias.length > 0 && (touchedFilters.urgencia || selectedUrgencias.length > 0);
+      !!urgenciaCol && urgencias.length > 0 && (touchedFilters.urgencia || sel.urgencias.length > 0);
     const applyFornecedor =
       !!fornecedorCol
       && fornecedores.length > 0
-      && (touchedFilters.fornecedor || selectedFornecedores.length > 0);
+      && (touchedFilters.fornecedor || sel.fornecedores.length > 0);
     const applyEmpreita =
       !!empreitaCol
       && empreitas.length > 0
-      && (touchedFilters.empreita || selectedEmpreitas.length > 0);
+      && (touchedFilters.empreita || sel.empreitas.length > 0);
     const applyNaturezaOrcamentaria =
       !!naturezaOrcamentariaCol
       && naturezasOrcamentarias.length > 0
-      && (touchedFilters.naturezaOrcamentaria || selectedNaturezasOrcamentarias.length > 0);
+      && (touchedFilters.naturezaOrcamentaria || sel.naturezas.length > 0);
 
-    const byFiliais = applyFilial ? new Set(selectedFiliais) : null;
-    const byCCs = applyCC ? new Set(selectedCCs) : null;
-    const bySetoresSolicitantes = applySetorSolicitante ? new Set(selectedSetoresSolicitantes) : null;
-    const byResponsaveis = applyResponsavel ? new Set(selectedResponsaveis) : null;
-    const byUrgencias = applyUrgencia ? new Set(selectedUrgencias) : null;
-    const byFornecedores = applyFornecedor ? new Set(selectedFornecedores) : null;
-    const byEmpreitas = applyEmpreita ? new Set(selectedEmpreitas) : null;
-    const byNaturezasOrcamentarias = applyNaturezaOrcamentaria
-      ? new Set(selectedNaturezasOrcamentarias)
-      : null;
+    const byFiliais = applyFilial ? new Set(sel.filiais) : null;
+    const byCCs = applyCC ? new Set(sel.ccs) : null;
+    const bySetoresSolicitantes = applySetorSolicitante ? new Set(sel.setores) : null;
+    const byResponsaveis = applyResponsavel ? new Set(sel.responsaveis) : null;
+    const byUrgencias = applyUrgencia ? new Set(sel.urgencias) : null;
+    const byFornecedores = applyFornecedor ? new Set(sel.fornecedores) : null;
+    const byEmpreitas = applyEmpreita ? new Set(sel.empreitas) : null;
+    const byNaturezasOrcamentarias = applyNaturezaOrcamentaria ? new Set(sel.naturezas) : null;
+
+    const calcularFacetas = (row: Record<string, unknown>) => {
+      const criadoEmDate = movimentoDataHoraCol ? parseCellDate(row[movimentoDataHoraCol]) : null;
+      return {
+        filial: getFilialValue(row),
+        cc: getCCValue(row),
+        setor: getSetorSolicitanteValue(row),
+        responsavel: resolveResponsavelFilterLabel(getResponsavelValue(row)),
+        urgencia: getUrgenciaValue(row),
+        fornecedor: fornecedorCol ? String(row[fornecedorCol] ?? '').trim() : '',
+        empreita: empreitaCol ? readFluigCellString(row, empreitaCol) : '',
+        natureza: naturezaOrcamentariaCol ? getNaturezaOrcamentariaDisplay(row) : '',
+        criadoEm: criadoEmDate ? criadoEmDate.getTime() : 0,
+        criadoEmDate,
+      };
+    };
+    const facetasDe = (row: Record<string, unknown>) => {
+      if (!otimizarFiltros) return calcularFacetas(row);
+      let f = facetasPorLinha.get(row);
+      if (!f) {
+        f = calcularFacetas(row);
+        facetasPorLinha.set(row, f);
+      }
+      return f;
+    };
+    const calcularTextoBusca = (row: Record<string, unknown>) => {
+      const colKeys = currentColumns.slice();
+      for (const k of Object.keys(row)) {
+        if (!colKeys.includes(k)) colKeys.push(k);
+      }
+      const partes: string[] = [];
+      for (const col of colKeys) {
+        const str = formatValue(row[col]).toLowerCase();
+        if (str !== '—') partes.push(str);
+      }
+      return partes.join('\u0001');
+    };
+    const textoBuscaDe = (row: Record<string, unknown>) => {
+      if (!otimizarFiltros) return calcularTextoBusca(row);
+      let t = textoBuscaPorLinha.get(row);
+      if (t === undefined) {
+        t = calcularTextoBusca(row);
+        textoBuscaPorLinha.set(row, t);
+      }
+      return t;
+    };
 
     const matchRow = (row: Record<string, unknown>) => {
-      if (byFiliais && !byFiliais.has(getFilialValue(row))) return false;
-      if (byCCs && !byCCs.has(getCCValue(row))) return false;
-      if (bySetoresSolicitantes && !bySetoresSolicitantes.has(getSetorSolicitanteValue(row))) return false;
+      const f = facetasDe(row);
+      if (byFiliais && !byFiliais.has(f.filial)) return false;
+      if (byCCs && !byCCs.has(f.cc)) return false;
+      if (bySetoresSolicitantes && !bySetoresSolicitantes.has(f.setor)) return false;
       if (byResponsaveis) {
-        const label = resolveResponsavelFilterLabel(getResponsavelValue(row));
-        if (!label || !byResponsaveis.has(label)) return false;
+        if (!f.responsavel || !byResponsaveis.has(f.responsavel)) return false;
       }
-      if (byUrgencias && !byUrgencias.has(getUrgenciaValue(row))) return false;
-      if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim()))
-        return false;
-      if (byEmpreitas && empreitaCol && !byEmpreitas.has(readFluigCellString(row, empreitaCol)))
-        return false;
-      if (byNaturezasOrcamentarias && !byNaturezasOrcamentarias.has(getNaturezaOrcamentariaDisplay(row)))
-        return false;
+      if (byUrgencias && !byUrgencias.has(f.urgencia)) return false;
+      if (byFornecedores && fornecedorCol && !byFornecedores.has(f.fornecedor)) return false;
+      if (byEmpreitas && empreitaCol && !byEmpreitas.has(f.empreita)) return false;
+      if (byNaturezasOrcamentarias && !byNaturezasOrcamentarias.has(f.natureza)) return false;
       if (hasPeriodFilter) {
-        const createdAt = movimentoDataHoraCol ? parseCellDate(row[movimentoDataHoraCol]) : null;
-        if (!isCreationDateInRange(createdAt, periodFrom, periodTo)) return false;
+        if (!isCreationDateInRange(f.criadoEmDate, periodFrom, periodTo)) return false;
       }
       if (search) {
-        const colKeys = currentColumns.slice();
-        for (const k of Object.keys(row)) {
-          if (!colKeys.includes(k)) colKeys.push(k);
-        }
-        const found = colKeys.some((col) => {
-          const str = formatValue(row[col]).toLowerCase();
-          if (str === '—') return false;
-          return str.includes(search);
-        });
-        if (!found) return false;
+        if (!textoBuscaDe(row).includes(search)) return false;
       }
       return true;
     };
@@ -2221,25 +2328,17 @@ export function FluigSolicitacoesPage({
     });
 
     const allRows = byEtapa.flatMap(([, rows]) => rows);
-    const creationTs = (row: Record<string, unknown>) => {
-      if (!movimentoDataHoraCol) return 0;
-      const d = parseCellDate(row[movimentoDataHoraCol]);
-      return d ? d.getTime() : 0;
-    };
+    const creationTs = (row: Record<string, unknown>) => (movimentoDataHoraCol ? facetasDe(row).criadoEm : 0);
     const todosRows = [...allRows].sort((a, b) => creationTs(b) - creationTs(a));
 
     return [[FLUIG_TODOS_ETAPA_LABEL, todosRows] as const, ...byEtapa];
   }, [
     fullStatusList,
-    selectedFiliais,
-    selectedCCs,
-    selectedSetoresSolicitantes,
-    selectedResponsaveis,
-    selectedUrgencias,
-    selectedFornecedores,
-    selectedEmpreitas,
-    selectedNaturezasOrcamentarias,
-    searchText,
+    selecoesEfetivas,
+    buscaEfetiva,
+    otimizarFiltros,
+    facetasPorLinha,
+    textoBuscaPorLinha,
     currentColumns,
     filialCol,
     ccColResolved,

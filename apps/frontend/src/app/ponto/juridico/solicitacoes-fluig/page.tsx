@@ -23,6 +23,7 @@ export default function SolicitacoesFluigJuridicoPage() {
           showExportButton: true,
           showMirrorSyncButton: true,
           showEmpreitaFilter: true,
+          otimizarFiltros: true,
           leadTimeColumn: 'START_DATE',
           naturezaOrcamentariaColumn: 'natureza',
           responsavelColumn: 'responsavel_solicitacao',
