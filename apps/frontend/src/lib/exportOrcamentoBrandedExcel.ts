@@ -4,7 +4,7 @@ import { EXPORT_COMPANY } from '@/lib/exportBrandingLogos';
 const BRAND_RED = 'FFB91C1C';
 const TITLE_TEXT = 'FF111827';
 const MUTED_TEXT = 'FF4B5563';
-const BORDER = 'FFE5E7EB';
+const BORDER = 'FF000000';
 const ROW_ALT = 'FFF9FAFB';
 const WHITE = 'FFFFFFFF';
 const HEADER_BG = 'FFF9FAFB';
@@ -35,7 +35,9 @@ export type OrcamentoExcelColumn = {
 export type OrcamentoExcelRowKind =
   | 'item'
   | 'titulo'
+  | 'itemBarra'
   | 'subtitulo'
+  | 'cabecalho'
   | 'total'
   | 'section'
   | 'legenda'
@@ -51,6 +53,8 @@ export type OrcamentoExcelRow = {
   formats?: Record<number, OrcamentoExcelColFormat>;
   /** Mescla colunas 0-based inclusive, ex.: [0, 7] junta A até H. */
   merge?: [number, number];
+  /** Cor por célula, por cima do tipo da linha. `item` usa a cor do item; `plain` fica branco. */
+  tones?: Record<number, 'item' | 'plain' | 'label'>;
 };
 
 export type OrcamentoExcelSheetSpec = {
@@ -62,6 +66,8 @@ export type OrcamentoExcelSheetSpec = {
   autoFilter?: boolean;
   /** Se false, não escreve o cabeçalho global (útil quando cada bloco já tem o próprio). */
   showHeader?: boolean;
+  /** Cores desta aba. Se omitido, usa a aparência geral do arquivo. */
+  aparencia?: OrcamentoExcelAparencia;
 };
 
 export type OrcamentoExcelAparencia = {
@@ -71,8 +77,19 @@ export type OrcamentoExcelAparencia = {
   subtituloTexto?: string;
   headerFundo?: string;
   headerTexto?: string;
+  /** Faixa do item na memória de cálculo. */
+  itemFundo?: string;
+  itemTexto?: string;
   fonte?: string;
 };
+
+function colunaEhDescricao(header?: string): boolean {
+  const h = String(header ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return h.includes('descri');
+}
 
 function hexToArgb(hex?: string, fallback = BRAND_RED): string {
   if (!hex) return fallback;
@@ -106,7 +123,7 @@ function applyThinBorder(cell: ExcelJS.Cell) {
 function excelNumFmt(format: OrcamentoExcelColFormat | undefined): string | undefined {
   switch (format) {
     case 'currency':
-      return 'R$ #,##0.00';
+      return '_-[$R$-416]* #,##0.00_-;-[$R$-416]* #,##0.00_-;_-[$R$-416]* "-"??_-;_-@_-';
     case 'qty':
       return '#,##0.00';
     case 'qty4':
@@ -166,21 +183,23 @@ async function fillWorkbook(
   workbook.created = new Date();
   workbook.modified = new Date();
 
-  const fontName = resolveExcelFont(options?.aparencia?.fonte);
-  const tituloBg = hexToArgb(options?.aparencia?.tituloFundo, TITLE_BG);
-  const tituloFg = hexToArgb(options?.aparencia?.tituloTexto, WHITE);
-  const subtituloBg = hexToArgb(options?.aparencia?.subtituloFundo, SUBTITLE_BG);
-  const subtituloFg = hexToArgb(options?.aparencia?.subtituloTexto, SUBTITLE_FG);
-  const headerBg = hexToArgb(options?.aparencia?.headerFundo, HEADER_BG);
-  const headerFg = hexToArgb(options?.aparencia?.headerTexto, HEADER_FG);
-
   for (const spec of sheets) {
     if (!spec.columns.length) continue;
+    const aparencia = spec.aparencia ?? options?.aparencia;
+    const fontName = resolveExcelFont(aparencia?.fonte);
+    const tituloBg = hexToArgb(aparencia?.tituloFundo, TITLE_BG);
+    const tituloFg = hexToArgb(aparencia?.tituloTexto, WHITE);
+    const subtituloBg = hexToArgb(aparencia?.subtituloFundo, SUBTITLE_BG);
+    const subtituloFg = hexToArgb(aparencia?.subtituloTexto, SUBTITLE_FG);
+    const headerBg = hexToArgb(aparencia?.headerFundo, HEADER_BG);
+    const headerFg = hexToArgb(aparencia?.headerTexto, HEADER_FG);
+    const itemBg = hexToArgb(aparencia?.itemFundo, tituloBg);
+    const itemFg = hexToArgb(aparencia?.itemTexto, tituloFg);
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
     const sheet = workbook.addWorksheet(spec.name.slice(0, 31), {
       views: showHeader ? [{ state: 'frozen', ySplit: 1 }] : [{}],
-      properties: { defaultRowHeight: 18 },
+      properties: { defaultRowHeight: 30 },
       pageSetup: {
         orientation: 'landscape',
         fitToPage: true,
@@ -197,7 +216,7 @@ async function fillWorkbook(
 
     if (showHeader) {
       const headerRow = sheet.getRow(1);
-      headerRow.height = 36;
+      headerRow.height = 30;
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
         cell.value = col.header;
@@ -213,8 +232,7 @@ async function fillWorkbook(
       const excelRow = (showHeader ? 2 : 1) + i;
       const row = sheet.getRow(excelRow);
       const kind = rowSpec.kind ?? 'item';
-      row.height =
-        kind === 'titulo' ? 24 : kind === 'legenda' || kind === 'section' ? 20 : kind === 'blank' ? 22 : 18;
+      row.height = 30;
 
       if (kind === 'item') itemStripe += 1;
 
@@ -229,11 +247,17 @@ async function fillWorkbook(
           rowSpec.formulas?.[c],
           excelRow
         );
+        const mergeTo = rowSpec.merge?.[0] === c ? rowSpec.merge[1] : undefined;
+        const alinhamento =
+          colunaEhDescricao(col?.header) ||
+          (mergeTo != null && colunaEhDescricao(spec.columns[mergeTo]?.header))
+            ? 'left'
+            : 'center';
         cell.font = { name: fontName, size: 10, color: { argb: TITLE_TEXT } };
         cell.alignment = {
           vertical: 'middle',
-          horizontal: col?.align || (format && format !== 'text' ? 'right' : 'left'),
-          wrapText: kind === 'legenda' || kind === 'section',
+          horizontal: alinhamento,
+          wrapText: kind === 'legenda' || kind === 'section' || colunaEhDescricao(col?.header),
         };
 
         if (kind === 'blank') {
@@ -243,17 +267,22 @@ async function fillWorkbook(
 
         applyThinBorder(cell);
 
-        if (kind === 'titulo') {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tituloBg } };
-          cell.font = { name: fontName, size: 10, bold: true, color: { argb: tituloFg } };
+        if (kind === 'titulo' || kind === 'itemBarra') {
+          const fundo = kind === 'itemBarra' ? itemBg : tituloBg;
+          const letra = kind === 'itemBarra' ? itemFg : tituloFg;
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fundo } };
+          cell.font = { name: fontName, size: 10, bold: true, color: { argb: letra } };
           cell.alignment = {
             vertical: 'middle',
-            horizontal: c === colCount - 1 ? 'center' : 'left',
+            horizontal: colunaEhDescricao(col?.header) ? 'left' : 'center',
             wrapText: true,
           };
         } else if (kind === 'subtitulo') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subtituloBg } };
           cell.font = { name: fontName, size: 10, bold: true, color: { argb: subtituloFg } };
+        } else if (kind === 'cabecalho') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
+          cell.font = { name: fontName, size: 9, bold: true, color: { argb: headerFg } };
         } else if (kind === 'total') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TOTAL_BG } };
           cell.font = { name: fontName, size: 10, bold: true, color: { argb: TITLE_TEXT } };
@@ -280,11 +309,38 @@ async function fillWorkbook(
             }
           }
         }
+
+        const cellTone = rowSpec.tones?.[c];
+        if (cellTone === 'item') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: itemBg } };
+          cell.font = { name: fontName, size: 10, bold: true, color: { argb: itemFg } };
+          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        } else if (cellTone === 'plain' || cellTone === 'label') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WHITE } };
+          cell.font = { name: fontName, size: 10, bold: true, color: { argb: TITLE_TEXT } };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: cellTone === 'label' || colunaEhDescricao(col?.header) ? 'left' : 'center',
+            wrapText: true,
+          };
+        }
       }
       if (rowSpec.merge) {
         const [from, to] = rowSpec.merge;
         sheet.mergeCells(excelRow, from + 1, excelRow, to + 1);
       }
+    });
+
+    spec.columns.forEach((col, i) => {
+      if (!colunaEhDescricao(col.header)) return;
+      let maior = String(col.header || '').length;
+      for (const rowSpec of spec.rows) {
+        const valor = rowSpec.values[i];
+        if (typeof valor !== 'string') continue;
+        maior = Math.max(maior, valor.trim().length);
+      }
+      const largura = Math.min(120, Math.max(col.width ?? 20, maior + 3));
+      sheet.getColumn(i + 1).width = largura;
     });
 
     if (spec.autoFilter !== false && spec.rows.length) {

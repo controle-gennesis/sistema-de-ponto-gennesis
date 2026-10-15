@@ -14221,6 +14221,7 @@ export function OrcamentoPageView({
       if (mostrarTitulo) {
         const resumo = somarLinhas(rowsDoTitulo);
         const values = empty();
+        values[0] = String(main);
         values[3] = String(bloco.servicoNome || '').toUpperCase();
         values[6] = '';
         values[7] = '';
@@ -14288,24 +14289,24 @@ export function OrcamentoPageView({
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}%)`;
-    const pushRodape = (rotulo: string, semBdi: number | '', comBdi: number | '') => {
+    const pushRodape = (rotulo: string, valor: number | '') => {
       const values = empty();
       values[3] = rotulo;
-      values[12] = semBdi === '' ? '\u00A0' : arredondarMoeda2(semBdi);
-      values[13] = comBdi === '' ? '\u00A0' : arredondarMoeda2(comBdi);
+      values[13] = valor === '' ? '\u00A0' : arredondarMoeda2(valor);
       rows.push({ kind: 'total', values });
     };
     rows.push({ kind: 'blank', values: empty() });
-    pushRodape('ORÇAMENTO', rf.totalBase, '');
+    pushRodape('ORÇAMENTO', rf.totalBase);
     if (rf.descontoPct > 0) {
-      pushRodape(descontoLabel, rf.valorDesconto, '');
-      pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto, '');
+      pushRodape(descontoLabel, rf.valorDesconto);
+      pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto);
     }
-    pushRodape(bdiLabel, rf.valorBdi, '');
-    pushRodape('TOTAL GERAL', '', rf.totalComDescontoEBdi);
+    pushRodape(bdiLabel, rf.valorBdi);
+    pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi);
 
     return {
       name: 'Orçamento',
+      aparencia: aparenciaMontagem,
       title: 'Orçamento',
       autoFilter: false,
       columns: [
@@ -14314,7 +14315,7 @@ export function OrcamentoPageView({
         { header: 'BANCO', width: 10, align: 'center' },
         { header: 'DESCRIÇÃO', width: 52 },
         { header: 'UNIDADE', width: 10, align: 'center' },
-        { header: 'QUANTIDADE', width: 12, format: 'qty4' },
+        { header: 'QUANTIDADE', width: 12, format: 'qty' },
         { header: 'MÃO DE OBRA', width: 16, format: 'currency' },
         { header: 'MATERIAL', width: 16, format: 'currency' },
         { header: 'VALOR UNITÁRIO\nSEM BDI', width: 16, format: 'currency' },
@@ -14584,6 +14585,7 @@ export function OrcamentoPageView({
     await downloadOrcamentoBrandedExcel(
       [{
         name: 'Analítico',
+        aparencia: aparenciaAnalitico,
         title: 'Analítico do orçamento',
         subtitle: 'Insumos das composições com quantidade e custo',
         columns: [
@@ -14595,7 +14597,7 @@ export function OrcamentoPageView({
           { header: 'CATEGORIA', width: 16 },
           { header: 'DESCRIÇÃO INSUMO', width: 30 },
           { header: 'UN', width: 8, align: 'center' },
-          { header: 'QUANTIDADE', width: 14, format: 'qty4' },
+          { header: 'QUANTIDADE', width: 14, format: 'qty' },
           { header: 'Preço Unit.', width: 13, format: 'currency' },
           { header: 'TOTAL (R$)', width: 14, format: 'currency' },
         ],
@@ -14672,6 +14674,7 @@ export function OrcamentoPageView({
     }
     return {
       name: 'Analítico',
+      aparencia: aparenciaAnalitico,
       title: 'Orçamento analítico',
       subtitle: 'Composições e insumos com quantidade e totais',
       columns: [
@@ -14681,7 +14684,7 @@ export function OrcamentoPageView({
         { header: 'Banco', width: 10, align: 'center' },
         { header: 'Descrição', width: 48 },
         { header: 'Und', width: 8, align: 'center' },
-        { header: 'Quant.', width: 12, format: 'qty4' },
+        { header: 'Quant.', width: 12, format: 'qty' },
         { header: 'Valor unit.', width: 14, format: 'currency' },
         { header: 'Total', width: 14, format: 'currency' },
         { header: 'Total orçamento', width: 16, format: 'currency' },
@@ -14815,6 +14818,7 @@ export function OrcamentoPageView({
     }
     return {
       name: 'Ficha de demanda',
+      aparencia: aparenciaFichaDemanda,
       title: 'Ficha de demanda',
       subtitle: 'Compras, custos estimados e percentuais da planilha analítica',
       columns: [
@@ -14824,12 +14828,12 @@ export function OrcamentoPageView({
         { header: 'Descrição', width: 44 },
         { header: 'Tipo', width: 12, align: 'center' },
         { header: 'UN', width: 6, align: 'center' },
-        { header: 'Quantidade', width: 12, format: 'qty4' },
+        { header: 'Quantidade', width: 12, format: 'qty' },
         { header: 'Valor unit. orçamento', width: 16, format: 'currency' },
         { header: 'Total orçamento', width: 16, format: 'currency' },
         { header: 'Valor unit. estimado', width: 16, format: 'currency' },
         { header: 'Custo estimado', width: 16, format: 'currency' },
-        { header: 'Quantidade compra', width: 16, format: 'qty4' },
+        { header: 'Quantidade compra', width: 16, format: 'qty' },
         { header: 'Valor unit. compra real', width: 18, format: 'currency' },
         { header: 'Custo compra real', width: 16, format: 'currency' },
         { header: '% Qtd. solicitada', width: 14, format: 'percent' },
@@ -14860,7 +14864,7 @@ export function OrcamentoPageView({
     if (itensCalculados.length === 0) return null;
 
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
-    const empty = () => Array.from({ length: 9 }, () => '') as OrcamentoExcelRow['values'];
+    const empty = () => Array.from({ length: 10 }, () => '') as OrcamentoExcelRow['values'];
     const rows: OrcamentoExcelRow[] = [];
 
     itensCalculados.forEach((row, rowIdx) => {
@@ -14870,18 +14874,22 @@ export function OrcamentoPageView({
       const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(linhasExport);
       const un = unidadeComposicaoParaExibicao(row.unidadeComposicao, tipoAuto) || unidadeLabel(tipoAuto);
       const rotulo = rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1);
-      const descricaoTitulo = `${rotulo} ${row.item.descricao || ''}`.trim();
       const rotulos = row.dimensoes?.rotulosColunas;
+      const observacao = observacoesPorItem[row.key]?.trim() || '';
+      const descricaoItem = (row.item.descricao || '').trim().toUpperCase();
 
       rows.push({
-        kind: 'titulo',
-        values: [descricaoTitulo, '', '', '', '', '', '', '', un],
-        merge: [0, 7],
+        kind: 'item',
+        values: [rotulo, descricaoItem, un, observacao, '', '', '', '', '', ''],
+        merge: [3, 9],
+        tones: { 0: 'item', 1: 'label', 2: 'plain', 3: 'label' },
       });
       rows.push({
-        kind: 'section',
+        kind: 'cabecalho',
+        merge: [0, 1],
         values: [
           (rotulos?.descricao ?? 'DESCRIÇÃO:').trim() || 'DESCRIÇÃO:',
+          '',
           rotulos?.C || 'C',
           rotulos?.L || 'L',
           rotulos?.H || 'H',
@@ -14893,21 +14901,19 @@ export function OrcamentoPageView({
         ],
       });
 
-      let totalA = 0;
-      let totalV = 0;
       let totalSub = 0;
       if (linhasExport.length) {
         for (let i = 0; i < linhasExport.length; i++) {
           const ln = linhasExport[i];
-          const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
-          const descLinha = ln.origemComposicaoRotulo?.trim()
-            ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
-            : descBase;
+          const descInformada = ln.descricao?.trim() || '';
+          const descLinha = [ln.origemComposicaoRotulo?.trim(), descInformada].filter(Boolean).join(' ');
           if (ln.cabecalhoSecao) {
             rows.push({
-              kind: 'subtitulo',
+              kind: 'cabecalho',
+              merge: [0, 1],
               values: [
                 descLinha,
+                '',
                 rotulos?.C || 'C',
                 rotulos?.L || 'L',
                 rotulos?.H || 'H',
@@ -14928,33 +14934,48 @@ export function OrcamentoPageView({
           const empol = Number(empolRaw) || 0;
           const tipo = tipoAuto;
           const n = ln.N || 0;
-          const a = areaExibidaLinha(ln);
-          const v = volumeExibidoLinha(ln, tipo);
           const sub = calcularQuantidadeLinha(ln, tipo);
-          totalA += a;
-          totalV += v;
           totalSub += sub;
+          const celula = (n: number): number | '' => (Number.isFinite(n) && n !== 0 ? n : '');
+          if (linhaMedicaoEstaVazia(ln)) {
+            rows.push({ kind: 'item', merge: [0, 1], values: empty() });
+            continue;
+          }
           rows.push({
             kind: 'item',
-            values: [descLinha, ln.C || 0, ln.L || 0, ln.H || 0, empol, n, a, v, sub],
+            merge: [0, 1],
+            values: [
+              descLinha,
+              '',
+              celula(ln.C || 0),
+              celula(ln.L || 0),
+              celula(ln.H || 0),
+              celula(empol),
+              celula(n),
+              celula(areaExibidaLinha(ln)),
+              celula(volumeExibidoLinha(ln, tipo)),
+              celula(sub),
+            ],
           });
         }
       } else {
         totalSub = row.quantidade;
+        const celula = (n: number): number | '' => (Number.isFinite(n) && n !== 0 ? n : '');
         rows.push({
           kind: 'item',
-          values: [row.item.descricao || '', 0, 0, 0, 1, 1, 0, 0, row.quantidade],
+          merge: [0, 1],
+          values: [row.item.descricao || '', '', '', '', '', '', '', '', '', celula(row.quantidade)],
         });
       }
 
+      const totalValues = empty();
+      totalValues[0] = 'TOTAL';
+      totalValues[9] = totalSub;
       rows.push({
         kind: 'total',
-        values: ['TOTAL', '—', '—', '—', '—', '—', totalA, totalV, totalSub],
-      });
-      rows.push({
-        kind: 'total',
-        values: ['VALOR TOTAL', '', '', '', '', '', '', '', arredondarMoeda2(row.total)],
-        formats: { 8: 'currency' },
+        values: totalValues,
+        merge: [0, 8],
+        tones: { 0: 'label', 9: 'item' },
       });
     });
 
@@ -14964,16 +14985,18 @@ export function OrcamentoPageView({
       subtitle: 'Quantitativos por dimensão (C, L, H) com fórmulas de área, volume e subtotal',
       autoFilter: false,
       showHeader: false,
+      aparencia: aparenciaMemorial,
       columns: [
+        { header: 'ITEM', width: 12, align: 'center' },
         { header: 'DESCRIÇÃO', width: 56 },
-        { header: 'C', width: 10, align: 'center', format: 'qty4' },
-        { header: 'L', width: 10, align: 'center', format: 'qty4' },
-        { header: 'H', width: 10, align: 'center', format: 'qty4' },
+        { header: 'C', width: 10, align: 'center', format: 'qty' },
+        { header: 'L', width: 10, align: 'center', format: 'qty' },
+        { header: 'H', width: 10, align: 'center', format: 'qty' },
         { header: '%', width: 14, align: 'center', format: 'qty' },
-        { header: 'N', width: 8, align: 'center', format: 'qty4' },
-        { header: 'A', width: 12, align: 'center', format: 'qty4' },
-        { header: 'V', width: 12, align: 'center', format: 'qty4' },
-        { header: 'SUBTOTAL', width: 14, align: 'center', format: 'qty4' },
+        { header: 'N', width: 8, align: 'center', format: 'qty' },
+        { header: 'A', width: 12, align: 'center', format: 'qty' },
+        { header: 'V', width: 12, align: 'center', format: 'qty' },
+        { header: 'SUBTOTAL', width: 14, align: 'center', format: 'qty' },
       ],
       rows,
     };
