@@ -464,6 +464,39 @@ async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureDemandSheetPurchaseCancelled(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'demand_sheet_approvals'))) return;
+
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'DemandSheetPurchaseStatus'
+        AND e.enumlabel = 'CANCELLED'
+    ) AS "exists"
+  `;
+  if (!rows[0]?.exists) {
+    console.warn('[Schema] Enum DemandSheetPurchaseStatus sem CANCELLED — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      DO $$
+      BEGIN
+        ALTER TYPE "DemandSheetPurchaseStatus" ADD VALUE 'CANCELLED';
+      EXCEPTION
+        WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+  }
+
+  if (!(await columnExists(prisma, 'demand_sheet_approvals', 'purchaseCancellationNote'))) {
+    console.warn('[Schema] Coluna purchaseCancellationNote em demand_sheet_approvals ausente — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "demand_sheet_approvals"
+        ADD COLUMN IF NOT EXISTS "purchaseCancellationNote" TEXT;
+    `);
+  }
+}
+
 async function ensurePurchaseOrderStageApprovals(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'purchase_orders'))) return;
 
@@ -3109,6 +3142,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureMaterialRequestCommentsTable(prisma);
     await ensurePurchaseOrderCommentsTable(prisma);
     await ensureDemandSheetApprovals(prisma);
+    await ensureDemandSheetPurchaseCancelled(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);

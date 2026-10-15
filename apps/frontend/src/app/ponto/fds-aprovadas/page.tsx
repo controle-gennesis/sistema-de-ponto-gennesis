@@ -48,6 +48,7 @@ const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
   { value: 'SUPPLIES', label: 'Suprimentos' },
   { value: 'FINISHED', label: 'Finalizado' },
+  { value: 'CANCELLED', label: 'Cancelado' },
 ]);
 
 export default function FdsAprovadasPage() {
@@ -141,12 +142,15 @@ export default function FdsAprovadasPage() {
     mutationFn: async ({
       id,
       purchaseStatus,
+      purchaseCancellationNote,
     }: {
       id: string;
       purchaseStatus: DemandSheetPurchaseStatus;
+      purchaseCancellationNote?: string;
     }) => {
       const res = await api.patch(`/demand-sheet-approvals/${id}/purchase-status`, {
         purchaseStatus,
+        purchaseCancellationNote,
       });
       return res.data;
     },
@@ -426,9 +430,13 @@ export default function FdsAprovadasPage() {
           isOpen={!!selectedRecord}
           isSaving={updateStatusMutation.isPending}
           onClose={() => setSelectedRecord(null)}
-          onSave={(purchaseStatus) => {
+          onSave={(purchaseStatus, purchaseCancellationNote) => {
             if (!selectedRecord) return;
-            updateStatusMutation.mutate({ id: selectedRecord.id, purchaseStatus });
+            updateStatusMutation.mutate({
+              id: selectedRecord.id,
+              purchaseStatus,
+              purchaseCancellationNote,
+            });
           }}
         />
 

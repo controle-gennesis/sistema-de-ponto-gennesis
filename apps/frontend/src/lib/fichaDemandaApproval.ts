@@ -13,7 +13,8 @@ export type DemandSheetPurchaseStatus =
   | 'PARTIALLY_FULFILLED_BY_STOCK'
   | 'PURCHASE_REQUEST'
   | 'SUPPLIES'
-  | 'FINISHED';
+  | 'FINISHED'
+  | 'CANCELLED';
 
 export const FD_PURCHASE_STATUS_OPTIONS: {
   value: DemandSheetPurchaseStatus;
@@ -26,6 +27,7 @@ export const FD_PURCHASE_STATUS_OPTIONS: {
   { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
   { value: 'SUPPLIES', label: 'Suprimentos' },
   { value: 'FINISHED', label: 'Finalizado' },
+  { value: 'CANCELLED', label: 'Cancelado' },
 ];
 
 export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string> =
@@ -40,6 +42,8 @@ export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | n
   switch (status) {
     case 'FINISHED':
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    case 'CANCELLED':
+      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
     case 'PURCHASE_REQUEST':
     case 'SUPPLIES':
       return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
@@ -150,6 +154,7 @@ export interface FichaDemandaApprovalRecord {
   purchaseStatus?: DemandSheetPurchaseStatus | null;
   purchaseStatusUpdatedAt?: string | null;
   purchaseStatusUpdaterNome?: string | null;
+  purchaseCancellationNote?: string | null;
   managerApprovalComment?: string | null;
   managerRejectionReason?: string | null;
   managerApproverNome?: string | null;

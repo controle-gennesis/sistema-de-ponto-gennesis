@@ -249,6 +249,11 @@ export function FichaDemandaDetailModal({
           <Field label="Data/hora">{formatDateTime(record.dataHora)}</Field>
           <Field label="Status">{FD_STATUS_LABELS[record.status] || record.status}</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
+          {record.purchaseStatus === 'CANCELLED' && record.purchaseCancellationNote ? (
+            <div className="sm:col-span-2">
+              <Field label="Observação do cancelamento">{record.purchaseCancellationNote}</Field>
+            </div>
+          ) : null}
           <Field label="Criada em">{formatDateTime(record.createdAt)}</Field>
           {record.managerApproverNome ? (
             <Field label="Aprovado por">{record.managerApproverNome}</Field>

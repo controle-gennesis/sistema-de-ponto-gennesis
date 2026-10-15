@@ -16110,6 +16110,12 @@ export function OrcamentoPageView({
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status compras</dt>
                           <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{purchaseStatusLabel(fichaDemandaRecord.purchaseStatus)}</dd>
                         </div>
+                        {fichaDemandaRecord.purchaseStatus === 'CANCELLED' && fichaDemandaRecord.purchaseCancellationNote ? (
+                          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                            <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Observação do cancelamento</dt>
+                            <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.purchaseCancellationNote}</dd>
+                          </div>
+                        ) : null}
                         <div className="min-w-0 sm:col-span-2 lg:col-span-3">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Observação</dt>
                           <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.observacao || '—'}</dd>

@@ -18,7 +18,7 @@ interface FichaDemandaPurchaseStatusModalProps {
   isOpen: boolean;
   isSaving?: boolean;
   onClose: () => void;
-  onSave: (purchaseStatus: DemandSheetPurchaseStatus) => void;
+  onSave: (purchaseStatus: DemandSheetPurchaseStatus, purchaseCancellationNote?: string) => void;
 }
 
 export function FichaDemandaPurchaseStatusModal({
@@ -29,6 +29,7 @@ export function FichaDemandaPurchaseStatusModal({
   onSave,
 }: FichaDemandaPurchaseStatusModalProps) {
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [cancellationNote, setCancellationNote] = useState('');
 
   const statusOptions = useMemo(
     () => labeledToSelectOptions(FD_PURCHASE_STATUS_OPTIONS),
@@ -38,14 +39,23 @@ export function FichaDemandaPurchaseStatusModal({
   useEffect(() => {
     if (!record) {
       setSelectedStatus('');
+      setCancellationNote('');
       return;
     }
     setSelectedStatus(record.purchaseStatus ?? '');
+    setCancellationNote(record.purchaseCancellationNote ?? '');
   }, [record]);
+
+  const cancelledSelected = selectedStatus === 'CANCELLED';
+  const noteFilled = cancellationNote.trim().length > 0;
 
   const handleSave = () => {
     if (!selectedStatus) return;
-    onSave(selectedStatus as DemandSheetPurchaseStatus);
+    if (cancelledSelected && !noteFilled) return;
+    onSave(
+      selectedStatus as DemandSheetPurchaseStatus,
+      cancelledSelected ? cancellationNote.trim() : undefined
+    );
   };
 
   return (
@@ -118,6 +128,20 @@ export function FichaDemandaPurchaseStatusModal({
               matchTriggerWidth
               className="w-full"
             />
+            {cancelledSelected ? (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Observação do cancelamento<span className="text-red-500"> *</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={cancellationNote}
+                  onChange={(e) => setCancellationNote(e.target.value)}
+                  placeholder="Informe o motivo do cancelamento"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+            ) : null}
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
               Selecione um único status de compras para esta ficha.
             </p>
@@ -135,7 +159,11 @@ export function FichaDemandaPurchaseStatusModal({
             <Button type="button" variant="outline" onClick={onClose} disabled={isSaving}>
               Cancelar
             </Button>
-            <Button type="button" onClick={handleSave} disabled={!selectedStatus || isSaving}>
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={!selectedStatus || isSaving || (cancelledSelected && !noteFilled)}
+            >
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

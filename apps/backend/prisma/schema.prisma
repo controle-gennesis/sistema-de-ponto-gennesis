@@ -1484,6 +1484,7 @@ enum DemandSheetPurchaseStatus {
   PURCHASE_REQUEST
   SUPPLIES
   FINISHED
+  CANCELLED
 }
 
 /// Ficha de demanda (FD) — aprovação via Controle (Aprovar Fichas de Demanda + contratos liberados).
@@ -1522,6 +1523,8 @@ model DemandSheetApproval {
   purchaseStatus          DemandSheetPurchaseStatus?
   purchaseStatusUpdatedBy String?
   purchaseStatusUpdatedAt DateTime?
+  /// Motivo informado quando o status de compras é Cancelado.
+  purchaseCancellationNote String?
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
 

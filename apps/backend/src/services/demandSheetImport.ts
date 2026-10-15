@@ -243,7 +243,8 @@ function mapPurchaseStatus(raw: unknown): DemandSheetPurchaseStatus | null {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toUpperCase();
-  if (!v || v === 'CANCELADO') return null;
+  if (!v) return null;
+  if (v.includes('CANCEL')) return 'CANCELLED';
   if (v.includes('FINALIZ')) return 'FINISHED';
   if (v.includes('SOLICIT')) return 'PURCHASE_REQUEST';
   if (v.includes('SUPRIMENT')) return 'SUPPLIES';

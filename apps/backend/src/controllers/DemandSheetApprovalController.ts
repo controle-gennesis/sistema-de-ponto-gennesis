@@ -115,6 +115,7 @@ const PURCHASE_STATUS_VALUES = [
   'PURCHASE_REQUEST',
   'SUPPLIES',
   'FINISHED',
+  'CANCELLED',
 ] as const satisfies readonly DemandSheetPurchaseStatus[];
 
 const anexoSchema = z.object({
@@ -150,6 +151,7 @@ const managerDecisionSchema = z.object({
 
 const purchaseStatusSchema = z.object({
   purchaseStatus: z.enum(PURCHASE_STATUS_VALUES),
+  purchaseCancellationNote: z.string().optional().nullable(),
 });
 
 const purchaseRefsSchema = z.object({
@@ -227,6 +229,7 @@ function serializeRow(row: {
   purchaseStatus: DemandSheetPurchaseStatus | null;
   purchaseStatusUpdatedBy: string | null;
   purchaseStatusUpdatedAt: Date | null;
+  purchaseCancellationNote: string | null;
   createdAt: Date;
   updatedAt: Date;
   solicitante?: { id: string; name: string } | null;
@@ -805,6 +808,10 @@ export class DemandSheetApprovalController {
       }
 
       const body = purchaseStatusSchema.parse(req.body);
+      const cancellationNote = String(body.purchaseCancellationNote ?? '').trim();
+      if (body.purchaseStatus === 'CANCELLED' && !cancellationNote) {
+        throw createError('Informe a observação do cancelamento.', 400);
+      }
 
       const updated = await prisma.demandSheetApproval.update({
         where: { id },
@@ -812,6 +819,8 @@ export class DemandSheetApprovalController {
           purchaseStatus: body.purchaseStatus,
           purchaseStatusUpdatedBy: req.user.id,
           purchaseStatusUpdatedAt: new Date(),
+          purchaseCancellationNote:
+            body.purchaseStatus === 'CANCELLED' ? cancellationNote : null,
         },
         include: includeDefault,
       });
