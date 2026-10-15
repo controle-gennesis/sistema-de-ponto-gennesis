@@ -13019,6 +13019,31 @@ export function OrcamentoPageView({
     }
   }, []);
 
+  const scrollPorAbaRef = useRef<Partial<Record<typeof orcamentoViewTab, number>>>({});
+
+  const guardarRolagemDaAba = useCallback(() => {
+    const scroller = document.querySelector('.app-page-scroll');
+    if (!(scroller instanceof HTMLElement)) return;
+    scrollPorAbaRef.current[orcamentoViewTab] = scroller.scrollTop;
+  }, [orcamentoViewTab]);
+
+  useLayoutEffect(() => {
+    if (abaPesadaPendente) return;
+    const scroller = document.querySelector('.app-page-scroll');
+    if (!(scroller instanceof HTMLElement)) return;
+    const salva = scrollPorAbaRef.current[orcamentoViewTab];
+    if (salva == null) {
+      irParaTopoDasAbas();
+      return;
+    }
+    const aplicar = () => {
+      scroller.scrollTop = salva;
+    };
+    aplicar();
+    const quadro = requestAnimationFrame(aplicar);
+    return () => cancelAnimationFrame(quadro);
+  }, [orcamentoViewTab, abaPesadaPendente, irParaTopoDasAbas]);
+
   // BDI 0%: esconde por padrão as colunas “com BDI”; ao voltar BDI > 0, mostra de novo.
   useEffect(() => {
     const bdiPct = parsePercentualMeta(meta.bdiPercentual);
@@ -14520,12 +14545,6 @@ export function OrcamentoPageView({
       setMemorialItemKey(itensMemoriaCalculoLista[0].key);
     }
   }, [orcamentoViewTab, itensMemoriaCalculoLista, memorialItemKey, memorialDisponivel]);
-
-  useEffect(() => {
-    if (orcamentoViewTab !== 'memorial' || !memorialItemKey || !memorialDisponivel) return;
-    const el = document.getElementById(`memorial-medicoes-${memorialItemKey}`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [orcamentoViewTab, memorialItemKey, memorialDisponivel]);
 
   const exportarAnalitico = async () => {
     if (itensCalculados.length === 0) {
@@ -18780,8 +18799,8 @@ export function OrcamentoPageView({
                       ) {
                         return;
                       }
+                      guardarRolagemDaAba();
                       setOrcamentoViewTab(next);
-                      irParaTopoDasAbas();
                     }}
                     className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800"
                     pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
