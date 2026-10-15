@@ -19,8 +19,10 @@ import {
   buildConfiguredNaturezaCatalog,
   buildTotvsNaturezaItems,
   collectNaturezaKeysInUse,
+  createCustomDfcBlock,
   getCanonicalOptionsForBlock,
   getDfcBlockSelectOptions,
+  getDfcParentGroupOptions,
   loadGastosNaturezasConfigStore,
   mapTotvsNaturezaToBlock,
   unlinkConfiguredNatureza,
@@ -53,7 +55,12 @@ type MappingDraft = {
   asAlias: boolean;
   newCanonicalLabel: string;
   sumAsPositiveCredit: boolean;
+  newBlockCode: string;
+  newBlockLabel: string;
+  newBlockParentKey: string;
 };
+
+const NOVO_BLOCO_DFC = '__novo_bloco__';
 
 type NaturezaMovementSummary = {
   total: number;
@@ -66,7 +73,10 @@ const EMPTY_DRAFT: MappingDraft = {
   targetCanonicalLabel: '',
   asAlias: false,
   newCanonicalLabel: '',
-  sumAsPositiveCredit: false
+  sumAsPositiveCredit: false,
+  newBlockCode: '',
+  newBlockLabel: '',
+  newBlockParentKey: ''
 };
 
 function formatCurrency(value: number): string {
@@ -280,14 +290,21 @@ export function GastosNaturezasManageModal({
     [configuredCatalog]
   );
 
-  const blockOptions = useMemo(() => getDfcBlockSelectOptions(), []);
+  const parentGroupOptions = useMemo(() => getDfcParentGroupOptions(), []);
+  const blockOptions = useMemo(
+    () => [
+      { value: NOVO_BLOCO_DFC, label: 'Criar novo bloco…' },
+      ...getDfcBlockSelectOptions(store)
+    ],
+    [store]
+  );
   const canonicalOptions = useMemo(
     () => (mappingDraft?.blockId ? getCanonicalOptionsForBlock(mappingDraft.blockId, store) : []),
     [mappingDraft?.blockId, store]
   );
 
   const handleStartMapping = (item: GastosTotvsNaturezaItem) => {
-    const blockId = blockOptions[0]?.value ?? '';
+    const blockId = blockOptions.find((option) => option.value !== NOVO_BLOCO_DFC)?.value ?? '';
     setMappingDraft({
       ...EMPTY_DRAFT,
       totvsLabel: item.label,
@@ -305,15 +322,23 @@ export function GastosNaturezasManageModal({
     if (!mappingDraft) return;
 
     try {
+      const creatingBlock = mappingDraft.blockId === NOVO_BLOCO_DFC;
       const targetCanonicalLabel = mappingDraft.asAlias
         ? mappingDraft.targetCanonicalLabel
         : mappingDraft.newCanonicalLabel;
+      const blockId = creatingBlock
+        ? createCustomDfcBlock({
+            code: mappingDraft.newBlockCode,
+            label: mappingDraft.newBlockLabel,
+            parentKey: mappingDraft.newBlockParentKey || parentGroupOptions[0]?.value || ''
+          }).id
+        : mappingDraft.blockId;
 
       mapTotvsNaturezaToBlock({
         totvsLabel: mappingDraft.totvsLabel,
-        blockId: mappingDraft.blockId,
+        blockId,
         targetCanonicalLabel,
-        asAlias: mappingDraft.asAlias,
+        asAlias: creatingBlock ? false : mappingDraft.asAlias,
         sumAsPositiveCredit: mappingDraft.sumAsPositiveCredit
       });
 
@@ -705,8 +730,13 @@ export function GastosNaturezasManageModal({
                         ? {
                             ...prev,
                             blockId,
+                            asAlias: blockId === NOVO_BLOCO_DFC ? false : prev.asAlias,
+                            newBlockParentKey:
+                              prev.newBlockParentKey || parentGroupOptions[0]?.value || '',
                             targetCanonicalLabel:
-                              getCanonicalOptionsForBlock(blockId, store)[0]?.value ?? ''
+                              blockId === NOVO_BLOCO_DFC
+                                ? ''
+                                : getCanonicalOptionsForBlock(blockId, store)[0]?.value ?? ''
                           }
                         : prev
                     )
@@ -721,10 +751,14 @@ export function GastosNaturezasManageModal({
                   Tipo de vínculo
                 </label>
                 <StringSingleSelectDropdown
-                  options={[
-                    { value: 'new', label: 'Nova natureza no bloco' },
-                    { value: 'alias', label: 'Alias de natureza existente' }
-                  ]}
+                  options={
+                    mappingDraft.blockId === NOVO_BLOCO_DFC
+                      ? [{ value: 'new', label: 'Nova natureza no bloco' }]
+                      : [
+                          { value: 'new', label: 'Nova natureza no bloco' },
+                          { value: 'alias', label: 'Alias de natureza existente' }
+                        ]
+                  }
                   value={mappingDraft.asAlias ? 'alias' : 'new'}
                   onChange={(value) =>
                     setMappingDraft((prev) => {
@@ -750,7 +784,58 @@ export function GastosNaturezasManageModal({
                 />
               </div>
 
-              {mappingDraft.asAlias ? (
+              {mappingDraft.blockId === NOVO_BLOCO_DFC ? (
+                <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      Código do bloco
+                    </label>
+                    <input
+                      type="text"
+                      value={mappingDraft.newBlockCode}
+                      onChange={(e) =>
+                        setMappingDraft((prev) =>
+                          prev ? { ...prev, newBlockCode: e.target.value } : prev
+                        )
+                      }
+                      placeholder="Ex.: 1.2.2"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      Nome do bloco
+                    </label>
+                    <input
+                      type="text"
+                      value={mappingDraft.newBlockLabel}
+                      onChange={(e) =>
+                        setMappingDraft((prev) =>
+                          prev ? { ...prev, newBlockLabel: e.target.value } : prev
+                        )
+                      }
+                      placeholder="Ex.: Glosas e Retencoes"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      Grupo
+                    </label>
+                    <StringSingleSelectDropdown
+                      options={parentGroupOptions}
+                      value={mappingDraft.newBlockParentKey || parentGroupOptions[0]?.value || ''}
+                      onChange={(newBlockParentKey) =>
+                        setMappingDraft((prev) => (prev ? { ...prev, newBlockParentKey } : prev))
+                      }
+                      placeholder="Selecione o grupo"
+                      allowEmpty={false}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {mappingDraft.asAlias && mappingDraft.blockId !== NOVO_BLOCO_DFC ? (
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                     Natureza canônica

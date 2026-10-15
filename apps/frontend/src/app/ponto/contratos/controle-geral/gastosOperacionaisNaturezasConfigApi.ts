@@ -23,12 +23,14 @@ export async function fetchGastosNaturezasConfigFromServer(): Promise<GastosNatu
 
   const serverEmpty =
     data.mappings.length === 0 &&
+    (data.customBlocks?.length ?? 0) === 0 &&
     data.unlinkedConfiguredKeys.length === 0 &&
     data.dismissedTotvsKeys.length === 0 &&
     data.acknowledgedTotvsKeys.length === 0;
 
   const localHasData =
     local.mappings.length > 0 ||
+    (local.customBlocks?.length ?? 0) > 0 ||
     local.unlinkedConfiguredKeys.length > 0 ||
     local.dismissedTotvsKeys.length > 0 ||
     local.acknowledgedTotvsKeys.length > 0;

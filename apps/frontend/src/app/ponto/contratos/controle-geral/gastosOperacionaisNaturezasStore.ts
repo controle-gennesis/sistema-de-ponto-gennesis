@@ -21,8 +21,19 @@ export type GastosNaturezaCustomMapping = {
   createdAt: string;
 };
 
+export type GastosNaturezaCustomBlock = {
+  id: string;
+  code: string;
+  label: string;
+  /** Caminho do grupo, ex.: ["1. Atividades Operacionais", "1.2 Deduções da Receita Operacional"]. */
+  parentLabels: string[];
+  createdAt: string;
+};
+
 export type GastosNaturezasConfigStore = {
   mappings: GastosNaturezaCustomMapping[];
+  /** Blocos DFC criados na tela de vínculo, além do catálogo fixo. */
+  customBlocks: GastosNaturezaCustomBlock[];
   /** Naturezas do TOTVS marcadas como "não precisa mapear". */
   dismissedTotvsKeys: string[];
   /** Naturezas novas já visualizadas pelo usuário (some o badge). */
@@ -60,10 +71,24 @@ export type GastosTotvsNaturezaItem = {
 
 const EMPTY_STORE: GastosNaturezasConfigStore = {
   mappings: [],
+  customBlocks: [],
   dismissedTotvsKeys: [],
   acknowledgedTotvsKeys: [],
   unlinkedConfiguredKeys: []
 };
+
+function isCustomBlock(item: unknown): item is GastosNaturezaCustomBlock {
+  if (!item || typeof item !== 'object') return false;
+  const block = item as GastosNaturezaCustomBlock;
+  return (
+    typeof block.id === 'string' &&
+    typeof block.code === 'string' &&
+    typeof block.label === 'string' &&
+    Array.isArray(block.parentLabels) &&
+    block.parentLabels.every((label) => typeof label === 'string') &&
+    typeof block.createdAt === 'string'
+  );
+}
 
 function readStore(): GastosNaturezasConfigStore {
   if (typeof window === 'undefined') return { ...EMPTY_STORE };
@@ -88,6 +113,7 @@ function readStore(): GastosNaturezasConfigStore {
               typeof item.createdAt === 'string'
           )
         : [],
+      customBlocks: Array.isArray(parsed.customBlocks) ? parsed.customBlocks.filter(isCustomBlock) : [],
       dismissedTotvsKeys: Array.isArray(parsed.dismissedTotvsKeys)
         ? parsed.dismissedTotvsKeys.filter((key): key is string => typeof key === 'string')
         : [],
@@ -109,6 +135,7 @@ function writeStore(store: GastosNaturezasConfigStore): void {
   try {
     const isEmpty =
       store.mappings.length === 0 &&
+      store.customBlocks.length === 0 &&
       store.dismissedTotvsKeys.length === 0 &&
       store.acknowledgedTotvsKeys.length === 0 &&
       store.unlinkedConfiguredKeys.length === 0;
@@ -132,6 +159,7 @@ export function replaceGastosNaturezasConfigStore(
 ): GastosNaturezasConfigStore {
   const next: GastosNaturezasConfigStore = {
     mappings: Array.isArray(store.mappings) ? store.mappings : [],
+    customBlocks: Array.isArray(store.customBlocks) ? store.customBlocks.filter(isCustomBlock) : [],
     dismissedTotvsKeys: Array.isArray(store.dismissedTotvsKeys) ? store.dismissedTotvsKeys : [],
     acknowledgedTotvsKeys: Array.isArray(store.acknowledgedTotvsKeys)
       ? store.acknowledgedTotvsKeys
@@ -191,8 +219,24 @@ export function isUnlinkedConfiguredNatureza(
   );
 }
 
-function getBlockById(blockId: string): GastosOperacionaisDfcLeafBlock | undefined {
-  return GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS.find((block) => block.id === blockId);
+function asLeafBlock(block: GastosNaturezaCustomBlock): GastosOperacionaisDfcLeafBlock {
+  return {
+    id: block.id,
+    code: block.code,
+    label: block.label,
+    parentLabels: block.parentLabels,
+    naturezas: []
+  };
+}
+
+function getBlockById(
+  blockId: string,
+  store: GastosNaturezasConfigStore = loadGastosNaturezasConfigStore()
+): GastosOperacionaisDfcLeafBlock | undefined {
+  const builtIn = GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS.find((block) => block.id === blockId);
+  if (builtIn) return builtIn;
+  const custom = store.customBlocks.find((block) => block.id === blockId);
+  return custom ? asLeafBlock(custom) : undefined;
 }
 
 export function findNaturezaCustomMapping(
@@ -245,7 +289,7 @@ export function resolveGastosNaturezaModalEntry(natureza: string): {
     }
   }
 
-  const block = getBlockById(mapping.blockId);
+  const block = getBlockById(mapping.blockId, store);
   if (!block) return null;
 
   return {
@@ -296,7 +340,7 @@ export function buildConfiguredNaturezaCatalog(
   }
 
   for (const mapping of store.mappings) {
-    const block = getBlockById(mapping.blockId);
+    const block = getBlockById(mapping.blockId, store);
     if (!block) continue;
 
     const blockPath = [...block.parentLabels, `${block.code} ${block.label}`].join(' › ');
@@ -459,10 +503,9 @@ export function mapTotvsNaturezaToBlock(input: {
   if (!input.blockId) throw new Error('Selecione o bloco DFC.');
   if (!targetCanonicalLabel) throw new Error('Informe a natureza canônica.');
 
-  const block = getBlockById(input.blockId);
-  if (!block) throw new Error('Bloco DFC não encontrado.');
-
   const store = readStore();
+  const block = getBlockById(input.blockId, store);
+  if (!block) throw new Error('Bloco DFC não encontrado.');
   const key = normalizeGastosOperacionaisNaturezaKey(totvsLabel);
   const nextMappings = store.mappings.filter(
     (mapping) => normalizeGastosOperacionaisNaturezaKey(mapping.totvsLabel) !== key
@@ -587,18 +630,75 @@ export function removeCustomNaturezaMapping(mappingId: string): void {
   });
 }
 
-export function getDfcBlockSelectOptions(): Array<{ value: string; label: string }> {
-  return GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS.map((block) => ({
+export function getDfcParentGroupOptions(): Array<{ value: string; label: string }> {
+  const seen = new Map<string, string>();
+  for (const block of GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS) {
+    const value = block.parentLabels.join(' › ');
+    if (!value || seen.has(value)) continue;
+    seen.set(value, value);
+  }
+  return Array.from(seen.values()).map((value) => ({ value, label: value }));
+}
+
+export function createCustomDfcBlock(input: {
+  code: string;
+  label: string;
+  parentKey: string;
+}): GastosNaturezaCustomBlock {
+  const code = input.code.trim().replace(/\s+/g, '');
+  const label = input.label.trim();
+  const parentLabels = input.parentKey
+    .split('›')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!/^\d+(?:\.\d+)+$/.test(code)) {
+    throw new Error('Informe o código do bloco, como 1.2.2.');
+  }
+  if (!label) throw new Error('Informe o nome do bloco.');
+  if (parentLabels.length < 2) throw new Error('Selecione o grupo do bloco.');
+
+  const store = readStore();
+  const codeKey = code.toLowerCase();
+  const duplicated =
+    GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS.some((block) => block.code.toLowerCase() === codeKey) ||
+    store.customBlocks.some((block) => block.code.toLowerCase() === codeKey);
+  if (duplicated) throw new Error('Já existe um bloco com esse código.');
+
+  const block: GastosNaturezaCustomBlock = {
+    id: `custom-${code.replace(/\./g, '-')}`,
+    code,
+    label,
+    parentLabels,
+    createdAt: new Date().toISOString()
+  };
+  saveStore({ ...store, customBlocks: [...store.customBlocks, block] });
+  return block;
+}
+
+export function getDfcBlockSelectOptions(
+  store: GastosNaturezasConfigStore = loadGastosNaturezasConfigStore()
+): Array<{ value: string; label: string }> {
+  const builtIn = GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS.map((block) => ({
     value: block.id,
-    label: `${block.code} ${block.label}`
+    label: `${block.code} ${block.label}`,
+    code: block.code
   }));
+  const custom = store.customBlocks.map((block) => ({
+    value: block.id,
+    label: `${block.code} ${block.label}`,
+    code: block.code
+  }));
+  return [...builtIn, ...custom]
+    .sort((a, b) => a.code.localeCompare(b.code, 'pt-BR', { numeric: true }))
+    .map(({ value, label }) => ({ value, label }));
 }
 
 export function getCanonicalOptionsForBlock(
   blockId: string,
   store: GastosNaturezasConfigStore = loadGastosNaturezasConfigStore()
 ): Array<{ value: string; label: string }> {
-  const block = getBlockById(blockId);
+  const block = getBlockById(blockId, store);
   if (!block) return [];
 
   const builtIn = block.naturezas.map((entry) => ({

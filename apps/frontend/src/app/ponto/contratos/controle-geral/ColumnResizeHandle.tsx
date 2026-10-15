@@ -59,7 +59,7 @@ export function ResizableTh({
   children
 }: ResizableThProps) {
   return (
-    <th className={`relative ${className}`} style={{ width, maxWidth: width }}>
+    <th className={`relative ${className}`} style={{ width }}>
       <div className="overflow-hidden">{children}</div>
       <ColumnResizeHandle width={width} minWidth={minWidth} onWidthChange={onWidthChange} />
     </th>

@@ -12,8 +12,17 @@ export type GastosNaturezaCustomMapping = {
   createdAt: string;
 };
 
+export type GastosNaturezaCustomBlock = {
+  id: string;
+  code: string;
+  label: string;
+  parentLabels: string[];
+  createdAt: string;
+};
+
 export type GastosNaturezasConfigStore = {
   mappings: GastosNaturezaCustomMapping[];
+  customBlocks: GastosNaturezaCustomBlock[];
   dismissedTotvsKeys: string[];
   acknowledgedTotvsKeys: string[];
   unlinkedConfiguredKeys: string[];
@@ -21,6 +30,7 @@ export type GastosNaturezasConfigStore = {
 
 const EMPTY_STORE: GastosNaturezasConfigStore = {
   mappings: [],
+  customBlocks: [],
   dismissedTotvsKeys: [],
   acknowledgedTotvsKeys: [],
   unlinkedConfiguredKeys: []
@@ -33,8 +43,21 @@ const CONFIG_PATH = path.join(
 
 let memoryCache: GastosNaturezasConfigStore | null = null;
 
+function isCustomBlock(item: unknown): item is GastosNaturezaCustomBlock {
+  if (!item || typeof item !== 'object') return false;
+  const block = item as GastosNaturezaCustomBlock;
+  return (
+    typeof block.id === 'string' &&
+    typeof block.code === 'string' &&
+    typeof block.label === 'string' &&
+    Array.isArray(block.parentLabels) &&
+    block.parentLabels.every((label) => typeof label === 'string') &&
+    typeof block.createdAt === 'string'
+  );
+}
+
 function sanitizeStore(parsed: Partial<GastosNaturezasConfigStore> | null | undefined): GastosNaturezasConfigStore {
-  if (!parsed || typeof parsed !== 'object') return { ...EMPTY_STORE };
+  if (!parsed || typeof parsed !== 'object') return { ...EMPTY_STORE, customBlocks: [] };
 
   return {
     mappings: Array.isArray(parsed.mappings)
@@ -49,6 +72,7 @@ function sanitizeStore(parsed: Partial<GastosNaturezasConfigStore> | null | unde
             typeof item.createdAt === 'string'
         )
       : [],
+    customBlocks: Array.isArray(parsed.customBlocks) ? parsed.customBlocks.filter(isCustomBlock) : [],
     dismissedTotvsKeys: Array.isArray(parsed.dismissedTotvsKeys)
       ? parsed.dismissedTotvsKeys.filter((key): key is string => typeof key === 'string')
       : [],

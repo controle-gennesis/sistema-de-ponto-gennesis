@@ -587,7 +587,7 @@ function summarizeGastosPanelRows(rows: readonly GastosOperacionaisRow[]): Gasto
 
 /** Evita quebra do sinal negativo em valores monetários longos (ex.: -R$ 1.554.904,49). */
 const amountCurrencyCellClassName =
-  'px-2.5 py-2 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
+  'overflow-hidden px-2.5 py-2 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
 const amountCurrencyTotalCellClassName =
   'px-2.5 py-2 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
 const amountGrandTotalCellClassName =
@@ -603,7 +603,7 @@ const amountPercentThClassName =
 const dataCenterThClassName =
   'px-1.5 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 const dataCenterCellClassName =
-  'px-1.5 py-2 text-center text-sm tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap';
+  'overflow-hidden px-1.5 py-2 text-center text-sm tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap';
 const contractThClassName =
   'px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
 const contractCellClassName =
@@ -872,14 +872,14 @@ export function ControleGeralGastosOperacionaisPanel({
   const resizableColumns = useMemo((): ControleGeralColumnWidth[] => {
     const columns: ControleGeralColumnWidth[] = [];
     if (enableRowExclusion) columns.push({ key: 'select', defaultWidth: 56, minWidth: 48 });
+    columns.push({ key: 'contrato', defaultWidth: 260, minWidth: 140 });
     columns.push(
-      { key: 'mes', defaultWidth: 92, minWidth: 72 },
-      { key: 'ano', defaultWidth: 68, minWidth: 56 }
+      { key: 'mes', defaultWidth: 118, minWidth: 104 },
+      { key: 'ano', defaultWidth: 118, minWidth: 104 }
     );
     if (!hideLocalityColumn) {
       columns.push({ key: 'localidade', defaultWidth: 118, minWidth: 84 });
     }
-    columns.push({ key: 'contrato', defaultWidth: 260, minWidth: 140 });
     if (showFaturamentoColumn) {
       columns.push(
         { key: 'faturamento', defaultWidth: 156, minWidth: 110 },
@@ -890,7 +890,7 @@ export function ControleGeralGastosOperacionaisPanel({
     if (showTetoOrcamentarioColumn) {
       columns.push({ key: 'teto', defaultWidth: 168, minWidth: 120 });
     }
-    columns.push({ key: 'gastos', defaultWidth: 150, minWidth: 110 });
+    columns.push({ key: 'gastos', defaultWidth: 188, minWidth: 168 });
     if (showTetoOrcamentarioColumn) {
       columns.push({ key: 'saldo-gastar', defaultWidth: 156, minWidth: 120 });
     }
@@ -908,7 +908,12 @@ export function ControleGeralGastosOperacionaisPanel({
     return columns;
   }, [enableRowExclusion, hideLocalityColumn, showFaturamentoColumn, showTetoOrcamentarioColumn]);
   const { widths: columnWidths, totalWidth: tableWidth, setColumnWidth } =
-    useControleGeralColumnWidths('controle-geral:gastos-column-widths:v2', resizableColumns);
+    useControleGeralColumnWidths(
+      readOnlyPoloColumn
+        ? 'gastos-operacionais:column-widths:v1'
+        : 'controle-geral:gastos-column-widths:v2',
+      resizableColumns
+    );
   const columnMinWidth = useCallback(
     (key: string) => resizableColumns.find((column) => column.key === key)?.minWidth ?? 60,
     [resizableColumns]
@@ -2569,8 +2574,8 @@ export function ControleGeralGastosOperacionaisPanel({
 
                 <div className="table-scroll">
                   <table
-                    className="text-sm table-fixed [&_td]:!min-w-0 [&_th]:!min-w-0"
-                    style={{ width: tableWidth, minWidth: tableWidth }}
+                    className="w-full text-sm table-fixed [&_td]:!min-w-0 [&_th]:!min-w-0"
+                    style={{ minWidth: tableWidth }}
                   >
                     <colgroup>
                       {resizableColumns.map((column) => (
@@ -2598,6 +2603,14 @@ export function ControleGeralGastosOperacionaisPanel({
                           </ResizableTh>
                         ) : null}
                         <ResizableTh
+                          className={contractThClassName}
+                          width={columnWidths.contrato}
+                          minWidth={columnMinWidth('contrato')}
+                          onWidthChange={(width) => setColumnWidth('contrato', width)}
+                        >
+                          Contrato
+                        </ResizableTh>
+                        <ResizableTh
                           className={dataCenterThClassName}
                           width={columnWidths.mes}
                           minWidth={columnMinWidth('mes')}
@@ -2623,14 +2636,6 @@ export function ControleGeralGastosOperacionaisPanel({
                             {readOnlyPoloColumn ? 'Polo' : 'Local'}
                           </ResizableTh>
                         ) : null}
-                        <ResizableTh
-                          className={contractThClassName}
-                          width={columnWidths.contrato}
-                          minWidth={columnMinWidth('contrato')}
-                          onWidthChange={(width) => setColumnWidth('contrato', width)}
-                        >
-                          Contrato
-                        </ResizableTh>
                         {showFaturamentoColumn ? (
                           <ResizableTh
                             className={amountCurrencyThClassName}
@@ -2778,32 +2783,6 @@ export function ControleGeralGastosOperacionaisPanel({
                                   </div>
                                 </td>
                               ) : null}
-                              <td className={dataCenterCellClassName}>
-                                {renderPendingValue(gastosValuesPending, buildMesesLabel(row))}
-                              </td>
-                              <td className={dataCenterCellClassName}>
-                                {renderPendingValue(gastosValuesPending, buildAnoLabel(row))}
-                              </td>
-                              {!hideLocalityColumn ? (
-                                <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
-                                  {readOnlyPoloColumn ? (
-                                    row.polo?.trim() || '—'
-                                  ) : (
-                                    <StringSingleSelectDropdown
-                                      value={getEffectiveContractLocality(row.contract, inferredLocalityOverrides)}
-                                      onChange={(value) =>
-                                        handleContractLocalityChange(row.contract, value)
-                                      }
-                                      options={localityTableSelectOptions}
-                                      allowEmpty={false}
-                                      disableSearch
-                                      hideChevron
-                                      className={localitySelectWrapperClassName}
-                                      triggerClassName={localitySelectTriggerClassName}
-                                    />
-                                  )}
-                                </td>
-                              ) : null}
                               <td className={contractCellClassName}>
                                 <div className="flex items-center gap-2">
                                   {enableContractFluxoModal ? (
@@ -2851,6 +2830,32 @@ export function ControleGeralGastosOperacionaisPanel({
                                   ) : null}
                                 </div>
                               </td>
+                              <td className={dataCenterCellClassName}>
+                                {renderPendingValue(gastosValuesPending, buildMesesLabel(row))}
+                              </td>
+                              <td className={dataCenterCellClassName}>
+                                {renderPendingValue(gastosValuesPending, buildAnoLabel(row))}
+                              </td>
+                              {!hideLocalityColumn ? (
+                                <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
+                                  {readOnlyPoloColumn ? (
+                                    row.polo?.trim() || '—'
+                                  ) : (
+                                    <StringSingleSelectDropdown
+                                      value={getEffectiveContractLocality(row.contract, inferredLocalityOverrides)}
+                                      onChange={(value) =>
+                                        handleContractLocalityChange(row.contract, value)
+                                      }
+                                      options={localityTableSelectOptions}
+                                      allowEmpty={false}
+                                      disableSearch
+                                      hideChevron
+                                      className={localitySelectWrapperClassName}
+                                      triggerClassName={localitySelectTriggerClassName}
+                                    />
+                                  )}
+                                </td>
+                              ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
                                   {renderPendingValue(
@@ -2923,7 +2928,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                 </td>
                               ) : null}
                               <td
-                                className={`${amountCurrencyCellClassName} ${gastosNaturezaModalValueClassName(row.totalAcumulado)} ${
+                                className={`${amountCurrencyCellClassName} text-red-600 dark:text-red-400 ${
                                   enableNaturezaBreakdown && !gastosValuesPending
                                     ? 'cursor-pointer rounded-md hover:bg-blue-50/70 hover:underline dark:hover:bg-blue-950/30'
                                     : ''
@@ -2959,7 +2964,7 @@ export function ControleGeralGastosOperacionaisPanel({
                               >
                                 {renderPendingValue(
                                   gastosValuesPending,
-                                  formatCurrency(row.totalAcumulado)
+                                  formatCurrency(Math.abs(row.totalAcumulado))
                                 )}
                               </td>
                               {showTetoOrcamentarioColumn ? (
@@ -3079,7 +3084,7 @@ export function ControleGeralGastosOperacionaisPanel({
                             </tr>
                           ))}
                           <FinancialTotalsTableRow
-                            title={`Total — ${group.localityLabel}`}
+                            title="Total"
                             contractCount={group.rows.length}
                             summary={groupSummary}
                             showNfsMetrics={showFaturamentoColumn}
@@ -3096,7 +3101,7 @@ export function ControleGeralGastosOperacionaisPanel({
                         <FinancialTotalsTableRow
                           title={
                             readOnlyPoloColumn
-                              ? 'Total geral — todos os polos'
+                              ? 'Total geral'
                               : 'Total geral — todas as localidades'
                           }
                           contractCount={visibleRowsWithFaturamento.length}
