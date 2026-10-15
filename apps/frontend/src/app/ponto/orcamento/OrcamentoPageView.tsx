@@ -1646,7 +1646,14 @@ function nomeBancoParaExibicao(banco: string | null | undefined): string {
   const raw = String(banco ?? '').trim();
   if (!raw) return '—';
   const semLocal = raw.replace(/\/[^/]*\s*$/, '').trim();
-  return semLocal || raw;
+  const nome = semLocal || raw;
+  const norm = nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  // Base Emp do Orçafascio é a composição própria da empresa.
+  if (norm === 'emp' || norm === 'empresa' || norm === 'proprio') return 'PROPRIO';
+  return nome;
 }
 
 /**
@@ -3145,7 +3152,8 @@ function normalizarStatusAprovacaoOrcamento(
   return 'rascunho';
 }
 
-function orcamentoComCronograma(status: OrcamentoStatusAprovacao): boolean {
+function orcamentoComCronograma(status: OrcamentoStatusAprovacao, versao?: number): boolean {
+  if ((versao ?? 1) > 1) return true;
   return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
 }
 
@@ -10695,10 +10703,6 @@ export function OrcamentoPageView({
         orcamentoAtivoId,
         montarPayloadSalvarOrcamento(servicos, imports, sessaoAtual)
       );
-      const entry = await criarVersaoOrcamentoApi(centroCustoId, orcamentoAtivoId);
-      const versaoNova = entry.versao ?? (meta.versao ?? 1) + 1;
-      const statusNova: OrcamentoStatusAprovacao =
-        meta.statusAprovacao === 'em_correcao' ? 'em_correcao' : 'rascunho';
 
       if (compsNovas.length > 0) {
         const porChave = new Map(composicoes.map((c) => [c.chave, c]));
@@ -10738,9 +10742,8 @@ export function OrcamentoPageView({
 
       const orcafascioDadosRefresh =
         acharCabecalhoOrcafascioNaCache(budgetId, meta.osNumeroPasta) ?? meta.orcafascioDados;
-      const { fichaDemandaApprovalId: _aprovacaoAnterior, ...metaSemAprovacao } = meta;
       const nextMeta: OrcamentoMeta = {
-        ...metaSemAprovacao,
+        ...meta,
         orcafascioBudgetId: budgetId,
         ...(orcafascioDadosRefresh ? { orcafascioDados: orcafascioDadosRefresh } : {}),
         ...(finApi.totalComBdi > 0
@@ -10752,12 +10755,6 @@ export function OrcamentoPageView({
               },
             }
           : {}),
-        familiaId: entry.familiaId,
-        versao: versaoNova,
-        congelado: false,
-        origemVersaoId: orcamentoAtivoId,
-        revisaoCount: versaoNova,
-        statusAprovacao: statusNova,
         historicoMovimentos: [
           ...(meta.historicoMovimentos ?? []),
           {
@@ -10792,16 +10789,15 @@ export function OrcamentoPageView({
 
       await saveOrcamentoToApi(
         centroCustoId,
-        entry.id,
+        orcamentoAtivoId,
         montarPayloadSalvarOrcamento(servicosParaApi, imports, nextSessao)
       );
 
-      setListaOrcamentos((prev) => {
-        const marked = prev.map((o) =>
-          o.id === orcamentoAtivoId ? { ...normalizeListaVersaoFields(o), congelado: true } : o
-        );
-        return [entry, ...marked.filter((o) => o.id !== entry.id)];
-      });
+      setListaOrcamentos((prev) =>
+        prev.map((o) =>
+          o.id === orcamentoAtivoId ? { ...o, updatedAt: new Date().toISOString() } : o
+        )
+      );
       orcamentosListaCache.delete(centroCustoId);
 
       setServicos(servicosParaApi);
@@ -10819,20 +10815,17 @@ export function OrcamentoPageView({
       setInsumosAnaliticoManuais(manuaisNext);
       setMoMatManualPorItem(valoresManuaisNext);
       setMeta(nextMeta);
-      setNomeOrcamentoRascunho(entry.nome);
-      setOrcamentoAtivoId(entry.id);
-      navigateEmbeddedOrcamentoPath(entry.id);
 
       const partes: string[] = [];
       if (adicionadas > 0) partes.push(`${adicionadas} nova(s)`);
       if (removidas > 0) partes.push(`${removidas} removida(s)`);
       toast.success(
         partes.length > 0
-          ? `Revisão ${formatOrcamentoRevisao(versaoNova)} criada: ${partes.join(', ')}.`
-          : `Revisão ${formatOrcamentoRevisao(versaoNova)} criada com a atualização do Orçafascio.`
+          ? `Orçamento atualizado: ${partes.join(', ')}.`
+          : 'Orçamento atualizado a partir do Orçafascio.'
       );
       nomesOrcafascioSnapRef.current = {
-        orcamentoId: entry.id,
+        orcamentoId: orcamentoAtivoId,
         ...snapshotNomesServicosOrcamento(servicosParaApi)
       };
 
@@ -10857,7 +10850,7 @@ export function OrcamentoPageView({
           osCodigo: osCodigoSnap,
           numeroPasta: numeroPastaSnap,
           valor: Number.isFinite(valorSnap) ? valorSnap : 0,
-          orcamentoId: entry.id,
+          orcamentoId: orcamentoAtivoId,
           descricaoServicoOs: descricaoOsSnap,
           isAditivo: meta.isAditivo === true,
         });
@@ -15194,37 +15187,64 @@ export function OrcamentoPageView({
     }
     if (statusAprovacaoAtivo !== 'finalizado' || reabrindoOrcamento) return;
     setReabrindoOrcamento(true);
-    const prevMeta = meta;
-    const prevSessao = sessaoRef.current;
-    const nextMeta: OrcamentoMeta = anexarMovimentoOrcamento(
-      { ...meta, statusAprovacao: 'rascunho', gradeTravada: undefined },
-      'reabertura',
-      currentUserName
-    );
-    const nextSessao: SessaoOrcamentoPersist = { ...sessaoRef.current, meta: nextMeta };
-    setMeta(nextMeta);
-    sessaoRef.current = nextSessao;
+    const origemId = orcamentoAtivoId;
     try {
+      const sessao = sessaoRef.current ?? sessaoVazia();
       await saveOrcamentoToApi(
         centroCustoId,
-        orcamentoAtivoId,
+        origemId,
+        montarPayloadSalvarOrcamento(servicos, imports, sessao)
+      );
+      const entry = await criarVersaoOrcamentoApi(centroCustoId, origemId);
+      const versaoNova = entry.versao ?? (meta.versao ?? 1) + 1;
+      const nextMeta = anexarMovimentoOrcamento(
+        {
+          ...meta,
+          familiaId: entry.familiaId || meta.familiaId || origemId,
+          versao: versaoNova,
+          revisaoCount: versaoNova,
+          congelado: false,
+          origemVersaoId: origemId,
+          statusAprovacao: 'rascunho',
+          gradeTravada: undefined,
+          fichaDemandaApprovalId: undefined,
+        },
+        'reabertura',
+        currentUserName
+      );
+      const nextSessao: SessaoOrcamentoPersist = {
+        ...sessaoRef.current,
+        cronograma: cronogramaVazio(),
+        meta: nextMeta,
+      };
+      await saveOrcamentoToApi(
+        centroCustoId,
+        entry.id,
         montarPayloadSalvarOrcamento(servicos, imports, nextSessao)
       );
-      setListaOrcamentos((prev) =>
-        prev.map((o) =>
-          o.id === orcamentoAtivoId
-            ? { ...o, statusAprovacao: 'rascunho', updatedAt: new Date().toISOString() }
-            : o
-        )
-      );
+      setListaOrcamentos((prev) => {
+        const marked = prev.map((o) =>
+          o.id === origemId ? { ...normalizeListaVersaoFields(o), congelado: true } : o
+        );
+        return [entry, ...marked.filter((o) => o.id !== entry.id)];
+      });
+      orcamentosListaCache.delete(centroCustoId);
       const userId = authService.getUser()?.id || '';
-      if (userId && orcamentoAtivoId) dispensarCronogramaNovo(userId, orcamentoAtivoId);
+      const contractId = resolveContractIdForOsSync() || '';
+      if (userId) {
+        registrarCronogramaNovo(userId, { contractId, orcamentoId: entry.id });
+      }
       void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
       void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
-      toast.success('Orçamento reaberto. Edite e finalize de novo para atualizar o valor na OS.');
+      setConfirmReabrirOrcamento(false);
+      toast.success(
+        `Revisão ${formatOrcamentoRevisao(versaoNova)} criada, com cronograma novo. ${formatOrcamentoRevisao(versaoNumero)} ficou congelada.`
+      );
+      setOrcamentoViewTab('montagem');
+      setNomeOrcamentoRascunho(entry.nome);
+      setOrcamentoAtivoId(entry.id);
+      navigateEmbeddedOrcamentoPath(entry.id);
     } catch {
-      setMeta(prevMeta);
-      sessaoRef.current = prevSessao;
       toast.error('Não foi possível reabrir o orçamento.');
     } finally {
       setReabrindoOrcamento(false);
@@ -15989,7 +16009,8 @@ export function OrcamentoPageView({
                             normalizarStatusAprovacaoOrcamento(
                               listaOrcamentos.find((item) => item.id === orcamentoListaActionMenu.orcamentoId)
                                 ?.statusAprovacao
-                            )
+                            ),
+                            listaOrcamentos.find((item) => item.id === orcamentoListaActionMenu.orcamentoId)?.versao
                           ) && (
                             <button
                               type="button"
@@ -17487,7 +17508,7 @@ export function OrcamentoPageView({
 
                 {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
                   <div className={cronogramaOnly ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'flex w-full min-w-0 flex-col'}>
-                  {!orcamentoComCronograma(statusAprovacaoAtivo) ? (
+                  {!orcamentoComCronograma(statusAprovacaoAtivo, versaoNumero) ? (
                     <OrcamentoSecaoVazia
                       titulo="Cronograma ainda não criado"
                       texto="Finalize o orçamento para criar o cronograma."
@@ -18942,7 +18963,11 @@ export function OrcamentoPageView({
               Reabrir orçamento?
             </h3>
             <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
-              O orçamento volta a ficar editável. O valor na OS permanece até você finalizar de novo.
+              A revisão{' '}
+              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero)}</span> fica
+              congelada como foi finalizada. A edição abre em{' '}
+              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero + 1)}</span>.
+              O valor na OS permanece até você finalizar de novo.
             </p>
             <div className="flex items-center justify-center space-x-3">
               <button
@@ -19195,11 +19220,7 @@ export function OrcamentoPageView({
               <span className="font-semibold text-gray-800 dark:text-gray-200">
                 {formatOrcamentoRevisao(versaoNumero)}
               </span>{' '}
-              fica congelada como está e a atualização entra em{' '}
-              <span className="font-semibold text-gray-800 dark:text-gray-200">
-                {formatOrcamentoRevisao(versaoNumero + 1)}
-              </span>
-              .
+              é atualizada no lugar. Nenhuma revisão nova é criada.
             </p>
             <p className="mt-3 text-center text-sm leading-relaxed text-gray-600 dark:text-gray-400">
               Se estiver igual, nenhuma revisão é criada. Quantidade, memória de cálculo e ficha de

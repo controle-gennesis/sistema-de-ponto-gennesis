@@ -1744,7 +1744,14 @@ export default function ContractDetailPage() {
   const orcamentosCount = orcamentosLista.length;
   const cronogramasCount = orcamentosLista.filter((o) => {
     const status = String(o.statusAprovacao || '').trim().toLowerCase();
-    return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
+    const versao = Number((o as { versao?: number }).versao);
+    const revisao = Number.isFinite(versao) && versao >= 1 ? Math.floor(versao) : 1;
+    return (
+      revisao > 1 ||
+      status === 'finalizado' ||
+      status === 'aguardando_aprovacao' ||
+      status === 'aprovado'
+    );
   }).length;
   const relatoriosCount = Array.isArray(relatoriosListaData?.data)
     ? relatoriosListaData.data.length

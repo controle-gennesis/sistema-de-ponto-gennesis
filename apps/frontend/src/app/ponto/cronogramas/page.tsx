@@ -16,6 +16,7 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { formatOrcamentoRevisao } from '@/components/orcamento/OrcamentoRevisaoBadge';
 import { sincronizarCronogramasRecentes } from '@/lib/cronogramaNovos';
 import { authService } from '@/lib/auth';
 import {
@@ -35,6 +36,7 @@ type OrcamentoListaRow = {
   nome: string;
   updatedAt: string;
   statusAprovacao?: string;
+  versao?: number;
   cronogramaProgressoFisico?: number;
   cronogramaConcluido?: number;
   cronogramaTotalEtapas?: number;
@@ -156,14 +158,25 @@ export default function CronogramasPage() {
           return orcs
             .filter((o) => {
               const status = String(o.statusAprovacao || '').trim().toLowerCase();
-              return status === 'finalizado' || status === 'aguardando_aprovacao' || status === 'aprovado';
+              const versao = Number(o.versao);
+              const revisao = Number.isFinite(versao) && versao >= 1 ? Math.floor(versao) : 1;
+              return (
+                revisao > 1 ||
+                status === 'finalizado' ||
+                status === 'aguardando_aprovacao' ||
+                status === 'aprovado'
+              );
             })
             .map(
-            (o): CronogramaListItem => ({
+            (o): CronogramaListItem => {
+              const versao = Number(o.versao);
+              const revisao = Number.isFinite(versao) && versao >= 1 ? Math.floor(versao) : 1;
+              const nomeBase = nomeOrcamentoSemCodigo(o.nome) || o.nome;
+              return {
               contractId: c.id,
               contractName: (c.name || c.number || c.id).trim(),
               orcamentoId: o.id,
-              nome: nomeOrcamentoSemCodigo(o.nome) || o.nome,
+              nome: `${nomeBase} · ${formatOrcamentoRevisao(revisao)}`,
               codigo: codigoFromNomeOrcamento(o.nome),
               updatedAt: o.updatedAt || '',
               progressoFisico:
@@ -182,7 +195,8 @@ export default function CronogramasPage() {
                 typeof o.cronogramaAtrasado === 'number' && Number.isFinite(o.cronogramaAtrasado)
                   ? o.cronogramaAtrasado
                   : undefined,
-            })
+            };
+            }
           );
         })
       );
