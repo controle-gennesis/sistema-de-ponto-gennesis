@@ -427,18 +427,21 @@ export type ResolverFormulaExterna = (
 ) => number | null;
 
 function substituirRefsFormulaLinha(expr: string, ctx: ContextoFormulaMedicao): string {
-  const comSub = expr.replace(/\bSUB\b/gi, String(Number(ctx.SUB) || 0));
-  return comSub.replace(/%|\b([CLHNAV])\b/gi, (match) => {
-    if (match === '%') return String(Number(ctx.empolamento) || 0);
-    const m = match.toUpperCase();
-    if (m === 'C') return String(Number(ctx.C) || 0);
-    if (m === 'L') return String(Number(ctx.L) || 0);
-    if (m === 'H') return String(Number(ctx.H) || 0);
-    if (m === 'N') return String(Number(ctx.N) || 0);
-    if (m === 'A') return String(Number(ctx.A) || 0);
-    if (m === 'V') return String(Number(ctx.V) || 0);
-    return match;
-  });
+  return expr.replace(
+    /(?<![A-Za-zÀ-ÿ0-9_.])(?:SUB|[CLHNAV]|%)(?![A-Za-zÀ-ÿ0-9_.])/gi,
+    (match) => {
+      if (match === '%') return String(Number(ctx.empolamento) || 0);
+      const m = match.toUpperCase();
+      if (m === 'C') return String(Number(ctx.C) || 0);
+      if (m === 'L') return String(Number(ctx.L) || 0);
+      if (m === 'H') return String(Number(ctx.H) || 0);
+      if (m === 'N') return String(Number(ctx.N) || 0);
+      if (m === 'A') return String(Number(ctx.A) || 0);
+      if (m === 'V') return String(Number(ctx.V) || 0);
+      if (m === 'SUB') return String(Number(ctx.SUB) || 0);
+      return match;
+    }
+  );
 }
 
 function substituirRefsFormulaExternas(
@@ -462,7 +465,591 @@ function substituirRefsFormulaExternas(
   return { expr: next, ok };
 }
 
-/** Valor de uma fórmula da memória (`=C+L+N`) ou de um número digitado. */
+type ValorFormula = { k: 'n'; v: number } | { k: 'b'; v: boolean };
+
+type AstFormula =
+  | { t: 'num'; v: number }
+  | { t: 'un'; op: '+' | '-'; x: AstFormula }
+  | { t: 'bin'; op: '+' | '-' | '*' | '/' | '^'; l: AstFormula; r: AstFormula }
+  | { t: 'cmp'; op: '=' | '<>' | '<' | '>' | '<=' | '>='; l: AstFormula; r: AstFormula }
+  | { t: 'call'; name: string; args: AstFormula[] };
+
+function canonNomeFuncao(nome: string): string {
+  return nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+const ALIAS_FUNCAO: Record<string, string> = {
+  ARRED: 'ARRED',
+  ARREDONDAR: 'ARRED',
+  ROUND: 'ARRED',
+  'ARREDONDAR.PARA.CIMA': 'CIMA',
+  ROUNDUP: 'CIMA',
+  'ARREDONDAR.PARA.BAIXO': 'BAIXO',
+  ROUNDDOWN: 'BAIXO',
+  TRUNCAR: 'TRUNCAR',
+  TRUNC: 'TRUNCAR',
+  INT: 'INT',
+  ABS: 'ABS',
+  SINAL: 'SINAL',
+  SIGN: 'SINAL',
+  SOMA: 'SOMA',
+  SUM: 'SOMA',
+  MEDIA: 'MEDIA',
+  AVERAGE: 'MEDIA',
+  MAXIMO: 'MAXIMO',
+  MAX: 'MAXIMO',
+  MINIMO: 'MINIMO',
+  MIN: 'MINIMO',
+  MOD: 'MOD',
+  RESTO: 'MOD',
+  POTENCIA: 'POTENCIA',
+  POWER: 'POTENCIA',
+  RAIZ: 'RAIZ',
+  SQRT: 'RAIZ',
+  QUOCIENTE: 'QUOCIENTE',
+  QUOTIENT: 'QUOCIENTE',
+  MULT: 'MULT',
+  PRODUCT: 'MULT',
+  TETO: 'TETO',
+  CEILING: 'TETO',
+  PISO: 'PISO',
+  FLOOR: 'PISO',
+  'TETO.MAT': 'TETO.MAT',
+  'CEILING.MATH': 'TETO.MAT',
+  'PISO.MAT': 'PISO.MAT',
+  'FLOOR.MATH': 'PISO.MAT',
+  SE: 'SE',
+  IF: 'SE',
+  E: 'E',
+  AND: 'E',
+  OU: 'OU',
+  OR: 'OU',
+  NAO: 'NAO',
+  NOT: 'NAO',
+  SEERRO: 'SEERRO',
+  IFERROR: 'SEERRO',
+  PI: 'PI',
+  GRAUS: 'GRAUS',
+  DEGREES: 'GRAUS',
+  RADIANOS: 'RADIANOS',
+  RADIANS: 'RADIANOS',
+  SEN: 'SEN',
+  SIN: 'SEN',
+  COS: 'COS',
+  TAN: 'TAN',
+  ASEN: 'ASEN',
+  ASIN: 'ASEN',
+  ACOS: 'ACOS',
+  ATAN: 'ATAN',
+  LN: 'LN',
+  LOG: 'LOG',
+  LOG10: 'LOG10',
+  EXP: 'EXP',
+  FATORIAL: 'FATORIAL',
+  FACT: 'FATORIAL',
+};
+
+export type AjudaFuncaoFormula = {
+  nome: string;
+  assinatura: string;
+  descricao: string;
+};
+
+/** Nomes que aparecem na lista enquanto a fórmula é digitada. */
+export const AJUDA_FUNCOES_FORMULA: AjudaFuncaoFormula[] = [
+  { nome: 'ABS', assinatura: 'ABS(núm)', descricao: 'Devolve o valor sem o sinal.' },
+  { nome: 'ACOS', assinatura: 'ACOS(núm)', descricao: 'Arco cosseno, em radianos.' },
+  { nome: 'ARRED', assinatura: 'ARRED(núm; casas)', descricao: 'Arredonda para o número mais próximo.' },
+  { nome: 'ARREDONDAR', assinatura: 'ARREDONDAR(núm; casas)', descricao: 'O mesmo que ARRED.' },
+  { nome: 'ARREDONDAR.PARA.BAIXO', assinatura: 'ARREDONDAR.PARA.BAIXO(núm; casas)', descricao: 'Arredonda em direção ao zero.' },
+  { nome: 'ARREDONDAR.PARA.CIMA', assinatura: 'ARREDONDAR.PARA.CIMA(núm; casas)', descricao: 'Arredonda afastando do zero.' },
+  { nome: 'ASEN', assinatura: 'ASEN(núm)', descricao: 'Arco seno, em radianos.' },
+  { nome: 'ATAN', assinatura: 'ATAN(núm)', descricao: 'Arco tangente, em radianos.' },
+  { nome: 'COS', assinatura: 'COS(núm)', descricao: 'Cosseno de um ângulo em radianos.' },
+  { nome: 'E', assinatura: 'E(teste1; teste2)', descricao: 'Verdadeiro só se todos os testes forem verdadeiros.' },
+  { nome: 'EXP', assinatura: 'EXP(núm)', descricao: 'Eleva e à potência informada.' },
+  { nome: 'FATORIAL', assinatura: 'FATORIAL(núm)', descricao: 'Fatorial de um inteiro.' },
+  { nome: 'GRAUS', assinatura: 'GRAUS(radianos)', descricao: 'Converte radianos em graus.' },
+  { nome: 'INT', assinatura: 'INT(núm)', descricao: 'Arredonda para baixo até o inteiro.' },
+  { nome: 'LN', assinatura: 'LN(núm)', descricao: 'Logaritmo natural.' },
+  { nome: 'LOG', assinatura: 'LOG(núm; base)', descricao: 'Logaritmo. Sem a base, usa 10.' },
+  { nome: 'LOG10', assinatura: 'LOG10(núm)', descricao: 'Logaritmo de base 10.' },
+  { nome: 'MÁXIMO', assinatura: 'MÁXIMO(n1; n2)', descricao: 'O maior dos números.' },
+  { nome: 'MÉDIA', assinatura: 'MÉDIA(n1; n2)', descricao: 'Média dos números.' },
+  { nome: 'MÍNIMO', assinatura: 'MÍNIMO(n1; n2)', descricao: 'O menor dos números.' },
+  { nome: 'MOD', assinatura: 'MOD(núm; divisor)', descricao: 'Resto da divisão.' },
+  { nome: 'MULT', assinatura: 'MULT(n1; n2)', descricao: 'Multiplica os números.' },
+  { nome: 'NÃO', assinatura: 'NÃO(teste)', descricao: 'Inverte verdadeiro e falso.' },
+  { nome: 'OU', assinatura: 'OU(teste1; teste2)', descricao: 'Verdadeiro se algum teste for verdadeiro.' },
+  { nome: 'PI', assinatura: 'PI()', descricao: 'Valor de π.' },
+  { nome: 'PISO', assinatura: 'PISO(núm; múltiplo)', descricao: 'Arredonda para baixo até o múltiplo.' },
+  { nome: 'POTÊNCIA', assinatura: 'POTÊNCIA(núm; expoente)', descricao: 'Eleva o número à potência.' },
+  { nome: 'QUOCIENTE', assinatura: 'QUOCIENTE(núm; divisor)', descricao: 'Parte inteira da divisão.' },
+  { nome: 'RADIANOS', assinatura: 'RADIANOS(graus)', descricao: 'Converte graus em radianos.' },
+  { nome: 'RAIZ', assinatura: 'RAIZ(núm)', descricao: 'Raiz quadrada.' },
+  { nome: 'SE', assinatura: 'SE(teste; se_verdadeiro; se_falso)', descricao: 'Escolhe um valor conforme o teste.' },
+  { nome: 'SEERRO', assinatura: 'SEERRO(valor; se_erro)', descricao: 'Se a conta falhar, devolve o outro valor.' },
+  { nome: 'SEN', assinatura: 'SEN(núm)', descricao: 'Seno de um ângulo em radianos.' },
+  { nome: 'SINAL', assinatura: 'SINAL(núm)', descricao: '1, 0 ou -1 conforme o sinal.' },
+  { nome: 'SOMA', assinatura: 'SOMA(n1; n2)', descricao: 'Soma os números.' },
+  { nome: 'TAN', assinatura: 'TAN(núm)', descricao: 'Tangente de um ângulo em radianos.' },
+  { nome: 'TETO', assinatura: 'TETO(núm; múltiplo)', descricao: 'Arredonda para cima até o múltiplo.' },
+  { nome: 'TRUNCAR', assinatura: 'TRUNCAR(núm; casas)', descricao: 'Corta as casas, sem arredondar.' },
+];
+
+export function sugestoesFuncaoFormula(prefixo: string): AjudaFuncaoFormula[] {
+  const alvo = canonNomeFuncao(prefixo);
+  const lista = alvo
+    ? AJUDA_FUNCOES_FORMULA.filter((item) => canonNomeFuncao(item.nome).startsWith(alvo))
+    : AJUDA_FUNCOES_FORMULA;
+  return lista;
+}
+
+/** Nome de função ainda incompleto, logo antes do cursor. */
+export function prefixoFuncaoNoCursor(
+  formula: string,
+  cursor: number
+): { inicio: number; prefixo: string } | null {
+  if (!formula.trimStart().startsWith('=')) return null;
+  const ate = formula.slice(0, Math.max(0, cursor));
+  const match = ate.match(/(?:^|[=+\-*/^(;,])\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.]*)?$/);
+  if (!match) return null;
+  const prefixo = match[1] ?? '';
+  return { inicio: ate.length - prefixo.length, prefixo };
+}
+
+export function ajudaFuncaoAberta(formula: string, cursor: number): AjudaFuncaoFormula | null {
+  let profundidade = 0;
+  for (let i = Math.max(0, cursor) - 1; i >= 0; i -= 1) {
+    const ch = formula[i];
+    if (ch === ')') profundidade += 1;
+    else if (ch === '(') {
+      if (profundidade === 0) {
+        const nome = formula.slice(0, i).match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.]*)$/)?.[1];
+        if (!nome) return null;
+        const alvo = canonNomeFuncao(nome);
+        return AJUDA_FUNCOES_FORMULA.find((item) => canonNomeFuncao(item.nome) === alvo) ?? null;
+      }
+      profundidade -= 1;
+    }
+  }
+  return null;
+}
+
+function lerNumeroFormula(s: string, i: number): { v: number; i: number } | null {
+  if (!/\d/.test(s[i] ?? '')) return null;
+  let j = i;
+  while (j < s.length && /\d/.test(s[j]!)) j += 1;
+  const inteiro = s.slice(i, j);
+  if (s[j] === '.' && /\d/.test(s[j + 1] ?? '')) {
+    const milhar = /^(\.\d{3})+(,\d+)?/.exec(s.slice(j));
+    if (milhar && milhar[0].includes(',')) {
+      const bruto = inteiro + milhar[0];
+      return { v: Number(bruto.replace(/\./g, '').replace(',', '.')), i: j + milhar[0].length };
+    }
+    let k = j + 1;
+    while (k < s.length && /\d/.test(s[k]!)) k += 1;
+    return { v: Number(`${inteiro}.${s.slice(j + 1, k)}`), i: k };
+  }
+  if (s[j] === ',' && /\d/.test(s[j + 1] ?? '')) {
+    let k = j + 1;
+    while (k < s.length && /\d/.test(s[k]!)) k += 1;
+    return { v: Number(`${inteiro}.${s.slice(j + 1, k)}`), i: k };
+  }
+  return { v: Number(inteiro), i: j };
+}
+
+function tokenizarFormula(s: string): Array<{ t: string; v?: string | number }> | null {
+  const out: Array<{ t: string; v?: string | number }> = [];
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i]!;
+    if (/\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    const num = lerNumeroFormula(s, i);
+    if (num) {
+      out.push({ t: 'num', v: num.v });
+      i = num.i;
+      continue;
+    }
+    if (/[A-Za-zÀ-ÿ_]/.test(ch)) {
+      let j = i + 1;
+      while (j < s.length && /[A-Za-zÀ-ÿ0-9_]/.test(s[j]!)) j += 1;
+      while (s[j] === '.' && /[A-Za-zÀ-ÿ]/.test(s[j + 1] ?? '')) {
+        j += 2;
+        while (j < s.length && /[A-Za-zÀ-ÿ0-9_]/.test(s[j]!)) j += 1;
+      }
+      out.push({ t: 'id', v: s.slice(i, j) });
+      i = j;
+      continue;
+    }
+    const dois = s.slice(i, i + 2);
+    if (dois === '<>' || dois === '<=' || dois === '>=') {
+      out.push({ t: 'op', v: dois });
+      i += 2;
+      continue;
+    }
+    if ('+-*/^=<>'.includes(ch)) {
+      out.push({ t: 'op', v: ch });
+      i += 1;
+      continue;
+    }
+    if (ch === '(') {
+      out.push({ t: 'lp' });
+      i += 1;
+      continue;
+    }
+    if (ch === ')') {
+      out.push({ t: 'rp' });
+      i += 1;
+      continue;
+    }
+    if (ch === ';' || ch === ',') {
+      out.push({ t: 'sep' });
+      i += 1;
+      continue;
+    }
+    return null;
+  }
+  out.push({ t: 'eof' });
+  return out;
+}
+
+function avaliarAstFormula(ast: AstFormula): ValorFormula | null {
+  if (ast.t === 'num') return { k: 'n', v: ast.v };
+  if (ast.t === 'un') {
+    const x = avaliarAstFormula(ast.x);
+    const n = x ? numeroDaFormula(x) : null;
+    if (n == null) return null;
+    return { k: 'n', v: ast.op === '-' ? -n : n };
+  }
+  if (ast.t === 'bin') {
+    const l = avaliarAstFormula(ast.l);
+    const r = avaliarAstFormula(ast.r);
+    const a = l ? numeroDaFormula(l) : null;
+    const b = r ? numeroDaFormula(r) : null;
+    if (a == null || b == null) return null;
+    if (ast.op === '+') return { k: 'n', v: a + b };
+    if (ast.op === '-') return { k: 'n', v: a - b };
+    if (ast.op === '*') return { k: 'n', v: a * b };
+    if (ast.op === '/') return b === 0 ? null : { k: 'n', v: a / b };
+    return { k: 'n', v: a ** b };
+  }
+  if (ast.t === 'cmp') {
+    const l = avaliarAstFormula(ast.l);
+    const r = avaliarAstFormula(ast.r);
+    const a = l ? numeroDaFormula(l) : null;
+    const b = r ? numeroDaFormula(r) : null;
+    if (a == null || b == null) return null;
+    const igual = Math.abs(a - b) < 1e-9;
+    let ok = false;
+    if (ast.op === '=') ok = igual;
+    else if (ast.op === '<>') ok = !igual;
+    else if (ast.op === '<') ok = a < b && !igual;
+    else if (ast.op === '>') ok = a > b && !igual;
+    else if (ast.op === '<=') ok = a < b || igual;
+    else ok = a > b || igual;
+    return { k: 'b', v: ok };
+  }
+  return avaliarChamadaFormula(ast.name, ast.args);
+}
+
+function numeroDaFormula(v: ValorFormula): number | null {
+  if (v.k === 'n') return Number.isFinite(v.v) ? v.v : null;
+  return v.v ? 1 : 0;
+}
+
+function boolDaFormula(v: ValorFormula): boolean {
+  if (v.k === 'b') return v.v;
+  return v.v !== 0;
+}
+
+function numerosDaChamada(args: AstFormula[]): number[] | null {
+  const out: number[] = [];
+  for (const arg of args) {
+    const v = avaliarAstFormula(arg);
+    const n = v ? numeroDaFormula(v) : null;
+    if (n == null) return null;
+    out.push(n);
+  }
+  return out;
+}
+
+function fatorDez(casas: number): number {
+  const d = Math.trunc(casas);
+  if (!Number.isFinite(d) || Math.abs(d) > 12) return Number.NaN;
+  return 10 ** d;
+}
+
+function arredondarMetade(n: number, casas: number): number | null {
+  const f = fatorDez(casas);
+  if (!Number.isFinite(f) || f === 0) return null;
+  const deslocado = Number((n * f).toPrecision(15));
+  const arred = deslocado >= 0 ? Math.round(deslocado) : -Math.round(Math.abs(deslocado));
+  return arred / f;
+}
+
+function arredondarFora(n: number, casas: number): number | null {
+  const f = fatorDez(casas);
+  if (!Number.isFinite(f) || f === 0) return null;
+  const deslocado = Number((n * f).toPrecision(15));
+  const arred = deslocado >= 0 ? Math.ceil(deslocado - 1e-10) : Math.floor(deslocado + 1e-10);
+  return arred / f;
+}
+
+function arredondarDentro(n: number, casas: number): number | null {
+  const f = fatorDez(casas);
+  if (!Number.isFinite(f) || f === 0) return null;
+  return Math.trunc(Number((n * f).toPrecision(15))) / f;
+}
+
+function multiploExcel(n: number, sig: number, cima: boolean): number | null {
+  if (!Number.isFinite(n) || !Number.isFinite(sig) || sig === 0) return null;
+  const q = n / sig;
+  const ajustado = Number(q.toPrecision(15));
+  const passo = cima ? Math.ceil(ajustado - 1e-10) : Math.floor(ajustado + 1e-10);
+  return passo * sig;
+}
+
+function avaliarChamadaFormula(nomeBruto: string, args: AstFormula[]): ValorFormula | null {
+  const nome = ALIAS_FUNCAO[canonNomeFuncao(nomeBruto)];
+  if (!nome) return null;
+  if (nome === 'SE') {
+    if (args.length < 2 || args.length > 3) return null;
+    const cond = avaliarAstFormula(args[0]!);
+    if (!cond) return null;
+    if (boolDaFormula(cond)) return avaliarAstFormula(args[1]!);
+    if (args.length === 3) return avaliarAstFormula(args[2]!);
+    return { k: 'n', v: 0 };
+  }
+  if (nome === 'SEERRO') {
+    if (args.length !== 2) return null;
+    return avaliarAstFormula(args[0]!) ?? avaliarAstFormula(args[1]!);
+  }
+  if (nome === 'E' || nome === 'OU') {
+    if (!args.length) return null;
+    let acc = nome === 'E';
+    for (const arg of args) {
+      const v = avaliarAstFormula(arg);
+      if (!v) return null;
+      const b = boolDaFormula(v);
+      acc = nome === 'E' ? acc && b : acc || b;
+    }
+    return { k: 'b', v: acc };
+  }
+  if (nome === 'NAO') {
+    if (args.length !== 1) return null;
+    const v = avaliarAstFormula(args[0]!);
+    if (!v) return null;
+    return { k: 'b', v: !boolDaFormula(v) };
+  }
+  if (nome === 'PI') {
+    if (args.length) return null;
+    return { k: 'n', v: Math.PI };
+  }
+  const nums = numerosDaChamada(args);
+  if (!nums) return null;
+  if (nome === 'SOMA') {
+    if (!nums.length) return null;
+    return { k: 'n', v: nums.reduce((s, n) => s + n, 0) };
+  }
+  if (nome === 'MEDIA') {
+    if (!nums.length) return null;
+    return { k: 'n', v: nums.reduce((s, n) => s + n, 0) / nums.length };
+  }
+  if (nome === 'MAXIMO') {
+    if (!nums.length) return null;
+    return { k: 'n', v: Math.max(...nums) };
+  }
+  if (nome === 'MINIMO') {
+    if (!nums.length) return null;
+    return { k: 'n', v: Math.min(...nums) };
+  }
+  if (nome === 'MULT') {
+    if (!nums.length) return null;
+    return { k: 'n', v: nums.reduce((s, n) => s * n, 1) };
+  }
+  if (nome === 'ABS' && nums.length === 1) return { k: 'n', v: Math.abs(nums[0]!) };
+  if (nome === 'SINAL' && nums.length === 1) {
+    return { k: 'n', v: nums[0]! > 0 ? 1 : nums[0]! < 0 ? -1 : 0 };
+  }
+  if (nome === 'INT' && nums.length === 1) return { k: 'n', v: Math.floor(nums[0]!) };
+  if (nome === 'RAIZ' && nums.length === 1) {
+    return nums[0]! < 0 ? null : { k: 'n', v: Math.sqrt(nums[0]!) };
+  }
+  if (nome === 'GRAUS' && nums.length === 1) return { k: 'n', v: (nums[0]! * 180) / Math.PI };
+  if (nome === 'RADIANOS' && nums.length === 1) return { k: 'n', v: (nums[0]! * Math.PI) / 180 };
+  if (nome === 'SEN' && nums.length === 1) return { k: 'n', v: Math.sin(nums[0]!) };
+  if (nome === 'COS' && nums.length === 1) return { k: 'n', v: Math.cos(nums[0]!) };
+  if (nome === 'TAN' && nums.length === 1) return { k: 'n', v: Math.tan(nums[0]!) };
+  if (nome === 'ASEN' && nums.length === 1) return { k: 'n', v: Math.asin(nums[0]!) };
+  if (nome === 'ACOS' && nums.length === 1) return { k: 'n', v: Math.acos(nums[0]!) };
+  if (nome === 'ATAN' && nums.length === 1) return { k: 'n', v: Math.atan(nums[0]!) };
+  if (nome === 'LN' && nums.length === 1) return nums[0]! <= 0 ? null : { k: 'n', v: Math.log(nums[0]!) };
+  if (nome === 'LOG10' && nums.length === 1) {
+    return nums[0]! <= 0 ? null : { k: 'n', v: Math.log10(nums[0]!) };
+  }
+  if (nome === 'LOG') {
+    if (nums.length < 1 || nums.length > 2 || nums[0]! <= 0) return null;
+    const base = nums.length === 2 ? nums[1]! : 10;
+    if (base <= 0 || base === 1) return null;
+    return { k: 'n', v: Math.log(nums[0]!) / Math.log(base) };
+  }
+  if (nome === 'EXP' && nums.length === 1) return { k: 'n', v: Math.exp(nums[0]!) };
+  if (nome === 'FATORIAL' && nums.length === 1) {
+    const n = nums[0]!;
+    if (n < 0 || n > 170 || !Number.isInteger(n)) return null;
+    let acc = 1;
+    for (let i = 2; i <= n; i += 1) acc *= i;
+    return { k: 'n', v: acc };
+  }
+  if (nome === 'ARRED') {
+    if (nums.length < 1 || nums.length > 2) return null;
+    const v = arredondarMetade(nums[0]!, nums[1] ?? 0);
+    return v == null ? null : { k: 'n', v };
+  }
+  if (nome === 'CIMA') {
+    if (nums.length < 1 || nums.length > 2) return null;
+    const v = arredondarFora(nums[0]!, nums[1] ?? 0);
+    return v == null ? null : { k: 'n', v };
+  }
+  if (nome === 'BAIXO' || nome === 'TRUNCAR') {
+    if (nums.length < 1 || nums.length > 2) return null;
+    const v = arredondarDentro(nums[0]!, nums[1] ?? 0);
+    return v == null ? null : { k: 'n', v };
+  }
+  if (nome === 'MOD' && nums.length === 2) {
+    if (nums[1] === 0) return null;
+    return { k: 'n', v: nums[0]! - nums[1]! * Math.floor(nums[0]! / nums[1]!) };
+  }
+  if (nome === 'POTENCIA' && nums.length === 2) return { k: 'n', v: nums[0]! ** nums[1]! };
+  if (nome === 'QUOCIENTE' && nums.length === 2) {
+    if (nums[1] === 0) return null;
+    return { k: 'n', v: Math.trunc(nums[0]! / nums[1]!) };
+  }
+  if (nome === 'TETO' || nome === 'PISO') {
+    if (nums.length < 1 || nums.length > 2) return null;
+    const v = multiploExcel(nums[0]!, nums[1] ?? 1, nome === 'TETO');
+    return v == null ? null : { k: 'n', v };
+  }
+  if (nome === 'TETO.MAT' || nome === 'PISO.MAT') {
+    if (nums.length < 1 || nums.length > 2) return null;
+    const v = multiploExcel(nums[0]!, nums[1] ?? 1, nome === 'TETO.MAT');
+    return v == null ? null : { k: 'n', v };
+  }
+  return null;
+}
+
+function analisarFormula(expr: string): AstFormula | null {
+  const toks = tokenizarFormula(expr);
+  if (!toks) return null;
+  let i = 0;
+  const peek = () => toks[i]!;
+  const come = (t: string, v?: string) => {
+    const atual = peek();
+    if (atual.t !== t || (v != null && atual.v !== v)) return false;
+    i += 1;
+    return true;
+  };
+  const parseCmp = (): AstFormula | null => {
+    let l = parseAdd();
+    if (!l) return null;
+    while (peek().t === 'op' && ['=', '<>', '<', '>', '<=', '>='].includes(String(peek().v))) {
+      const op = String(peek().v) as AstFormula & { t: 'cmp' } extends never ? string : '=' | '<>' | '<' | '>' | '<=' | '>=';
+      i += 1;
+      const r = parseAdd();
+      if (!r) return null;
+      l = { t: 'cmp', op, l, r };
+    }
+    return l;
+  };
+  const parseAdd = (): AstFormula | null => {
+    let l = parseMul();
+    if (!l) return null;
+    while (peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
+      const op = peek().v as '+' | '-';
+      i += 1;
+      const r = parseMul();
+      if (!r) return null;
+      l = { t: 'bin', op, l, r };
+    }
+    return l;
+  };
+  const parseMul = (): AstFormula | null => {
+    let l = parsePow();
+    if (!l) return null;
+    while (peek().t === 'op' && (peek().v === '*' || peek().v === '/')) {
+      const op = peek().v as '*' | '/';
+      i += 1;
+      const r = parsePow();
+      if (!r) return null;
+      l = { t: 'bin', op, l, r };
+    }
+    return l;
+  };
+  const parsePow = (): AstFormula | null => {
+    const l = parseUn();
+    if (!l) return null;
+    if (peek().t === 'op' && peek().v === '^') {
+      i += 1;
+      const r = parsePow();
+      if (!r) return null;
+      return { t: 'bin', op: '^', l, r };
+    }
+    return l;
+  };
+  const parseUn = (): AstFormula | null => {
+    if (peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
+      const op = peek().v as '+' | '-';
+      i += 1;
+      const x = parseUn();
+      if (!x) return null;
+      return { t: 'un', op, x };
+    }
+    return parsePrim();
+  };
+  const parsePrim = (): AstFormula | null => {
+    if (come('num')) return { t: 'num', v: Number(toks[i - 1]!.v) };
+    if (peek().t === 'id') {
+      const name = String(peek().v);
+      i += 1;
+      if (!come('lp')) return null;
+      const args: AstFormula[] = [];
+      if (!come('rp')) {
+        while (true) {
+          const arg = parseCmp();
+          if (!arg) return null;
+          args.push(arg);
+          if (come('rp')) break;
+          if (!come('sep')) return null;
+        }
+      }
+      return { t: 'call', name, args };
+    }
+    if (!come('lp')) return null;
+    const inner = parseCmp();
+    if (!inner || !come('rp')) return null;
+    return inner;
+  };
+  const ast = parseCmp();
+  if (!ast || peek().t !== 'eof') return null;
+  return ast;
+}
+
+function avaliarExpressaoFormula(expr: string): number | null {
+  const ast = analisarFormula(expr);
+  if (!ast) return null;
+  const valor = avaliarAstFormula(ast);
+  const n = valor ? numeroDaFormula(valor) : null;
+  return n != null && Number.isFinite(n) ? n : null;
+}
+
+/** Valor de uma fórmula da memória (`=C+L+N`, `=ARRED(C;2)`) ou de um número digitado. */
 export function avaliarFormulaMedicao(
   raw: string,
   rowCtx?: ContextoFormulaMedicao,
@@ -470,20 +1057,15 @@ export function avaliarFormulaMedicao(
 ): number | null {
   const text = String(raw ?? '').trim();
   if (text.startsWith('=')) {
-    let s = text.slice(1).trim().replace(/,/g, '.');
+    let s = text.slice(1).trim();
     if (resolverExterna && s.includes('{')) {
       const externo = substituirRefsFormulaExternas(s, resolverExterna);
       if (!externo.ok) return null;
       s = externo.expr;
     }
     if (rowCtx) s = substituirRefsFormulaLinha(s, rowCtx);
-    if (!s || !/^[\d\s+\-*/.()]+$/.test(s)) return null;
-    try {
-      const result = new Function(`return (${s})`)();
-      return typeof result === 'number' && isFinite(result) ? result : null;
-    } catch {
-      return null;
-    }
+    if (!s) return null;
+    return avaliarExpressaoFormula(s);
   }
   const t = text.replace(/^=/, '').trim();
   if (!t) return null;
