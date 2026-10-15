@@ -832,6 +832,7 @@ type PreparedOcCreateData = {
   boletoAttachmentName: string | null;
   paymentBoletoInstallments?: Prisma.InputJsonValue;
   freightAmount: Decimal;
+  discountAmount: Decimal;
   freightType: string | null;
   totvsDestination: string | null;
   totvsCodFilial: number | null;
