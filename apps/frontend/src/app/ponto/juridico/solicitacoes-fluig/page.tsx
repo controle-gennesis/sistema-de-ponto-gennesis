@@ -22,6 +22,7 @@ export default function SolicitacoesFluigJuridicoPage() {
           useEmployeeListLayout: true,
           showExportButton: true,
           showMirrorSyncButton: true,
+          showEmpreitaFilter: true,
           leadTimeColumn: 'START_DATE',
           naturezaOrcamentariaColumn: 'natureza',
           responsavelColumn: 'responsavel_solicitacao',

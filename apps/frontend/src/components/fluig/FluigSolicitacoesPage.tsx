@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Layers,
   Truck,
+  HardHat,
   Users,
   User,
   Landmark,
@@ -925,6 +926,9 @@ type FluigSolicitacoesPageConfig = {
   naturezaOrcamentariaColumn?: string;
   /** Nome exato da coluna Fluig do responsável/solicitante (opcional). */
   responsavelColumn?: string;
+  /** Filtro e coluna de empreiteiro a partir do Nome Social da solicitação. */
+  showEmpreitaFilter?: boolean;
+  empreitaColumn?: string;
 };
 
 /** Histórico / título com “Ver mais”, no padrão PNCP. */
@@ -995,7 +999,8 @@ type FluigFilterCategory =
   | 'responsavel'
   | 'urgencia'
   | 'fornecedor'
-  | 'naturezaOrcamentaria';
+  | 'naturezaOrcamentaria'
+  | 'empreita';
 
 const NO_TOUCHED_FILTERS: Record<FluigFilterCategory, boolean> = {
   filial: false,
@@ -1005,6 +1010,7 @@ const NO_TOUCHED_FILTERS: Record<FluigFilterCategory, boolean> = {
   urgencia: false,
   fornecedor: false,
   naturezaOrcamentaria: false,
+  empreita: false,
 };
 
 const EMPTY_FLUIG_VALUES: Record<string, unknown>[] = [];
@@ -1036,6 +1042,7 @@ export function FluigSolicitacoesPage({
   const [selectedUrgencias, setSelectedUrgencias] = useState<string[]>([]);
   const [selectedFornecedores, setSelectedFornecedores] = useState<string[]>([]);
   const [selectedNaturezasOrcamentarias, setSelectedNaturezasOrcamentarias] = useState<string[]>([]);
+  const [selectedEmpreitas, setSelectedEmpreitas] = useState<string[]>([]);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [periodFrom, setPeriodFrom] = useState('');
@@ -1732,6 +1739,39 @@ export function FluigSolicitacoesPage({
     );
   }) ?? null;
   const fornecedorCol = currentColumns.find((c: string) => /^fornecedor$/i.test(c)) ?? null;
+  const empreitaCol = useMemo(() => {
+    if (!config?.showEmpreitaFilter) return null;
+    const pool = Array.from(
+      new Set([
+        ...currentColumns,
+        ...(currentValuesFilteredByFilial[0]
+          ? Object.keys(currentValuesFilteredByFilial[0] as Record<string, unknown>)
+          : []),
+      ])
+    );
+    const override = config.empreitaColumn?.trim();
+    if (override) {
+      const low = override.toLowerCase();
+      const exact = pool.find((c) => c === override || c.toLowerCase() === low);
+      if (exact) return exact;
+    }
+    return (
+      pool.find((c) => {
+        const n = c
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[_\s-]+/g, ' ')
+          .trim()
+          .toLowerCase();
+        return n === 'nome social';
+      }) ?? null
+    );
+  }, [
+    config?.showEmpreitaFilter,
+    config?.empreitaColumn,
+    currentColumns,
+    currentValuesFilteredByFilial,
+  ]);
   const setorSolicitanteCol =
     currentColumns.find((c: string) => /^setor[_\s-]?solicitante$/i.test(c))
     ?? currentColumns.find((c: string) => /setor.*solicitante|solicitante.*setor/i.test(c))
@@ -1908,6 +1948,17 @@ export function FluigSolicitacoesPage({
     return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, fornecedorCol]);
 
+  const empreitas = useMemo(() => {
+    if (!empreitaCol) return EMPTY_STRING_OPTIONS;
+    const set = new Set<string>();
+    currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
+      const v = readFluigCellString(row, empreitaCol);
+      if (v && v !== '—') set.add(v);
+    });
+    const next = Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
+  }, [currentValuesFilteredByFilial, empreitaCol]);
+
   const getSetorSolicitanteValue = (row: Record<string, unknown>): string => {
     if (!setorSolicitanteCol) return '';
     const val = row[setorSolicitanteCol];
@@ -1969,10 +2020,10 @@ export function FluigSolicitacoesPage({
     if (!naturezaOrcamentariaCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
-      const v = getNaturezaOrcamentariaValue(row);
-      if (v) set.add(v);
+      const v = getNaturezaOrcamentariaDisplay(row);
+      if (v && v !== '—') set.add(v);
     });
-    const next = Array.from(set).sort();
+    const next = Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
     return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, naturezaOrcamentariaCol]);
 
@@ -1980,8 +2031,8 @@ export function FluigSolicitacoesPage({
     () =>
       naturezasOrcamentarias.map((n) => ({
         value: n,
-        label: formatFluigBudgetFieldDisplay(n) ?? n,
-        searchText: `${n} ${formatFluigBudgetFieldDisplay(n) ?? ''}`,
+        label: n,
+        searchText: n,
       })),
     [naturezasOrcamentarias]
   );
@@ -2040,6 +2091,11 @@ export function FluigSolicitacoesPage({
   }, [fornecedores, touchedFilters.fornecedor]);
 
   useEffect(() => {
+    if (touchedFilters.empreita) return;
+    setSelectedEmpreitas((prev) => (sameStringArray(prev, empreitas) ? prev : empreitas));
+  }, [empreitas, touchedFilters.empreita]);
+
+  useEffect(() => {
     if (touchedFilters.naturezaOrcamentaria) return;
     setSelectedNaturezasOrcamentarias((prev) =>
       sameStringArray(prev, naturezasOrcamentarias) ? prev : naturezasOrcamentarias
@@ -2073,6 +2129,7 @@ export function FluigSolicitacoesPage({
     ) ||
     isCategoryFiltered(touchedFilters.urgencia, urgenciaCol, urgencias, selectedUrgencias) ||
     isCategoryFiltered(touchedFilters.fornecedor, fornecedorCol, fornecedores, selectedFornecedores) ||
+    isCategoryFiltered(touchedFilters.empreita, empreitaCol, empreitas, selectedEmpreitas) ||
     isCategoryFiltered(
       touchedFilters.naturezaOrcamentaria,
       naturezaOrcamentariaCol,
@@ -2104,6 +2161,10 @@ export function FluigSolicitacoesPage({
       !!fornecedorCol
       && fornecedores.length > 0
       && (touchedFilters.fornecedor || selectedFornecedores.length > 0);
+    const applyEmpreita =
+      !!empreitaCol
+      && empreitas.length > 0
+      && (touchedFilters.empreita || selectedEmpreitas.length > 0);
     const applyNaturezaOrcamentaria =
       !!naturezaOrcamentariaCol
       && naturezasOrcamentarias.length > 0
@@ -2115,6 +2176,7 @@ export function FluigSolicitacoesPage({
     const byResponsaveis = applyResponsavel ? new Set(selectedResponsaveis) : null;
     const byUrgencias = applyUrgencia ? new Set(selectedUrgencias) : null;
     const byFornecedores = applyFornecedor ? new Set(selectedFornecedores) : null;
+    const byEmpreitas = applyEmpreita ? new Set(selectedEmpreitas) : null;
     const byNaturezasOrcamentarias = applyNaturezaOrcamentaria
       ? new Set(selectedNaturezasOrcamentarias)
       : null;
@@ -2130,7 +2192,9 @@ export function FluigSolicitacoesPage({
       if (byUrgencias && !byUrgencias.has(getUrgenciaValue(row))) return false;
       if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim()))
         return false;
-      if (byNaturezasOrcamentarias && !byNaturezasOrcamentarias.has(getNaturezaOrcamentariaValue(row)))
+      if (byEmpreitas && empreitaCol && !byEmpreitas.has(readFluigCellString(row, empreitaCol)))
+        return false;
+      if (byNaturezasOrcamentarias && !byNaturezasOrcamentarias.has(getNaturezaOrcamentariaDisplay(row)))
         return false;
       if (hasPeriodFilter) {
         const createdAt = movimentoDataHoraCol ? parseCellDate(row[movimentoDataHoraCol]) : null;
@@ -2173,6 +2237,7 @@ export function FluigSolicitacoesPage({
     selectedResponsaveis,
     selectedUrgencias,
     selectedFornecedores,
+    selectedEmpreitas,
     selectedNaturezasOrcamentarias,
     searchText,
     currentColumns,
@@ -2184,6 +2249,7 @@ export function FluigSolicitacoesPage({
     responsavelMemberToLabel,
     urgenciaCol,
     fornecedorCol,
+    empreitaCol,
     naturezaOrcamentariaCol,
     filiais.length,
     centrosCusto.length,
@@ -2191,6 +2257,7 @@ export function FluigSolicitacoesPage({
     responsaveis.length,
     urgencias.length,
     fornecedores.length,
+    empreitas.length,
     naturezasOrcamentarias.length,
     touchedFilters,
     hasPeriodFilter,
@@ -2224,6 +2291,7 @@ export function FluigSolicitacoesPage({
     setSelectedResponsaveis([...responsaveis]);
     setSelectedUrgencias([...urgencias]);
     setSelectedFornecedores([...fornecedores]);
+    setSelectedEmpreitas([...empreitas]);
     setSelectedNaturezasOrcamentarias([...naturezasOrcamentarias]);
     setPeriodFrom('');
     setPeriodTo('');
@@ -2338,6 +2406,21 @@ export function FluigSolicitacoesPage({
                     placeholder="Todos"
                     searchPlaceholder="Pesquisar..."
                     icon={<Layers className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {empreitaCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Empreita"
+                    options={empreitas.map((nome) => ({ value: nome, label: nome }))}
+                    selected={selectedEmpreitas}
+                    onChange={(next) => {
+                      markFilterTouched('empreita');
+                      setSelectedEmpreitas(next);
+                    }}
+                    placeholder="Todas"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<HardHat className="h-4 w-4" />}
                     noFocusRing
                   />
                 ) : null}
@@ -2719,6 +2802,7 @@ export function FluigSolicitacoesPage({
                       const listShowFilial = useEmployeeListLayout && !!filialCol && !hideFilialFilter;
                       const listShowCC = useEmployeeListLayout && !!ccColResolved;
                       const listShowNatureza = useEmployeeListLayout && !!naturezaOrcamentariaCol;
+                      const listShowEmpreiteiro = useEmployeeListLayout && !!empreitaCol;
                       const listShowFornecedor = useEmployeeListLayout && !!fornecedorCol;
                       const listShowResponsavel = useEmployeeListLayout && !!responsavelCol;
                       const thPad = 'py-4';
@@ -2730,6 +2814,7 @@ export function FluigSolicitacoesPage({
                           (listShowFilial ? 1 : 0) +
                           (listShowCC ? 1 : 0) +
                           (listShowNatureza ? 1 : 0) +
+                          (listShowEmpreiteiro ? 1 : 0) +
                           (listShowFornecedor ? 1 : 0) +
                           (listShowResponsavel ? 1 : 0) +
                           (showCreationDateColumn ? 1 : 0) +
@@ -2799,6 +2884,13 @@ export function FluigSolicitacoesPage({
                                           className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
                                         >
                                           Natureza
+                                        </th>
+                                      )}
+                                      {listShowEmpreiteiro && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[12rem]`}
+                                        >
+                                          Empreiteiro
                                         </th>
                                       )}
                                       {listShowFornecedor && (
@@ -2983,6 +3075,18 @@ export function FluigSolicitacoesPage({
                                                 title={getNaturezaOrcamentariaDisplay(row) || undefined}
                                               >
                                                 {getNaturezaOrcamentariaDisplay(row) || '—'}
+                                              </span>
+                                            </td>
+                                          )}
+                                          {listShowEmpreiteiro && empreitaCol && (
+                                            <td
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 max-w-[16rem]`}
+                                            >
+                                              <span
+                                                className="line-clamp-2 mx-auto inline-block max-w-[16rem] text-center align-middle"
+                                                title={readFluigCellString(row, empreitaCol) || undefined}
+                                              >
+                                                {readFluigCellString(row, empreitaCol) || '—'}
                                               </span>
                                             </td>
                                           )}
