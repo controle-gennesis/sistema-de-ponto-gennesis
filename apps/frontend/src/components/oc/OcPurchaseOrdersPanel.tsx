@@ -218,8 +218,9 @@ export interface PurchaseOrder {
   paymentProofName?: string | null;
   /** JSON: [{ url, name, uploadedAt }] — NFs após validação do comprovante */
   nfAttachments?: unknown;
-  /** Frete (R$). Total a pagar = soma dos itens + frete. */
+  /** Frete (R$). Total a pagar = soma dos itens + frete − desconto. */
   freightAmount?: number | string | null;
+  discountAmount?: number | string | null;
   freightType?: string | null;
   totvsCodFilial?: number | string | null;
   stockLocationId?: string | null;
@@ -584,7 +585,7 @@ function orderAlreadyHasNfNumber(
 }
 
 /** Total da OC na listagem: itens + frete (fallback em registros antigos só com amountToPay). */
-function orderGrandTotal(o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'amountToPay'>): number {
+function orderGrandTotal(o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'discountAmount' | 'amountToPay'>): number {
   const pricedItems = (o.items ?? []).filter((i) => {
     if (i.totalPrice == null) return false;
     return Number.isFinite(Number(i.totalPrice));
@@ -602,8 +603,13 @@ function orderGrandTotal(o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'amo
   }
   const items = pricedItems.reduce((s, i) => s + Number(i.totalPrice), 0);
   const fRaw = o.freightAmount;
+  const discountRaw = o.discountAmount;
+  const discount =
+    discountRaw != null && discountRaw !== '' && Number.isFinite(Number(discountRaw))
+      ? Number(discountRaw)
+      : 0;
   if (fRaw != null && fRaw !== '' && Number.isFinite(Number(fRaw))) {
-    return Math.round((items + Number(fRaw)) * 100) / 100;
+    return Math.max(0, Math.round((items + Number(fRaw) - discount) * 100) / 100);
   }
   if (o.amountToPay != null && o.amountToPay !== '' && Number.isFinite(Number(o.amountToPay))) {
     return Number(o.amountToPay);

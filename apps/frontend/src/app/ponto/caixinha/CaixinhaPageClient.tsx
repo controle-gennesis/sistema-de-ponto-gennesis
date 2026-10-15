@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building2,
+  CheckCircle2,
   Filter,
   HardHat,
   Loader2,
@@ -79,6 +80,7 @@ type CaixinhaPurchase = {
   notes: string | null;
   invoicePdfUrl: string | null;
   invoicePdfName: string | null;
+  status?: 'PENDENTE' | 'PAGO';
 };
 
 type CaixinhaOptions = {
@@ -532,6 +534,19 @@ export default function CaixinhaPageClient() {
     }
   });
 
+  const markPaidMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.patch(`/caixinha/${id}/pagar`);
+    },
+    onSuccess: () => {
+      toast.success('Lançamento marcado como OK');
+      void queryClient.invalidateQueries({ queryKey: ['caixinha-purchases'] });
+    },
+    onError: (err: { response?: { data?: { message?: string; error?: string } } }) => {
+      toast.error(err?.response?.data?.message || err?.response?.data?.error || 'Falha ao marcar como OK');
+    }
+  });
+
   const uploadPdf = async (file: File) => {
     setUploadingPdf(true);
     setInvoiceDragOver(false);
@@ -712,6 +727,7 @@ export default function CaixinhaPageClient() {
                           <th className={cadastroListClasses.thCenter}>Obra</th>
                           <th className={cadastroListClasses.thCenter}>Solicitante</th>
                           <th className={cadastroListClasses.thCenter}>Data compra</th>
+                          <th className={cadastroListClasses.thCenter}>Status</th>
                           <th className={cadastroListClasses.thNumeric}>Valor</th>
                           <th className={cadastroListClasses.thRight}>Ação</th>
                         </tr>
@@ -747,6 +763,17 @@ export default function CaixinhaPageClient() {
                               </p>
                             </td>
                             <td className={cadastroListClasses.tdCenter}>{formatDateBr(row.purchaseDate)}</td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              {row.status === 'PAGO' ? (
+                                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                  OK
+                                </span>
+                              ) : (
+                                <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                                  Pendente
+                                </span>
+                              )}
+                            </td>
                             <td className={`${cadastroListClasses.td} text-right tabular-nums`}>
                               {formatBRL(Number(row.amount) || 0)}
                             </td>
@@ -774,6 +801,19 @@ export default function CaixinhaPageClient() {
                       deleteMutation.mutate(rowForActionMenu.id);
                     }
                   }}
+                  extraItems={
+                    rowForActionMenu.status === 'PAGO'
+                      ? []
+                      : [
+                          {
+                            label: 'OK',
+                            tone: 'success',
+                            icon: <CheckCircle2 className="h-4 w-4 shrink-0" />,
+                            disabled: markPaidMutation.isPending,
+                            onClick: () => markPaidMutation.mutate(rowForActionMenu.id),
+                          },
+                        ]
+                  }
                 />
               ) : null}
             </CardContent>

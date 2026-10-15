@@ -63,6 +63,7 @@ function serialize(row: CaixinhaPurchase) {
     notes: row.notes,
     invoicePdfUrl: row.invoicePdfUrl,
     invoicePdfName: row.invoicePdfName,
+    status: row.status === 'PAGO' ? 'PAGO' : 'PENDENTE',
     createdById: row.createdById,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -297,6 +298,7 @@ export class CaixinhaPurchaseController {
           notes: trimOrNull(body.notes),
           invoicePdfUrl: trimOrNull(body.invoicePdfUrl),
           invoicePdfName: trimOrNull(body.invoicePdfName),
+          status: 'PENDENTE',
           createdById: userId,
         },
       });
@@ -369,6 +371,34 @@ export class CaixinhaPurchaseController {
         success: true,
         data: serialize(row),
         message: 'Lançamento atualizado com sucesso',
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async markPaid(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const existing = await prisma.caixinhaPurchase.findUnique({ where: { id: req.params.id } });
+      if (!existing) throw createError('Lançamento não encontrado', 404);
+      await assertCanSeePurchase(req, existing);
+
+      if (existing.status === 'PAGO') {
+        return res.json({
+          success: true,
+          data: serialize(existing),
+          message: 'Lançamento já está OK',
+        });
+      }
+
+      const row = await prisma.caixinhaPurchase.update({
+        where: { id: existing.id },
+        data: { status: 'PAGO' },
+      });
+      return res.json({
+        success: true,
+        data: serialize(row),
+        message: 'Lançamento marcado como OK',
       });
     } catch (error) {
       return next(error);
