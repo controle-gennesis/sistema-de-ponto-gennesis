@@ -80,7 +80,7 @@ function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay
 
 /** Total da OC (itens + frete, ou amountToPay quando ainda sem linhas). */
 export function purchaseOrderGrandTotal(
-  o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'amountToPay'>
+  o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'discountAmount' | 'amountToPay'>
 ): number {
   const hasLineItems = (o.items?.length ?? 0) > 0;
   if (!hasLineItems) {
@@ -89,7 +89,12 @@ export function purchaseOrderGrandTotal(
   }
   const items = itemsSubtotal(o.items);
   const freight = orderFreightValue(o);
-  return Math.round((items + freight) * 100) / 100;
+  const discountRaw = o.discountAmount;
+  const discount =
+    discountRaw != null && discountRaw !== '' && Number.isFinite(Number(discountRaw))
+      ? Number(discountRaw)
+      : 0;
+  return Math.max(0, Math.round((items + freight - discount) * 100) / 100);
 }
 
 function lineHasDisplayData(line: NonNullable<PurchaseOrder['items']>[number]): boolean {

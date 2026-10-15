@@ -2905,8 +2905,29 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
   }
 }
 
+async function ensureQuoteMapDiscountColumns(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'quote_map_suppliers')) {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "quote_map_suppliers"
+      ADD COLUMN IF NOT EXISTS "discount" DECIMAL(12,2) NOT NULL DEFAULT 0;
+    `);
+  }
+  if (await tableExists(prisma, 'purchase_orders')) {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "purchase_orders"
+      ADD COLUMN IF NOT EXISTS "discountAmount" DECIMAL(15,2) NOT NULL DEFAULT 0;
+    `);
+  }
+}
+
 async function ensureCaixinhaPurchasesTable(prisma: PrismaClient): Promise<void> {
-  if (await tableExists(prisma, 'caixinha_purchases')) return;
+  if (await tableExists(prisma, 'caixinha_purchases')) {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "caixinha_purchases"
+      ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'PENDENTE';
+    `);
+    return;
+  }
 
   console.warn(
     '[Schema] Tabela caixinha_purchases ausente — criando automaticamente. ' +
@@ -2932,6 +2953,7 @@ async function ensureCaixinhaPurchasesTable(prisma: PrismaClient): Promise<void>
       "notes" TEXT,
       "invoicePdfUrl" TEXT,
       "invoicePdfName" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'PENDENTE',
       "createdById" TEXT NOT NULL,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3194,6 +3216,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureEmpreiteirosTable(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);
+    await ensureQuoteMapDiscountColumns(prisma);
     await repairInflatedFuelLiters(prisma);
     await ensureFuelWeeklyQuotaColumns(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');

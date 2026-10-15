@@ -570,6 +570,7 @@ export default function MapaCotacaoPage() {
   const [selectedRequestId, setSelectedRequestId] = useState<string>('');
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<Set<string>>(new Set());
   const [freightBySupplier, setFreightBySupplier] = useState<Record<string, string>>({});
+  const [discountBySupplier, setDiscountBySupplier] = useState<Record<string, string>>({});
   const [unitPriceBySupplierItem, setUnitPriceBySupplierItem] = useState<Record<string, string>>({});
 
   const [quoteMapId, setQuoteMapId] = useState<string>('');
@@ -890,6 +891,7 @@ export default function MapaCotacaoPage() {
     setSelectedSuppliersById({});
     setSupplierSearch('');
     setFreightBySupplier({});
+    setDiscountBySupplier({});
     setUnitPriceBySupplierItem({});
     setSupplierItemDetailByKey({});
     setPaymentDraftBySupplier({});
@@ -917,6 +919,14 @@ export default function MapaCotacaoPage() {
 
     // inicializa fretes e preços unitários como vazio (não sobrescreve se já existir)
     setFreightBySupplier((prev) => {
+      const next = { ...prev };
+      for (const supId of Array.from(selectedSupplierIds)) {
+        if (next[supId] === undefined) next[supId] = '';
+      }
+      return next;
+    });
+
+    setDiscountBySupplier((prev) => {
       const next = { ...prev };
       for (const supId of Array.from(selectedSupplierIds)) {
         if (next[supId] === undefined) next[supId] = '';
@@ -1044,9 +1054,10 @@ export default function MapaCotacaoPage() {
   }, [winnersByItem, ocItems, selectedSupplierIds]);
 
   const computedSupplierTotals = useMemo(() => {
-    const out: Record<string, { itemsTotal: number; freight: number; amountToPay: number }> = {};
+    const out: Record<string, { itemsTotal: number; freight: number; discount: number; amountToPay: number }> = {};
     for (const supplierId of Array.from(selectedSupplierIds)) {
       const freight = parseMapUnitPrice(freightBySupplier[supplierId] ?? '') ?? 0;
+      const discount = parseMapUnitPrice(discountBySupplier[supplierId] ?? '') ?? 0;
       const items = wonItemsBySupplier[supplierId] ?? [];
       let itemsTotal = 0;
       for (const item of items) {
@@ -1056,10 +1067,12 @@ export default function MapaCotacaoPage() {
         const q = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
         itemsTotal += unitPrice * q;
       }
-      out[supplierId] = { itemsTotal, freight, amountToPay: itemsTotal + freight };
+      const base = itemsTotal + freight;
+      const amountToPay = Math.max(0, Math.round((base - discount) * 100) / 100);
+      out[supplierId] = { itemsTotal, freight, discount, amountToPay };
     }
     return out;
-  }, [selectedSupplierIds, wonItemsBySupplier, freightBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
+  }, [selectedSupplierIds, wonItemsBySupplier, freightBySupplier, discountBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
 
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -1069,6 +1082,7 @@ export default function MapaCotacaoPage() {
     setSelectedSupplierIds(new Set());
     setOcModalSupplierId(null);
     setFreightBySupplier({});
+    setDiscountBySupplier({});
     setUnitPriceBySupplierItem({});
     setSupplierItemDetailByKey({});
     setPaymentDraftBySupplier({});
@@ -1151,18 +1165,30 @@ export default function MapaCotacaoPage() {
         // 2) Salvar cotações + frete no banco (isso recalcula vencedor por item no backend)
         const selectedSupplierIdsArr = Array.from(selectedSupplierIds);
         const freightBySupplierPayload: Record<string, number> = {};
+        const discountBySupplierPayload: Record<string, number> = {};
         for (const sid of selectedSupplierIdsArr) {
+          const nome = suppliers.find((s) => s.id === sid)?.name ?? 'fornecedor selecionado';
           const rawFrete = freightBySupplier[sid] ?? '';
           const parsed = parseMapUnitPrice(rawFrete);
           // Campo vazio = sem frete (0), igual ao resumo exibido na tela
           const f = rawFrete.trim() === '' ? 0 : parsed;
           if (f == null || f < 0) {
-            const nome = suppliers.find((s) => s.id === sid)?.name ?? 'fornecedor selecionado';
             throw new Error(
               `Frete inválido para "${nome}". Use um valor numérico válido (ex.: 0,00 ou 8,00).`
             );
           }
+          const rawDesconto = discountBySupplier[sid] ?? '';
+          const parsedDiscount = parseMapUnitPrice(rawDesconto);
+          const d = rawDesconto.trim() === '' ? 0 : parsedDiscount;
+          if (d == null || d < 0) {
+            throw new Error(`Desconto inválido para "${nome}".`);
+          }
+          const totals = computedSupplierTotals[sid];
+          if (totals && d > totals.itemsTotal + totals.freight + 0.001) {
+            throw new Error(`Desconto de "${nome}" é maior que itens + frete.`);
+          }
           freightBySupplierPayload[sid] = f;
+          discountBySupplierPayload[sid] = d;
         }
 
         const unitPricesPayload: Array<{
@@ -1194,6 +1220,7 @@ export default function MapaCotacaoPage() {
         await api.put(`/quote-maps/${mapId}/quotes`, {
           supplierIds: selectedSupplierIdsArr,
           freightBySupplier: freightBySupplierPayload,
+          discountBySupplier: discountBySupplierPayload,
           unitPrices: unitPricesPayload,
           itemQuantities: itemQuantitiesForSave,
         });
@@ -1696,6 +1723,39 @@ export default function MapaCotacaoPage() {
                                     colSpan={7}
                                     className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
                                   >
+                                    Desconto
+                                  </td>
+                                  {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
+                                    const sup = suppliers.find((x) => x.id === supplierId);
+                                    const borderCls = `border-l border-gray-200 dark:border-gray-700 ${
+                                      supplierIndex === supplierIds.length - 1
+                                        ? 'border-r border-gray-200 dark:border-gray-700'
+                                        : ''
+                                    }`;
+                                    return (
+                                      <MapFreightCell
+                                        key={`desconto-${supplierId}`}
+                                        value={discountBySupplier[supplierId] ?? ''}
+                                        borderClassName={borderCls}
+                                        ariaLabel={`Desconto ${sup?.name ?? supplierId}`}
+                                        onChange={(next) => {
+                                          setDiscountBySupplier((prev) => ({
+                                            ...prev,
+                                            [supplierId]: next,
+                                          }));
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                  <td className={cadastroListClasses.tdCenter} />
+                                </tr>
+                              ) : null}
+                              {selectedSupplierIds.size > 0 ? (
+                                <tr className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40">
+                                  <td
+                                    colSpan={7}
+                                    className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
+                                  >
                                     Valor total
                                   </td>
                                   {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
@@ -1883,6 +1943,12 @@ export default function MapaCotacaoPage() {
                         Frete:{' '}
                         <span className="font-medium text-gray-800 dark:text-gray-200">
                           {formatCurrencyBR(totals.freight)}
+                        </span>
+                      </span>
+                      <span>
+                        Desconto:{' '}
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {formatCurrencyBR(totals.discount)}
                         </span>
                       </span>
                       <span>

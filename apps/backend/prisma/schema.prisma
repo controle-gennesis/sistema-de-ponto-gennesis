@@ -2130,6 +2130,8 @@ model PurchaseOrder {
   nfAttachments              Json?
   /// Frete informado na criaÃ§Ã£o (ou ediÃ§Ã£o em correÃ§Ã£o). Total a pagar = soma dos itens + frete.
   freightAmount              Decimal             @default(0) @db.Decimal(15, 2)
+  /// Desconto em R$ abatido do total (itens + frete).
+  discountAmount             Decimal             @default(0) @db.Decimal(15, 2)
   /// Tipo de frete TOTVS RM (TMOV.TIPOFRETE): C CIF, F FOB, T Terceiros, S Sem Frete, R Remetente, D DestinatÃ¡rio
   freightType                String?
   /// Destino da OC: CONECTA | TOTVS (derivado do CC na criaÃ§Ã£o)
@@ -2144,7 +2146,7 @@ model PurchaseOrder {
   totvsNumMovimento          String?
   totvsSentAt                DateTime?
   totvsSentBy                String?
-  amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
+  amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete − desconto
   notes                      String?
   /// [{ url, name }] â anexos gerais na criaÃ§Ã£o da OC
   attachments                Json?
@@ -2290,6 +2292,8 @@ model QuoteMapSupplier {
   quoteMapId String
   supplierId String
   freight    Decimal? @db.Decimal(12, 2)
+  /// Desconto em R$ sobre (itens ganhos + frete). Não altera o vencedor de cada item.
+  discount   Decimal  @default(0) @db.Decimal(12, 2)
 
   // Campos de pagamento (usados na geraÃ§Ã£o de OC) - opcionais
   paymentType          String?
@@ -2662,6 +2666,8 @@ model CaixinhaPurchase {
   notes          String?
   invoicePdfUrl  String?
   invoicePdfName String?
+  /// PENDENTE no lançamento novo; PAGO (exibido como OK) nos que já existiam e depois do OK na lista.
+  status         String    @default("PENDENTE")
   createdById    String
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

@@ -334,6 +334,7 @@ export class QuoteMapService {
       paymentCondition?: string | null;
       paymentDetails?: string | null;
       freightAmount?: number;
+      discountAmount?: number;
       amountToPay?: number | null;
       notes?: string | null;
       buyerName?: string | null;
@@ -421,6 +422,9 @@ export class QuoteMapService {
           freightAmount: linkedPo
             ? this.toNumber(linkedPo.freightAmount)
             : this.toNumber(qs.freight),
+          discountAmount: linkedPo
+            ? this.toNumber(linkedPo.discountAmount)
+            : this.toNumber(qs.discount),
           amountToPay:
             linkedPo?.amountToPay != null
               ? this.toNumber(linkedPo.amountToPay)
@@ -455,6 +459,7 @@ export class QuoteMapService {
           paymentCondition: po.paymentCondition,
           paymentDetails: po.paymentDetails,
           freightAmount: this.toNumber(po.freightAmount),
+          discountAmount: this.toNumber(po.discountAmount),
           amountToPay: po.amountToPay != null ? this.toNumber(po.amountToPay) : null,
           notes: po.notes,
           buyerName: po.creator?.name || map.creator?.name || null,
@@ -508,6 +513,7 @@ export class QuoteMapService {
           paymentCondition: po.paymentCondition,
           paymentDetails: po.paymentDetails,
           freightAmount: this.toNumber(po.freightAmount),
+          discountAmount: this.toNumber(po.discountAmount),
           amountToPay: po.amountToPay != null ? this.toNumber(po.amountToPay) : null,
           notes: po.notes,
           buyerName: po.creator?.name || map.creator?.name || null,
@@ -569,6 +575,7 @@ export class QuoteMapService {
           paymentCondition: qs?.paymentCondition,
           paymentDetails: qs?.paymentDetails,
           freightAmount: this.toNumber(qs?.freight),
+          discountAmount: this.toNumber(qs?.discount),
           amountToPay: qs?.amountToPay != null ? this.toNumber(qs.amountToPay) : null,
           notes: qs?.observations,
           buyerName: map.creator?.name || null,
@@ -1198,10 +1205,11 @@ export class QuoteMapService {
 
         // Totais
         const freight = section.freightAmount || 0;
+        const discount = section.discountAmount || 0;
         const totalCompra =
           section.amountToPay != null && Number.isFinite(section.amountToPay)
             ? section.amountToPay
-            : productsTotal + freight;
+            : Math.max(0, productsTotal + freight - discount);
         ensureSpace(48);
         y += 8;
         const labelW = 118;
@@ -1218,6 +1226,15 @@ export class QuoteMapService {
         if (freight > 0) {
           doc.text('FRETE:', totalsX, y, { width: labelW, align: 'right', lineBreak: false });
           doc.text(this.formatCurrency(freight), totalsX + labelW, y, {
+            width: valueW,
+            align: 'right',
+            lineBreak: false,
+          });
+          y += 13;
+        }
+        if (discount > 0) {
+          doc.text('DESCONTO:', totalsX, y, { width: labelW, align: 'right', lineBreak: false });
+          doc.text(this.formatCurrency(discount), totalsX + labelW, y, {
             width: valueW,
             align: 'right',
             lineBreak: false,
@@ -1351,6 +1368,7 @@ export class QuoteMapService {
     data: {
       supplierIds: string[];
       freightBySupplier: Record<string, number>;
+      discountBySupplier?: Record<string, number>;
       unitPrices: Array<{
         supplierId: string;
         materialRequestItemId: string;
@@ -1426,9 +1444,11 @@ export class QuoteMapService {
           quoteMapId,
           supplierId,
           freight: new Decimal(data.freightBySupplier[supplierId] ?? 0),
+          discount: new Decimal(data.discountBySupplier?.[supplierId] ?? 0),
         },
         update: {
           freight: new Decimal(data.freightBySupplier[supplierId] ?? 0),
+          discount: new Decimal(data.discountBySupplier?.[supplierId] ?? 0),
         },
       });
     }
@@ -1584,10 +1604,13 @@ export class QuoteMapService {
 
     const suppliers = await this.db.quoteMapSupplier.findMany({
       where: { quoteMapId, supplierId: { in: supplierIds } },
-      select: { supplierId: true, freight: true }
+      select: { supplierId: true, freight: true, discount: true }
     });
     const freightBySupplier: Record<string, Decimal> = Object.fromEntries(
       suppliers.map((s: any) => [s.supplierId, s.freight ? new Decimal(s.freight) : new Decimal(0)])
+    );
+    const discountBySupplier: Record<string, Decimal> = Object.fromEntries(
+      suppliers.map((s: any) => [s.supplierId, s.discount ? new Decimal(s.discount) : new Decimal(0)])
     );
 
     const paymentMap = new Map(
@@ -1687,6 +1710,8 @@ export class QuoteMapService {
       if (!pay) throw new Error(`Informe o pagamento para o fornecedor selecionado`);
 
       const freight = freightBySupplier[supplierId] ?? new Decimal(0);
+      const discount = discountBySupplier[supplierId] ?? new Decimal(0);
+      if (discount.lt(0)) throw new Error('Desconto não pode ser negativo');
       const winnerItems = itemsBySupplier[supplierId] ?? [];
 
       const items = (winnerItems as any[]).map((w: any) => {
@@ -1728,6 +1753,7 @@ export class QuoteMapService {
         boletoAttachmentName: pay.boletoAttachmentName,
         creationBoletoInstallments: pay.creationBoletoInstallments,
         freightAmount: Number(freight),
+        discountAmount: Number(discount),
         freightType: pay.freightType ?? null,
         totvsCodFilial: pay.totvsCodFilial ?? null,
         stockLocationId: pay.stockLocationId ?? null,

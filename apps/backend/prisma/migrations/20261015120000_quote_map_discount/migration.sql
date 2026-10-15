@@ -1,0 +1,5 @@
+ALTER TABLE "quote_map_suppliers"
+ADD COLUMN IF NOT EXISTS "discount" DECIMAL(12,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE "purchase_orders"
+ADD COLUMN IF NOT EXISTS "discountAmount" DECIMAL(15,2) NOT NULL DEFAULT 0;

@@ -717,8 +717,10 @@ export interface CreatePurchaseOrderData {
   boletoAttachmentName?: string;
   /** Um boleto por parcela quando a condição de pagamento tem parcelCount > 1. */
   creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string | null }>;
-  /** Frete (R$). Total a pagar gravado = soma dos itens + frete. */
+  /** Frete (R$). Total a pagar gravado = soma dos itens + frete − desconto. */
   freightAmount?: number;
+  /** Desconto em R$ abatido de (itens + frete). */
+  discountAmount?: number;
   /** Tipo de frete TOTVS (C/F/T/S/R/D). */
   freightType?: string | null;
   /** Filial TOTVS: 1 DF, 5 GO. */
@@ -830,6 +832,7 @@ type PreparedOcCreateData = {
   boletoAttachmentName: string | null;
   paymentBoletoInstallments?: Prisma.InputJsonValue;
   freightAmount: Decimal;
+  discountAmount: Decimal;
   freightType: string | null;
   totvsDestination: string | null;
   totvsCodFilial: number | null;
@@ -1070,7 +1073,17 @@ export class PurchaseOrderService {
     if (freight.lt(0)) {
       throw new Error('Frete não pode ser negativo');
     }
+    const discount =
+      data.discountAmount !== undefined && data.discountAmount !== null && !Number.isNaN(Number(data.discountAmount))
+        ? new Decimal(data.discountAmount)
+        : new Decimal(0);
+    if (discount.lt(0)) {
+      throw new Error('Desconto não pode ser negativo');
+    }
     const itemsSum = items.reduce((s, row) => s.plus(row.totalPrice), new Decimal(0));
+    if (discount.gt(itemsSum.plus(freight))) {
+      throw new Error('Desconto maior que o valor da compra');
+    }
 
     let totvsDestination: string | null = null;
     let totvsCodFilial: number | null = parseTotvsFilial(data.totvsCodFilial);
@@ -1108,7 +1121,7 @@ export class PurchaseOrderService {
         : totvsDestination === 'TOTVS'
           ? toTotvsPaymentCondition(data.paymentCondition, data.paymentType)
           : data.paymentCondition || null;
-    const amountToPay = itemsSum.plus(freight);
+    const amountToPay = itemsSum.plus(freight).minus(discount);
 
     let paymentBoletoInstallments: Prisma.InputJsonValue | undefined;
     let boletoAttachmentUrl = data.boletoAttachmentUrl || null;
@@ -1183,6 +1196,7 @@ export class PurchaseOrderService {
       boletoAttachmentName,
       ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
       freightAmount: freight,
+      discountAmount: discount,
       freightType,
       totvsDestination,
       totvsCodFilial,
@@ -2073,7 +2087,14 @@ export class PurchaseOrderService {
   async updateDetails(id: string, data: UpdatePurchaseOrderDetailsData, userId?: string) {
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, status: true, createdBy: true, freightAmount: true, totvsCodFilial: true }
+      select: {
+        id: true,
+        status: true,
+        createdBy: true,
+        freightAmount: true,
+        discountAmount: true,
+        totvsCodFilial: true,
+      }
     });
 
     if (!order) {
@@ -2151,7 +2172,12 @@ export class PurchaseOrderService {
         itemsSum = rows.reduce((s, it) => s.plus(new Decimal(it.totalPrice)), new Decimal(0));
       }
 
-      const amountToPay = itemsSum.plus(freightToStore);
+      const discountToStore =
+        order.discountAmount != null ? new Decimal(order.discountAmount) : new Decimal(0);
+      if (discountToStore.gt(itemsSum.plus(freightToStore))) {
+        throw new Error('Desconto maior que o valor da compra');
+      }
+      const amountToPay = itemsSum.plus(freightToStore).minus(discountToStore);
 
       await tx.purchaseOrder.update({
         where: { id },
@@ -4258,7 +4284,9 @@ export class PurchaseOrderService {
       );
       const freight =
         order.freightAmount != null ? new Decimal(order.freightAmount) : new Decimal(0);
-      const amountToPay = itemsSum.plus(freight);
+      const discount =
+        order.discountAmount != null ? new Decimal(order.discountAmount) : new Decimal(0);
+      const amountToPay = Decimal.max(0, itemsSum.plus(freight).minus(discount));
 
       await tx.purchaseOrder.update({
         where: { id: purchaseOrderId },

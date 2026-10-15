@@ -72,6 +72,9 @@ router.post(
 router.post('/', requireCaixinha, (req, res, next) =>
   caixinhaPurchaseController.create(req, res, next)
 );
+router.patch('/:id/pagar', requireCaixinha, (req, res, next) =>
+  caixinhaPurchaseController.markPaid(req, res, next)
+);
 router.patch('/:id', requireCaixinha, (req, res, next) =>
   caixinhaPurchaseController.update(req, res, next)
 );
