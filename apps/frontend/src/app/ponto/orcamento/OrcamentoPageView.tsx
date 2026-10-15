@@ -14304,10 +14304,47 @@ export function OrcamentoPageView({
     pushRodape(bdiLabel, rf.valorBdi);
     pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi);
 
+    const moedaBr = (v: number) =>
+      arredondarMoeda2(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const dataOuVazio = (s: string) => (s?.trim() ? formatDataBr(s) : '');
+    const prazoDias = String(meta.prazoExecucaoDias ?? '').trim();
+    const periodo = [dataOuVazio(meta.dataAbertura), dataOuVazio(meta.dataEnvio)]
+      .filter(Boolean)
+      .join(' a ');
+    const revisao = meta.revisaoCount > 0 ? `R${String(meta.revisaoCount).padStart(2, '0')}` : 'Original';
+    const comValor = (pares: Array<[string, string]>) => pares.filter(([, valor]) => valor.trim() !== '');
+    const nomeOrc = (nomeOrcamentoSemCodigo || nomeOrcamentoAtivo || '').trim();
+
     return {
       name: 'Orçamento',
       aparencia: aparenciaMontagem,
       title: 'Orçamento',
+      cabecalho: {
+        titulo: (nomeOrc || 'Orçamento').toUpperCase(),
+        subtitulo: `Contrato: ${nomeContratoExport()}`,
+        esquerda: comValor([
+          ['OS / PASTA', String(meta.osNumeroPasta ?? '')],
+          ['CÓDIGO', String(codigoOrcamentoAtivo ?? '')],
+          ['DESCRIÇÃO', String(meta.descricao ?? '')],
+          ['RESPONSÁVEL', String(meta.responsavelOrcamento ?? '')],
+          ['REALIZADO POR', String(meta.orcamentoRealizadoPor ?? '')],
+          ['PERÍODO', periodo],
+          ['PRAZO DE EXECUÇÃO', prazoDias ? `${prazoDias} dias` : ''],
+          ['REVISÃO', revisao],
+        ]),
+        direita: [
+          ['ORÇAMENTO', moedaBr(rf.totalBase)],
+          ...(rf.descontoPct > 0
+            ? ([
+                [descontoLabel, moedaBr(rf.valorDesconto)],
+                ['TOTAL COM DESCONTO', moedaBr(rf.totalComDesconto)],
+              ] as Array<[string, string]>)
+            : []),
+          [bdiLabel, moedaBr(rf.valorBdi)],
+          ['TOTAL GERAL', moedaBr(rf.totalComDescontoEBdi)],
+          ['EMITIDO EM', new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })],
+        ],
+      },
       autoFilter: false,
       columns: [
         { header: 'ITEM', width: 10, align: 'center' },

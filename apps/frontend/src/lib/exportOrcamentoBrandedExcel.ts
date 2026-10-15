@@ -57,10 +57,20 @@ export type OrcamentoExcelRow = {
   tones?: Record<number, 'item' | 'plain' | 'label'>;
 };
 
+/** Faixa de identificação no topo da aba: título, subtítulo e dois blocos de rótulo/valor. */
+export type OrcamentoExcelCabecalho = {
+  titulo: string;
+  subtitulo?: string;
+  esquerda: Array<[rotulo: string, valor: string]>;
+  direita: Array<[rotulo: string, valor: string]>;
+};
+
 export type OrcamentoExcelSheetSpec = {
   name: string;
   title: string;
   subtitle?: string;
+  /** Escrito acima do cabeçalho das colunas (precisa de pelo menos 14 colunas). */
+  cabecalho?: OrcamentoExcelCabecalho;
   columns: OrcamentoExcelColumn[];
   rows: OrcamentoExcelRow[];
   autoFilter?: boolean;
@@ -197,8 +207,13 @@ async function fillWorkbook(
     const itemFg = hexToArgb(aparencia?.itemTexto, tituloFg);
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
+    const cabecalho = spec.cabecalho && colCount >= 14 ? spec.cabecalho : undefined;
+    const linhasInfo = cabecalho ? Math.max(cabecalho.esquerda.length, cabecalho.direita.length) : 0;
+    /** Linhas ocupadas acima do cabeçalho das colunas: título, subtítulo, informações e uma linha de respiro. */
+    const offsetCabecalho = cabecalho ? 2 + linhasInfo + 1 : 0;
+    const linhaHeaderColunas = offsetCabecalho + 1;
     const sheet = workbook.addWorksheet(spec.name.slice(0, 31), {
-      views: showHeader ? [{ state: 'frozen', ySplit: 1 }] : [{}],
+      views: showHeader && !cabecalho ? [{ state: 'frozen', ySplit: 1 }] : [{}],
       properties: { defaultRowHeight: 30 },
       pageSetup: {
         orientation: 'landscape',
@@ -214,8 +229,88 @@ async function fillWorkbook(
       sheet.getColumn(i + 1).width = col.width ?? 14;
     });
 
+    if (cabecalho) {
+      const escreverMesclado = (
+        linha: number,
+        de: number,
+        ate: number,
+        texto: string,
+        estilo: {
+          fundo: string;
+          cor: string;
+          tamanho: number;
+          negrito?: boolean;
+          alinhamento?: 'left' | 'center';
+        }
+      ) => {
+        for (let c = de; c <= ate; c++) {
+          const cell = sheet.getCell(linha, c);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: estilo.fundo } };
+          applyThinBorder(cell);
+        }
+        const cell = sheet.getCell(linha, de);
+        cell.value = texto;
+        cell.font = {
+          name: fontName,
+          size: estilo.tamanho,
+          bold: estilo.negrito,
+          color: { argb: estilo.cor },
+        };
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: estilo.alinhamento ?? 'left',
+          indent: estilo.alinhamento === 'center' ? 0 : 1,
+          wrapText: true,
+        };
+        if (ate > de) sheet.mergeCells(linha, de, linha, ate);
+      };
+
+      sheet.getRow(1).height = 36;
+      escreverMesclado(1, 1, colCount, cabecalho.titulo, {
+        fundo: tituloBg,
+        cor: tituloFg,
+        tamanho: 16,
+        negrito: true,
+        alinhamento: 'left',
+      });
+      sheet.getRow(2).height = 22;
+      escreverMesclado(2, 1, colCount, cabecalho.subtitulo ?? '', {
+        fundo: subtituloBg,
+        cor: subtituloFg,
+        tamanho: 10,
+        negrito: true,
+        alinhamento: 'left',
+      });
+      /** Os dois blocos ocupam a largura toda: o da direita termina na última coluna da tabela. */
+      const valorDireitaDe = colCount - 2;
+      const rotuloDireitaDe = valorDireitaDe - 4;
+      const valorEsquerdaAte = rotuloDireitaDe - 1;
+      for (let i = 0; i < linhasInfo; i++) {
+        const linha = 3 + i;
+        sheet.getRow(linha).height = 20;
+        const esq = cabecalho.esquerda[i];
+        const dir = cabecalho.direita[i];
+        const bloco = (par: [string, string] | undefined, rotDe: number, rotAte: number, valDe: number, valAte: number) => {
+          escreverMesclado(linha, rotDe, rotAte, par?.[0] ?? '', {
+            fundo: headerBg,
+            cor: headerFg,
+            tamanho: 9,
+            negrito: true,
+          });
+          escreverMesclado(linha, valDe, valAte, par?.[1] ?? '', {
+            fundo: WHITE,
+            cor: TITLE_TEXT,
+            tamanho: 10,
+          });
+        };
+        bloco(esq, 1, 3, 4, valorEsquerdaAte);
+        bloco(dir, rotuloDireitaDe, valorDireitaDe - 1, valorDireitaDe, colCount);
+      }
+      sheet.getRow(2 + linhasInfo + 1).height = 10;
+    }
+
     if (showHeader) {
-      const headerRow = sheet.getRow(1);
+      const headerRow = sheet.getRow(linhaHeaderColunas);
       headerRow.height = 30;
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
@@ -229,7 +324,7 @@ async function fillWorkbook(
 
     let itemStripe = 0;
     spec.rows.forEach((rowSpec, i) => {
-      const excelRow = (showHeader ? 2 : 1) + i;
+      const excelRow = offsetCabecalho + (showHeader ? 2 : 1) + i;
       const row = sheet.getRow(excelRow);
       const kind = rowSpec.kind ?? 'item';
       row.height = 30;
@@ -345,8 +440,8 @@ async function fillWorkbook(
 
     if (spec.autoFilter !== false && spec.rows.length) {
       sheet.autoFilter = {
-        from: { row: 1, column: 1 },
-        to: { row: 1 + spec.rows.length, column: colCount },
+        from: { row: linhaHeaderColunas, column: 1 },
+        to: { row: linhaHeaderColunas + spec.rows.length, column: colCount },
       };
     }
   }
