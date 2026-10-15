@@ -481,7 +481,7 @@ const COR_FATOR_EXPLICACAO: Record<CampoExplicacaoMedicao, { celula: string; tex
   },
 };
 
-const PALETA_FORMULA: { celula: string; texto: string }[] = [
+export const PALETA_FORMULA: { celula: string; texto: string }[] = [
   COR_FATOR_EXPLICACAO.C,
   COR_FATOR_EXPLICACAO.L,
   COR_FATOR_EXPLICACAO.H,
@@ -506,7 +506,7 @@ const PALETA_FORMULA: { celula: string; texto: string }[] = [
 
 const COR_FIXA_TOKEN: Record<string, number> = { C: 0, L: 1, H: 2, N: 3 };
 
-type SegmentoFormulaVisivel = {
+export type SegmentoFormulaVisivel = {
   texto: string;
   classe: string;
   /** Índice inclusivo no texto da fórmula guardada. */
@@ -753,7 +753,7 @@ function preservarPrefixoDigitado(
   });
 }
 
-function DicaFormulaCompleta({
+export function DicaFormulaCompleta({
   ancora,
   segmentos,
   texto,

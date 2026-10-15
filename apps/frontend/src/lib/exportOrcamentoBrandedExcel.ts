@@ -48,7 +48,10 @@ export type OrcamentoExcelCellValue = string | number | null | undefined;
 export type OrcamentoExcelRow = {
   kind?: OrcamentoExcelRowKind;
   values: OrcamentoExcelCellValue[];
-  /** Fórmulas Excel; chave = coluna 0-based. Use `{r}` para a linha real da planilha. */
+  /**
+   * Fórmulas Excel; chave = coluna 0-based. Use `{r}` para a linha real da planilha e
+   * `{R<n>}` para a linha real da n-ésima linha de `rows` (0-based), ex.: `SUM(M{R3}:M{R9})`.
+   */
   formulas?: Record<number, string>;
   formats?: Record<number, OrcamentoExcelColFormat>;
   /** Mescla colunas 0-based inclusive, ex.: [0, 7] junta A até H. */
@@ -166,11 +169,19 @@ function applyCellFormat(
   value: OrcamentoExcelCellValue,
   format: OrcamentoExcelColFormat | undefined,
   formula: string | undefined,
-  excelRow: number
+  excelRow: number,
+  primeiraLinhaDados: number
 ) {
   if (formula) {
-    const expr = formula.replace(/\{r\}/g, String(excelRow)).replace(/^=/, '');
-    cell.value = { formula: expr };
+    const expr = formula
+      .replace(/\{r\}/g, String(excelRow))
+      .replace(/\{R(\d+)\}/g, (_, i: string) => String(primeiraLinhaDados + Number(i)))
+      .replace(/^=/, '');
+    // `result` guarda o valor já calculado: leitores que não recalculam continuam mostrando o número.
+    cell.value =
+      typeof value === 'number' && Number.isFinite(value)
+        ? { formula: expr, result: value }
+        : { formula: expr };
   } else if (value === null || value === undefined || value === '') {
     cell.value = '';
   } else if (typeof value === 'number' && Number.isFinite(value)) {
@@ -340,7 +351,8 @@ async function fillWorkbook(
           rowSpec.values[c],
           format,
           rowSpec.formulas?.[c],
-          excelRow
+          excelRow,
+          offsetCabecalho + (showHeader ? 2 : 1)
         );
         const mergeTo = rowSpec.merge?.[0] === c ? rowSpec.merge[1] : undefined;
         const alinhamento =

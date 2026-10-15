@@ -552,6 +552,137 @@ const ALIAS_FUNCAO: Record<string, string> = {
   FACT: 'FATORIAL',
 };
 
+const FUNCAO_EXCEL: Record<string, string> = {
+  ARRED: 'ROUND',
+  CIMA: 'ROUNDUP',
+  BAIXO: 'ROUNDDOWN',
+  TRUNCAR: 'TRUNC',
+  INT: 'INT',
+  ABS: 'ABS',
+  SINAL: 'SIGN',
+  SOMA: 'SUM',
+  MEDIA: 'AVERAGE',
+  MAXIMO: 'MAX',
+  MINIMO: 'MIN',
+  MOD: 'MOD',
+  POTENCIA: 'POWER',
+  RAIZ: 'SQRT',
+  QUOCIENTE: 'QUOTIENT',
+  MULT: 'PRODUCT',
+  TETO: 'CEILING',
+  PISO: 'FLOOR',
+  'TETO.MAT': 'CEILING.MATH',
+  'PISO.MAT': 'FLOOR.MATH',
+  SE: 'IF',
+  E: 'AND',
+  OU: 'OR',
+  NAO: 'NOT',
+  SEERRO: 'IFERROR',
+  PI: 'PI',
+  GRAUS: 'DEGREES',
+  RADIANOS: 'RADIANS',
+  SEN: 'SIN',
+  COS: 'COS',
+  TAN: 'TAN',
+  ASEN: 'ASIN',
+  ACOS: 'ACOS',
+  ATAN: 'ATAN',
+  LN: 'LN',
+  LOG: 'LOG',
+  LOG10: 'LOG10',
+  EXP: 'EXP',
+  FATORIAL: 'FACT',
+};
+
+/**
+ * Traduz uma fórmula da memória (`=ARRED(C*L;2)`) para fórmula do Excel em inglês.
+ * `letras` diz a coluna de cada atalho (C, L, H, %, N, A, V, SUB); o atalho da própria linha vira `X{r}`.
+ * `externa` resolve `{rótulo!linha!campo}` para uma célula; devolve null se não achar.
+ * Devolve null quando algo não puder ser traduzido: quem chama mantém o valor fixo.
+ */
+export function formulaMemoriaParaExcel(
+  raw: string,
+  letras: Record<string, string>,
+  externa: (rotulo: string, linha: string, campo: string) => string | null
+): string | null {
+  const texto = String(raw ?? '').trim();
+  if (!texto.startsWith('=')) return null;
+  const s = texto.slice(1);
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i]!;
+    if (/\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    if (ch === '{') {
+      const fim = s.indexOf('}', i);
+      if (fim < 0) return null;
+      const m = /^\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}$/i.exec(s.slice(i, fim + 1));
+      if (!m) return null;
+      const celula = externa(m[1]!.trim(), m[2]!.toUpperCase(), m[3]!.toUpperCase());
+      if (!celula) return null;
+      out += celula;
+      i = fim + 1;
+      continue;
+    }
+    if (ch === '%') {
+      const letra = letras['%'];
+      if (!letra) return null;
+      out += `${letra}{r}`;
+      i += 1;
+      continue;
+    }
+    const num = lerNumeroFormula(s, i);
+    if (num) {
+      out += String(num.v);
+      i = num.i;
+      continue;
+    }
+    if (/[A-Za-zÀ-ÿ_]/.test(ch)) {
+      let j = i + 1;
+      while (j < s.length && /[A-Za-zÀ-ÿ0-9_]/.test(s[j]!)) j += 1;
+      while (s[j] === '.' && /[A-Za-zÀ-ÿ]/.test(s[j + 1] ?? '')) {
+        j += 2;
+        while (j < s.length && /[A-Za-zÀ-ÿ0-9_]/.test(s[j]!)) j += 1;
+      }
+      const nome = s.slice(i, j);
+      let k = j;
+      while (/\s/.test(s[k] ?? '')) k += 1;
+      if (s[k] === '(') {
+        const excel = FUNCAO_EXCEL[ALIAS_FUNCAO[canonNomeFuncao(nome)] ?? ''];
+        if (!excel) return null;
+        out += excel;
+      } else {
+        const letra = letras[nome.toUpperCase()];
+        if (!letra) return null;
+        out += `${letra}{r}`;
+      }
+      i = j;
+      continue;
+    }
+    const dois = s.slice(i, i + 2);
+    if (dois === '<>' || dois === '<=' || dois === '>=') {
+      out += dois;
+      i += 2;
+      continue;
+    }
+    if (ch === ';' || ch === ',') {
+      out += ',';
+      i += 1;
+      continue;
+    }
+    if ('+-*/^=<>()'.includes(ch)) {
+      out += ch;
+      i += 1;
+      continue;
+    }
+    return null;
+  }
+  return out ? out : null;
+}
+
 export type AjudaFuncaoFormula = {
   nome: string;
   assinatura: string;

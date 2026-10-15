@@ -124,7 +124,13 @@ import {
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { MemorialFormulaPickProvider, OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
+import {
+  DicaFormulaCompleta,
+  MemorialFormulaPickProvider,
+  OrcamentoMedicaoPainel,
+  PALETA_FORMULA,
+  type SegmentoFormulaVisivel,
+} from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
 import {
@@ -164,6 +170,7 @@ import {
 import {
   areaExibidaLinha,
   calcularQuantidadeLinha,
+  formulaMemoriaParaExcel,
   inferirTipoUnidadePorDimensao,
   linhaMemoriaComPadraoUm,
   linhaMedicaoEstaVazia,
@@ -4251,7 +4258,7 @@ const ORC_CORES_PINTURA: { hex: string; label: string }[] = [
   { hex: '#bbf7d0', label: 'Verde' },
   { hex: '#bfdbfe', label: 'Azul' },
   { hex: '#fbcfe8', label: 'Rosa' },
-  { hex: '#fed7aa', label: 'Laranja' },
+  { hex: '#fdba74', label: 'Laranja' },
   { hex: '#e5e7eb', label: 'Cinza' },
 ];
 
@@ -6976,10 +6983,51 @@ const FD_CAMPO_COMMIT_MS = 120;
  * O valor formatado do pai não sobrescreve o campo focado (evita o pisca).
  * Com `commitOnChange` (padrão), totais atualizam ao digitar — sem precisar sair do campo.
  */
+/** Mesma ordem de PALETA_FORMULA: [claro, escuro] (tons 800 e 200). */
+const CORES_SEGMENTO_ORC: Array<[string, string]> = [
+  ['#075985', '#7dd3fc'],
+  ['#065f46', '#6ee7b7'],
+  ['#92400e', '#fcd34d'],
+  ['#5b21b6', '#c4b5fd'],
+  ['#9f1239', '#fda4af'],
+  ['#155e75', '#67e8f9'],
+  ['#9a3412', '#fed7aa'],
+  ['#86198f', '#f0abfc'],
+];
+
+/** Cada número da fórmula leva a cor da célula de origem, na ordem das fontes; o resto fica neutro. */
+function segmentarFormulaOrc(formula: string, nFontes: number): SegmentoFormulaVisivel[] {
+  const neutro = 'text-gray-900 dark:text-gray-100';
+  const segmentos: SegmentoFormulaVisivel[] = [];
+  const re = /\d[\d.]*(?:,\d+)?/g;
+  let ultimo = 0;
+  let n = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(formula))) {
+    if (m.index > ultimo) {
+      segmentos.push({ texto: formula.slice(ultimo, m.index), classe: neutro, iniFormula: ultimo, fimFormula: m.index });
+    }
+    segmentos.push({
+      texto: m[0],
+      classe: n < nFontes ? PALETA_FORMULA[n % PALETA_FORMULA.length]!.texto : neutro,
+      iniFormula: m.index,
+      fimFormula: m.index + m[0].length,
+    });
+    ultimo = m.index + m[0].length;
+    n += 1;
+  }
+  if (ultimo < formula.length) {
+    segmentos.push({ texto: formula.slice(ultimo), classe: neutro, iniFormula: ultimo, fimFormula: formula.length });
+  }
+  return segmentos;
+}
+
 const FdCampoLocal = memo(function FdCampoLocal({
   id,
   draftKey,
   committedValue,
+  colorirFormula,
+  overlayClassName,
   /** Ao focar: mostra isto (ex. fórmula =4+7) em vez do valor formatado. */
   editValueOnFocus,
   /** Após blur/Enter: texto a exibir (ex. resultado da fórmula). */
@@ -6998,6 +7046,10 @@ const FdCampoLocal = memo(function FdCampoLocal({
   id?: string;
   draftKey?: string;
   committedValue: string;
+  /** Com o campo focado e uma fórmula (=…), pinta o texto por trechos coloridos. */
+  colorirFormula?: (texto: string) => SegmentoFormulaVisivel[];
+  /** Fonte/alinhamento do texto colorido: precisa ser igual ao do input. */
+  overlayClassName?: string;
   editValueOnFocus?: string;
   displayAfterCommit?: (raw: string) => string | null;
   onCommit: (raw: string) => void;
@@ -7016,6 +7068,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
   );
   const focusedRef = useRef(false);
+  const [focadoVisual, setFocadoVisual] = useState(false);
   const localRef = useRef(local);
   localRef.current = local;
   const onCommitRef = useRef(onCommit);
@@ -7082,7 +7135,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
     else if (mode === 'live') scheduleCommit(next);
   };
 
-  return (
+  const pintar = Boolean(colorirFormula) && focadoVisual && local.trimStart().startsWith('=');
+  const campo = (
     <input
       id={id}
       type="text"
@@ -7092,11 +7146,12 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
-      className={className}
+      className={pintar ? `${className ?? ''} !text-transparent` : className}
       value={local}
       onFocus={() => {
         if (disabled) return;
         focusedRef.current = true;
+        setFocadoVisual(true);
         const edit = String(editOnFocusRef.current ?? '').trim();
         if (edit) {
           localRef.current = edit;
@@ -7118,6 +7173,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onBlur={(e) => {
         focusedRef.current = false;
+        setFocadoVisual(false);
         onBlurExtraRef.current?.();
         if (disabled) return;
         const raw = e.target.value;
@@ -7130,6 +7186,24 @@ const FdCampoLocal = memo(function FdCampoLocal({
         }
       }}
     />
+  );
+  if (!colorirFormula) return campo;
+  return (
+    <div className="relative flex min-w-0 flex-1">
+      {pintar ? (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 flex items-center justify-end overflow-hidden whitespace-pre ${overlayClassName ?? ''}`}
+        >
+          {colorirFormula(local).map((parte, i) => (
+            <span key={i} className={parte.classe}>
+              {parte.texto}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {campo}
+    </div>
   );
 });
 
@@ -7348,8 +7422,33 @@ export function OrcamentoPageView({
   const [destaqueCalculoOrc, setDestaqueCalculoOrc] = useState<{
     itemKey: string;
     fontes: FonteCalculoOrc[];
+    /** Fórmula colorida mostrada em balão acima da célula focada. */
+    balao?: { ancora: HTMLElement; segmentos: SegmentoFormulaVisivel[]; texto: string };
   } | null>(null);
   const destaqueCalculoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Total de título/subtítulo clicado: mostra a conta e pinta as células que entram nela. */
+  const [somaOrc, setSomaOrc] = useState<{
+    chave: string;
+    coluna: 'total' | 'totalBdi' | 'peso';
+    ancora: HTMLElement;
+  } | null>(null);
+  useEffect(() => {
+    if (!somaOrc) return;
+    const sair = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setSomaOrc(null);
+    };
+    const fora = (ev: MouseEvent) => {
+      const alvo = ev.target as Node | null;
+      if (alvo && somaOrc.ancora.contains(alvo)) return;
+      setSomaOrc(null);
+    };
+    document.addEventListener('keydown', sair);
+    document.addEventListener('mousedown', fora, true);
+    return () => {
+      document.removeEventListener('keydown', sair);
+      document.removeEventListener('mousedown', fora, true);
+    };
+  }, [somaOrc]);
   const nomesOrcafascioSnapRef = useRef<{
     orcamentoId: string;
     titulos: Record<string, string>;
@@ -13917,10 +14016,52 @@ export function OrcamentoPageView({
   );
 
   const ativarDestaqueCalculoOrc = useCallback(
-    (itemKey: string, fontes: FonteCalculoOrc[]) => {
+    (
+      itemKey: string,
+      fontes: FonteCalculoOrc[],
+      formula?: string | null,
+      ancora?: HTMLElement | null
+    ) => {
       if (destaqueCalculoClearTimerRef.current) {
         clearTimeout(destaqueCalculoClearTimerRef.current);
         destaqueCalculoClearTimerRef.current = null;
+      }
+      // Cada número da fórmula leva a cor da célula de origem, na mesma ordem das fontes.
+      let balao: NonNullable<typeof destaqueCalculoOrc>['balao'];
+      if (formula && ancora) {
+        const segmentos: SegmentoFormulaVisivel[] = [];
+        const neutro = 'text-gray-900 dark:text-gray-100';
+        const re = /\d[\d.]*(?:,\d+)?/g;
+        let ultimo = 0;
+        let n = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(formula))) {
+          if (m.index > ultimo) {
+            segmentos.push({
+              texto: formula.slice(ultimo, m.index),
+              classe: neutro,
+              iniFormula: ultimo,
+              fimFormula: m.index,
+            });
+          }
+          segmentos.push({
+            texto: m[0],
+            classe: n < fontes.length ? PALETA_FORMULA[n % PALETA_FORMULA.length]!.texto : neutro,
+            iniFormula: m.index,
+            fimFormula: m.index + m[0].length,
+          });
+          ultimo = m.index + m[0].length;
+          n += 1;
+        }
+        if (ultimo < formula.length) {
+          segmentos.push({
+            texto: formula.slice(ultimo),
+            classe: neutro,
+            iniFormula: ultimo,
+            fimFormula: formula.length,
+          });
+        }
+        balao = { ancora, segmentos, texto: formula };
       }
       // Adia o setState para não remount/reconciliar a célula no meio do onFocus.
       window.requestAnimationFrame(() => {
@@ -13928,7 +14069,7 @@ export function OrcamentoPageView({
           setDestaqueCalculoOrc(null);
           return;
         }
-        setDestaqueCalculoOrc({ itemKey, fontes });
+        setDestaqueCalculoOrc({ itemKey, fontes, balao });
       });
     },
     []
@@ -14168,6 +14309,121 @@ export function OrcamentoPageView({
     if (novaLinhas.length) syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
   };
 
+  /** Conta por trás do total clicado em título/subtítulo, com uma cor por parcela. */
+  const somaOrcInfo = (() => {
+    if (!somaOrc) return null;
+    const { chave, coluna } = somaOrc;
+    const campo = coluna === 'total' ? 'total' : 'totalComBdi';
+    const somar = (lista: typeof itensCalculados, c: 'total' | 'totalComBdi') =>
+      lista.reduce((acc, r) => acc + r[c], 0);
+    let partes: Array<{ valor: number; fonte: string | null }> = [];
+    let simbolo = '+';
+    if (coluna === 'peso') {
+      const rowsLinha = chave.startsWith('s:')
+        ? (() => {
+            const b = subtitulosAdicionados.find((x) => `s:${x.key}` === chave);
+            return b ? itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [] : [];
+          })()
+        : itensCalculadosPorServicoNome.get(chave.slice(2)) ?? [];
+      partes = [
+        { valor: somar(rowsLinha, 'totalComBdi'), fonte: `${chave}|totalBdi` },
+        { valor: resumoFinanceiro.totalComDescontoEBdi, fonte: null },
+      ];
+      simbolo = '/';
+    } else if (chave.startsWith('s:')) {
+      const b = subtitulosAdicionados.find((x) => `s:${x.key}` === chave);
+      const rowsBloco = b ? itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [] : [];
+      partes = rowsBloco.map((r) => ({ valor: r[campo], fonte: `${r.key}|${coluna}` }));
+    } else {
+      const servico = chave.slice(2);
+      const blocosDoTitulo = subtitulosAdicionados.filter((b) => b.servicoNome === servico);
+      partes = blocosDoTitulo.map((b) => ({
+        valor: somar(itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [], campo),
+        fonte: `s:${b.key}|${coluna}`,
+      }));
+    }
+    const fmt = formatarMoedaCampoOrc;
+    const neutro = 'text-gray-900 dark:text-gray-100';
+    const segmentos: SegmentoFormulaVisivel[] = [];
+    const mapaCelulas = new Map<string, number>();
+    let cursor = 0;
+    const empurrar = (texto: string, classe: string) => {
+      segmentos.push({ texto, classe, iniFormula: cursor, fimFormula: cursor + texto.length });
+      cursor += texto.length;
+    };
+    empurrar('=', neutro);
+    partes.forEach((p, i) => {
+      if (i > 0) empurrar(simbolo, neutro);
+      const cor = i % PALETA_FORMULA.length;
+      if (p.fonte) mapaCelulas.set(p.fonte, cor);
+      empurrar(fmt(p.valor), PALETA_FORMULA[cor]!.texto);
+      // O total geral do rodapé já tem o desconto: o valor da linha também precisa dele.
+      if (coluna === 'peso' && i === 0 && resumoFinanceiro.descontoPct > 0) {
+        const pct = (1 - resumoFinanceiro.descontoPct).toLocaleString('pt-BR', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 4,
+        });
+        empurrar(`*${pct}`, neutro);
+      }
+    });
+    if (coluna === 'peso') {
+      empurrar('*100', neutro);
+    }
+    return { segmentos, texto: segmentos.map((s) => s.texto).join(''), mapaCelulas };
+  })();
+  const classeCelulaSomaOrc = (fonteKey: string, coluna: string): string => {
+    const idx = somaOrcInfo?.mapaCelulas.get(`${fonteKey}|${coluna}`);
+    return idx == null ? '' : PALETA_FORMULA[idx]!.celula;
+  };
+  /** Dentro da própria célula clicada: a fórmula colorida no lugar do valor. */
+  const conteudoSomaOrc = (chave: string, coluna: 'total' | 'totalBdi' | 'peso'): React.ReactNode | null => {
+    if (!somaOrc || !somaOrcInfo || somaOrc.chave !== chave || somaOrc.coluna !== coluna) return null;
+    // Fundo escuro (texto da linha claro) usa os tons claros; fundo claro usa os tons escuros.
+    const rgb = /\d+(\.\d+)?/g;
+    const [r = 0, g = 0, b = 0] = (window.getComputedStyle(somaOrc.ancora).color.match(rgb) ?? []).map(Number);
+    const fundoEscuro = 0.299 * r + 0.587 * g + 0.114 * b > 150;
+    return (
+      <span className="block whitespace-nowrap text-right text-sm font-semibold tabular-nums">
+        {somaOrcInfo.segmentos.map((parte, i) => {
+          // As linhas de título/subtítulo forçam `!text-inherit` nos filhos: a cor entra inline com important.
+          const idxPaleta = PALETA_FORMULA.findIndex((p) => p.texto === parte.classe);
+          const cor =
+            idxPaleta >= 0 ? CORES_SEGMENTO_ORC[idxPaleta]![fundoEscuro ? 1 : 0] : 'inherit';
+          return (
+            <span
+              key={i}
+              ref={(el) => {
+                if (el) el.style.setProperty('color', cor, 'important');
+              }}
+            >
+              {parte.texto}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
+  /** Célula de origem pintada: o texto vira escuro (a linha força `!text-inherit` e deixaria branco no claro). */
+  const refTextoSomaOrc = (fonteKey: string, coluna: string) => (el: HTMLElement | null) => {
+    if (!el) return;
+    if (somaOrcInfo?.mapaCelulas.has(`${fonteKey}|${coluna}`)) {
+      el.style.setProperty('color', isDark ? '#f3f4f6' : '#111827', 'important');
+    } else {
+      el.style.removeProperty('color');
+    }
+  };
+  const alternarSomaOrc = (
+    e: React.MouseEvent<HTMLElement>,
+    chave: string,
+    coluna: 'total' | 'totalBdi' | 'peso'
+  ) => {
+    e.stopPropagation();
+    const ancora = e.currentTarget;
+    setSomaOrc((atual) =>
+      atual && atual.chave === chave && atual.coluna === coluna ? null : { chave, coluna, ancora }
+    );
+  };
+
   const montarSheetOrcamentoDetalhado = (): OrcamentoExcelSheetSpec | null => {
     if (subtitulosAdicionados.length === 0 && itensCalculados.length === 0) {
       return null;
@@ -14195,6 +14451,14 @@ export function OrcamentoPageView({
 
     const empty = () => Array.from({ length: 16 }, () => '') as OrcamentoExcelRow['values'];
     const rows: OrcamentoExcelRow[] = [];
+    // Fórmulas só entram onde reproduzem o valor da tela; valor manual ou outro modo de arredondamento fica fixo.
+    const fatorBdi = 1 + resumoFinanceiro.bdiPct;
+    const fatorBdiTxt = String(fatorBdi);
+    const bate = (calculado: number, valor: number) => Math.abs(calculado - valor) < 0.0051;
+    const titulosIdx: number[] = [];
+    const subsDoTitulo = new Map<number, number[]>();
+    const itensDoSub = new Map<number, number[]>();
+    let tituloIdxAtual = -1;
     const servicoNumero = new Map<string, number>();
     let nextMain = 0;
     for (const b of subtitulosAdicionados) {
@@ -14232,6 +14496,9 @@ export function OrcamentoPageView({
         values[12] = arredondarMoeda2(resumo.custoDir);
         values[13] = arredondarMoeda2(resumo.totalComBdi);
         values[14] = resumo.pesoPct;
+        tituloIdxAtual = rows.length;
+        titulosIdx.push(tituloIdxAtual);
+        subsDoTitulo.set(tituloIdxAtual, []);
         rows.push({ kind: 'titulo', values });
       }
 
@@ -14248,13 +14515,40 @@ export function OrcamentoPageView({
       subValues[12] = arredondarMoeda2(resumoSub.custoDir);
       subValues[13] = arredondarMoeda2(resumoSub.totalComBdi);
       subValues[14] = resumoSub.pesoPct;
+      const subIdxLinha = rows.length;
+      subsDoTitulo.get(tituloIdxAtual)?.push(subIdxLinha);
+      itensDoSub.set(subIdxLinha, []);
       rows.push({ kind: 'subtitulo', values: subValues });
 
       rowsDoBloco.forEach((row, itemIdx) => {
         const usaDimensoes = !!row.dimensoes?.linhas?.length;
         const tipoAuto = inferirTipoUnidadePorDimensao(row.dimensoes?.linhas || []);
+        const r = rows.length;
+        itensDoSub.get(subIdxLinha)?.push(r);
+        const mo = arredondarMoeda2(row.maoDeObraUnitario);
+        const mat = arredondarMoeda2(row.materialUnitario);
+        const puSem = arredondarMoeda2(row.precoUnitario);
+        const puCom = arredondarMoeda2(row.precoUnitarioComBdi);
+        const subMo = arredondarMoeda2(row.subMaoDeObra);
+        const subMat = arredondarMoeda2(row.subMaterial);
+        const totSem = arredondarMoeda2(row.total);
+        const totCom = arredondarMoeda2(row.totalComBdi);
+        const qtd4 = roundTo(row.quantidade, 4);
+        const formulas: Record<number, string> = {};
+        if (bate(mo + mat, puSem)) formulas[8] = `G{r}+H{r}`;
+        if (bate(Math.round(puSem * fatorBdi * 100) / 100, puCom)) {
+          formulas[9] = `ROUND(I{r}*${fatorBdiTxt},2)`;
+        }
+        if (bate(Math.round(qtd4 * mo * 100) / 100, subMo)) formulas[10] = `ROUND(F{r}*G{r},2)`;
+        if (bate(Math.round(qtd4 * mat * 100) / 100, subMat)) formulas[11] = `ROUND(F{r}*H{r},2)`;
+        if (formulas[10] && formulas[11] && bate(subMo + subMat, totSem)) formulas[12] = `K{r}+L{r}`;
+        else if (bate(Math.round(qtd4 * puSem * 100) / 100, totSem)) formulas[12] = `ROUND(F{r}*I{r},2)`;
+        if (formulas[12] && bate(Math.round(totSem * fatorBdi * 100) / 100, totCom)) {
+          formulas[13] = `ROUND(M{r}*${fatorBdiTxt},2)`;
+        }
         rows.push({
           kind: 'item',
+          formulas,
           values: [
             `${main}.${subIdx}.${itemIdx + 1}`,
             row.item.codigo,
@@ -14289,20 +14583,72 @@ export function OrcamentoPageView({
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}%)`;
-    const pushRodape = (rotulo: string, valor: number | '') => {
+    // Subtítulos somam seus itens; títulos somam seus subtítulos; peso = total com BDI da linha / total geral.
+    const somaColuna = (letra: string, indices: number[]) =>
+      indices.length ? indices.map((n) => `${letra}{R${n}}`).join('+') : '';
+    const denominadorPeso = somaColuna('N', titulosIdx);
+    const pesoFormula = () => `IFERROR(N{r}/(${denominadorPeso})*100,0)`;
+    for (const [subRow, itens] of itensDoSub) {
+      if (!itens.length) continue;
+      const de = itens[0]!;
+      const ate = itens[itens.length - 1]!;
+      const f: Record<number, string> = {
+        12: `SUM(M{R${de}}:M{R${ate}})`,
+        13: `SUM(N{R${de}}:N{R${ate}})`,
+      };
+      if (denominadorPeso) f[14] = pesoFormula();
+      rows[subRow]!.formulas = f;
+    }
+    for (const [tituloRow, subs] of subsDoTitulo) {
+      if (!subs.length) continue;
+      const f: Record<number, string> = {
+        12: somaColuna('M', subs),
+        13: somaColuna('N', subs),
+      };
+      if (denominadorPeso) f[14] = pesoFormula();
+      rows[tituloRow]!.formulas = f;
+    }
+    if (denominadorPeso) {
+      for (const linha of rows) {
+        if (linha.kind === 'item' && linha.formulas) linha.formulas[14] = pesoFormula();
+      }
+    }
+
+    const pushRodape = (rotulo: string, valor: number | '', formula?: string) => {
       const values = empty();
       values[3] = rotulo;
       values[13] = valor === '' ? '\u00A0' : arredondarMoeda2(valor);
-      rows.push({ kind: 'total', values });
+      rows.push({
+        kind: 'total',
+        values,
+        ...(formula && valor !== '' ? { formulas: { 13: formula } } : {}),
+      });
     };
     rows.push({ kind: 'blank', values: empty() });
-    pushRodape('ORÇAMENTO', rf.totalBase);
+    const orcIdx = rows.length;
+    pushRodape('ORÇAMENTO', rf.totalBase, somaColuna('M', titulosIdx));
+    let baseBdiIdx = orcIdx;
     if (rf.descontoPct > 0) {
-      pushRodape(descontoLabel, rf.valorDesconto);
-      pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto);
+      const descIdx = rows.length;
+      pushRodape(
+        descontoLabel,
+        rf.valorDesconto,
+        bate(Math.round(rf.totalBase * rf.descontoPct * 100) / 100, rf.valorDesconto)
+          ? `ROUND(N{R${orcIdx}}*${rf.descontoPct},2)`
+          : undefined
+      );
+      baseBdiIdx = rows.length;
+      pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto, `N{R${orcIdx}}-N{R${descIdx}}`);
     }
-    pushRodape(bdiLabel, rf.valorBdi);
-    pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi);
+    const bdiIdx = rows.length;
+    pushRodape(
+      bdiLabel,
+      rf.valorBdi,
+      bate(Math.round(rf.totalComDesconto * rf.bdiPct * 100) / 100, rf.valorBdi)
+        ? `ROUND(N{R${baseBdiIdx}}*${rf.bdiPct},2)`
+        : undefined
+    );
+    pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi, `N{R${baseBdiIdx}}+N{R${bdiIdx}}`);
 
     const moedaBr = (v: number) =>
       arredondarMoeda2(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -14707,7 +15053,17 @@ export function OrcamentoPageView({
             totalUnitarioLinha,
             l.total,
           ];
-      rows.push({ kind: 'item', values });
+      // Total = quantidade × valor unitário; fórmulas só onde reproduzem o valor da tela.
+      const formulas: Record<number, string> = {};
+      const quantA = Number(l.quant);
+      const unitA = Number(l.valorUnit);
+      if (Number.isFinite(quantA) && Number.isFinite(unitA)) {
+        formulas[8] = `G{r}*H{r}`;
+        if (Math.abs(Math.round(quantA * unitA * 100) / 100 - Number(l.total)) < 0.0051) {
+          formulas[9] = `ROUND(G{r}*H{r},2)`;
+        }
+      }
+      rows.push({ kind: 'item', values, formulas });
     }
     return {
       name: 'Analítico',
@@ -14795,8 +15151,16 @@ export function OrcamentoPageView({
         }
         const vlUnitCompraRealAgreg = temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
         const pe = pctExportMap.get(l.key);
+        const formulasComp: Record<number, string> = {};
+        const quantC = Number(l.quantidadeReal);
+        const unitC = Number(l.valorUnit);
+        if (Math.abs(Math.round(quantC * unitC * 100) / 100 - Number(l.total)) < 0.0051) {
+          formulasComp[8] = `ROUND(G{r}*H{r},2)`;
+          formulasComp[10] = `ROUND(I{r}*${PLANILHA_FATOR_CUSTO_ESTIMADO},2)`;
+        }
         rows.push({
           kind: 'item',
+          formulas: formulasComp,
           values: [
             l.item,
             l.codigo,
@@ -14829,8 +15193,29 @@ export function OrcamentoPageView({
           ? qC * vReal
           : null;
       const pi = pctExportMap.get(l.key);
+      const formulasIns: Record<number, string> = {};
+      const quantI = Number(l.quantidadeReal);
+      const unitI = Number(l.valorUnit);
+      if (Math.abs(Math.round(quantI * unitI * 100) / 100 - Number(l.total)) < 0.0051) {
+        formulasIns[8] = `ROUND(G{r}*H{r},2)`;
+        if (Math.abs(Math.round(Number(l.total) * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100 - roundTo(custoEst, 2)) < 0.0051) {
+          formulasIns[10] = `ROUND(I{r}*${PLANILHA_FATOR_CUSTO_ESTIMADO},2)`;
+        }
+      }
+      if (Math.abs(Math.round(vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100 - roundTo(vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO, 2)) < 0.0051) {
+        formulasIns[9] = `ROUND(H{r}*${PLANILHA_FATOR_CUSTO_ESTIMADO},2)`;
+      }
+      if (
+        custoCompraR !== null &&
+        qC !== undefined &&
+        vReal !== undefined &&
+        Math.abs(Math.round(qC * roundTo(vReal, 2) * 100) / 100 - roundTo(custoCompraR, 2)) < 0.0051
+      ) {
+        formulasIns[13] = `ROUND(L{r}*M{r},2)`;
+      }
       rows.push({
         kind: 'item',
+        formulas: formulasIns,
         values: [
           l.item,
           l.codigo || '—',
@@ -14903,6 +15288,14 @@ export function OrcamentoPageView({
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
     const empty = () => Array.from({ length: 10 }, () => '') as OrcamentoExcelRow['values'];
     const rows: OrcamentoExcelRow[] = [];
+    // Fórmulas digitadas na memória viram fórmulas do Excel; as que não têm tradução ficam como valor.
+    const letrasMemoria: Record<string, string> = { C: 'C', L: 'D', H: 'E', '%': 'F', N: 'G', A: 'H', V: 'I', SUB: 'J' };
+    const colunaDoCampoMemoria: Record<string, number> = {
+      C: 2, L: 3, H: 4, empolamento: 5, N: 6, aManual: 7, valorManual: 7, vManual: 8, subtotalManual: 9,
+    };
+    const linhaPorRef = new Map<string, number>();
+    const totalPorRotulo = new Map<string, number>();
+    const pendentesMemoria: Array<{ row: number; col: number; raw: string }> = [];
 
     itensCalculados.forEach((row, rowIdx) => {
       if (rows.length) rows.push({ kind: 'blank', values: empty() });
@@ -14939,6 +15332,9 @@ export function OrcamentoPageView({
       });
 
       let totalSub = 0;
+      let linhaDadosN = 0;
+      let primeiraLinhaDados = -1;
+      let ultimaLinhaDados = -1;
       if (linhasExport.length) {
         for (let i = 0; i < linhasExport.length; i++) {
           const ln = linhasExport[i];
@@ -14974,9 +15370,19 @@ export function OrcamentoPageView({
           const sub = calcularQuantidadeLinha(ln, tipo);
           totalSub += sub;
           const celula = (n: number): number | '' => (Number.isFinite(n) && n !== 0 ? n : '');
+          linhaDadosN += 1;
+          linhaPorRef.set(`${rotulo.trim()}|${linhaDadosN}`, rows.length);
+          if (primeiraLinhaDados < 0) primeiraLinhaDados = rows.length;
+          ultimaLinhaDados = rows.length;
           if (linhaMedicaoEstaVazia(ln)) {
             rows.push({ kind: 'item', merge: [0, 1], values: empty() });
             continue;
+          }
+          for (const [campo, formulaRaw] of Object.entries(ln.formulas ?? {})) {
+            const col = colunaDoCampoMemoria[campo];
+            if (col != null && typeof formulaRaw === 'string' && formulaRaw.trim().startsWith('=')) {
+              pendentesMemoria.push({ row: rows.length, col, raw: formulaRaw });
+            }
           }
           rows.push({
             kind: 'item',
@@ -15008,13 +15414,28 @@ export function OrcamentoPageView({
       const totalValues = empty();
       totalValues[0] = 'TOTAL';
       totalValues[9] = totalSub;
+      totalPorRotulo.set(rotulo.trim(), rows.length);
       rows.push({
         kind: 'total',
         values: totalValues,
         merge: [0, 8],
         tones: { 0: 'label', 9: 'item' },
+        ...(primeiraLinhaDados >= 0
+          ? { formulas: { 9: `SUM(J{R${primeiraLinhaDados}}:J{R${ultimaLinhaDados}})` } }
+          : {}),
       });
     });
+
+    for (const p of pendentesMemoria) {
+      const formula = formulaMemoriaParaExcel(p.raw, letrasMemoria, (rot, lin, campo) => {
+        const idx = lin === 'T' ? totalPorRotulo.get(rot) : linhaPorRef.get(`${rot}|${lin}`);
+        const letra = letrasMemoria[campo];
+        return idx == null || !letra ? null : `${letra}{R${idx}}`;
+      });
+      if (!formula) continue;
+      const alvo = rows[p.row]!;
+      alvo.formulas = { ...(alvo.formulas ?? {}), [p.col]: formula };
+    }
 
     return {
       name: 'Memória de cálculo',
@@ -18021,14 +18442,36 @@ export function OrcamentoPageView({
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
                               <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`} />
-                              <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`t:${bloco.servicoNome}`, 'total')}
+                                data-orc-col="total"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo} ${classeCelulaSomaOrc(`t:${bloco.servicoNome}`, 'total')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `t:${bloco.servicoNome}`, 'total')}
+                              >
+                                {conteudoSomaOrc(`t:${bloco.servicoNome}`, 'total') ?? (
+                                  <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                                )}
                               </td>
-                              <td data-orc-col="totalBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`t:${bloco.servicoNome}`, 'totalBdi')}
+                                data-orc-col="totalBdi"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo} ${classeCelulaSomaOrc(`t:${bloco.servicoNome}`, 'totalBdi')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `t:${bloco.servicoNome}`, 'totalBdi')}
+                              >
+                                {conteudoSomaOrc(`t:${bloco.servicoNome}`, 'totalBdi') ?? (
+                                  <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                                )}
                               </td>
-                              <td data-orc-col="peso" className={`px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}>
-                                {resumoTitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                              <td
+                                data-orc-col="peso"
+                                className={`cursor-pointer px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `t:${bloco.servicoNome}`, 'peso')}
+                              >
+                                {conteudoSomaOrc(`t:${bloco.servicoNome}`, 'peso') ??
+                                  `${resumoTitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
                               </td>
                               <td data-orc-col="obs" className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderTitulo}`} />
                             </tr>
@@ -18110,14 +18553,36 @@ export function OrcamentoPageView({
                               <td data-orc-col="puBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="subMo" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
                               <td data-orc-col="subMat" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`} />
-                              <td data-orc-col="total" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`s:${bloco.key}`, 'total')}
+                                data-orc-col="total"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub} ${classeCelulaSomaOrc(`s:${bloco.key}`, 'total')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `s:${bloco.key}`, 'total')}
+                              >
+                                {conteudoSomaOrc(`s:${bloco.key}`, 'total') ?? (
+                                  <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                )}
                               </td>
-                              <td data-orc-col="totalBdi" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`s:${bloco.key}`, 'totalBdi')}
+                                data-orc-col="totalBdi"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub} ${classeCelulaSomaOrc(`s:${bloco.key}`, 'totalBdi')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `s:${bloco.key}`, 'totalBdi')}
+                              >
+                                {conteudoSomaOrc(`s:${bloco.key}`, 'totalBdi') ?? (
+                                  <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                )}
                               </td>
-                              <td data-orc-col="peso" className={`px-2 py-2.5 text-sm text-center align-middle text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap font-semibold ${borderSub}`}>
-                                {resumoSubtitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                              <td
+                                data-orc-col="peso"
+                                className={`cursor-pointer px-2 py-2.5 text-sm text-center align-middle text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap font-semibold ${borderSub}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `s:${bloco.key}`, 'peso')}
+                              >
+                                {conteudoSomaOrc(`s:${bloco.key}`, 'peso') ??
+                                  `${resumoSubtitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
                               </td>
                               <td data-orc-col="obs" className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderSub}`} />
                             </tr>
@@ -18145,16 +18610,13 @@ export function OrcamentoPageView({
                                         coresCelulaPorKey,
                                         isDark
                                       );
-                                      if (!fontesDestacadasLinha?.includes(fonte)) return pintura;
-                                      return {
-                                        ...pintura,
-                                        boxShadow: isDark
-                                          ? 'inset 0 0 0 2px rgba(245, 158, 11, 0.9)'
-                                          : 'inset 0 0 0 2px rgba(217, 119, 6, 0.95)',
-                                        backgroundColor: isDark
-                                          ? 'rgba(180, 83, 9, 0.4)'
-                                          : 'rgba(254, 243, 199, 0.95)',
-                                      };
+                                      // O destaque agora é por classe (uma cor por origem); aqui fica só a pintura do usuário.
+                                      void fonte;
+                                      return pintura;
+                                    };
+                                    const classeFonteDestacada = (fonte: FonteCalculoOrc): string => {
+                                      const i = fontesDestacadasLinha?.indexOf(fonte) ?? -1;
+                                      return i < 0 ? '' : PALETA_FORMULA[i % PALETA_FORMULA.length]!.celula;
                                     };
                                     return (
                                     <React.Fragment key={row.key}>
@@ -18219,7 +18681,7 @@ export function OrcamentoPageView({
                                       <td
                                         data-orc-col="qtd"
                                         style={estiloCelulaComDestaqueFonte('qtd', 'qtd')}
-                                        className="p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700"
+                                        className={`p-0 text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${classeFonteDestacada('qtd')}`}
                                       >
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
@@ -18352,7 +18814,7 @@ export function OrcamentoPageView({
                                           colDef.strong
                                             ? 'font-semibold text-gray-900 dark:text-gray-50'
                                             : 'text-gray-900 dark:text-gray-100'
-                                        }`}
+                                        } ${classeCelulaSomaOrc(row.key, colDef.col)} ${classeFonteDestacada(colDef.campo)}`}
                                         onClick={(e) => e.stopPropagation()}
                                         onMouseDown={(e) => {
                                           e.stopPropagation();
@@ -18379,6 +18841,12 @@ export function OrcamentoPageView({
                                             draftKey={`orc-${colDef.campo}:${row.key}`}
                                             committedValue={formatarMoedaCampoOrc(colDef.valor)}
                                             editValueOnFocus={formulaFoco}
+                                            colorirFormula={
+                                              calcInfo.fontes.length > 0
+                                                ? (texto) => segmentarFormulaOrc(texto, calcInfo.fontes.length)
+                                                : undefined
+                                            }
+                                            overlayClassName={`text-right text-sm tabular-nums ${colDef.strong ? 'font-semibold' : ''}`}
                                             commitOnChange={false}
                                             disabled={gradeTravada}
                                             mask={(raw) =>
@@ -18456,7 +18924,12 @@ export function OrcamentoPageView({
                                                   undefined
                                                 );
                                               }
-                                              ativarDestaqueCalculoOrc(row.key, calcInfo.fontes);
+                                              ativarDestaqueCalculoOrc(
+                                                row.key,
+                                                calcInfo.fontes,
+                                                calcInfo.formula,
+                                                document.getElementById(inputId)?.closest('td') ?? null
+                                              );
                                             }}
                                             onBlurExtra={limparDestaqueCalculoOrc}
                                             inputMode={formulaFoco ? 'text' : 'numeric'}
@@ -18515,6 +18988,14 @@ export function OrcamentoPageView({
                         </tbody>
                       </table>
                     </div>
+
+                    {destaqueCalculoOrc?.balao ? (
+                      <DicaFormulaCompleta
+                        ancora={destaqueCalculoOrc.balao.ancora}
+                        segmentos={destaqueCalculoOrc.balao.segmentos}
+                        texto={destaqueCalculoOrc.balao.texto}
+                      />
+                    ) : null}
 
                     {menuCtxMontagem && !gradeTravada && (
                       <ActionMenuOverlay
