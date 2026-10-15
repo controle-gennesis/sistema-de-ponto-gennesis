@@ -32,14 +32,25 @@ export type FuelApprovalRow = {
 
 export type FdApprovalRow = {
   id: string;
-  displayNumber?: number | null;
   status: string;
   createdAt?: string;
-  title?: string | null;
-  description?: string | null;
-  requester?: { id: string; name: string } | null;
-  contract?: { id: string; name?: string; number?: string } | null;
-  costCenter?: { id: string; name?: string; code?: string | null } | null;
+  codFichaDemanda?: string | null;
+  codigoPedido?: string | null;
+  solicitanteNome?: string | null;
+  solicitante?: { id: string; name: string } | null;
+  contratoNome?: string | null;
+  contrato?: { id: string; name?: string; number?: string } | null;
+  obra?: string | null;
+  polo?: string | null;
+  numMovRm?: string | null;
+  idMovRm?: string | null;
+  scNumero?: string | null;
+  scId?: string | null;
+  ocId?: string | null;
+  faturamentoEstimado?: number | string | null;
+  custoEstimado?: number | string | null;
+  observacao?: string | null;
+  dataHora?: string | null;
 };
 
 export type RmApprovalRow = {

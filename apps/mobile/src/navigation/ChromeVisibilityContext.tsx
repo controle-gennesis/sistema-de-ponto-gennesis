@@ -237,9 +237,9 @@ export function useChromeScroll() {
     }, [reveal]),
   );
 
-  // iOS: tab bar nativa sobrepõe a cena — precisa de inset no scroll.
-  // Android: BottomTabNavigator já aplica sceneContainerStyle.paddingBottom.
-  const tabBarOffset = Platform.OS === 'ios' ? getTabBarHeight(insets.bottom) : 0;
+  // iPhone: tab bar nativa sobrepõe a cena — precisa de inset no scroll.
+  // iPad e Android: a cena já reserva a altura da barra de baixo.
+  const tabBarOffset = Platform.OS === 'ios' && !Platform.isPad ? getTabBarHeight(insets.bottom) : 0;
 
   return {
     scrollProps: chrome?.scrollHandlers ?? {},

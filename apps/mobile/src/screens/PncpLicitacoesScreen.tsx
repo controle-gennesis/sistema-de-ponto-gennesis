@@ -589,6 +589,8 @@ export default function PncpLicitacoesScreen() {
               void loadList();
             }}
             tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={isTabScreen ? headerOffset : 0}
           />
         }
         keyboardShouldPersistTaps="handled"

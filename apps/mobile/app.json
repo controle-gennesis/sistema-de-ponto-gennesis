@@ -2,14 +2,15 @@
   "expo": {
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
-    "version": "1.0.11",
+    "version": "1.0.12",
     "orientation": "portrait",
-    "icon": "./assets/favicon.png",
+    "icon": "./assets/logo-ios.png",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
+      "icon": "./assets/logo-ios.png",
       "supportsTablet": true,
       "bundleIdentifier": "br.com.gennesis.conecta",
       "infoPlist": {
@@ -21,9 +22,10 @@
       }
     },
     "android": {
-      "versionCode": 12,
+      "versionCode": 13,
+      "icon": "./assets/logo-android.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/favicon.png",
+        "foregroundImage": "./assets/logo-android.png",
         "backgroundColor": "#ce3736"
       },
       "package": "com.engenharia.sistemaponto",

@@ -177,6 +177,7 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
         tabBarInactiveTintColor: isDark ? '#9ca3af' : '#6b7280',
         tabBarActiveBackgroundColor: 'transparent',
         tabBarShowLabel: true,
+        tabBarLabelPosition: Platform.isPad ? 'below-icon' : undefined,
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: '600',
@@ -225,11 +226,14 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
             tabBarLabel: ({ color }) => (
               <Text
                 numberOfLines={1}
+                allowFontScaling={false}
                 adjustsFontSizeToFit
                 minimumFontScale={0.72}
                 style={{
                   color,
                   fontSize: 10,
+                  lineHeight: 12,
+                  height: 12,
                   fontWeight: '600',
                   marginTop: 2,
                   marginBottom: 0,
@@ -277,7 +281,7 @@ export default function BottomTabNavigator() {
   return (
     <View style={styles.root}>
       <AppHeader />
-      {Platform.OS === 'ios' ? (
+      {Platform.OS === 'ios' && !Platform.isPad ? (
         <IosNativeTabs onTabChange={setActiveTab} />
       ) : (
         <AndroidLucideTabs onTabChange={setActiveTab} />

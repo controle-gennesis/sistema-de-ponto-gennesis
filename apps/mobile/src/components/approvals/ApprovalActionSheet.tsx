@@ -39,10 +39,12 @@ import {
   rejectRmRequest,
   returnMedicao,
   type FuelApprovalRow,
+  type FdApprovalRow,
   type MedicaoApprovalRow,
   type OcApprovalRow,
 } from '../../services/approvals';
 import {
+  formatApprovalMoney,
   parseApprovalMoneyInput,
   type ApprovalListItem,
   type ApprovalTabId,
@@ -101,6 +103,7 @@ export default function ApprovalActionSheet({
   const dpRaw = tab === 'dp' && item ? (item.raw as DpRequest) : null;
   const fuelRaw = tab === 'fuel' && item ? (item.raw as FuelApprovalRow) : null;
 
+  const fdRaw = tab === 'fd' && item ? (item.raw as FdApprovalRow) : null;
   const employeesQuery = useQuery({
     queryKey: ['payroll-employees'],
     queryFn: fetchPayrollEmployees,
@@ -350,7 +353,7 @@ export default function ApprovalActionSheet({
           </View>
         ) : null}
 
-        {!dpRaw && !fuelRaw ? (
+        {!dpRaw && !fuelRaw && !fdRaw ? (
           <View style={styles.detailGrid}>
             {item.subtitle ? (
               <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
@@ -359,6 +362,41 @@ export default function ApprovalActionSheet({
             {item.statusLabel ? (
               <DetailField styles={styles} label="Status" value={item.statusLabel} />
             ) : null}
+          </View>
+        ) : null}
+
+        {fdRaw ? (
+          <View style={styles.detailGrid}>
+            <DetailField styles={styles} label="Código da FD" value={fdRaw.codFichaDemanda?.trim() || '—'} />
+            <DetailField styles={styles} label="Pedido" value={fdRaw.codigoPedido?.trim() || '—'} />
+            <DetailField styles={styles} label="Contrato" value={fdRaw.contratoNome?.trim() || fdRaw.contrato?.name || '—'} />
+            <DetailField styles={styles} label="Obra" value={fdRaw.obra?.trim() || '—'} />
+            <DetailField
+              styles={styles}
+              label="Solicitante"
+              value={fdRaw.solicitanteNome?.trim() || fdRaw.solicitante?.name || '—'}
+            />
+            <DetailField styles={styles} label="Polo" value={fdRaw.polo?.trim() || '—'} />
+            <DetailField styles={styles} label="Nº Mov RM" value={fdRaw.numMovRm?.trim() || '—'} />
+            <DetailField styles={styles} label="ID Mov RM" value={fdRaw.idMovRm?.trim() || '—'} />
+            {fdRaw.scNumero?.trim() ? (
+              <DetailField styles={styles} label="Nº da SC" value={fdRaw.scNumero.trim()} />
+            ) : null}
+            {fdRaw.ocId?.trim() ? (
+              <DetailField styles={styles} label="ID da OC" value={fdRaw.ocId.trim()} />
+            ) : null}
+            <DetailField
+              styles={styles}
+              label="Faturamento estimado"
+              value={formatApprovalMoney(Number(fdRaw.faturamentoEstimado))}
+            />
+            <DetailField
+              styles={styles}
+              label="Custo estimado"
+              value={formatApprovalMoney(Number(fdRaw.custoEstimado))}
+            />
+            <DetailField styles={styles} label="Data/hora" value={fdRaw.dataHora?.trim() || '—'} />
+            <DetailField styles={styles} label="Observação" value={fdRaw.observacao?.trim() || '—'} />
           </View>
         ) : null}
 

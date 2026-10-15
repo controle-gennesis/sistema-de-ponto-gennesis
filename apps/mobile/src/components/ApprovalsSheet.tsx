@@ -65,7 +65,11 @@ type Props = {
 };
 
 function itemRefCode(item: ApprovalListItemWithTab): string {
-  const raw = item.raw as { displayNumber?: string | number | null };
+  const raw = item.raw as {
+    displayNumber?: string | number | null;
+    codFichaDemanda?: string | null;
+  };
+  if (item.tab === 'fd' && raw?.codFichaDemanda?.trim()) return raw.codFichaDemanda.trim();
   if (raw?.displayNumber != null && String(raw.displayNumber).trim() !== '') {
     return `#${raw.displayNumber}`;
   }

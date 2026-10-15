@@ -99,6 +99,8 @@ export default function HomeScreen() {
             refreshing={refreshing}
             onRefresh={() => void onRefresh()}
             tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={headerOffset}
           />
         }
       >

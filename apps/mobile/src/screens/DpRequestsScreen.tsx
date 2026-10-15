@@ -964,6 +964,8 @@ export default function DpRequestsScreen() {
             refreshing={listQuery.isRefetching}
             onRefresh={() => void listQuery.refetch()}
             tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={isTabScreen ? headerOffset : 0}
           />
         }
         keyboardShouldPersistTaps="handled"

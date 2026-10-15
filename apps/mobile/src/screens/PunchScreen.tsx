@@ -1182,7 +1182,7 @@ export default function PunchScreen() {
                 </View>
                 <View style={styles.mapLegendItem}>
                   <View style={[styles.mapDot, { backgroundColor: '#dc2626' }]} />
-                  <Text style={styles.mapLegendText}>Fora</Text>
+                  <Text style={styles.mapLegendText}>Fora do raio</Text>
                 </View>
               </View>
             </View>

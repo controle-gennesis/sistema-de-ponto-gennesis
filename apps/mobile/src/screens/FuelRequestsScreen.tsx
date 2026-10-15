@@ -997,6 +997,8 @@ export default function FuelRequestsScreen() {
               void loadList();
             }}
             tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={isTabScreen ? headerOffset : 0}
           />
         }
       >

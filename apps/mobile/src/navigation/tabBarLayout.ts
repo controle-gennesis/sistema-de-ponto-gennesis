@@ -46,13 +46,14 @@ export function getAndroidTabBarBottomPad(insetsBottom: number) {
   return insetsBottom > 10 ? insetsBottom + 6 : 28;
 }
 
-/** Altura aproximada da UITabBar nativa no iOS. */
+/** Altura aproximada da UITabBar nativa no iPhone. No iPad a barra é a de baixo, em JS. */
 export function getIosTabBarHeight(insetsBottom: number) {
   return 49 + insetsBottom;
 }
 
 export function getTabBarHeight(insetsBottom: number) {
-  return Platform.OS === 'ios'
-    ? getIosTabBarHeight(insetsBottom)
-    : getAndroidTabBarHeight(insetsBottom);
+  if (Platform.OS === 'ios' && !Platform.isPad) {
+    return getIosTabBarHeight(insetsBottom);
+  }
+  return getAndroidTabBarHeight(insetsBottom);
 }

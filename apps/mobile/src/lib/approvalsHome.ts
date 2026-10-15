@@ -130,17 +130,23 @@ export async function fetchPendingApprovalsForTab(
 
   if (tab === 'fd') {
     const rows = await fetchFdApprovals('PENDING');
-    return rows.map((row: FdApprovalRow) => ({
-      id: row.id,
-      title: row.title?.trim() || `Ficha #${row.displayNumber ?? '—'}`,
-      person: row.requester?.name || null,
-      place: row.contract?.name || row.costCenter?.name || null,
-      subtitle: row.contract?.name || row.costCenter?.name || row.requester?.name || '—',
-      meta: `#${row.displayNumber ?? '—'} · ${formatApprovalDate(row.createdAt)}`,
-      statusLabel: 'Pendente',
-      pending: true,
-      raw: row,
-    }));
+    return rows.map((row: FdApprovalRow) => {
+      const codigo = row.codFichaDemanda?.trim() || '';
+      const solicitante = row.solicitanteNome?.trim() || row.solicitante?.name || null;
+      const contrato = row.contratoNome?.trim() || row.contrato?.name || null;
+      const obra = row.obra?.trim() || null;
+      return {
+        id: row.id,
+        title: codigo || 'Ficha de demanda',
+        person: solicitante,
+        place: [contrato, obra].filter(Boolean).join(' · ') || null,
+        subtitle: obra || contrato || solicitante || '—',
+        meta: `${formatApprovalMoney(Number(row.faturamentoEstimado))} · ${formatApprovalDate(row.createdAt)}`,
+        statusLabel: 'Pendente',
+        pending: true,
+        raw: row,
+      };
+    });
   }
 
   if (tab === 'rm') {

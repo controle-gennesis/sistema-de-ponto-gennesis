@@ -35,6 +35,8 @@ const PANEL_WIDTH = Math.min(
   Math.round(Dimensions.get('window').width * (Platform.OS === 'android' ? 0.88 : 0.88)),
 );
 const CORNER = Platform.OS === 'android' ? 20 : 24;
+/** Folga à esquerda: o spring passa um pouco do ponto e, sem isso, o fundo aparece na borda. */
+const LEFT_BLEED = 56;
 
 function MenuItemRow({
   label,
@@ -228,7 +230,11 @@ export default function Menu({ visible, onClose }: MenuProps) {
           <Animated.View
             style={[
               styles.panelSlide,
-              { width: PANEL_WIDTH, transform: [{ translateX: slideAnim }] },
+              {
+                width: PANEL_WIDTH + LEFT_BLEED,
+                marginLeft: -LEFT_BLEED,
+                transform: [{ translateX: slideAnim }],
+              },
             ]}
           >
             <View
@@ -237,6 +243,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                 styles.panel,
                 {
                   backgroundColor: colors.surface ?? colors.background,
+                  paddingLeft: 20 + LEFT_BLEED,
                   paddingTop:
                     (Platform.OS === 'android'
                       ? insets.top > 0
@@ -378,7 +385,6 @@ const styles = StyleSheet.create({
   },
   panelSlide: {
     height: '100%',
-    maxWidth: 360,
     ...Platform.select({
       android: {
         elevation: 16,

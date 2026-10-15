@@ -347,6 +347,8 @@ export default function GestaoOsListScreen() {
             refreshing={!!listQuery.isRefetching}
             onRefresh={onRefresh}
             tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={headerOffset}
           />
         }
         ListHeaderComponent={listHeader}
