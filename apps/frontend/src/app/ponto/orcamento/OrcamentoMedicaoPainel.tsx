@@ -1110,7 +1110,9 @@ function CampoNumeroFormula({
   const [cursorPos, setCursorPos] = useState(0);
   const [indiceAjuda, setIndiceAjuda] = useState(0);
   const [ajudaFechada, setAjudaFechada] = useState(false);
-  const prefixoAjuda = editando ? prefixoFuncaoNoCursor(formula, cursorPos) : null;
+  /** Token escolhido clicando na célula não é nome de função sendo digitado: mostra o valor. */
+  const prefixoAjuda =
+    editando && formula !== ultimaFormulaPorClique ? prefixoFuncaoNoCursor(formula, cursorPos) : null;
   const segmentosExibir =
     segmentos && segmentos.length > 0 && formula.trimStart().startsWith('=')
       ? prefixoAjuda?.prefixo
@@ -1502,6 +1504,9 @@ function AjudaFormulaLista({
     document.body
   );
 }
+
+/** Última fórmula montada por clique em célula; enquanto o texto for igual, não há função sendo digitada. */
+let ultimaFormulaPorClique: string | null = null;
 
 /** `{1.1.2!3!A}` ou `{1.1.2!T!SUB}` — T é a linha de total da composição. */
 function formulaReferenciaCelula(
@@ -2775,6 +2780,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       }
       const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
       anotarTextoCalc(draftKey, current, next);
+      ultimaFormulaPorClique = next;
       const onCommit = calcCommittersRef.current[draftKey];
       const rowCtx = calcRowCtxRef.current[draftKey];
       const nextDraft = { ...draftCalcRef.current, [draftKey]: next };
