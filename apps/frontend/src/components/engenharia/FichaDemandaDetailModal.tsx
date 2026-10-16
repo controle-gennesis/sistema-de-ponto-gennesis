@@ -10,8 +10,11 @@ import { Button } from '@/components/ui/Button';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
-import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
+  FD_PURCHASE_STATUS_OPTIONS,
   anexosDemais,
   anexosOrdemCompra,
   fdAnexoKindLabel,
@@ -20,6 +23,7 @@ import {
   formatCurrencyDisplay,
   inferFdAnexoKind,
   purchaseStatusLabel,
+  type DemandSheetPurchaseStatus,
   type FdAnexo,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
@@ -117,6 +121,22 @@ export function FichaDemandaDetailModal({
   const [scNumero, setScNumero] = useState('');
   const [scId, setScId] = useState('');
   const [ocId, setOcId] = useState('');
+  const [purchaseStatus, setPurchaseStatus] = useState('');
+  const [cancellationNote, setCancellationNote] = useState('');
+
+  const purchaseStatusOptions = useMemo(
+    () => labeledToSelectOptions(FD_PURCHASE_STATUS_OPTIONS),
+    []
+  );
+
+  useEffect(() => {
+    // Almoxarifado é um status só (o GO antigo aparece como Almoxarifado); status que saíram da lista ficam em branco.
+    const current = record?.purchaseStatus === 'WAREHOUSE_GO' ? 'WAREHOUSE_DF' : record?.purchaseStatus;
+    setPurchaseStatus(
+      current && FD_PURCHASE_STATUS_OPTIONS.some((o) => o.value === current) ? current : ''
+    );
+    setCancellationNote(record?.purchaseCancellationNote ?? '');
+  }, [record?.id, record?.purchaseStatus, record?.purchaseCancellationNote]);
 
   useEffect(() => {
     setScNumero(record?.scNumero || '');
@@ -205,7 +225,41 @@ export function FichaDemandaDetailModal({
     },
   });
 
+  const statusMutation = useMutation({
+    mutationFn: async () => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-status`, {
+        purchaseStatus: purchaseStatus as DemandSheetPurchaseStatus,
+        purchaseCancellationNote:
+          purchaseStatus === 'CANCELLED' ? cancellationNote.trim() : undefined,
+      });
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onSuccess: async (updated) => {
+      toast.success('Status de compras atualizado.');
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+      await queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível atualizar o status.');
+    },
+  });
+
   if (!record) return null;
+
+  const statusUnchanged =
+    purchaseStatus === (record.purchaseStatus === 'WAREHOUSE_GO' ? 'WAREHOUSE_DF' : record.purchaseStatus ?? '') &&
+    (purchaseStatus !== 'CANCELLED' ||
+      cancellationNote.trim() === (record.purchaseCancellationNote ?? '').trim());
+  const cancelledNeedsNote = purchaseStatus === 'CANCELLED' && !cancellationNote.trim();
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalhes da Ficha de Demanda" size="xl">
@@ -268,6 +322,67 @@ export function FichaDemandaDetailModal({
             <Field label="Observação">{record.observacao || '—'}</Field>
           </div>
         </dl>
+
+        {allowAddOrdemCompra ? (
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Status de compras
+              </p>
+            </div>
+            <div className="space-y-3 p-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status
+                </label>
+                <StringSingleSelectDropdown
+                  value={purchaseStatus}
+                  onChange={setPurchaseStatus}
+                  options={purchaseStatusOptions}
+                  placeholder="Selecione o status..."
+                  emptyOptionLabel="Selecione o status..."
+                  searchPlaceholder="Pesquisar status..."
+                  matchTriggerWidth
+                  className="w-full"
+                />
+              </div>
+              {purchaseStatus === 'CANCELLED' ? (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Observação do cancelamento<span className="text-red-500"> *</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={cancellationNote}
+                    onChange={(e) => setCancellationNote(e.target.value)}
+                    placeholder="Informe o motivo do cancelamento"
+                    className={FORM_FIELD_TEXTAREA_CLS}
+                  />
+                </div>
+              ) : null}
+              {record.purchaseStatusUpdatedAt ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Última atualização: {formatDateTime(record.purchaseStatusUpdatedAt)}
+                  {record.purchaseStatusUpdaterNome ? ` — ${record.purchaseStatusUpdaterNome}` : ''}
+                </p>
+              ) : null}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => statusMutation.mutate()}
+                  disabled={
+                    !purchaseStatus ||
+                    statusUnchanged ||
+                    cancelledNeedsNote ||
+                    statusMutation.isPending
+                  }
+                >
+                  {statusMutation.isPending ? 'Salvando...' : 'Salvar status'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {allowAddOrdemCompra ? (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">

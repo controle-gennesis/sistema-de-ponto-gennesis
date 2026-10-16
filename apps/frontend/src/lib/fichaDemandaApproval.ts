@@ -16,24 +16,29 @@ export type DemandSheetPurchaseStatus =
   | 'FINISHED'
   | 'CANCELLED';
 
+/** Status que podem ser escolhidos hoje. "Almoxarifado" usa o valor WAREHOUSE_DF (o GO antigo segue válido). */
 export const FD_PURCHASE_STATUS_OPTIONS: {
   value: DemandSheetPurchaseStatus;
   label: string;
 }[] = [
-  { value: 'WAREHOUSE_DF', label: 'Almoxarifado DF' },
-  { value: 'WAREHOUSE_GO', label: 'Almoxarifado GO' },
-  { value: 'FULLY_FULFILLED_BY_STOCK', label: 'Atendida totalmente pelo estoque' },
-  { value: 'PARTIALLY_FULFILLED_BY_STOCK', label: 'Atendida parcialmente pelo estoque' },
+  { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
   { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
   { value: 'SUPPLIES', label: 'Suprimentos' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ];
 
-export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string> =
-  Object.fromEntries(
-    FD_PURCHASE_STATUS_OPTIONS.map((o) => [o.value, o.label])
-  ) as Record<DemandSheetPurchaseStatus, string>;
+/** Rótulos de todos os valores, inclusive os que não são mais selecionáveis (fichas antigas). */
+export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string> = {
+  WAREHOUSE_DF: 'Almoxarifado',
+  WAREHOUSE_GO: 'Almoxarifado',
+  FULLY_FULFILLED_BY_STOCK: 'Atendida totalmente pelo estoque',
+  PARTIALLY_FULFILLED_BY_STOCK: 'Atendida parcialmente pelo estoque',
+  PURCHASE_REQUEST: 'Solicitação de compra',
+  SUPPLIES: 'Suprimentos',
+  FINISHED: 'Finalizado',
+  CANCELLED: 'Cancelado',
+};
 
 export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | null | undefined): string {
   if (!status) {

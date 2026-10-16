@@ -336,6 +336,7 @@ export class DemandSheetApprovalController {
               { codFichaDemanda: { contains: search, mode: 'insensitive' } },
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
+              { idMovRm: { contains: search, mode: 'insensitive' } },
               { scNumero: { contains: search, mode: 'insensitive' } },
               { scId: { contains: search, mode: 'insensitive' } },
               { ocId: { contains: search, mode: 'insensitive' } },
@@ -749,6 +750,9 @@ export class DemandSheetApprovalController {
       if (purchaseStatus && purchaseStatus !== 'ALL') {
         if (purchaseStatus === 'NONE') {
           where.purchaseStatus = null;
+        } else if (purchaseStatus === 'WAREHOUSE_DF' || purchaseStatus === 'WAREHOUSE_GO') {
+          // Almoxarifado é um status só: junta os registros antigos de DF e GO.
+          where.purchaseStatus = { in: ['WAREHOUSE_DF', 'WAREHOUSE_GO'] };
         } else if (
           (PURCHASE_STATUS_VALUES as readonly string[]).includes(purchaseStatus)
         ) {
@@ -763,6 +767,7 @@ export class DemandSheetApprovalController {
               { codFichaDemanda: { contains: search, mode: 'insensitive' } },
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
+              { idMovRm: { contains: search, mode: 'insensitive' } },
               { scNumero: { contains: search, mode: 'insensitive' } },
               { scId: { contains: search, mode: 'insensitive' } },
               { ocId: { contains: search, mode: 'insensitive' } },

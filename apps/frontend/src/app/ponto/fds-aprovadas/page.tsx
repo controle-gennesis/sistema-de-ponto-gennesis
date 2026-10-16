@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { ClipboardCheck, Eye, Filter, MoreVertical, Search, X } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -12,7 +11,6 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { FichaDemandaPurchaseStatusModal } from '@/components/suprimentos/FichaDemandaPurchaseStatusModal';
 import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
 import api from '@/lib/api';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
@@ -41,10 +39,7 @@ type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
 const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
   { value: 'NONE', label: 'Sem status' },
-  { value: 'WAREHOUSE_DF', label: 'Almoxarifado DF' },
-  { value: 'WAREHOUSE_GO', label: 'Almoxarifado GO' },
-  { value: 'FULLY_FULFILLED_BY_STOCK', label: 'Atendida totalmente pelo estoque' },
-  { value: 'PARTIALLY_FULFILLED_BY_STOCK', label: 'Atendida parcialmente pelo estoque' },
+  { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
   { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
   { value: 'SUPPLIES', label: 'Suprimentos' },
   { value: 'FINISHED', label: 'Finalizado' },
@@ -53,12 +48,10 @@ const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
 
 export default function FdsAprovadasPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<PurchaseStatusFilter>('ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedRecord, setSelectedRecord] = useState<FichaDemandaApprovalRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<FichaDemandaApprovalRecord | null>(null);
   const [rowActionMenu, setRowActionMenu] = useState<{
     rowId: string;
@@ -132,38 +125,6 @@ export default function FdsAprovadasPage() {
     setRowActionMenu(null);
     setDetailRecord(row);
   };
-
-  const openPurchaseStatus = (row: FichaDemandaApprovalRecord) => {
-    setRowActionMenu(null);
-    setSelectedRecord(row);
-  };
-
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({
-      id,
-      purchaseStatus,
-      purchaseCancellationNote,
-    }: {
-      id: string;
-      purchaseStatus: DemandSheetPurchaseStatus;
-      purchaseCancellationNote?: string;
-    }) => {
-      const res = await api.patch(`/demand-sheet-approvals/${id}/purchase-status`, {
-        purchaseStatus,
-        purchaseCancellationNote,
-      });
-      return res.data;
-    },
-    onSuccess: () => {
-      toast.success('Status de compras atualizado.');
-      setSelectedRecord(null);
-      void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
-      void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
-    },
-    onError: (err: { response?: { data?: { error?: string } } }) => {
-      toast.error(err.response?.data?.error || 'Erro ao atualizar status');
-    },
-  });
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
@@ -269,6 +230,9 @@ export default function FdsAprovadasPage() {
                             Código
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            ID / Nº Mov.
+                          </th>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -307,6 +271,14 @@ export default function FdsAprovadasPage() {
                               <ListRowNavigableLabel className="text-sm font-medium">
                                 {row.codFichaDemanda}
                               </ListRowNavigableLabel>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
+                              <p className="text-gray-900 dark:text-gray-100">
+                                {row.idMovRm?.trim() || '—'}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {row.numMovRm?.trim() || '—'}
+                              </p>
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contratoNome}
@@ -397,18 +369,6 @@ export default function FdsAprovadasPage() {
                         <Eye className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
                         <span>Ver detalhes</span>
                       </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPurchaseStatus(rowForActionMenu);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                      >
-                        <ClipboardCheck className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                        <span>Atualizar status</span>
-                      </button>
                     </ActionMenuOverlay>
                   )}
                 </>
@@ -423,21 +383,6 @@ export default function FdsAprovadasPage() {
           onClose={() => setDetailRecord(null)}
           onRecordUpdated={(updated) => setDetailRecord(updated)}
           allowAddOrdemCompra
-        />
-
-        <FichaDemandaPurchaseStatusModal
-          record={selectedRecord}
-          isOpen={!!selectedRecord}
-          isSaving={updateStatusMutation.isPending}
-          onClose={() => setSelectedRecord(null)}
-          onSave={(purchaseStatus, purchaseCancellationNote) => {
-            if (!selectedRecord) return;
-            updateStatusMutation.mutate({
-              id: selectedRecord.id,
-              purchaseStatus,
-              purchaseCancellationNote,
-            });
-          }}
         />
 
         <Modal
