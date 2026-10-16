@@ -14,6 +14,8 @@ const SUBTITLE_BG = 'FFE2E8F0';
 const SUBTITLE_FG = 'FF1F2937';
 const TOTAL_BG = 'FFF9FAFB';
 const SECTION_BG = 'FFF3F4F6';
+const RODAPE_ROTULO_BG = 'FFD9D9D9';
+const SERVICO_BARRA_BG = 'FF000000';
 const GREEN_BG = 'FFDCFCE7';
 const GREEN_FG = 'FF166534';
 const AMBER_BG = 'FFFEF3C7';
@@ -39,6 +41,10 @@ export type OrcamentoExcelRowKind =
   | 'subtitulo'
   | 'cabecalho'
   | 'total'
+  /** Caixa de resumo no canto direito: rótulos cinza nas colunas 11–12 e valor na 13. */
+  | 'rodape'
+  /** Barra preta com o nome do serviço (memória de cálculo). */
+  | 'servico'
   | 'section'
   | 'legenda'
   | 'blank';
@@ -60,12 +66,21 @@ export type OrcamentoExcelRow = {
   tones?: Record<number, 'item' | 'plain' | 'label'>;
 };
 
-/** Faixa de identificação no topo da aba: título, subtítulo e dois blocos de rótulo/valor. */
+/** Célula do quadro de identificação no topo da aba; `de`/`ate` são colunas 0-based (inclusive). */
+export type OrcamentoExcelCabecalhoCelula = {
+  texto: string;
+  de: number;
+  ate: number;
+  /** Rótulo: fundo cinza, negrito e centralizado. Sem isso, é valor (fundo branco). */
+  rotulo?: boolean;
+  alinhamento?: 'left' | 'center';
+};
+
+/** Quadro de rótulo/valor acima do cabeçalho das colunas: cada item de `linhas` é uma linha da planilha. */
 export type OrcamentoExcelCabecalho = {
-  titulo: string;
-  subtitulo?: string;
-  esquerda: Array<[rotulo: string, valor: string]>;
-  direita: Array<[rotulo: string, valor: string]>;
+  linhas: OrcamentoExcelCabecalhoCelula[][];
+  /** Altura por linha (padrão 20). */
+  alturas?: number[];
 };
 
 export type OrcamentoExcelSheetSpec = {
@@ -219,9 +234,8 @@ async function fillWorkbook(
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
     const cabecalho = spec.cabecalho && colCount >= 14 ? spec.cabecalho : undefined;
-    const linhasInfo = cabecalho ? Math.max(cabecalho.esquerda.length, cabecalho.direita.length) : 0;
-    /** Linhas ocupadas acima do cabeçalho das colunas: título, subtítulo, informações e uma linha de respiro. */
-    const offsetCabecalho = cabecalho ? 2 + linhasInfo + 1 : 0;
+    /** Linhas ocupadas acima do cabeçalho das colunas: o quadro de identificação e uma linha de respiro. */
+    const offsetCabecalho = cabecalho ? cabecalho.linhas.length + 1 : 0;
     const linhaHeaderColunas = offsetCabecalho + 1;
     const sheet = workbook.addWorksheet(spec.name.slice(0, 31), {
       views: showHeader && !cabecalho ? [{ state: 'frozen', ySplit: 1 }] : [{}],
@@ -241,83 +255,33 @@ async function fillWorkbook(
     });
 
     if (cabecalho) {
-      const escreverMesclado = (
-        linha: number,
-        de: number,
-        ate: number,
-        texto: string,
-        estilo: {
-          fundo: string;
-          cor: string;
-          tamanho: number;
-          negrito?: boolean;
-          alinhamento?: 'left' | 'center';
+      cabecalho.linhas.forEach((celulas, i) => {
+        const linha = i + 1;
+        sheet.getRow(linha).height = cabecalho.alturas?.[i] ?? 20;
+        for (const celula of celulas) {
+          const de = celula.de + 1;
+          const ate = Math.min(celula.ate, colCount - 1) + 1;
+          for (let c = de; c <= ate; c++) {
+            const cell = sheet.getCell(linha, c);
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: celula.rotulo ? RODAPE_ROTULO_BG : WHITE },
+            };
+            applyThinBorder(cell);
+          }
+          const cell = sheet.getCell(linha, de);
+          cell.value = celula.texto;
+          cell.font = { name: fontName, size: 10, bold: Boolean(celula.rotulo), color: { argb: TITLE_TEXT } };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: celula.alinhamento ?? (celula.rotulo ? 'center' : 'left'),
+            wrapText: true,
+          };
+          if (ate > de) sheet.mergeCells(linha, de, linha, ate);
         }
-      ) => {
-        for (let c = de; c <= ate; c++) {
-          const cell = sheet.getCell(linha, c);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: estilo.fundo } };
-          applyThinBorder(cell);
-        }
-        const cell = sheet.getCell(linha, de);
-        cell.value = texto;
-        cell.font = {
-          name: fontName,
-          size: estilo.tamanho,
-          bold: estilo.negrito,
-          color: { argb: estilo.cor },
-        };
-        cell.alignment = {
-          vertical: 'middle',
-          horizontal: estilo.alinhamento ?? 'left',
-          indent: estilo.alinhamento === 'center' ? 0 : 1,
-          wrapText: true,
-        };
-        if (ate > de) sheet.mergeCells(linha, de, linha, ate);
-      };
-
-      sheet.getRow(1).height = 36;
-      escreverMesclado(1, 1, colCount, cabecalho.titulo, {
-        fundo: tituloBg,
-        cor: tituloFg,
-        tamanho: 16,
-        negrito: true,
-        alinhamento: 'left',
       });
-      sheet.getRow(2).height = 22;
-      escreverMesclado(2, 1, colCount, cabecalho.subtitulo ?? '', {
-        fundo: subtituloBg,
-        cor: subtituloFg,
-        tamanho: 10,
-        negrito: true,
-        alinhamento: 'left',
-      });
-      /** Os dois blocos ocupam a largura toda: o da direita termina na última coluna da tabela. */
-      const valorDireitaDe = colCount - 2;
-      const rotuloDireitaDe = valorDireitaDe - 4;
-      const valorEsquerdaAte = rotuloDireitaDe - 1;
-      for (let i = 0; i < linhasInfo; i++) {
-        const linha = 3 + i;
-        sheet.getRow(linha).height = 20;
-        const esq = cabecalho.esquerda[i];
-        const dir = cabecalho.direita[i];
-        const bloco = (par: [string, string] | undefined, rotDe: number, rotAte: number, valDe: number, valAte: number) => {
-          escreverMesclado(linha, rotDe, rotAte, par?.[0] ?? '', {
-            fundo: headerBg,
-            cor: headerFg,
-            tamanho: 9,
-            negrito: true,
-          });
-          escreverMesclado(linha, valDe, valAte, par?.[1] ?? '', {
-            fundo: WHITE,
-            cor: TITLE_TEXT,
-            tamanho: 10,
-          });
-        };
-        bloco(esq, 1, 3, 4, valorEsquerdaAte);
-        bloco(dir, rotuloDireitaDe, valorDireitaDe - 1, valorDireitaDe, colCount);
-      }
-      sheet.getRow(2 + linhasInfo + 1).height = 10;
+      sheet.getRow(cabecalho.linhas.length + 1).height = 10;
     }
 
     if (showHeader) {
@@ -369,6 +333,36 @@ async function fillWorkbook(
 
         if (kind === 'blank') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WHITE } };
+          continue;
+        }
+
+        if (kind === 'servico') {
+          row.height = 28;
+          applyThinBorder(cell);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SERVICO_BARRA_BG } };
+          cell.font = { name: fontName, size: 12, bold: true, color: { argb: WHITE } };
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          continue;
+        }
+
+        if (kind === 'rodape') {
+          row.height = 20;
+          const ehRotulo = c === 11 || c === 12;
+          if (!ehRotulo && c !== 13) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: WHITE } };
+            continue;
+          }
+          applyThinBorder(cell);
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: ehRotulo ? RODAPE_ROTULO_BG : WHITE },
+          };
+          cell.font = { name: fontName, size: 10, bold: true, color: { argb: TITLE_TEXT } };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: ehRotulo ? 'center' : 'right',
+          };
           continue;
         }
 

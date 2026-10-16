@@ -137,9 +137,11 @@ import {
   buildOrcamentoBrandedWorkbook,
   downloadOrcamentoBrandedExcel,
   orcamentoWorkbookToFile,
+  type OrcamentoExcelCabecalhoCelula,
   type OrcamentoExcelRow,
   type OrcamentoExcelSheetSpec,
 } from '@/lib/exportOrcamentoBrandedExcel';
+import { EXPORT_COMPANY } from '@/lib/exportBrandingLogos';
 import {
   calcularDataFimOrcamento,
   calcularStatusCronograma,
@@ -7146,6 +7148,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
+      data-formula={focadoVisual && local.trimStart().startsWith('=') ? 'true' : undefined}
       className={pintar ? `${className ?? ''} !text-transparent` : className}
       value={local}
       onFocus={() => {
@@ -14525,25 +14528,27 @@ export function OrcamentoPageView({
         const tipoAuto = inferirTipoUnidadePorDimensao(row.dimensoes?.linhas || []);
         const r = rows.length;
         itensDoSub.get(subIdxLinha)?.push(r);
-        const mo = arredondarMoeda2(row.maoDeObraUnitario);
-        const mat = arredondarMoeda2(row.materialUnitario);
-        const puSem = arredondarMoeda2(row.precoUnitario);
-        const puCom = arredondarMoeda2(row.precoUnitarioComBdi);
+        // Unitários e quantidade seguem com a precisão do cálculo (a planilha exibe 2 casas),
+        // para as fórmulas reproduzirem exatamente os subtotais e totais da tela.
+        const mo = roundTo(row.maoDeObraUnitario, 8);
+        const mat = roundTo(row.materialUnitario, 8);
+        const puSem = roundTo(row.precoUnitario, 8);
+        const puCom = roundTo(row.precoUnitarioComBdi, 8);
         const subMo = arredondarMoeda2(row.subMaoDeObra);
         const subMat = arredondarMoeda2(row.subMaterial);
         const totSem = arredondarMoeda2(row.total);
         const totCom = arredondarMoeda2(row.totalComBdi);
-        const qtd4 = roundTo(row.quantidade, 4);
+        const qtd = roundTo(row.quantidade, 8);
+        const r2 = (n: number) => Math.round(n * 100) / 100;
         const formulas: Record<number, string> = {};
-        if (bate(mo + mat, puSem)) formulas[8] = `G{r}+H{r}`;
-        if (bate(Math.round(puSem * fatorBdi * 100) / 100, puCom)) {
-          formulas[9] = `ROUND(I{r}*${fatorBdiTxt},2)`;
-        }
-        if (bate(Math.round(qtd4 * mo * 100) / 100, subMo)) formulas[10] = `ROUND(F{r}*G{r},2)`;
-        if (bate(Math.round(qtd4 * mat * 100) / 100, subMat)) formulas[11] = `ROUND(F{r}*H{r},2)`;
-        if (formulas[10] && formulas[11] && bate(subMo + subMat, totSem)) formulas[12] = `K{r}+L{r}`;
-        else if (bate(Math.round(qtd4 * puSem * 100) / 100, totSem)) formulas[12] = `ROUND(F{r}*I{r},2)`;
-        if (formulas[12] && bate(Math.round(totSem * fatorBdi * 100) / 100, totCom)) {
+        const puSemCalc = mo + mat;
+        if (bate(puSemCalc, puSem)) formulas[8] = `G{r}+H{r}`;
+        if (bate(puSem * fatorBdi, puCom)) formulas[9] = `I{r}*${fatorBdiTxt}`;
+        if (bate(r2(qtd * mo), subMo)) formulas[10] = `ROUND(F{r}*G{r},2)`;
+        if (bate(r2(qtd * mat), subMat)) formulas[11] = `ROUND(F{r}*H{r},2)`;
+        if (bate(r2(qtd * mo + qtd * mat), totSem)) formulas[12] = `ROUND(F{r}*G{r}+F{r}*H{r},2)`;
+        else if (bate(r2(qtd * puSem), totSem)) formulas[12] = `ROUND(F{r}*I{r},2)`;
+        if (formulas[12] && bate(r2(totSem * fatorBdi), totCom)) {
           formulas[13] = `ROUND(M{r}*${fatorBdiTxt},2)`;
         }
         rows.push({
@@ -14558,15 +14563,15 @@ export function OrcamentoPageView({
               row.unidadeComposicao,
               usaDimensoes ? tipoAuto : 'un'
             ),
-            roundTo(row.quantidade, 4),
-            arredondarMoeda2(row.maoDeObraUnitario),
-            arredondarMoeda2(row.materialUnitario),
-            arredondarMoeda2(row.precoUnitario),
-            arredondarMoeda2(row.precoUnitarioComBdi),
-            arredondarMoeda2(row.subMaoDeObra),
-            arredondarMoeda2(row.subMaterial),
-            arredondarMoeda2(row.total),
-            arredondarMoeda2(row.totalComBdi),
+            qtd,
+            mo,
+            mat,
+            puSem,
+            puCom,
+            subMo,
+            subMat,
+            totSem,
+            totCom,
             totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
             observacoesPorItem[row.key] ?? '',
           ],
@@ -14614,39 +14619,46 @@ export function OrcamentoPageView({
       }
     }
 
-    const pushRodape = (rotulo: string, valor: number | '', formula?: string) => {
+    // Caixa compacta no canto direito: rótulo em L:M (ou rótulo + % em L e M) e valor em N.
+    const pushRodape = (rotulo: string, valor: number | '', formula?: string, pct?: number) => {
       const values = empty();
-      values[3] = rotulo;
+      values[11] = rotulo;
+      if (pct != null) values[12] = pct;
       values[13] = valor === '' ? '\u00A0' : arredondarMoeda2(valor);
       rows.push({
-        kind: 'total',
+        kind: 'rodape',
         values,
+        ...(pct != null ? { formats: { 12: 'percent' as const } } : { merge: [11, 12] as [number, number] }),
         ...(formula && valor !== '' ? { formulas: { 13: formula } } : {}),
       });
     };
+    // Percentual como número (em %), para a fórmula do valor poder referenciá-lo na planilha.
+    const pctNumero = (p: number) => Math.round(p * 10000) / 100;
     rows.push({ kind: 'blank', values: empty() });
     const orcIdx = rows.length;
-    pushRodape('ORÇAMENTO', rf.totalBase, somaColuna('M', titulosIdx));
+    pushRodape('CUSTO TOTAL', rf.totalBase, somaColuna('M', titulosIdx));
     let baseBdiIdx = orcIdx;
     if (rf.descontoPct > 0) {
       const descIdx = rows.length;
       pushRodape(
-        descontoLabel,
+        'DESCONTO',
         rf.valorDesconto,
         bate(Math.round(rf.totalBase * rf.descontoPct * 100) / 100, rf.valorDesconto)
-          ? `ROUND(N{R${orcIdx}}*${rf.descontoPct},2)`
-          : undefined
+          ? `ROUND(N{R${orcIdx}}*M{r}/100,2)`
+          : undefined,
+        pctNumero(rf.descontoPct)
       );
       baseBdiIdx = rows.length;
       pushRodape('TOTAL COM DESCONTO', rf.totalComDesconto, `N{R${orcIdx}}-N{R${descIdx}}`);
     }
     const bdiIdx = rows.length;
     pushRodape(
-      bdiLabel,
+      'BDI',
       rf.valorBdi,
       bate(Math.round(rf.totalComDesconto * rf.bdiPct * 100) / 100, rf.valorBdi)
-        ? `ROUND(N{R${baseBdiIdx}}*${rf.bdiPct},2)`
-        : undefined
+        ? `ROUND(N{R${baseBdiIdx}}*M{r}/100,2)`
+        : undefined,
+      pctNumero(rf.bdiPct)
     );
     pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi, `N{R${baseBdiIdx}}+N{R${bdiIdx}}`);
 
@@ -14654,42 +14666,63 @@ export function OrcamentoPageView({
       arredondarMoeda2(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const dataOuVazio = (s: string) => (s?.trim() ? formatDataBr(s) : '');
     const prazoDias = String(meta.prazoExecucaoDias ?? '').trim();
-    const periodo = [dataOuVazio(meta.dataAbertura), dataOuVazio(meta.dataEnvio)]
-      .filter(Boolean)
-      .join(' a ');
-    const revisao = meta.revisaoCount > 0 ? `R${String(meta.revisaoCount).padStart(2, '0')}` : 'Original';
-    const comValor = (pares: Array<[string, string]>) => pares.filter(([, valor]) => valor.trim() !== '');
+    const rot = (texto: string, de: number, ate: number): OrcamentoExcelCabecalhoCelula => ({
+      texto,
+      de,
+      ate,
+      rotulo: true,
+    });
+    const val = (
+      texto: string,
+      de: number,
+      ate: number,
+      alinhamento?: 'left' | 'center'
+    ): OrcamentoExcelCabecalhoCelula => ({ texto, de, ate, alinhamento });
+    const pctTextoCab = (p: number) =>
+      `${(p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
     const nomeOrc = (nomeOrcamentoSemCodigo || nomeOrcamentoAtivo || '').trim();
+    // Remove o prefixo automático "Importado do Orçafascio ·" (e o ponto final) da descrição.
+    const servicoCab = String(meta.descricao || nomeOrc || '')
+      .replace(/^\s*Importado do Or[çc]afascio\s*(?:·\s*)?/i, '')
+      .replace(/\.\s*$/, '')
+      .trim();
+    const exemptCab = orcafascioDadosExibicao?.exempt;
+    const encargosTexto = exemptCab == null ? '' : exemptCab ? 'DESONERADO' : 'ONERADO';
 
     return {
       name: 'Orçamento',
       aparencia: aparenciaMontagem,
       title: 'Orçamento',
       cabecalho: {
-        titulo: (nomeOrc || 'Orçamento').toUpperCase(),
-        subtitulo: `Contrato: ${nomeContratoExport()}`,
-        esquerda: comValor([
-          ['OS / PASTA', String(meta.osNumeroPasta ?? '')],
-          ['CÓDIGO', String(codigoOrcamentoAtivo ?? '')],
-          ['DESCRIÇÃO', String(meta.descricao ?? '')],
-          ['RESPONSÁVEL', String(meta.responsavelOrcamento ?? '')],
-          ['REALIZADO POR', String(meta.orcamentoRealizadoPor ?? '')],
-          ['PERÍODO', periodo],
-          ['PRAZO DE EXECUÇÃO', prazoDias ? `${prazoDias} dias` : ''],
-          ['REVISÃO', revisao],
-        ]),
-        direita: [
-          ['ORÇAMENTO', moedaBr(rf.totalBase)],
-          ...(rf.descontoPct > 0
-            ? ([
-                [descontoLabel, moedaBr(rf.valorDesconto)],
-                ['TOTAL COM DESCONTO', moedaBr(rf.totalComDesconto)],
-              ] as Array<[string, string]>)
-            : []),
-          [bdiLabel, moedaBr(rf.valorBdi)],
-          ['TOTAL GERAL', moedaBr(rf.totalComDescontoEBdi)],
-          ['EMITIDO EM', new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })],
+        linhas: [
+          // Colunas: rótulo 0–2 · valor 3–7 · rótulo direito 8–9 · valor direito 10–15.
+          [rot('CONTRATADA', 0, 2), val(EXPORT_COMPANY.toUpperCase() + '.', 3, 15)],
+          [
+            rot('ÓRGÃO', 0, 2),
+            val(nomeContratoExport().toUpperCase(), 3, 7),
+            rot('Nº CONTRATO', 8, 9),
+            val('', 10, 15),
+          ],
+          [
+            rot('Nº DO ORÇAMENTO', 0, 2),
+            val(String(codigoOrcamentoAtivo ?? ''), 3, 7),
+            rot('ENCARGOS SOCIAIS', 8, 9),
+            val(encargosTexto, 10, 15),
+          ],
+          [
+            rot('DATA', 0, 2),
+            val(dataOuVazio(meta.dataAbertura), 3, 7),
+            rot('BDI', 8, 9),
+            val(pctTextoCab(rf.bdiPct), 10, 15),
+          ],
+          [
+            rot('SERVIÇO', 0, 2),
+            val(servicoCab.toUpperCase(), 3, 7),
+            rot('DESCONTO', 8, 9),
+            val(pctTextoCab(rf.descontoPct), 10, 15),
+          ],
         ],
+        alturas: [20, 20, 20, 20, 32],
       },
       autoFilter: false,
       columns: [
@@ -15297,8 +15330,19 @@ export function OrcamentoPageView({
     const totalPorRotulo = new Map<string, number>();
     const pendentesMemoria: Array<{ row: number; col: number; raw: string }> = [];
 
+    let servicoAnterior: string | null = null;
     itensCalculados.forEach((row, rowIdx) => {
       if (rows.length) rows.push({ kind: 'blank', values: empty() });
+
+      // Barra com o nome do serviço sempre que ele muda (os itens vêm agrupados por serviço).
+      const servicoAtual = normalizarNomeServicoOrcamento(row.servicoNome);
+      if (servicoAtual !== servicoAnterior) {
+        servicoAnterior = servicoAtual;
+        const barra = empty();
+        barra[0] = String(row.servicoNome || '').trim().toUpperCase();
+        rows.push({ kind: 'servico', values: barra, merge: [0, 9] });
+        rows.push({ kind: 'blank', values: empty() });
+      }
 
       const linhasExport = linhasMedicaoEfetivas(row.dimensoes);
       const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(linhasExport);
@@ -18835,7 +18879,10 @@ export function OrcamentoPageView({
                                             colDef.strong ? 'font-semibold' : ''
                                           }`}
                                         >
-                                          <span className="shrink-0 opacity-80">R$</span>
+                                          {/* Esconde o R$ enquanto a fórmula está aberta para edição. */}
+                                          <span className="shrink-0 opacity-80 [&:has(+div_input[data-formula=true])]:hidden">
+                                            R$
+                                          </span>
                                           <FdCampoLocal
                                             id={inputId}
                                             draftKey={`orc-${colDef.campo}:${row.key}`}
