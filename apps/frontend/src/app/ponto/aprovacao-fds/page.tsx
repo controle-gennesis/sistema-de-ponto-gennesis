@@ -3,7 +3,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ClipboardCheck, Edit, Eye, MoreVertical, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  ClipboardCheck,
+  Edit,
+  Eye,
+  Hourglass,
+  MoreVertical,
+  Plus,
+  Search,
+  Trash2,
+  Undo2,
+  Upload,
+  X,
+  XCircle,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -30,7 +44,8 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
 const ITEMS_PER_PAGE = 20;
@@ -41,6 +56,7 @@ export default function AprovacaoFdsPage() {
   const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | FichaDemandaApprovalRecord['status']>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -81,7 +97,20 @@ export default function AprovacaoFdsPage() {
     enabled: !loadingUser,
   });
 
-  const records = listData || [];
+  const allRecords = useMemo(() => listData || [], [listData]);
+  const statusCounts = useMemo(
+    () => ({
+      WAITING_MANAGER: allRecords.filter((r) => r.status === 'WAITING_MANAGER').length,
+      APPROVED: allRecords.filter((r) => r.status === 'APPROVED').length,
+      REJECTED: allRecords.filter((r) => r.status === 'REJECTED').length,
+      CANCELLED: allRecords.filter((r) => r.status === 'CANCELLED').length,
+    }),
+    [allRecords]
+  );
+  const records = useMemo(
+    () => (statusFilter === 'ALL' ? allRecords : allRecords.filter((r) => r.status === statusFilter)),
+    [allRecords, statusFilter]
+  );
 
   const totalFiltered = records.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
@@ -97,7 +126,7 @@ export default function AprovacaoFdsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, statusFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -231,6 +260,55 @@ export default function AprovacaoFdsPage() {
             title="Fichas de Demanda"
             description="Cadastre e acompanhe as fichas de demanda."
           />
+
+          <div className={pageStatCardsGridClass}>
+            {(
+              [
+                {
+                  filter: 'WAITING_MANAGER',
+                  label: 'Pendentes de aprovação',
+                  Icon: Hourglass,
+                  iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+                  iconColor: 'text-amber-600 dark:text-amber-400',
+                },
+                {
+                  filter: 'APPROVED',
+                  label: 'Aprovadas',
+                  Icon: CheckCircle2,
+                  iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+                  iconColor: 'text-emerald-600 dark:text-emerald-400',
+                },
+                {
+                  filter: 'REJECTED',
+                  label: 'Em correção',
+                  Icon: Undo2,
+                  iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+                  iconColor: 'text-blue-600 dark:text-blue-400',
+                },
+                {
+                  filter: 'CANCELLED',
+                  label: 'Canceladas',
+                  Icon: XCircle,
+                  iconBg: 'bg-red-100 dark:bg-red-900/30',
+                  iconColor: 'text-red-600 dark:text-red-400',
+                },
+              ] as const
+            ).map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={statusCounts[card.filter]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                loading={loadingList}
+                isActive={statusFilter === card.filter}
+                onClick={() =>
+                  setStatusFilter((prev) => (prev === card.filter ? 'ALL' : card.filter))
+                }
+              />
+            ))}
+          </div>
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">

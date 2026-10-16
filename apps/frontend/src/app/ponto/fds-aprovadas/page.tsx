@@ -1,9 +1,22 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ClipboardCheck, Eye, Filter, MoreVertical, Search, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  ClipboardCheck,
+  ClipboardList,
+  Eye,
+  Filter,
+  Hourglass,
+  MoreVertical,
+  Search,
+  Timer,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -29,6 +42,7 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
@@ -36,9 +50,81 @@ const ROW_ACTION_MENU_WIDTH_PX = 224;
 
 type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
 
+/** Cards de resumo: cada um agrupa status de compras. */
+type StatCardFilter = 'ALL' | 'PENDING' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
+
+const LIST_HEADER_BY_FILTER: Record<
+  StatCardFilter,
+  { title: string; subtitle: string; Icon: LucideIcon; iconBg: string; iconColor: string }
+> = {
+  ALL: {
+    title: 'Todas as fichas',
+    subtitle: 'Todas as fichas de demanda aprovadas',
+    Icon: ClipboardList,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  PENDING: {
+    title: 'Pendentes',
+    subtitle: 'Fichas aprovadas que ainda não receberam status de compras',
+    Icon: Hourglass,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  IN_PROGRESS: {
+    title: 'Em andamento',
+    subtitle: 'Fichas em Almoxarifado, Solicitação de compra ou Suprimentos',
+    Icon: Timer,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  FINISHED: {
+    title: 'Finalizadas',
+    subtitle: 'Fichas com a compra finalizada',
+    Icon: CheckCircle2,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  CANCELLED: {
+    title: 'Canceladas',
+    subtitle: 'Fichas com a compra cancelada',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+const IN_PROGRESS_STATUSES: DemandSheetPurchaseStatus[] = [
+  'WAREHOUSE_DF',
+  'WAREHOUSE_GO',
+  'FULLY_FULFILLED_BY_STOCK',
+  'PARTIALLY_FULFILLED_BY_STOCK',
+  'PURCHASE_REQUEST',
+  'SUPPLIES',
+];
+
+function matchesStatCard(status: DemandSheetPurchaseStatus | null | undefined, card: StatCardFilter) {
+  if (card === 'ALL') return true;
+  if (card === 'PENDING') return !status;
+  if (card === 'FINISHED') return status === 'FINISHED';
+  if (card === 'CANCELLED') return status === 'CANCELLED';
+  return !!status && IN_PROGRESS_STATUSES.includes(status);
+}
+
+/** Filtro por status exato; "Almoxarifado" junta os registros antigos de DF e GO. */
+function matchesPurchaseStatus(
+  status: DemandSheetPurchaseStatus | null | undefined,
+  filter: PurchaseStatusFilter
+) {
+  if (filter === 'ALL') return true;
+  if (filter === 'NONE') return !status;
+  if (filter === 'WAREHOUSE_DF') return status === 'WAREHOUSE_DF' || status === 'WAREHOUSE_GO';
+  return status === filter;
+}
+
 const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
-  { value: 'NONE', label: 'Sem status' },
+  { value: 'NONE', label: 'Pendente' },
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
   { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
   { value: 'SUPPLIES', label: 'Suprimentos' },
@@ -50,6 +136,7 @@ export default function FdsAprovadasPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<PurchaseStatusFilter>('ALL');
+  const [statCardFilter, setStatCardFilter] = useState<StatCardFilter>('ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [detailRecord, setDetailRecord] = useState<FichaDemandaApprovalRecord | null>(null);
@@ -74,20 +161,38 @@ export default function FdsAprovadasPage() {
   });
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['demand-sheet-approvals', 'aprovadas-compras', searchTerm, purchaseStatusFilter],
+    queryKey: ['demand-sheet-approvals', 'aprovadas-compras', searchTerm],
     queryFn: async () => {
       const res = await api.get('/demand-sheet-approvals/aprovadas-compras', {
-        params: {
-          search: searchTerm || undefined,
-          purchaseStatus: purchaseStatusFilter !== 'ALL' ? purchaseStatusFilter : undefined,
-        },
+        params: { search: searchTerm || undefined },
       });
       return (res.data?.data || []) as FichaDemandaApprovalRecord[];
     },
     enabled: !loadingUser,
   });
 
-  const records = listData || [];
+  const allRecords = useMemo(() => listData || [], [listData]);
+  const statCounts = useMemo(
+    () => ({
+      ALL: allRecords.length,
+      PENDING: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'PENDING')).length,
+      IN_PROGRESS: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'IN_PROGRESS')).length,
+      FINISHED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'FINISHED')).length,
+      CANCELLED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'CANCELLED')).length,
+    }),
+    [allRecords]
+  );
+  const records = useMemo(
+    () =>
+      allRecords.filter(
+        (r) =>
+          matchesStatCard(r.purchaseStatus, statCardFilter) &&
+          matchesPurchaseStatus(r.purchaseStatus, purchaseStatusFilter)
+      ),
+    [allRecords, statCardFilter, purchaseStatusFilter]
+  );
+  const listHeader = LIST_HEADER_BY_FILTER[statCardFilter];
+  const ListHeaderIcon = listHeader.Icon;
   const totalFiltered = records.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -102,7 +207,7 @@ export default function FdsAprovadasPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, purchaseStatusFilter]);
+  }, [searchTerm, purchaseStatusFilter, statCardFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -147,19 +252,46 @@ export default function FdsAprovadasPage() {
             description="Consulte e acompanhe as fichas de demanda aprovadas."
           />
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-5">
+            {(
+              [
+                { filter: 'ALL', label: 'Todas' },
+                { filter: 'PENDING', label: 'Pendentes' },
+                { filter: 'IN_PROGRESS', label: 'Em andamento' },
+                { filter: 'FINISHED', label: 'Finalizadas' },
+                { filter: 'CANCELLED', label: 'Canceladas' },
+              ] as const
+            ).map((card) => {
+              const style = LIST_HEADER_BY_FILTER[card.filter];
+              return (
+                <FilterStatCard
+                  key={card.filter}
+                  label={card.label}
+                  count={statCounts[card.filter]}
+                  icon={style.Icon}
+                  iconBg={style.iconBg}
+                  iconColor={style.iconColor}
+                  loading={loadingList}
+                  isActive={statCardFilter === card.filter}
+                  onClick={() => setStatCardFilter(card.filter)}
+                />
+              );
+            })}
+          </div>
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <ClipboardCheck className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Fichas de Demanda
+                      {listHeader.title}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Lista de fichas aprovadas
+                      {listHeader.subtitle}
                     </p>
                   </div>
                 </div>

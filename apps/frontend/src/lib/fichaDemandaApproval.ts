@@ -61,7 +61,7 @@ export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | n
 }
 
 export function purchaseStatusLabel(value: DemandSheetPurchaseStatus | null | undefined): string {
-  if (!value) return 'Sem status';
+  if (!value) return 'Pendente';
   return FD_PURCHASE_STATUS_LABELS[value] ?? value;
 }
 
