@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, startTransition, memo, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Calculator,
   Upload,
@@ -7350,6 +7350,15 @@ export function OrcamentoPageView({
   const { isDark } = useTheme();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
   const [centroCustoId, setCentroCustoId] = useState<string | null>(() => lockedCostCenterId ?? null);
+  // Mesma consulta da lista de orçamentos (cache compartilhado): traz o número do contrato para o cabeçalho exportado.
+  const { data: contractsListData } = useQuery({
+    queryKey: ['contracts', 'orcamentos-all'],
+    queryFn: async () => {
+      const res = await api.get('/contracts', { params: { limit: 500 } });
+      return res.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
   const [importContratoSelecionadoId, setImportContratoSelecionadoId] = useState(
     () => (initialImportContractId || '').trim()
   );
@@ -14686,6 +14695,17 @@ export function OrcamentoPageView({
       .replace(/^\s*Importado do Or[çc]afascio\s*(?:·\s*)?/i, '')
       .replace(/\.\s*$/, '')
       .trim();
+    const contratosLista = (() => {
+      const raw = contractsListData?.data ?? contractsListData;
+      return Array.isArray(raw)
+        ? (raw as Array<{ id?: string; number?: string; costCenterId?: string }>)
+        : [];
+    })();
+    const contratoDoOrcamento =
+      contratosLista.find((c) => c.id && c.id === (meta.linkedContractId || '').trim()) ??
+      contratosLista.find((c) => c.id && c.id === (embeddedContractId || '').trim()) ??
+      contratosLista.find((c) => c.costCenterId && String(c.costCenterId) === String(centroCustoId));
+    const numeroContratoCab = String(contratoDoOrcamento?.number ?? '').trim();
     const exemptCab = orcafascioDadosExibicao?.exempt;
     const encargosTexto = exemptCab == null ? '' : exemptCab ? 'DESONERADO' : 'ONERADO';
 
@@ -14696,33 +14716,45 @@ export function OrcamentoPageView({
       cabecalho: {
         linhas: [
           // Colunas: rótulo 0–2 · valor 3–7 · rótulo direito 8–9 · valor direito 10–15.
-          [rot('CONTRATADA', 0, 2), val(EXPORT_COMPANY.toUpperCase() + '.', 3, 15)],
+          // Campos sem dado no sistema (Endereço, Data Base) saem vazios para preencher no Excel.
+          [
+            rot('CONTRATADA', 0, 2),
+            val(EXPORT_COMPANY.toUpperCase() + '.', 3, 7),
+            rot('Nº CONTRATO', 8, 9),
+            val(numeroContratoCab, 10, 15),
+          ],
           [
             rot('ÓRGÃO', 0, 2),
             val(nomeContratoExport().toUpperCase(), 3, 7),
-            rot('Nº CONTRATO', 8, 9),
-            val('', 10, 15),
-          ],
-          [
-            rot('Nº DO ORÇAMENTO', 0, 2),
-            val(String(codigoOrcamentoAtivo ?? ''), 3, 7),
             rot('ENCARGOS SOCIAIS', 8, 9),
             val(encargosTexto, 10, 15),
           ],
           [
-            rot('DATA', 0, 2),
-            val(dataOuVazio(meta.dataAbertura), 3, 7),
+            rot('Nº DO ORÇAMENTO', 0, 2),
+            val(String(codigoOrcamentoAtivo ?? ''), 3, 7),
             rot('BDI', 8, 9),
             val(pctTextoCab(rf.bdiPct), 10, 15),
           ],
           [
-            rot('SERVIÇO', 0, 2),
-            val(servicoCab.toUpperCase(), 3, 7),
+            rot('DATA', 0, 2),
+            val(dataOuVazio(meta.dataAbertura), 3, 7),
             rot('DESCONTO', 8, 9),
             val(pctTextoCab(rf.descontoPct), 10, 15),
           ],
+          [
+            rot('ENDEREÇO', 0, 2),
+            val('', 3, 7),
+            rot('DATA BASE', 8, 9),
+            val('', 10, 15),
+          ],
+          [
+            rot('SERVIÇO', 0, 2),
+            val(servicoCab.toUpperCase(), 3, 7),
+            rot('PRAZO ESTIMADO', 8, 9),
+            val(prazoDias ? `${prazoDias} dias` : '', 10, 15),
+          ],
         ],
-        alturas: [20, 20, 20, 20, 32],
+        alturas: [20, 20, 20, 20, 20, 32],
       },
       autoFilter: false,
       columns: [
