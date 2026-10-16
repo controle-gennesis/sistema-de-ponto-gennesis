@@ -42,6 +42,7 @@ function sameEntities(a: BreadcrumbItem[], b: BreadcrumbItem[]): boolean {
     if (!other) return false;
     if (item.label !== other.label) return false;
     if ((item.href ?? '') !== (other.href ?? '')) return false;
+    if (!!item.onClick !== !!other.onClick) return false;
     if ((item.badge ?? '') !== (other.badge ?? '')) return false;
     const am = item.badgeMenu ?? [];
     const bm = other.badgeMenu ?? [];

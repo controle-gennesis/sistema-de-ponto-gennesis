@@ -1743,7 +1743,19 @@ export default function EmpreiteirosPage() {
       : null;
   useBreadcrumbEntity(
     showMedicaoPage && breadcrumbEmpreitaName
-      ? [{ label: breadcrumbEmpreitaName }, { label: 'Medições de entrega' }]
+      ? [
+          {
+            label: breadcrumbEmpreitaName,
+            // Volta para a empreita (a tela troca de seção por estado, não por URL).
+            onClick: medicaoTargetItem
+              ? () => {
+                  setMedicaoContractFilterId(null);
+                  openDetails(medicaoTargetItem);
+                }
+              : undefined,
+          },
+          { label: 'Medições de entrega' },
+        ]
       : breadcrumbEmpreitaName
         ? { label: breadcrumbEmpreitaName }
         : null,

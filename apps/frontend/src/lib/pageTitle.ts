@@ -121,6 +121,8 @@ export type BreadcrumbItem = {
   label: string;
   /** Se definido, o crumb é clicável (exceto o último). */
   href?: string;
+  /** Alternativa ao `href` para páginas que trocam de seção por estado (sem mudar a URL). */
+  onClick?: () => void;
   /** Badge opcional ao lado do rótulo (ex.: revisão R01). */
   badge?: string;
   /** Menu do badge (trocar entre revisões). */
@@ -251,6 +253,7 @@ export function appendBreadcrumbEntity(
     .map((item) => ({
       label: item.label?.trim() ?? '',
       href: item.href,
+      ...(item.onClick ? { onClick: item.onClick } : {}),
       ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
       ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
         ? { badgeMenu: item.badgeMenu }

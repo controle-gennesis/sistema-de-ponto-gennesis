@@ -318,6 +318,15 @@ export function TopNavbar({
                         >
                           {crumb.label}
                         </Link>
+                      ) : crumb.onClick ? (
+                        <button
+                          type="button"
+                          onClick={crumb.onClick}
+                          className="whitespace-nowrap text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                          title={crumb.label}
+                        >
+                          {crumb.label}
+                        </button>
                       ) : (
                         <span
                           className="whitespace-nowrap text-gray-400 dark:text-gray-500"
