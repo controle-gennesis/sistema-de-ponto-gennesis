@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { prisma } from '../lib/prisma';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAnyModuleAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { createError } from '../middleware/errorHandler';
 
@@ -11,6 +11,7 @@ const TOMADORES_KEY = pathToModuleKey('/ponto/espelho-nf/tomadores-servico');
 const CONTAS_BANCARIAS_KEY = pathToModuleKey('/ponto/espelho-nf/contas-bancarias');
 const CODIGOS_TRIBUTARIOS_KEY = pathToModuleKey('/ponto/espelho-nf/codigos-tributarios');
 const APROVAR_ESPELHO_NF_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
+const ESPELHOS_APROVADOS_KEY = pathToModuleKey('/ponto/financeiro/espelhos-aprovados');
 
 /** O bootstrap carrega os dados usados pelo espelho, por cada tela de cadastro e pela aprovação. */
 const requireEspelhoNfRead = requireAnyModuleAccess([
@@ -20,7 +21,17 @@ const requireEspelhoNfRead = requireAnyModuleAccess([
   CONTAS_BANCARIAS_KEY,
   CODIGOS_TRIBUTARIOS_KEY,
   APROVAR_ESPELHO_NF_KEY,
+  ESPELHOS_APROVADOS_KEY,
 ]);
+
+const APPROVAL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'SENT_FOR_CORRECTION', 'CANCELLED'] as const;
+type MirrorApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+function normApprovalStatus(v: unknown): MirrorApprovalStatus {
+  const s = String(v ?? '');
+  return (APPROVAL_STATUSES as readonly string[]).includes(s)
+    ? (s as MirrorApprovalStatus)
+    : 'PENDING_APPROVAL';
+}
 
 const COLLECTION_TYPES = ['RETIDO', 'RECOLHIDO'] as const;
 function normCollectionType(v: unknown): string {
@@ -170,10 +181,84 @@ router.get('/bootstrap', requireEspelhoNfRead, async (_req, res, next) => {
                 }
               : undefined,
           nfConstarNaNota: m.nfConstarNaNota ?? null,
-          nfConstarNaNotaAcknowledged: Boolean(m.nfConstarNaNotaAcknowledged)
+          nfConstarNaNotaAcknowledged: Boolean(m.nfConstarNaNotaAcknowledged),
+          approvalStatus: normApprovalStatus(m.approvalStatus),
+          approvalComment: m.approvalComment ?? '',
+          approvalDecidedAt: m.approvalDecidedAt?.toISOString?.() ?? null,
+          approvalDecidedByName: m.approvalDecidedByName ?? ''
         }))
       }
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/** Decisão do aprovador: Aprovado (segue para o Financeiro), Enviado para correção ou Cancelado. */
+router.post('/mirrors/:id/approval', requireModuleAccess(APROVAR_ESPELHO_NF_KEY), async (req: AuthRequest, res, next) => {
+  try {
+    const p = prisma as any;
+    const id = String(req.params.id ?? '');
+    const status = normApprovalStatus(req.body?.status);
+    if (status === 'PENDING_APPROVAL') {
+      return next(createError('Status inválido para decisão', 400));
+    }
+    const comment = String(req.body?.comment ?? '').trim();
+
+    const mirror = await p.espelhoNfMirror.findUnique({
+      where: { id },
+      select: { id: true, costCenterId: true }
+    });
+    if (!mirror) return next(createError('Espelho não encontrado', 404));
+
+    if (!req.user?.isAdmin) {
+      const scoped = await prisma.userEspelhoNfApprovalCostCenter.findMany({
+        where: { userId: req.user!.id },
+        select: { costCenterId: true }
+      });
+      if (!scoped.some((row) => row.costCenterId === mirror.costCenterId)) {
+        return next(createError('Você não tem permissão para decidir espelhos deste centro de custo.', 403));
+      }
+    }
+
+    const decider = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { name: true }
+    });
+    await p.espelhoNfMirror.update({
+      where: { id },
+      data: {
+        approvalStatus: status,
+        approvalComment: comment || null,
+        approvalDecidedAt: new Date(),
+        approvalDecidedById: req.user!.id,
+        approvalDecidedByName: decider?.name ?? null
+      }
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/** Quem criou/editou reenvia o espelho: volta para Aguardando aprovação. */
+router.post('/mirrors/:id/resubmit', requireModuleAccess(ESPELHO_NF_KEY), async (req, res, next) => {
+  try {
+    const p = prisma as any;
+    const id = String(req.params.id ?? '');
+    const mirror = await p.espelhoNfMirror.findUnique({ where: { id }, select: { id: true } });
+    if (!mirror) return next(createError('Espelho não encontrado', 404));
+    await p.espelhoNfMirror.update({
+      where: { id },
+      data: {
+        approvalStatus: 'PENDING_APPROVAL',
+        approvalComment: null,
+        approvalDecidedAt: null,
+        approvalDecidedById: null,
+        approvalDecidedByName: null
+      }
+    });
+    return res.status(200).json({ success: true });
   } catch (error) {
     return next(error);
   }
@@ -259,6 +344,28 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
       !p.espelhoNfTaxCode
     ) {
       throw new Error('Prisma Client desatualizado para o módulo Espelho NF. Reinicie o backend.');
+    }
+
+    // O status de aprovação é do servidor: o PUT (lista inteira do navegador) nunca o sobrescreve.
+    // Espelho novo entra pendente; mudanças de status passam por /mirrors/:id/approval e /resubmit.
+    const mirrorHasApproval = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some(
+        (field: any) => field?.name === 'approvalStatus'
+      )
+    );
+    const approvalById = new Map<string, any>();
+    if (mirrorHasApproval) {
+      const existing = await p.espelhoNfMirror.findMany({
+        select: {
+          id: true,
+          approvalStatus: true,
+          approvalComment: true,
+          approvalDecidedAt: true,
+          approvalDecidedById: true,
+          approvalDecidedByName: true
+        }
+      });
+      for (const row of existing) approvalById.set(row.id, row);
     }
 
     const ops: any[] = [
@@ -437,6 +544,20 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
               : {}),
             ...(mirrorHasNfConstarNaNotaAcknowledged
               ? { nfConstarNaNotaAcknowledged: Boolean(item.nfConstarNaNotaAcknowledged) }
+              : {}),
+            ...(mirrorHasApproval
+              ? (() => {
+                  const kept = approvalById.get(String(item.id));
+                  return kept
+                    ? {
+                        approvalStatus: normApprovalStatus(kept.approvalStatus),
+                        approvalComment: kept.approvalComment ?? null,
+                        approvalDecidedAt: kept.approvalDecidedAt ?? null,
+                        approvalDecidedById: kept.approvalDecidedById ?? null,
+                        approvalDecidedByName: kept.approvalDecidedByName ?? null
+                      }
+                    : { approvalStatus: 'PENDING_APPROVAL' };
+                })()
               : {})
           }))
         })

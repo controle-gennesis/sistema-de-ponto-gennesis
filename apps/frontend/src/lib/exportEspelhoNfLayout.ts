@@ -1457,7 +1457,13 @@ export function buildEspelhoDetailRows(
   taxCodeLimits?: { inssMaterialLimit: string; issMaterialLimit: string } | null,
   issRule?: EspelhoTaxRule | null
 ): [string, string][] {
-  const ccRow = resolveCostCenterRowLabel(m, costCenters);
+  const ccRow =
+    costCenters?.find((c) => c.id === m.costCenterId)?.name?.trim() ||
+    resolveCostCenterRowLabel(m, costCenters);
+  const dataBr = (iso?: string) => {
+    const mt = String(iso ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return mt ? `${mt[3]}/${mt[2]}/${mt[1]}` : '—';
+  };
   const limits = computeEspelhoMaterialLimits(
     m.measurementAmount,
     taxCodeLimits?.inssMaterialLimit,
@@ -1479,12 +1485,12 @@ export function buildEspelhoDetailRows(
     ['Base de cálculo INSS', bases.baseInss],
     ['Base de cálculo ISS', bases.baseIss],
     ['Centro de custo', ccRow || '—'],
-    ['Vencimento', m.dueDate || '—'],
+    ['Vencimento', dataBr(m.dueDate)],
     ['Nº Empenho', dash(m.empenhoNumber)],
     ['Nº Processo', dash(m.processNumber)],
     ['Ordem de Serviço', dash(m.serviceOrder)],
-    ['Início da medição', dash(m.measurementStartDate)],
-    ['Fim da medição', dash(m.measurementEndDate)],
+    ['Início da medição', dataBr(m.measurementStartDate)],
+    ['Fim da medição', dataBr(m.measurementEndDate)],
     ['Unidade Predial', dash(m.buildingUnit)],
     ['Observações', m.observations.trim() ? m.observations : '—'],
     ['Prestador', m.providerName],

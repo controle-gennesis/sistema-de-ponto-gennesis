@@ -34,8 +34,9 @@ import {
 } from '@/lib/exportEspelhoNfLayout';
 import {
   type EspelhoApprovalStatus,
+  decideEspelhoApproval,
   resolveEspelhoApprovalStatus,
-  updateEspelhoApprovalStatus
+  syncLegacyLocalEspelhoDecisions
 } from '@/lib/espelhoNfApproval';
 import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
@@ -426,6 +427,21 @@ function AprovacoesPage() {
   };
   const espelhoApprovals = espelhoData.items;
 
+  // Decisões antigas (que só existiam no navegador de quem aprovou) são enviadas ao servidor uma vez.
+  const legacyEspelhoSyncedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (legacyEspelhoSyncedRef.current || !espelhoResp || !canApproveEspelhoNf) return;
+    legacyEspelhoSyncedRef.current = true;
+    void syncLegacyLocalEspelhoDecisions(
+      espelhoApprovals.map((item) => ({ id: item.id, serverStatus: item.status }))
+    ).then((sent) => {
+      if (sent > 0) {
+        void queryClient.invalidateQueries({ queryKey: ['approvals', 'espelho-nf'] });
+        void queryClient.invalidateQueries({ queryKey: ['espelho-nf-bootstrap'] });
+      }
+    });
+  }, [espelhoResp, espelhoApprovals, canApproveEspelhoNf, queryClient]);
+
   const detailPayrollMonthYear = React.useMemo(() => {
     const src = detailRequest?.createdAt;
     if (!src) {
@@ -746,8 +762,17 @@ function AprovacoesPage() {
       toast.error('Você não tem permissão para decidir espelhos deste centro de custo.');
       return;
     }
-    updateEspelhoApprovalStatus(mirrorId, status);
+    try {
+      await decideEspelhoApproval(
+        mirrorId,
+        status as Exclude<EspelhoApprovalStatus, 'PENDING_APPROVAL'>
+      );
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Não foi possível registrar a decisão.');
+      return;
+    }
     toast.success(successMessage);
+    await queryClient.invalidateQueries({ queryKey: ['espelho-nf-bootstrap'] });
     await queryClient.invalidateQueries({ queryKey: ['approvals', 'espelho-nf'] });
     await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
   };

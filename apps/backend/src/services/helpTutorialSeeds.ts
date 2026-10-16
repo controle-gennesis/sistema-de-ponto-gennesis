@@ -635,15 +635,15 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
   // ——— Contratos e Licitações ———
   {
     slug: 'usar-espelho-da-nota-fiscal',
-    title: 'Usar Espelho da Nota Fiscal',
+    title: 'Usar Espelhos de NF',
     summary: 'Como consultar o espelho de NF no módulo de contratos e licitações.',
     setor: 'Contratos e Licitações',
     keywords: ['espelho NF', 'nota fiscal', 'licitações'],
     href: '/ponto/espelho-nf',
     steps: [
       {
-        title: 'Abra Espelho da Nota Fiscal',
-        body: 'No menu Contratos e Licitações, acesse Espelho da Nota Fiscal.',
+        title: 'Abra Espelhos de NF',
+        body: 'No menu Contratos e Licitações, acesse Espelhos de NF.',
       },
       {
         title: 'Busque a NF',

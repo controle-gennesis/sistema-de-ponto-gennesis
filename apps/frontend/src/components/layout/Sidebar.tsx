@@ -1012,6 +1012,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/financeiro/receitas'))
           },
           {
+            name: 'Espelhos de NF',
+            href: '/ponto/financeiro/espelhos-aprovados',
+            icon: FileSpreadsheet,
+            description: 'Espelhos de nota fiscal aprovados, prontos para o Financeiro',
+            permission: isAdministrator || can(pk('/ponto/financeiro/espelhos-aprovados'))
+          },
+          {
             name: 'Pagamento da Folha',
             href: '/ponto/financeiro',
             icon: DollarSign,
@@ -1211,10 +1218,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         icon: ScrollText,
         items: [
           {
-            name: 'Espelho da Nota Fiscal',
+            name: 'Espelhos de NF',
             href: '/ponto/espelho-nf',
             icon: FileSpreadsheet,
-            description: 'Montar o espelho da nota fiscal',
+            description: 'Montar os espelhos de nota fiscal',
             permission: isAdministrator || can(pk('/ponto/espelho-nf'))
           },
           {

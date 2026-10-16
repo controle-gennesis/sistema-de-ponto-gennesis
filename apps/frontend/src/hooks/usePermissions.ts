@@ -907,6 +907,8 @@ export function useRoutePermission(route: string) {
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || can(pk('/ponto/financeiro/controle-financeiro')),
     '/ponto/financeiro/receitas': isAdministrator || can(pk('/ponto/financeiro/receitas')),
+    '/ponto/financeiro/espelhos-aprovados':
+      isAdministrator || can(pk('/ponto/financeiro/espelhos-aprovados')),
     '/ponto/financeiro/controle-nfs':
       isAdministrator || can(pk('/ponto/financeiro/controle-nfs')),
     '/ponto/financeiro/nfs-recebidas':

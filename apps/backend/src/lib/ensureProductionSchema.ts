@@ -464,6 +464,27 @@ async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureEspelhoNfMirrorApprovalColumns(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'espelho_nf_mirrors'))) return;
+  if (await columnExists(prisma, 'espelho_nf_mirrors', 'approvalStatus')) return;
+  console.warn('[Schema] Colunas de aprovação do espelho NF ausentes — adicionando.');
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS "approvalStatus" TEXT NOT NULL DEFAULT 'PENDING_APPROVAL';`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS "approvalComment" TEXT;`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS "approvalDecidedAt" TIMESTAMP(3);`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS "approvalDecidedById" TEXT;`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS "approvalDecidedByName" TEXT;`
+  );
+}
+
 async function ensureDemandSheetPurchaseCancelled(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'demand_sheet_approvals'))) return;
 
@@ -3165,6 +3186,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePurchaseOrderCommentsTable(prisma);
     await ensureDemandSheetApprovals(prisma);
     await ensureDemandSheetPurchaseCancelled(prisma);
+    await ensureEspelhoNfMirrorApprovalColumns(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);

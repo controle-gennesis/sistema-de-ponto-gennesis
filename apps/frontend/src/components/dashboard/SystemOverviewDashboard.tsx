@@ -759,7 +759,7 @@ export function SystemOverviewDashboard() {
           emptyHint="Nenhum mapa de cotação"
         />
         <DonutCard
-          title="Espelho NF"
+          title="Espelhos de NF"
           subtitle="Anexos de nota fiscal"
           href={ROUTES.espelhoNf}
           icon={Receipt}

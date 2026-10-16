@@ -1,3 +1,5 @@
+import api from '@/lib/api';
+
 export type EspelhoApprovalStatus =
   | 'PENDING_APPROVAL'
   | 'APPROVED'
@@ -75,4 +77,46 @@ export function removeEspelhoApprovalStatus(mirrorId: string): void {
   if (!map[mirrorId]) return;
   delete map[mirrorId];
   setEspelhoApprovalStatusMap(map);
+}
+
+/** Decisão do aprovador gravada no servidor (o Financeiro enxerga os aprovados em qualquer computador). */
+export async function decideEspelhoApproval(
+  mirrorId: string,
+  status: Exclude<EspelhoApprovalStatus, 'PENDING_APPROVAL'>,
+  comment?: string
+): Promise<void> {
+  await api.post(`/espelho-nf/mirrors/${encodeURIComponent(mirrorId)}/approval`, {
+    status,
+    comment: comment?.trim() || undefined
+  });
+  removeEspelhoApprovalStatus(mirrorId);
+}
+
+/** Reenvio para aprovação (espelho editado ou corrigido): volta para "Aguardando aprovação". */
+export async function resubmitEspelhoApproval(mirrorId: string): Promise<void> {
+  await api.post(`/espelho-nf/mirrors/${encodeURIComponent(mirrorId)}/resubmit`);
+  removeEspelhoApprovalStatus(mirrorId);
+}
+
+/**
+ * Antes o status ficava só no navegador de quem aprovou. Envia ao servidor as decisões antigas que
+ * ainda estão neste navegador e continuam "pendentes" no banco. Retorna quantas foram enviadas.
+ */
+export async function syncLegacyLocalEspelhoDecisions(
+  mirrors: Array<{ id: string; serverStatus: EspelhoApprovalStatus }>
+): Promise<number> {
+  const local = getEspelhoApprovalStatusMap();
+  let sent = 0;
+  for (const m of mirrors) {
+    const rec = local[m.id];
+    if (!rec || m.serverStatus !== 'PENDING_APPROVAL') continue;
+    if (rec.status === 'PENDING_APPROVAL') continue;
+    try {
+      await decideEspelhoApproval(m.id, rec.status, rec.comment);
+      sent += 1;
+    } catch {
+      // Sem permissão para este centro de custo (ou falha de rede): mantém o registro local.
+    }
+  }
+  return sent;
 }

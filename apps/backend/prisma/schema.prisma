@@ -1394,6 +1394,12 @@ model EspelhoNfMirror {
   nfConstarNaNota             Json?
   /// ConfirmaÃ§Ã£o obrigatÃ³ria de que o usuÃ¡rio revisou âconstar na nota fiscalâ
   nfConstarNaNotaAcknowledged Boolean   @default(false)
+  /// Fluxo: PENDING_APPROVAL → APPROVED (vai para o Financeiro) | SENT_FOR_CORRECTION | CANCELLED
+  approvalStatus              String    @default("PENDING_APPROVAL")
+  approvalComment             String?
+  approvalDecidedAt           DateTime?
+  approvalDecidedById         String?
+  approvalDecidedByName       String?
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
@@ -1409,6 +1415,7 @@ model EspelhoNfMirror {
   @@index([bankAccountId])
   @@index([taxCodeId])
   @@index([createdAt])
+  @@index([approvalStatus])
   @@map("espelho_nf_mirrors")
 }
 

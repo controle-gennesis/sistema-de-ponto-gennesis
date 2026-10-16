@@ -134,6 +134,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Financeiro
   { key: pathToModuleKey('/ponto/financeiro/controle-financeiro'), name: 'Controle Financeiro', href: '/ponto/financeiro/controle-financeiro', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/receitas'), name: 'Receitas', href: '/ponto/financeiro/receitas', category: 'Financeiro' },
+  { key: pathToModuleKey('/ponto/financeiro/espelhos-aprovados'), name: 'Espelhos de NF', href: '/ponto/financeiro/espelhos-aprovados', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Balanço Financeiro', href: '/ponto/financeiro/analise-extrato', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/financeiro/controle-nfs'), name: "Controle de NF's", href: '/ponto/financeiro/controle-nfs', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/financeiro/nfs-recebidas'), name: 'Entrada Fiscal', href: '/ponto/financeiro/nfs-recebidas', category: 'Métricas' },
@@ -166,7 +167,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Contratos e Licitações
   {
     key: pathToModuleKey('/ponto/espelho-nf'),
-    name: 'Espelho da Nota Fiscal',
+    name: 'Espelhos de NF',
     href: '/ponto/espelho-nf',
     category: 'Contratos e Licitações',
   },
@@ -395,7 +396,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   {
     key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
-    name: 'Aprovar Espelho da Nota Fiscal',
+    name: 'Aprovar Espelhos de NF',
     href: '/ponto/controle/aprovar-espelho-nf',
     category: 'Controle',
     group: 'Aprovações',
