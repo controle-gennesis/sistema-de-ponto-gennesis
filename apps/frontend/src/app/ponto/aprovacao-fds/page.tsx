@@ -3,17 +3,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { LucideIcon } from 'lucide-react';
 import {
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   Edit,
   Eye,
+  FileCheck2,
+  Filter,
   Hourglass,
   MoreVertical,
   Plus,
   Search,
+  Timer,
   Trash2,
-  Undo2,
   Upload,
   X,
   XCircle,
@@ -44,10 +48,90 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
+
+type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
+
+/** Aguardando Aprovação = aguardando o gestor. Em Fila/Em Cotação/Finalizadas = status de compras da ficha já aprovada. */
+function matchesCard(r: FichaDemandaApprovalRecord, card: CardFilter): boolean {
+  switch (card) {
+    case 'ALL':
+      return true;
+    case 'IN_APPROVAL':
+      return r.status === 'WAITING_MANAGER';
+    case 'PENDING':
+      return r.status === 'APPROVED' && !r.purchaseStatus;
+    case 'QUOTATION':
+      return r.status === 'APPROVED' && r.purchaseStatus === 'PURCHASE_REQUEST';
+    case 'FINISHED':
+      return r.purchaseStatus === 'FINISHED';
+    case 'CANCELLED':
+      return r.status === 'CANCELLED' || r.purchaseStatus === 'CANCELLED';
+  }
+}
+
+const CARD_STYLE: Record<
+  CardFilter,
+  { label: string; subtitle: string; Icon: LucideIcon; iconBg: string; iconColor: string }
+> = {
+  ALL: {
+    label: 'Todas',
+    subtitle: 'Todas as fichas de demanda cadastradas',
+    Icon: ClipboardList,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  IN_APPROVAL: {
+    label: 'Aguardando Aprovação',
+    subtitle: 'Fichas aguardando a aprovação do gestor',
+    Icon: FileCheck2,
+    iconBg: 'bg-violet-100 dark:bg-violet-900/30',
+    iconColor: 'text-violet-600 dark:text-violet-400',
+  },
+  PENDING: {
+    label: 'Em Fila',
+    subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
+    Icon: Hourglass,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  QUOTATION: {
+    label: 'Em Cotação',
+    subtitle: 'Fichas com a solicitação de compra em cotação',
+    Icon: Timer,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  FINISHED: {
+    label: 'Finalizadas',
+    subtitle: 'Fichas com a compra finalizada',
+    Icon: CheckCircle2,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  CANCELLED: {
+    label: 'Canceladas',
+    subtitle: 'Fichas canceladas',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+const CARD_ORDER: CardFilter[] = [
+  'ALL',
+  'IN_APPROVAL',
+  'PENDING',
+  'QUOTATION',
+  'FINISHED',
+  'CANCELLED',
+];
 const ITEMS_PER_PAGE = 20;
 
 export default function AprovacaoFdsPage() {
@@ -56,7 +140,9 @@ export default function AprovacaoFdsPage() {
   const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | FichaDemandaApprovalRecord['status']>('ALL');
+  const [statusFilter, setStatusFilter] = useState<CardFilter>('ALL');
+  const [contratoFilter, setContratoFilter] = useState(contratoFiltro || 'ALL');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -84,12 +170,12 @@ export default function AprovacaoFdsPage() {
   });
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['demand-sheet-approvals', searchTerm, contratoFiltro],
+    queryKey: ['demand-sheet-approvals', searchTerm, contratoFilter],
     queryFn: async () => {
       const res = await api.get('/demand-sheet-approvals', {
         params: {
           search: searchTerm || undefined,
-          contratoId: contratoFiltro || undefined,
+          contratoId: contratoFilter !== 'ALL' ? contratoFilter : undefined,
         },
       });
       return (res.data?.data || []) as FichaDemandaApprovalRecord[];
@@ -97,21 +183,38 @@ export default function AprovacaoFdsPage() {
     enabled: !loadingUser,
   });
 
+  const { data: contratosData } = useQuery({
+    queryKey: ['fd-approval-contrato-options'],
+    queryFn: async () => {
+      const res = await api.get('/demand-sheet-approvals/options/contratos');
+      return (res.data?.data ?? []) as Array<{ id: string; name: string; number?: string }>;
+    },
+    enabled: !loadingUser,
+  });
+  const contratoOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: 'ALL', label: 'Todos' },
+        ...(contratosData ?? []).map((c) => ({ value: c.id, label: c.name })),
+      ]),
+    [contratosData]
+  );
+  const hasActiveFilter = contratoFilter !== 'ALL';
+
   const allRecords = useMemo(() => listData || [], [listData]);
   const statusCounts = useMemo(
-    () => ({
-      WAITING_MANAGER: allRecords.filter((r) => r.status === 'WAITING_MANAGER').length,
-      APPROVED: allRecords.filter((r) => r.status === 'APPROVED').length,
-      REJECTED: allRecords.filter((r) => r.status === 'REJECTED').length,
-      CANCELLED: allRecords.filter((r) => r.status === 'CANCELLED').length,
-    }),
+    () =>
+      Object.fromEntries(
+        CARD_ORDER.map((card) => [card, allRecords.filter((r) => matchesCard(r, card)).length])
+      ) as Record<CardFilter, number>,
     [allRecords]
   );
   const records = useMemo(
-    () => (statusFilter === 'ALL' ? allRecords : allRecords.filter((r) => r.status === statusFilter)),
+    () => allRecords.filter((r) => matchesCard(r, statusFilter)),
     [allRecords, statusFilter]
   );
-
+  const listHeader = CARD_STYLE[statusFilter];
+  const ListHeaderIcon = listHeader.Icon;
   const totalFiltered = records.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -126,7 +229,7 @@ export default function AprovacaoFdsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, contratoFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -261,68 +364,40 @@ export default function AprovacaoFdsPage() {
             description="Cadastre e acompanhe as fichas de demanda."
           />
 
-          <div className={pageStatCardsGridClass}>
-            {(
-              [
-                {
-                  filter: 'WAITING_MANAGER',
-                  label: 'Pendentes de aprovação',
-                  Icon: Hourglass,
-                  iconBg: 'bg-amber-100 dark:bg-amber-900/30',
-                  iconColor: 'text-amber-600 dark:text-amber-400',
-                },
-                {
-                  filter: 'APPROVED',
-                  label: 'Aprovadas',
-                  Icon: CheckCircle2,
-                  iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
-                  iconColor: 'text-emerald-600 dark:text-emerald-400',
-                },
-                {
-                  filter: 'REJECTED',
-                  label: 'Em correção',
-                  Icon: Undo2,
-                  iconBg: 'bg-blue-100 dark:bg-blue-900/30',
-                  iconColor: 'text-blue-600 dark:text-blue-400',
-                },
-                {
-                  filter: 'CANCELLED',
-                  label: 'Canceladas',
-                  Icon: XCircle,
-                  iconBg: 'bg-red-100 dark:bg-red-900/30',
-                  iconColor: 'text-red-600 dark:text-red-400',
-                },
-              ] as const
-            ).map((card) => (
-              <FilterStatCard
-                key={card.filter}
-                label={card.label}
-                count={statusCounts[card.filter]}
-                icon={card.Icon}
-                iconBg={card.iconBg}
-                iconColor={card.iconColor}
-                loading={loadingList}
-                isActive={statusFilter === card.filter}
-                onClick={() =>
-                  setStatusFilter((prev) => (prev === card.filter ? 'ALL' : card.filter))
-                }
-              />
-            ))}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-5">
+            {CARD_ORDER.filter((card) => card !== 'ALL').map((card) => {
+              const style = CARD_STYLE[card];
+              return (
+                <FilterStatCard
+                  key={card}
+                  label={style.label}
+                  count={statusCounts[card]}
+                  icon={style.Icon}
+                  iconBg={style.iconBg}
+                  iconColor={style.iconColor}
+                  loading={loadingList}
+                  isActive={statusFilter === card}
+                  onClick={() => setStatusFilter((prev) => (prev === card ? 'ALL' : card))}
+                />
+              );
+            })}
           </div>
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <ClipboardCheck className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Fichas de Demanda
+                      {statusFilter === 'ALL' ? 'Fichas de Demanda' : listHeader.label}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Gerencie as fichas de demanda cadastradas
+                      {statusFilter === 'ALL'
+                        ? 'Gerencie as fichas de demanda cadastradas'
+                        : listHeader.subtitle}
                     </p>
                   </div>
                 </div>
@@ -347,6 +422,22 @@ export default function AprovacaoFdsPage() {
                       </button>
                     ) : null}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFiltersOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveFilter
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveFilter ? 'Filtro (contrato ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowImport(true)}
@@ -399,6 +490,9 @@ export default function AprovacaoFdsPage() {
                             Código da FD
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            ID / Nº Mov.
+                          </th>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Pedido
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -440,6 +534,14 @@ export default function AprovacaoFdsPage() {
                               <ListRowNavigableLabel className="text-sm font-medium">
                                 {row.codFichaDemanda}
                               </ListRowNavigableLabel>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
+                              <p className="text-gray-900 dark:text-gray-100">
+                                {row.idMovRm?.trim() || '—'}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {row.numMovRm?.trim() || '—'}
+                              </p>
                             </td>
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.codigoPedido}
@@ -614,6 +716,45 @@ export default function AprovacaoFdsPage() {
             </div>
           </AppModalOverlay>
         ) : null}
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Fichas de Demanda"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Contrato
+              </label>
+              <StringSingleSelectDropdown
+                value={contratoFilter}
+                onChange={setContratoFilter}
+                options={contratoOptions}
+                allowEmpty={false}
+                searchPlaceholder="Pesquisar contrato..."
+                className="w-full"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setContratoFilter('ALL')}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersOpen(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </Modal>
       </MainLayout>
     </ProtectedRoute>
   );

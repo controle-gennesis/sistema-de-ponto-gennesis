@@ -11,10 +11,7 @@ import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
-  FD_PURCHASE_STATUS_OPTIONS,
   anexosDemais,
   anexosOrdemCompra,
   fdAnexoKindLabel,
@@ -23,7 +20,6 @@ import {
   formatCurrencyDisplay,
   inferFdAnexoKind,
   purchaseStatusLabel,
-  type DemandSheetPurchaseStatus,
   type FdAnexo,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
@@ -121,22 +117,13 @@ export function FichaDemandaDetailModal({
   const [scNumero, setScNumero] = useState('');
   const [scId, setScId] = useState('');
   const [ocId, setOcId] = useState('');
-  const [purchaseStatus, setPurchaseStatus] = useState('');
-  const [cancellationNote, setCancellationNote] = useState('');
-
-  const purchaseStatusOptions = useMemo(
-    () => labeledToSelectOptions(FD_PURCHASE_STATUS_OPTIONS),
-    []
-  );
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelNote, setCancelNote] = useState('');
 
   useEffect(() => {
-    // Almoxarifado é um status só (o GO antigo aparece como Almoxarifado); status que saíram da lista ficam em branco.
-    const current = record?.purchaseStatus === 'WAREHOUSE_GO' ? 'WAREHOUSE_DF' : record?.purchaseStatus;
-    setPurchaseStatus(
-      current && FD_PURCHASE_STATUS_OPTIONS.some((o) => o.value === current) ? current : ''
-    );
-    setCancellationNote(record?.purchaseCancellationNote ?? '');
-  }, [record?.id, record?.purchaseStatus, record?.purchaseCancellationNote]);
+    setCancelOpen(false);
+    setCancelNote('');
+  }, [record?.id]);
 
   useEffect(() => {
     setScNumero(record?.scNumero || '');
@@ -225,18 +212,19 @@ export function FichaDemandaDetailModal({
     },
   });
 
-  const statusMutation = useMutation({
+  const cancelMutation = useMutation({
     mutationFn: async () => {
       if (!record?.id) throw new Error('Ficha inválida');
       const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-status`, {
-        purchaseStatus: purchaseStatus as DemandSheetPurchaseStatus,
-        purchaseCancellationNote:
-          purchaseStatus === 'CANCELLED' ? cancellationNote.trim() : undefined,
+        purchaseStatus: 'CANCELLED',
+        purchaseCancellationNote: cancelNote.trim(),
       });
       return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
     },
     onSuccess: async (updated) => {
-      toast.success('Status de compras atualizado.');
+      toast.success('Ficha cancelada.');
+      setCancelOpen(false);
+      setCancelNote('');
       if (updated) onRecordUpdated?.(updated);
       await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
@@ -249,17 +237,69 @@ export function FichaDemandaDetailModal({
               ?.error ||
             (err as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast.error(msg || 'Não foi possível atualizar o status.');
+      toast.error(msg || 'Não foi possível cancelar a ficha.');
     },
   });
 
   if (!record) return null;
 
-  const statusUnchanged =
-    purchaseStatus === (record.purchaseStatus === 'WAREHOUSE_GO' ? 'WAREHOUSE_DF' : record.purchaseStatus ?? '') &&
-    (purchaseStatus !== 'CANCELLED' ||
-      cancellationNote.trim() === (record.purchaseCancellationNote ?? '').trim());
-  const cancelledNeedsNote = purchaseStatus === 'CANCELLED' && !cancellationNote.trim();
+  // Status automático: Pendente → (SC preenchida) Cotação → (ID da OC + anexo da OC) Finalizado.
+  const isCancelled = record.purchaseStatus === 'CANCELLED';
+  const isFinished = record.purchaseStatus === 'FINISHED';
+  const canCancel = !isCancelled && !isFinished;
+  // Pendente (sem status de compras): ainda não existe OC, então não dá para anexar nem editar.
+  const ordemCompraEditavel = !!record.purchaseStatus && !isCancelled;
+  // Etapas: sem status → SC; Cotação → ID da OC + anexo da OC; demais (Finalizado, Cancelado, antigos) → tudo.
+  const stage: 'sc' | 'oc' | 'all' = !record.purchaseStatus
+    ? 'sc'
+    : record.purchaseStatus === 'PURCHASE_REQUEST'
+      ? 'oc'
+      : 'all';
+  const ordemCompraCards =
+    ordensCompra.length === 0 ? null : (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {ordensCompra.map((anexo, index) => {
+          const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
+          const isPending = !anexo.url;
+          return (
+            <FilePreviewCard
+              key={anexoKey}
+              file={{
+                originalName: anexo.name || 'Arquivo',
+                fileUrl: anexo.url,
+              }}
+              extra="Ordem de compra"
+              uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
+              onUpload={
+                allowPendingUpload && isPending && ordemCompraEditavel
+                  ? (file) => {
+                      const idForUpload = anexo.id || anexoKey;
+                      uploadMutation.mutate({ anexoId: idForUpload, file, kind: 'oc' });
+                    }
+                  : undefined
+              }
+            />
+          );
+        })}
+      </div>
+    );
+  const ordemCompraDropZone =
+    allowAddOrdemCompra && ordemCompraEditavel ? (
+      <FileDropZone
+        label="Adicionar ordem de compra"
+        hint="Clique ou arraste imagem/PDF"
+        uploading={uploadingAnexoId === 'oc'}
+        disabled={uploadMutation.isPending && uploadingAnexoId !== 'oc'}
+        onFiles={(files) => {
+          const file = files[0];
+          if (file) uploadMutation.mutate({ file, kind: 'oc' });
+        }}
+      />
+    ) : null;
+  const refsChanged =
+    scNumero !== (record.scNumero || '') ||
+    scId !== (record.scId || '') ||
+    ocId !== (record.ocId || '');
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalhes da Ficha de Demanda" size="xl">
@@ -289,13 +329,9 @@ export function FichaDemandaDetailModal({
           <Field label="Polo">{record.polo || '—'}</Field>
           <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
           <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
-          {!allowAddOrdemCompra && (record.scNumero || record.scId || record.ocId) ? (
-            <>
-              <Field label="Nº da SC">{record.scNumero || '—'}</Field>
-              <Field label="ID da SC">{record.scId || '—'}</Field>
-              <Field label="ID da OC">{record.ocId || '—'}</Field>
-            </>
-          ) : null}
+          <Field label="Nº da SC">{record.scNumero || '—'}</Field>
+          <Field label="ID da SC">{record.scId || '—'}</Field>
+          {record.ocId ? <Field label="ID da OC">{record.ocId}</Field> : null}
           <Field label="Faturamento estimado">
             {formatCurrencyDisplay(record.faturamentoEstimado)}
           </Field>
@@ -323,116 +359,100 @@ export function FichaDemandaDetailModal({
           </div>
         </dl>
 
-        {allowAddOrdemCompra ? (
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                Status de compras
-              </p>
-            </div>
-            <div className="space-y-3 p-4">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status
-                </label>
-                <StringSingleSelectDropdown
-                  value={purchaseStatus}
-                  onChange={setPurchaseStatus}
-                  options={purchaseStatusOptions}
-                  placeholder="Selecione o status..."
-                  emptyOptionLabel="Selecione o status..."
-                  searchPlaceholder="Pesquisar status..."
-                  matchTriggerWidth
-                  className="w-full"
-                />
-              </div>
-              {purchaseStatus === 'CANCELLED' ? (
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Observação do cancelamento<span className="text-red-500"> *</span>
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={cancellationNote}
-                    onChange={(e) => setCancellationNote(e.target.value)}
-                    placeholder="Informe o motivo do cancelamento"
-                    className={FORM_FIELD_TEXTAREA_CLS}
-                  />
-                </div>
-              ) : null}
-              {record.purchaseStatusUpdatedAt ? (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Última atualização: {formatDateTime(record.purchaseStatusUpdatedAt)}
-                  {record.purchaseStatusUpdaterNome ? ` — ${record.purchaseStatusUpdaterNome}` : ''}
-                </p>
-              ) : null}
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  onClick={() => statusMutation.mutate()}
-                  disabled={
-                    !purchaseStatus ||
-                    statusUnchanged ||
-                    cancelledNeedsNote ||
-                    statusMutation.isPending
-                  }
-                >
-                  {statusMutation.isPending ? 'Salvando...' : 'Salvar status'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {allowAddOrdemCompra ? (
+        {/* Finalizada ou cancelada: não edita mais; os dados ficam na lista acima e a OC no bloco de consulta. */}
+        {allowAddOrdemCompra && canCancel ? (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                 Solicitação e ordem de compra
               </p>
             </div>
-            <div className="grid gap-4 p-4 sm:grid-cols-3">
-              <label className="block min-w-0">
-                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  Nº da SC
-                </span>
-                <input
-                  value={scNumero}
-                  onChange={(e) => setScNumero(e.target.value)}
-                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
-                  placeholder="Número da SC"
-                />
-              </label>
-              <label className="block min-w-0">
-                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  ID da SC
-                </span>
-                <input
-                  value={scId}
-                  onChange={(e) => setScId(e.target.value)}
-                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
-                  placeholder="ID da SC"
-                />
-              </label>
-              <label className="block min-w-0">
-                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  ID da OC
-                </span>
-                <input
-                  value={ocId}
-                  onChange={(e) => setOcId(e.target.value)}
-                  className={`${FORM_FIELD_INPUT_CLS} mt-1`}
-                  placeholder="ID da OC"
-                />
-              </label>
-              <div className="sm:col-span-3 flex justify-end">
-                <Button
-                  type="button"
-                  onClick={() => refsMutation.mutate()}
-                  disabled={refsMutation.isPending}
-                >
-                  {refsMutation.isPending ? 'Salvando...' : 'Salvar'}
-                </Button>
+            <div className="space-y-4 p-4">
+              {isCancelled && record.purchaseCancellationNote ? (
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  Cancelada: {record.purchaseCancellationNote}
+                </p>
+              ) : null}
+              <div
+                className={`grid gap-4 ${
+                  stage === 'all' ? 'sm:grid-cols-3' : stage === 'sc' ? 'sm:grid-cols-2' : 'sm:grid-cols-1'
+                }`}
+              >
+                {stage !== 'oc' ? (
+                  <>
+                    <label className="block min-w-0">
+                      <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Nº da SC
+                      </span>
+                      <input
+                        value={scNumero}
+                        onChange={(e) => setScNumero(e.target.value)}
+                        disabled={isCancelled}
+                        className={FORM_FIELD_INPUT_CLS}
+                        placeholder="Digite o número da solicitação"
+                      />
+                    </label>
+                    <label className="block min-w-0">
+                      <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        ID da SC
+                      </span>
+                      <input
+                        value={scId}
+                        onChange={(e) => setScId(e.target.value)}
+                        disabled={isCancelled}
+                        className={FORM_FIELD_INPUT_CLS}
+                        placeholder="Digite o ID da solicitação"
+                      />
+                    </label>
+                  </>
+                ) : null}
+                {/* Pendente (sem status de compras): ainda não existe OC, então o ID da OC não aparece. */}
+                {stage !== 'sc' ? (
+                  <label className="block min-w-0">
+                    <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      ID da OC
+                    </span>
+                    <input
+                      value={ocId}
+                      onChange={(e) => setOcId(e.target.value)}
+                      disabled={isCancelled}
+                      className={FORM_FIELD_INPUT_CLS}
+                      placeholder="Digite o ID da ordem de compra"
+                    />
+                  </label>
+                ) : null}
+              </div>
+              {stage !== 'sc' ? (
+                <div className="space-y-3">
+                  <span className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Anexo da OC
+                  </span>
+                  {ordemCompraCards}
+                  {ordemCompraDropZone}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  {canCancel ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCancelOpen(true)}
+                      disabled={refsMutation.isPending}
+                    >
+                      Cancelar
+                    </Button>
+                  ) : null}
+                </div>
+                {!isCancelled ? (
+                  <Button
+                    type="button"
+                    onClick={() => refsMutation.mutate()}
+                    disabled={refsMutation.isPending || !refsChanged}
+                  >
+                    {refsMutation.isPending ? 'Salvando...' : 'Salvar'}
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -470,59 +490,18 @@ export function FichaDemandaDetailModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                <Paperclip className="h-4 w-4 text-gray-500" />
-                Ordens de compra
-              </div>
-            </div>
-            <div className="space-y-3 p-4">
-              {ordensCompra.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Nenhuma ordem de compra anexada.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {ordensCompra.map((anexo, index) => {
-                    const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
-                    const isPending = !anexo.url;
-                    return (
-                      <FilePreviewCard
-                        key={anexoKey}
-                        file={{
-                          originalName: anexo.name || 'Arquivo',
-                          fileUrl: anexo.url,
-                        }}
-                        extra="Ordem de compra"
-                        uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
-                        onUpload={
-                          allowPendingUpload && isPending
-                            ? (file) => {
-                                const idForUpload = anexo.id || anexoKey;
-                                uploadMutation.mutate({ anexoId: idForUpload, file, kind: 'oc' });
-                              }
-                            : undefined
-                        }
-                      />
-                    );
-                  })}
+          {/* Enquanto edita (Suprimentos) o anexo da OC fica no bloco acima; aqui só a consulta, quando há OC. */}
+          {(!allowAddOrdemCompra || !canCancel) && ordensCompra.length > 0 ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  <Paperclip className="h-4 w-4 text-gray-500" />
+                  Ordens de compra
                 </div>
-              )}
-              {allowAddOrdemCompra ? (
-                <FileDropZone
-                  label="Adicionar ordem de compra"
-                  hint="Clique ou arraste imagem/PDF"
-                  uploading={uploadingAnexoId === 'oc'}
-                  disabled={uploadMutation.isPending && uploadingAnexoId !== 'oc'}
-                  onFiles={(files) => {
-                    const file = files[0];
-                    if (file) uploadMutation.mutate({ file, kind: 'oc' });
-                  }}
-                />
-              ) : null}
+              </div>
+              <div className="p-4">{ordemCompraCards}</div>
             </div>
-          </div>
+          ) : null}
 
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
@@ -579,6 +558,50 @@ export function FichaDemandaDetailModal({
           </div>
         )}
       </div>
+      <Modal
+        isOpen={cancelOpen}
+        onClose={() => {
+          if (!cancelMutation.isPending) setCancelOpen(false);
+        }}
+        title="Cancelar ficha de demanda"
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Informe o motivo do cancelamento. A ficha passa para Cancelada e não poderá mais ser
+            alterada.
+          </p>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Motivo do cancelamento<span className="text-red-500"> *</span>
+            </label>
+            <textarea
+              rows={3}
+              value={cancelNote}
+              onChange={(e) => setCancelNote(e.target.value)}
+              placeholder="Informe o motivo do cancelamento"
+              className={FORM_FIELD_TEXTAREA_CLS}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCancelOpen(false)}
+              disabled={cancelMutation.isPending}
+            >
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => cancelMutation.mutate()}
+              disabled={!cancelNote.trim() || cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? 'Cancelando...' : 'Cancelar ficha'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }

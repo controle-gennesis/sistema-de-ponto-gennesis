@@ -268,6 +268,55 @@ const includeDefault = {
   purchaseStatusUpdater: { select: { id: true, name: true } },
 } as const;
 
+/** Anexo de ordem de compra já enviado (com arquivo). */
+function hasOrdemCompraAnexo(anexos: unknown): boolean {
+  if (!Array.isArray(anexos)) return false;
+  return anexos.some((a) => {
+    const item = (a ?? {}) as { url?: string; kind?: string; name?: string };
+    if (!item.url) return false;
+    if (item.kind === 'oc') return true;
+    if (item.kind) return false;
+    return /ORDEM\s*DE\s*COMPRA|ANEXO[_-]?OC|(?:^|[_-])OC(?:[_-]|\d)/i.test(String(item.name ?? ''));
+  });
+}
+
+/**
+ * Status de compras automático:
+ * Pendente (sem status) + Nº e ID da SC preenchidos → Cotação;
+ * Cotação + ID da OC preenchido + anexo da OC → Finalizado.
+ * Cancelado, Finalizado e os status antigos não mudam sozinhos.
+ */
+async function advancePurchaseStatusAutomatically<
+  T extends {
+    id: string;
+    status: string;
+    purchaseStatus: DemandSheetPurchaseStatus | null;
+    scNumero: string | null;
+    scId: string | null;
+    ocId: string | null;
+    anexos: unknown;
+  },
+>(row: T, userId: string): Promise<T> {
+  if (row.status !== 'APPROVED') return row;
+  let next: DemandSheetPurchaseStatus | null = row.purchaseStatus;
+  if (!next && row.scNumero?.trim() && row.scId?.trim()) next = 'PURCHASE_REQUEST';
+  if (next === 'PURCHASE_REQUEST' && row.ocId?.trim() && hasOrdemCompraAnexo(row.anexos)) {
+    next = 'FINISHED';
+  }
+  if (next === row.purchaseStatus) return row;
+  const updated = await prisma.demandSheetApproval.update({
+    where: { id: row.id },
+    data: {
+      purchaseStatus: next,
+      purchaseStatusUpdatedBy: userId,
+      purchaseStatusUpdatedAt: new Date(),
+      purchaseCancellationNote: null,
+    },
+    include: includeDefault,
+  });
+  return updated as unknown as T;
+}
+
 async function userCanAccessFdModule(userId: string, isAdmin: boolean): Promise<boolean> {
   if (isAdmin) return true;
   const perm = await prisma.userPermission.findFirst({
@@ -812,6 +861,10 @@ export class DemandSheetApprovalController {
         throw createError('Somente fichas aprovadas pelo gestor podem receber status de compras', 400);
       }
 
+      if (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED') {
+        throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
+      }
+
       const body = purchaseStatusSchema.parse(req.body);
       const cancellationNote = String(body.purchaseCancellationNote ?? '').trim();
       if (body.purchaseStatus === 'CANCELLED' && !cancellationNote) {
@@ -859,6 +912,10 @@ export class DemandSheetApprovalController {
         throw createError('Somente fichas aprovadas podem receber número e ID de SC e OC', 400);
       }
 
+      if (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED') {
+        throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
+      }
+
       const body = purchaseRefsSchema.parse(req.body);
       const updated = await prisma.demandSheetApproval.update({
         where: { id },
@@ -869,8 +926,9 @@ export class DemandSheetApprovalController {
         },
         include: includeDefault,
       });
+      const advanced = await advancePurchaseStatusAutomatically(updated, req.user.id);
 
-      return res.json({ success: true, data: serializeRow(updated) });
+      return res.json({ success: true, data: serializeRow(advanced) });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) {
@@ -1026,7 +1084,14 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({
         where: { id },
-        select: { id: true, externalId: true, anexos: true, status: true, createdBy: true },
+        select: {
+          id: true,
+          externalId: true,
+          anexos: true,
+          status: true,
+          createdBy: true,
+          purchaseStatus: true,
+        },
       });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
 
@@ -1051,6 +1116,12 @@ export class DemandSheetApprovalController {
 
       const anexoId = String((req.body as { anexoId?: unknown })?.anexoId ?? '').trim();
       const requestedKind = String((req.body as { kind?: unknown })?.kind ?? '').trim();
+      if (
+        requestedKind === 'oc' &&
+        (existing.purchaseStatus === 'FINISHED' || existing.purchaseStatus === 'CANCELLED')
+      ) {
+        throw createError('Ficha finalizada ou cancelada não pode mais receber ordem de compra.', 400);
+      }
       const originalName =
         fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
 
@@ -1126,10 +1197,11 @@ export class DemandSheetApprovalController {
         data: { anexos: list as unknown as Prisma.InputJsonValue },
         include: includeDefault,
       });
+      const advanced = await advancePurchaseStatusAutomatically(row, req.user.id);
 
       return res.json({
         success: true,
-        data: serializeRow(row),
+        data: serializeRow(advanced),
         message: 'Anexo vinculado com sucesso',
       });
     } catch (e: unknown) {

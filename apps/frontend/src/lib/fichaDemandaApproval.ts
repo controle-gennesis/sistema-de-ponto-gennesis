@@ -22,8 +22,7 @@ export const FD_PURCHASE_STATUS_OPTIONS: {
   label: string;
 }[] = [
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
-  { value: 'SUPPLIES', label: 'Suprimentos' },
+  { value: 'PURCHASE_REQUEST', label: 'Em Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ];
@@ -34,7 +33,7 @@ export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string
   WAREHOUSE_GO: 'Almoxarifado',
   FULLY_FULFILLED_BY_STOCK: 'Atendida totalmente pelo estoque',
   PARTIALLY_FULFILLED_BY_STOCK: 'Atendida parcialmente pelo estoque',
-  PURCHASE_REQUEST: 'Solicitação de compra',
+  PURCHASE_REQUEST: 'Em Cotação',
   SUPPLIES: 'Suprimentos',
   FINISHED: 'Finalizado',
   CANCELLED: 'Cancelado',
@@ -42,7 +41,8 @@ export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string
 
 export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | null | undefined): string {
   if (!status) {
-    return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+    // Sem status de compras = "Em Fila" (mesma cor do card).
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   }
   switch (status) {
     case 'FINISHED':
@@ -61,7 +61,7 @@ export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | n
 }
 
 export function purchaseStatusLabel(value: DemandSheetPurchaseStatus | null | undefined): string {
-  if (!value) return 'Pendente';
+  if (!value) return 'Em Fila';
   return FD_PURCHASE_STATUS_LABELS[value] ?? value;
 }
 

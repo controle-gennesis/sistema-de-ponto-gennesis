@@ -51,7 +51,7 @@ const ROW_ACTION_MENU_WIDTH_PX = 224;
 type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
 
 /** Cards de resumo: cada um agrupa status de compras. */
-type StatCardFilter = 'ALL' | 'PENDING' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
+type StatCardFilter = 'ALL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
 const LIST_HEADER_BY_FILTER: Record<
   StatCardFilter,
@@ -65,15 +65,15 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   PENDING: {
-    title: 'Pendentes',
-    subtitle: 'Fichas aprovadas que ainda não receberam status de compras',
+    title: 'Em Fila',
+    subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
-  IN_PROGRESS: {
-    title: 'Em andamento',
-    subtitle: 'Fichas em Almoxarifado, Solicitação de compra ou Suprimentos',
+  QUOTATION: {
+    title: 'Em Cotação',
+    subtitle: 'Fichas com a solicitação de compra em cotação',
     Icon: Timer,
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
@@ -94,21 +94,12 @@ const LIST_HEADER_BY_FILTER: Record<
   },
 };
 
-const IN_PROGRESS_STATUSES: DemandSheetPurchaseStatus[] = [
-  'WAREHOUSE_DF',
-  'WAREHOUSE_GO',
-  'FULLY_FULFILLED_BY_STOCK',
-  'PARTIALLY_FULFILLED_BY_STOCK',
-  'PURCHASE_REQUEST',
-  'SUPPLIES',
-];
-
 function matchesStatCard(status: DemandSheetPurchaseStatus | null | undefined, card: StatCardFilter) {
   if (card === 'ALL') return true;
   if (card === 'PENDING') return !status;
   if (card === 'FINISHED') return status === 'FINISHED';
   if (card === 'CANCELLED') return status === 'CANCELLED';
-  return !!status && IN_PROGRESS_STATUSES.includes(status);
+  return status === 'PURCHASE_REQUEST';
 }
 
 /** Filtro por status exato; "Almoxarifado" junta os registros antigos de DF e GO. */
@@ -124,10 +115,9 @@ function matchesPurchaseStatus(
 
 const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
-  { value: 'NONE', label: 'Pendente' },
+  { value: 'NONE', label: 'Em Fila' },
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
-  { value: 'SUPPLIES', label: 'Suprimentos' },
+  { value: 'PURCHASE_REQUEST', label: 'Em Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ]);
@@ -176,7 +166,7 @@ export default function FdsAprovadasPage() {
     () => ({
       ALL: allRecords.length,
       PENDING: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'PENDING')).length,
-      IN_PROGRESS: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'IN_PROGRESS')).length,
+      QUOTATION: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'QUOTATION')).length,
       FINISHED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'FINISHED')).length,
       CANCELLED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'CANCELLED')).length,
     }),
@@ -256,8 +246,8 @@ export default function FdsAprovadasPage() {
             {(
               [
                 { filter: 'ALL', label: 'Todas' },
-                { filter: 'PENDING', label: 'Pendentes' },
-                { filter: 'IN_PROGRESS', label: 'Em andamento' },
+                { filter: 'PENDING', label: 'Em Fila' },
+                { filter: 'QUOTATION', label: 'Em Cotação' },
                 { filter: 'FINISHED', label: 'Finalizadas' },
                 { filter: 'CANCELLED', label: 'Canceladas' },
               ] as const
@@ -426,7 +416,7 @@ export default function FdsAprovadasPage() {
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <span
-                                className={`inline-flex max-w-[220px] rounded-full px-2.5 py-0.5 text-xs font-semibold ${fdPurchaseStatusBadgeClass(row.purchaseStatus)}`}
+                                className={`inline-flex max-w-[220px] whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${fdPurchaseStatusBadgeClass(row.purchaseStatus)}`}
                                 title={purchaseStatusLabel(row.purchaseStatus)}
                               >
                                 {purchaseStatusLabel(row.purchaseStatus)}
