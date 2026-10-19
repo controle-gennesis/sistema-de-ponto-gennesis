@@ -52,11 +52,23 @@ function serializePleito(p: any) {
   };
 }
 
+/**
+ * As abas «Ordens de Serviço» e «Pleitos» do contrato leem os mesmos registros.
+ * Cada aba tem a sua flag; o endpoint aceita quem tem qualquer uma delas.
+ */
+async function assertOsOrPleitosPermission(req: AuthRequest, contractId: string): Promise<void> {
+  try {
+    await assertContractModulePermission(req, contractId, 'ordemServico');
+  } catch {
+    await assertContractModulePermission(req, contractId, 'pleitos');
+  }
+}
+
 export class ContractPleitoController {
   async getPleitosByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractModulePermission(req, contractId, 'pleitos');
+      await assertOsOrPleitosPermission(req, contractId);
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
@@ -75,7 +87,7 @@ export class ContractPleitoController {
   async createPleito(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractModulePermission(req, contractId, 'pleitos');
+      await assertOsOrPleitosPermission(req, contractId);
 
       const b = req.body;
 

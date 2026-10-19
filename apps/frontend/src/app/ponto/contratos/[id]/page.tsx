@@ -1388,7 +1388,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/contracts/${contractId}/pleitos`);
       return res.data;
     },
-    enabled: !!contractId && canAccessOrdemServicoModulo
+    enabled: !!contractId && (canAccessOrdemServicoModulo || canAccessPleitosModulo)
   });
 
   const { data: productionsData, isLoading: loadingProductions } = useQuery({
