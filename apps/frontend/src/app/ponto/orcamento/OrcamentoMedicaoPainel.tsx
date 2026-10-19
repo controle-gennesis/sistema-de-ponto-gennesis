@@ -99,7 +99,7 @@ type Props = {
  * Larguras da grade: a 1ª linha do thead (item) ocupa a coluna Descrição + colSpan no restante;
  * `<colgroup>` define a grade de fato (w-* nas células sozinho não segura o layout).
  */
-const COLS_MEDIC_PCT = { item: 6, desc: 38, med: 7 } as const;
+const COLS_MEDIC_PCT = { item: 6, desc: 35, med: 6.5 } as const;
 
 const colDesc = 'min-w-[18rem] sm:min-w-[22rem]';
 const colMed = 'min-w-[2.75rem] max-w-[4.25rem]';
@@ -3023,7 +3023,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   /** Descrição + C + L + H + N + % + A + V + Subtotal. */
-  const contarColunasGrade = () => 9;
+  const contarColunasGrade = () => 10;
 
   const celulaVazia = (title?: string) => (
     <td className={`${tdRest} text-center`} title={title}>
@@ -3274,6 +3274,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {renderRotuloFixo('A', 'A', 'th', LINHA_ROTULOS, true)}
         {renderRotuloFixo('V', 'V', 'th', LINHA_ROTULOS, true)}
         {renderRotuloFixo('Subtotal', 'subtotal', 'th', LINHA_ROTULOS, true)}
+        <th className={thRestSticky} style={stickyHeaderTopStyle}>
+          <div className={rotuloFixoCls}>TOTAL</div>
+        </th>
       </tr>
     );
   };
@@ -3331,7 +3334,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td className={thRest} aria-hidden />
+        <td className={thRest}>
+          <div className={rotuloFixoCls}>{dim.rotulosColunas?.detalhes?.trim() || 'DETALHES'}</div>
+        </td>
         <CelulaCabecalho
           as="td"
           col={0}
@@ -3369,6 +3374,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {renderRotuloFixo('A', 'A', 'td', idx, false)}
         {renderRotuloFixo('V', 'V', 'td', idx, false)}
         {renderRotuloFixo('Subtotal', 'subtotal', 'td', idx, false)}
+        {idx === 0 ? renderCelulaTotalMedicao() : null}
       </tr>
     );
   };
@@ -3412,9 +3418,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       .filter(l => !l.cabecalhoSecao).length;
     const formulaSessao = pickApi?.session ?? null;
     const destacaCelula = (campo: string, token: FormulaPickToken) => {
-      if (somaTotalVisivel && ln.formulas?.subtotalManual && formulaUsaTokenCurto(ln.formulas.subtotalManual, token)) {
-        return classeCelulaFormula(ln.formulas.subtotalManual, chaveTokenLocal(token));
-      }
       if (!formulaSessao?.formula) return '';
       if (
         formulaSessao.itemKey === rowKey &&
@@ -3720,6 +3723,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {renderCelulaAV('A', valorA, 'Área (m²)')}
         {renderCelulaAV('V', valorV, 'Volume (m³)')}
         {renderCelulaAV('subtotal', valorSubtotal, 'Quantidade da linha')}
+        {idx === 0 ? renderCelulaTotalMedicao() : null}
       </tr>
     );
   };
@@ -3773,7 +3777,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const totalCelulaRef = useRef<HTMLTableCellElement | null>(null);
 
-  const renderLinhaTotalMedicao = () => {
+  /** Total da memória: célula única mesclada na coluna à direita do subtotal, cobrindo todas as linhas. */
+  const renderCelulaTotalMedicao = () => {
     const linhas = (linhasEfetivas ?? []).filter(ln => !ln.cabecalhoSecao);
     const totalSub = linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipo), 0);
     const marcaSub = (() => {
@@ -3782,7 +3787,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       return classeCelulaFormula(formula, chaveTokenExterno(itemRotulo, 'T', 'SUB'));
     })();
     const podeEscolherSub = Boolean(pickApi?.session) && !marcaSub;
-    const corItemClasse = estiloTitulo ? '' : 'bg-red-600 text-white dark:bg-red-950/90';
+    const corItemClasse = estiloTitulo ? '' : '!bg-red-600 !text-white dark:!bg-red-950/90';
     const textoSoma = partesSoma.length
       ? `=${partesSoma.map(parte => formatMedicaoCentavos(parte.valor)).join('+')}`
       : '';
@@ -3819,22 +3824,18 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         ]
       : [];
     return (
-      <tr className={gradeTableRowTrCls}>
-        <td className={tdItemCol} aria-hidden />
-        <td colSpan={8} className={`${tdFirst} !border-r-0`}>
-          <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
-            Total
-          </span>
-        </td>
         <td
           ref={totalCelulaRef}
-          className={`${tdCalc} relative !border-l border-gray-200 outline-none dark:border-gray-600 ${
+          rowSpan={Math.max(1, linhasEfetivas.length)}
+          className={`${tdCalc} !h-auto !max-h-none align-middle relative !border-l border-gray-200 outline-none dark:border-gray-600 ${
             marcaSub || corItemClasse
           } ${podeEscolherSub || !readOnly ? 'cursor-pointer' : ''} ${
             somaTotalVisivel ? 'ring-2 ring-inset ring-red-950 dark:ring-red-400' : ''
           }`}
           style={marcaSub ? undefined : estiloTitulo}
           title="Duplo clique para ver os subtotais que entram nesta soma"
+          onClick={e => e.stopPropagation()}
+          onContextMenu={e => e.stopPropagation()}
           onMouseDownCapture={e => {
             if (readOnly) return;
             onPickFormulaCell(e, 'T', 'subtotal', 'SUB');
@@ -3855,7 +3856,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             />
           ) : null}
         </td>
-      </tr>
     );
   };
 
@@ -3882,7 +3882,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         <colgroup>
           <col style={{ width: `${COLS_MEDIC_PCT.item}%` }} />
           <col style={{ width: `${COLS_MEDIC_PCT.desc}%` }} />
-          {Array.from({ length: 8 }, (_, i) => (
+          {Array.from({ length: 9 }, (_, i) => (
             <col key={i} style={{ width: `${COLS_MEDIC_PCT.med}%` }} />
           ))}
         </colgroup>
@@ -4042,7 +4042,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           </thead>
           <tbody>
             {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
-            {renderLinhaTotalMedicao()}
           </tbody>
         </>
       )
@@ -4061,7 +4060,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         </thead>
         <tbody>
           {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
-          {renderLinhaTotalMedicao()}
         </tbody>
       </>
     )

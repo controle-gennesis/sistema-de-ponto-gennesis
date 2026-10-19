@@ -15352,7 +15352,7 @@ export function OrcamentoPageView({
     if (itensCalculados.length === 0) return null;
 
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
-    const empty = () => Array.from({ length: 10 }, () => '') as OrcamentoExcelRow['values'];
+    const empty = () => Array.from({ length: 11 }, () => '') as OrcamentoExcelRow['values'];
     const rows: OrcamentoExcelRow[] = [];
     // Fórmulas digitadas na memória viram fórmulas do Excel; as que não têm tradução ficam como valor.
     const letrasMemoria: Record<string, string> = { C: 'C', L: 'D', H: 'E', '%': 'F', N: 'G', A: 'H', V: 'I', SUB: 'J' };
@@ -15373,7 +15373,7 @@ export function OrcamentoPageView({
         servicoAnterior = servicoAtual;
         const barra = empty();
         barra[0] = String(row.servicoNome || '').trim().toUpperCase();
-        rows.push({ kind: 'servico', values: barra, merge: [0, 9] });
+        rows.push({ kind: 'servico', values: barra, merge: [0, 10] });
         rows.push({ kind: 'blank', values: empty() });
       }
 
@@ -15387,8 +15387,8 @@ export function OrcamentoPageView({
 
       rows.push({
         kind: 'item',
-        values: [rotulo, descricaoItem, un, observacao, '', '', '', '', '', ''],
-        merge: [3, 9],
+        values: [rotulo, descricaoItem, un, observacao, '', '', '', '', '', '', ''],
+        merge: [3, 10],
         tones: { 0: 'item', 1: 'label', 2: 'plain', 3: 'label' },
       });
       rows.push({
@@ -15404,9 +15404,11 @@ export function OrcamentoPageView({
           'A',
           'V',
           'SUBTOTAL',
+          'TOTAL',
         ],
       });
 
+      const inicioCorpo = rows.length;
       let totalSub = 0;
       let linhaDadosN = 0;
       let primeiraLinhaDados = -1;
@@ -15420,7 +15422,7 @@ export function OrcamentoPageView({
             rows.push({
               kind: 'cabecalho',
               values: [
-                '',
+                (rotulos?.detalhes ?? 'DETALHES').trim() || 'DETALHES',
                 descLinha,
                 rotulos?.C || 'C',
                 rotulos?.L || 'L',
@@ -15430,6 +15432,7 @@ export function OrcamentoPageView({
                 'A',
                 'V',
                 'SUBTOTAL',
+                'TOTAL',
               ],
             });
             continue;
@@ -15472,37 +15475,40 @@ export function OrcamentoPageView({
               celula(areaExibidaLinha(ln)),
               celula(volumeExibidoLinha(ln, tipo)),
               celula(sub),
+              '',
             ],
           });
         }
       } else {
         totalSub = row.quantidade;
+        ultimaLinhaDados = rows.length;
         const celula = (n: number): number | '' => (Number.isFinite(n) && n !== 0 ? n : '');
         rows.push({
           kind: 'item',
-          values: ['', row.item.descricao || '', '', '', '', '', '', '', '', celula(row.quantidade)],
+          values: ['', row.item.descricao || '', '', '', '', '', '', '', '', celula(row.quantidade), ''],
         });
       }
 
-      const totalValues = empty();
-      totalValues[1] = 'TOTAL';
-      totalValues[9] = totalSub;
-      totalPorRotulo.set(rotulo.trim(), rows.length);
-      rows.push({
-        kind: 'total',
-        values: totalValues,
-        merge: [1, 8],
-        tones: { 0: 'plain', 1: 'label', 9: 'item' },
-        ...(primeiraLinhaDados >= 0
-          ? { formulas: { 9: `SUM(J{R${primeiraLinhaDados}}:J{R${ultimaLinhaDados}})` } }
-          : {}),
-      });
+      // O total do item é uma célula única à direita do subtotal, mesclada em todas as linhas do corpo.
+      if (rows.length > inicioCorpo) {
+        const alvoTotal = rows[inicioCorpo]!;
+        alvoTotal.values[10] = totalSub;
+        alvoTotal.tones = { ...(alvoTotal.tones ?? {}), 10: 'item' };
+        alvoTotal.rowSpan = { 10: rows.length - inicioCorpo };
+        if (primeiraLinhaDados >= 0) {
+          alvoTotal.formulas = {
+            ...(alvoTotal.formulas ?? {}),
+            10: `SUM(J{R${primeiraLinhaDados}}:J{R${ultimaLinhaDados}})`,
+          };
+        }
+        totalPorRotulo.set(rotulo.trim(), inicioCorpo);
+      }
     });
 
     for (const p of pendentesMemoria) {
       const formula = formulaMemoriaParaExcel(p.raw, letrasMemoria, (rot, lin, campo) => {
         const idx = lin === 'T' ? totalPorRotulo.get(rot) : linhaPorRef.get(`${rot}|${lin}`);
-        const letra = letrasMemoria[campo];
+        const letra = lin === 'T' ? 'K' : letrasMemoria[campo];
         return idx == null || !letra ? null : `${letra}{R${idx}}`;
       });
       if (!formula) continue;
@@ -15528,6 +15534,7 @@ export function OrcamentoPageView({
         { header: 'A', width: 12, align: 'center', format: 'qty' },
         { header: 'V', width: 12, align: 'center', format: 'qty' },
         { header: 'SUBTOTAL', width: 14, align: 'center', format: 'qty' },
+        { header: 'TOTAL', width: 14, align: 'center', format: 'qty' },
       ],
       rows,
     };

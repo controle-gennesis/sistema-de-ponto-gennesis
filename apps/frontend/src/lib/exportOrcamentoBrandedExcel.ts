@@ -64,6 +64,8 @@ export type OrcamentoExcelRow = {
   formats?: Record<number, OrcamentoExcelColFormat>;
   /** Mescla colunas 0-based inclusive, ex.: [0, 7] junta A até H. */
   merge?: [number, number];
+  /** Mescla para baixo: coluna 0-based → quantas linhas a célula ocupa (inclui a atual). */
+  rowSpan?: Record<number, number>;
   /** Cor por célula, por cima do tipo da linha. `item` usa a cor do item; `plain` fica branco. */
   tones?: Record<number, 'item' | 'plain' | 'label'>;
 };
@@ -205,7 +207,8 @@ function applyCellFormat(
         ? { formula: expr, result: value }
         : { formula: expr };
   } else if (value === null || value === undefined || value === '') {
-    cell.value = '';
+    // Célula realmente vazia: uma string vazia daria #VALOR! em fórmulas que a referenciam.
+    cell.value = null;
   } else if (typeof value === 'number' && Number.isFinite(value)) {
     cell.value = value;
   } else {
@@ -309,6 +312,7 @@ async function fillWorkbook(
     }
 
     let itemStripe = 0;
+    const mesclasVerticais: Array<[number, number, number]> = [];
     spec.rows.forEach((rowSpec, i) => {
       const excelRow = offsetCabecalho + (showHeader ? 2 : 1) + i;
       const row = sheet.getRow(excelRow);
@@ -440,11 +444,19 @@ async function fillWorkbook(
           };
         }
       }
+      if (rowSpec.rowSpan) {
+        // Mescla só depois de todas as linhas: escrever numa célula coberta apagaria o valor da principal.
+        for (const [col, n] of Object.entries(rowSpec.rowSpan)) {
+          if (n > 1) mesclasVerticais.push([excelRow, Number(col) + 1, excelRow + n - 1]);
+        }
+      }
       if (rowSpec.merge) {
         const [from, to] = rowSpec.merge;
         sheet.mergeCells(excelRow, from + 1, excelRow, to + 1);
       }
     });
+
+    for (const [de, col, ate] of mesclasVerticais) sheet.mergeCells(de, col, ate, col);
 
     spec.columns.forEach((col, i) => {
       if (!colunaEhDescricao(col.header)) return;
