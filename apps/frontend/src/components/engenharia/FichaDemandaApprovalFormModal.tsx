@@ -310,7 +310,8 @@ export function FichaDemandaApprovalFormModal({
   }, [isOpen, isSaving, requestClose]);
 
   const { data: contractsData } = useQuery({
-    queryKey: ['fd-approval-contrato-options'],
+    // Chave própria: a tela de aprovação usa outra com o mesmo endpoint, mas guarda só a lista (outro formato).
+    queryKey: ['fd-approval-form-contrato-options'],
     queryFn: async () => {
       const res = await api.get('/demand-sheet-approvals/options/contratos');
       return res.data;
