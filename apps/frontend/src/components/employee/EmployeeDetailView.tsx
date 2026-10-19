@@ -1387,12 +1387,6 @@ export function EmployeeDetailView({
     ...(canManageUserPermissions ? [{ id: 'permissions' as const, label: 'Permissões' }] : []),
   ];
 
-  const positionLabel = isEmpreiteiro
-    ? ['Empreita', selectedEmployee.empreiteiro?.specialty].filter(Boolean).join(' · ')
-    : [selectedEmployee.employee?.position, selectedEmployee.employee?.department]
-        .filter(Boolean)
-        .join(' de ');
-
   return (
     <div className="w-full space-y-6 pb-12">
       {/* z-50 com menu aberto: a animação page-enter deixa transform nas seções e as abas ficavam por cima do dropdown */}
@@ -1435,12 +1429,11 @@ export function EmployeeDetailView({
           <h1 className="truncate text-2xl font-semibold text-gray-900 dark:text-gray-100">
             {selectedEmployee.name}
           </h1>
-          {positionLabel ? (
-            <p className="mt-1.5 truncate text-sm text-gray-500 dark:text-gray-400">{positionLabel}</p>
+          {selectedEmployee.cpf ? (
+            <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+              {formatCpfInput(selectedEmployee.cpf)}
+            </p>
           ) : null}
-          <p className="mt-1.5 break-all text-sm text-gray-500 dark:text-gray-400">
-            {selectedEmployee.email}
-          </p>
           {isEmpreiteiro ? (
             needsEmpreiteiroRelink ? (
               <div className="mt-2 space-y-1">
