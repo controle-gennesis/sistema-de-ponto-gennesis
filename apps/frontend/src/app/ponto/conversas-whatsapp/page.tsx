@@ -231,20 +231,22 @@ function ListaMensagensWhatsAppDetalhe({
 }) {
   const userLabel = clientDisplayName?.trim() || 'Cliente';
 
+  // Quem está atendendo vê o lado do atendimento (Gennecy e atendente) à direita, em vermelho,
+  // e o cliente à esquerda, em cinza — como nos chats comuns. `role === 'user'` é o cliente.
   return (
     <div className={`space-y-3 overflow-y-auto pr-2 ${scrollClassName ?? 'max-h-[320px]'}`}>
       {messages.map((m) => (
-        <div key={m.id} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        <div key={m.id} className={`flex gap-2 ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
           <div
             className={`max-w-[85%] rounded-xl px-3 py-2.5 ${
-              m.role === 'user'
+              m.role !== 'user'
                 ? 'bg-red-600 text-white dark:bg-red-500'
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
             }`}
           >
             <div
               className={`flex items-center gap-2 text-xs mb-1 flex-wrap ${
-                m.role === 'user'
+                m.role !== 'user'
                   ? 'text-white/90'
                   : 'opacity-80 text-gray-600 dark:text-gray-300'
               }`}
@@ -264,7 +266,7 @@ function ListaMensagensWhatsAppDetalhe({
                     title="Ver arquivo"
                     aria-label="Ver arquivo"
                     className={
-                      m.role === 'user'
+                      m.role !== 'user'
                         ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-white/40 text-white hover:bg-white/15 transition-colors'
                         : 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 text-gray-800 dark:text-gray-100 bg-white/80 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors'
                     }
@@ -279,7 +281,7 @@ function ListaMensagensWhatsAppDetalhe({
                     title="Baixar arquivo"
                     aria-label="Baixar arquivo"
                     className={
-                      m.role === 'user'
+                      m.role !== 'user'
                         ? 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-white hover:bg-white/15 transition-colors'
                         : 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/25 transition-colors'
                     }
@@ -293,7 +295,7 @@ function ListaMensagensWhatsAppDetalhe({
                     target="_blank"
                     rel="noopener noreferrer"
                     className={`inline-flex items-center gap-1 text-xs underline ${
-                      m.role === 'user' ? 'text-white' : ''
+                      m.role !== 'user' ? 'text-white' : ''
                     }`}
                   >
                     <Paperclip className="w-3 h-3" />
@@ -301,7 +303,7 @@ function ListaMensagensWhatsAppDetalhe({
                   </a>
                 )}
                 {!m.mediaUrl && (
-                  <div className={`inline-flex items-center gap-1 text-xs opacity-80 ${m.role === 'user' ? 'text-white/90' : ''}`}>
+                  <div className={`inline-flex items-center gap-1 text-xs opacity-80 ${m.role !== 'user' ? 'text-white/90' : ''}`}>
                     <Paperclip className="w-3 h-3" />
                     <span>{m.fileName || 'Arquivo enviado'}</span>
                   </div>
