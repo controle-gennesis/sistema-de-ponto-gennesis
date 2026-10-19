@@ -316,6 +316,9 @@ export function FichaDemandaApprovalFormModal({
       return res.data;
     },
     enabled: isOpen && !hideContractField,
+    // Contratos liberados mudam na tela de permissões: não reaproveita lista antiga (padrão é 5 min).
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const { data: obrasData, isLoading: loadingObras } = useQuery({
