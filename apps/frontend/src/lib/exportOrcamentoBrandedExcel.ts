@@ -78,6 +78,8 @@ export type OrcamentoExcelCabecalhoCelula = {
   /** Rótulo: fundo cinza, negrito e centralizado. Sem isso, é valor (fundo branco). */
   rotulo?: boolean;
   alinhamento?: 'left' | 'center';
+  /** `barra` = faixa preta com texto branco; `destaque` = valor maior, em negrito. */
+  estilo?: 'barra' | 'destaque' | 'legenda';
 };
 
 /** Quadro de rótulo/valor acima do cabeçalho das colunas: cada item de `linhas` é uma linha da planilha. */
@@ -85,6 +87,22 @@ export type OrcamentoExcelCabecalho = {
   linhas: OrcamentoExcelCabecalhoCelula[][];
   /** Altura por linha (padrão 20). */
   alturas?: number[];
+  /** Coloca a logo da Gennesis no canto superior esquerdo (sobre as células vazias da 1ª linha). */
+  logo?: boolean;
+};
+
+/** Caixa de texto fora da tabela, à direita (ex.: bancos de composições usados no orçamento). */
+export type OrcamentoExcelCaixaLateral = {
+  titulo: string;
+  texto: string;
+  /** Linha (1-based) onde a caixa começa; padrão 1. */
+  linhaDe?: number;
+  /** Quantas linhas o texto ocupa abaixo do título; padrão 6. */
+  linhasTexto?: number;
+  /** Colunas 0-based (inclusive). */
+  colDe: number;
+  colAte: number;
+  larguraColuna?: number;
 };
 
 export type OrcamentoExcelSheetSpec = {
@@ -100,6 +118,8 @@ export type OrcamentoExcelSheetSpec = {
   showHeader?: boolean;
   /** Cores desta aba. Se omitido, usa a aparência geral do arquivo. */
   aparencia?: OrcamentoExcelAparencia;
+  /** Caixa à direita da tabela; a área de impressão continua só na tabela. */
+  caixaLateral?: OrcamentoExcelCaixaLateral;
   /** Tamanho da fonte (pt) das linhas de item e do cabeçalho das colunas. */
   tamanhos?: { item?: number; header?: number };
 };
@@ -247,7 +267,7 @@ async function fillWorkbook(
     const tamHeader = spec.tamanhos?.header ?? 8;
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
-    const cabecalho = spec.cabecalho && colCount >= 14 ? spec.cabecalho : undefined;
+    const cabecalho = spec.cabecalho;
     /** Linhas ocupadas acima do cabeçalho das colunas: o quadro de identificação e uma linha de respiro. */
     const offsetCabecalho = cabecalho ? cabecalho.linhas.length + 1 : 0;
     const linhaHeaderColunas = offsetCabecalho + 1;
@@ -280,16 +300,30 @@ async function fillWorkbook(
             cell.fill = {
               type: 'pattern',
               pattern: 'solid',
-              fgColor: { argb: celula.rotulo ? RODAPE_ROTULO_BG : WHITE },
+              fgColor: {
+                argb:
+                  celula.estilo === 'barra'
+                    ? SERVICO_BARRA_BG
+                    : celula.rotulo
+                      ? RODAPE_ROTULO_BG
+                      : WHITE,
+              },
             };
             applyThinBorder(cell);
           }
           const cell = sheet.getCell(linha, de);
           cell.value = celula.texto;
-          cell.font = { name: fontName, size: 10, bold: Boolean(celula.rotulo), color: { argb: TITLE_TEXT } };
+          cell.font =
+            celula.estilo === 'barra'
+              ? { name: fontName, size: 11, bold: true, color: { argb: WHITE } }
+              : celula.estilo === 'destaque'
+                ? { name: fontName, size: 14, bold: true, color: { argb: TITLE_TEXT } }
+                : celula.estilo === 'legenda'
+                  ? { name: fontName, size: 9, italic: true, color: { argb: TITLE_TEXT } }
+                : { name: fontName, size: 10, bold: Boolean(celula.rotulo), color: { argb: TITLE_TEXT } };
           cell.alignment = {
             vertical: 'middle',
-            horizontal: celula.alinhamento ?? (celula.rotulo ? 'center' : 'left'),
+            horizontal: celula.alinhamento ?? (celula.rotulo || celula.estilo ? 'center' : 'left'),
             wrapText: true,
           };
           if (ate > de) sheet.mergeCells(linha, de, linha, ate);
@@ -469,6 +503,78 @@ async function fillWorkbook(
       const largura = Math.min(120, Math.max(col.width ?? 20, maior + 3));
       sheet.getColumn(i + 1).width = largura;
     });
+
+    if (cabecalho?.logo) {
+      try {
+        // Logo Gennesis com o nome (public/logonome.jpg, 879×284), centralizada na 1ª célula do cabeçalho.
+        const resp = await fetch('/logonome.jpg');
+        if (resp.ok) {
+          const bytes = new Uint8Array(await resp.arrayBuffer());
+          let bin = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          }
+          const imageId = workbook.addImage({ base64: btoa(bin), extension: 'jpeg' });
+          const primeira = cabecalho.linhas[0]?.[0];
+          const de = primeira?.de ?? 0;
+          const ate = Math.min(primeira?.ate ?? 2, colCount - 1);
+          const colPx = (c: number) => Math.round((sheet.getColumn(c + 1).width ?? 8.43) * 7 + 5);
+          let larguraPx = 0;
+          for (let c = de; c <= ate; c++) larguraPx += colPx(c);
+          const alturaPx = ((cabecalho.alturas?.[0] ?? 20) * 96) / 72;
+          const h = Math.max(20, Math.round(alturaPx - 10));
+          const w = Math.min(Math.round(h * (879 / 284)), Math.max(40, larguraPx - 10));
+          const hFinal = Math.round(w * (284 / 879));
+          // Fração de coluna: deslocamento em px dentro da coluna onde a logo começa.
+          let restante = (larguraPx - w) / 2;
+          let col = de;
+          while (col < ate && restante >= colPx(col)) {
+            restante -= colPx(col);
+            col += 1;
+          }
+          sheet.addImage(imageId, {
+            tl: { col: col + restante / colPx(col), row: (alturaPx - hFinal) / 2 / alturaPx },
+            ext: { width: w, height: hFinal },
+            editAs: 'absolute',
+          });
+        }
+      } catch {
+        /* sem logo: o cabeçalho continua válido */
+      }
+    }
+
+    if (spec.caixaLateral) {
+      const cx = spec.caixaLateral;
+      const l0 = cx.linhaDe ?? 1;
+      const l1 = l0 + 1;
+      const l2 = l1 + (cx.linhasTexto ?? 6) - 1;
+      const c0 = cx.colDe + 1;
+      const c1 = cx.colAte + 1;
+      for (let c = c0; c <= c1; c++) sheet.getColumn(c).width = cx.larguraColuna ?? 22;
+      for (let r = l0; r <= l2; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const cell = sheet.getCell(r, c);
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: r === l0 ? RODAPE_ROTULO_BG : WHITE },
+          };
+          applyThinBorder(cell);
+        }
+      }
+      sheet.mergeCells(l0, c0, l0, c1);
+      sheet.mergeCells(l1, c0, l2, c1);
+      const titulo = sheet.getCell(l0, c0);
+      titulo.value = cx.titulo;
+      titulo.font = { name: fontName, size: 11, bold: true, color: { argb: TITLE_TEXT } };
+      titulo.alignment = { vertical: 'middle', horizontal: 'center' };
+      const corpo = sheet.getCell(l1, c0);
+      corpo.value = cx.texto;
+      corpo.font = { name: fontName, size: 9, bold: true, color: { argb: TITLE_TEXT } };
+      corpo.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      const ultimaLinhaTabela = offsetCabecalho + (showHeader ? 1 : 0) + spec.rows.length;
+      sheet.pageSetup.printArea = `A1:${sheet.getColumn(colCount).letter}${Math.max(ultimaLinhaTabela, l2)}`;
+    }
 
     if (spec.autoFilter !== false && spec.rows.length) {
       sheet.autoFilter = {

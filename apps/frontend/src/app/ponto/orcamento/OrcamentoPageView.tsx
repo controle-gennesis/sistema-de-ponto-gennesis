@@ -55,6 +55,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
+import { BRAZIL_STATE_LABELS } from '@/lib/brazilStates';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -1663,6 +1664,68 @@ function nomeBancoParaExibicao(banco: string | null | undefined): string {
   // Base Emp do Orçafascio é a composição própria da empresa.
   if (norm === 'emp' || norm === 'empresa' || norm === 'proprio') return 'PROPRIO';
   return nome;
+}
+
+/** Banco de composições usado no orçamento, com mês/ano e estado da tabela de referência. */
+export type BancoReferenciaOrcamento = { banco: string; versao?: string; local?: string };
+
+function formatarVersaoBancoOrcafascio(raw: unknown): string {
+  const t = String(raw ?? '').trim();
+  if (!t) return '';
+  const ano1 = /^(\d{4})[-/](\d{1,2})/.exec(t);
+  if (ano1) return `${ano1[2]!.padStart(2, '0')}/${ano1[1]}`;
+  const ano2 = /^(\d{1,2})[-/](\d{4})/.exec(t);
+  if (ano2) return `${ano2[1]!.padStart(2, '0')}/${ano2[2]}`;
+  return t;
+}
+
+function nomeLocalBancoOrcafascio(raw: unknown): string {
+  const t = String(raw ?? '').trim();
+  if (!t || /^central$/i.test(t)) return '';
+  const uf = BRAZIL_STATE_LABELS[t.toUpperCase() as keyof typeof BRAZIL_STATE_LABELS];
+  return uf || t;
+}
+
+/** Bancos distintos (nome + mês/ano + estado) presentes nas linhas do orçamento do Orçafascio. */
+function extrairBancosReferenciaOrcafascio(
+  ...listas: Array<Record<string, unknown>[]>
+): BancoReferenciaOrcamento[] {
+  const vistos = new Map<string, BancoReferenciaOrcamento>();
+  for (const linhas of listas) {
+    for (const row of linhas) {
+      const base = String(row.base ?? row.base_name ?? row.reference_base ?? '').trim();
+      if (!base) continue;
+      const banco = nomeBancoParaExibicao(base);
+      if (banco === 'PROPRIO' || banco === '—') continue;
+      const versao = formatarVersaoBancoOrcafascio(row.base_version ?? row.version ?? row.versoin);
+      const local = nomeLocalBancoOrcafascio(row.base_locals);
+      const chave = `${banco}|${versao}|${local}`;
+      if (!vistos.has(chave)) {
+        vistos.set(chave, { banco, ...(versao ? { versao } : {}), ...(local ? { local } : {}) });
+      }
+    }
+  }
+  return Array.from(vistos.values());
+}
+
+function parseBancosReferenciaMeta(raw: unknown): BancoReferenciaOrcamento[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: BancoReferenciaOrcamento[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const banco = String(o.banco ?? '').trim();
+    if (!banco) continue;
+    const versao = String(o.versao ?? '').trim();
+    const local = String(o.local ?? '').trim();
+    out.push({ banco, ...(versao ? { versao } : {}), ...(local ? { local } : {}) });
+  }
+  return out.length ? out : undefined;
+}
+
+function textoBancosReferencia(bancos: BancoReferenciaOrcamento[]): string {
+  const linhas = bancos.map((b) => [b.banco, b.versao, b.local].filter(Boolean).join(' - '));
+  return linhas.length ? `${linhas.join('; ')};` : '';
 }
 
 /**
@@ -3317,6 +3380,8 @@ type OrcamentoMeta = {
   orcafascioBudgetId?: string;
   /** Cabeçalho do orçamento no Orçafascio (desonerado, UF, leis sociais, etc.). */
   orcafascioDados?: OrcafascioDadosMeta;
+  /** Bancos de composições do orçamento (nome, mês/ano e estado), gravados na importação do Orçafascio. */
+  bancosReferencia?: BancoReferenciaOrcamento[];
   /** Totais do sintético Orçafascio (referência na importação; a barra usa a soma das linhas). */
   totaisOrcafascio?: {
     semBdi: number;
@@ -4648,6 +4713,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
               : undefined,
           orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
           orcafascioDados: parseOrcafascioDadosMeta(metaRaw.orcafascioDados),
+          bancosReferencia: parseBancosReferenciaMeta(metaRaw.bancosReferencia),
           statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
           fichaDemandaPct: (() => {
             const n = Number(metaRaw.fichaDemandaPct);
@@ -5038,6 +5104,7 @@ function parseOrcamentoDetailRaw(d: {
             : undefined,
         orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
         orcafascioDados: parseOrcafascioDadosMeta(metaRaw.orcafascioDados),
+        bancosReferencia: parseBancosReferenciaMeta(metaRaw.bancosReferencia),
         statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
         fichaDemandaPct: (() => {
           const n = Number(metaRaw.fichaDemandaPct);
@@ -10480,6 +10547,10 @@ export function OrcamentoPageView({
         orcafascioDados: extrairDadosCabecalhoOrcafascio(
           orcafascioOrcamentoDetalhe as Record<string, unknown>
         ),
+        ...(() => {
+          const bancosRef = extrairBancosReferenciaOrcafascio(linhas, analitico);
+          return bancosRef.length ? { bancosReferencia: bancosRef } : {};
+        })(),
         // Não grava totalComBdi do sintético Orçafascio aqui — esse total pode
         // divergir da montagem. O Total da lista vem do rodapé (totalComDescontoEBdi).
         ...(finApi.totalComBdi > 0
@@ -14709,13 +14780,27 @@ export function OrcamentoPageView({
     const exemptCab = orcafascioDadosExibicao?.exempt;
     const encargosTexto = exemptCab == null ? '' : exemptCab ? 'DESONERADO' : 'ONERADO';
 
+    const revisaoTexto = `R${String(Math.max(0, Number(meta.revisaoCount) || 0)).padStart(2, '0')}`;
+    const statusTexto = ORCAMENTO_STATUS_LABELS[normalizarStatusAprovacaoOrcamento(meta.statusAprovacao)] ?? '';
+    const textoEncargos =
+      exemptCab == null
+        ? ''
+        : exemptCab
+          ? 'DESONERADO: contribuição previdenciária fora dos encargos sociais, de acordo com as bases.'
+          : 'NÃO DESONERADO: encargos sociais embutidos nos preços unitários dos insumos de mão de obra, de acordo com as bases.';
     return {
       name: 'Orçamento',
       aparencia: aparenciaMontagem,
       tamanhos: { item: 11, header: 12 },
       title: 'Orçamento',
       cabecalho: {
+        logo: true,
         linhas: [
+          // Faixa do topo: logos à esquerda e nome da obra em destaque.
+          [
+            { texto: '', de: 0, ate: 2 },
+            { texto: (nomeOrc || servicoCab).toUpperCase(), de: 3, ate: 15, estilo: 'destaque' },
+          ],
           // Colunas: rótulo 0–2 · valor 3–7 · rótulo direito 8–9 · valor direito 10–15.
           // Campos sem dado no sistema (Endereço, Data Base) saem vazios para preencher no Excel.
           [
@@ -14754,10 +14839,64 @@ export function OrcamentoPageView({
             rot('PRAZO ESTIMADO', 8, 9),
             val(prazoDias ? `${prazoDias} dias` : '', 10, 15),
           ],
+          // Dados da OS e do orçamento. Campos sem dado no sistema saem vazios para preencher no Excel.
+          [
+            rot('Nº DA OS', 0, 2),
+            val(String(meta.osNumeroPasta ?? '').trim(), 3, 7),
+            rot('UNIDADE', 8, 9),
+            val('', 10, 15),
+          ],
+          [
+            rot('RESPONSÁVEL PELO ORÇAMENTO', 0, 2),
+            val(String(meta.responsavelOrcamento ?? '').trim().toUpperCase(), 3, 7),
+            rot('LOCAL', 8, 9),
+            val('', 10, 15),
+          ],
+          [
+            rot('ORÇAMENTO REALIZADO POR', 0, 2),
+            val(String(meta.orcamentoRealizadoPor ?? '').trim().toUpperCase(), 3, 7),
+            rot('SETOR', 8, 9),
+            val('', 10, 15),
+          ],
+          [
+            rot('REVISÃO', 0, 2),
+            val(revisaoTexto, 3, 7),
+            rot('STATUS', 8, 9),
+            val(statusTexto.toUpperCase(), 10, 15),
+          ],
+          [
+            rot('SOLICITANTE', 0, 2),
+            val('', 3, 7),
+            rot('DESCRIÇÃO', 8, 9),
+            val('', 10, 15),
+          ],
+          [rot('OBS. ENCARGOS', 0, 2), val(textoEncargos, 3, 15)],
+          [{ texto: 'ORÇAMENTO', de: 0, ate: 15, estilo: 'barra' }],
         ],
-        alturas: [20, 20, 20, 20, 20, 32],
+        alturas: [54, 20, 20, 20, 20, 20, 32, 20, 20, 20, 20, 20, 24, 22],
       },
       autoFilter: false,
+      caixaLateral: (() => {
+        // Sem dados gravados na importação (orçamentos antigos), usa o banco e o local de cada item.
+        const bancos: BancoReferenciaOrcamento[] =
+          meta.bancosReferencia && meta.bancosReferencia.length
+            ? meta.bancosReferencia
+            : (() => {
+                const vistos = new Map<string, BancoReferenciaOrcamento>();
+                for (const r of itensCalculados) {
+                  const bruto = String(r.item.banco ?? '').trim();
+                  if (!bruto) continue;
+                  const nome = nomeBancoParaExibicao(bruto);
+                  if (nome === 'PROPRIO' || nome === '—') continue;
+                  const local = nomeLocalBancoOrcafascio(/\/([^/]*)\s*$/.exec(bruto)?.[1] ?? '');
+                  const chave = `${nome}|${local}`;
+                  if (!vistos.has(chave)) vistos.set(chave, { banco: nome, ...(local ? { local } : {}) });
+                }
+                return Array.from(vistos.values());
+              })();
+        const texto = textoBancosReferencia(bancos);
+        return texto ? { titulo: 'Bancos', texto, colDe: 17, colAte: 21, linhaDe: 2, linhasTexto: 6 } : undefined;
+      })(),
       columns: [
         { header: 'ITEM', width: 10, align: 'center' },
         { header: 'CÓDIGO', width: 12, align: 'center' },
@@ -15519,6 +15658,23 @@ export function OrcamentoPageView({
     return {
       name: 'Memória de cálculo',
       title: 'Memória de cálculo',
+      cabecalho: {
+        logo: true,
+        linhas: [
+          [{ texto: '', de: 0, ate: 10 }],
+          [{ texto: 'MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS', de: 0, ate: 10, estilo: 'barra' }],
+          [
+            {
+              texto:
+                'LEGENDA: C= Comprimento - L= Largura - H= Altura - E= Espessura - N= nº de repetições - A= Área - P = Perímetro- V= Volume - Pi= 3,1416 - Pr= Perímetro - P= Peso - R= Raio - %= porcentagem de perda M= Metro',
+              de: 0,
+              ate: 10,
+              estilo: 'legenda',
+            },
+          ],
+        ],
+        alturas: [54, 20, 30],
+      },
       subtitle: 'Quantitativos por dimensão (C, L, H) com fórmulas de área, volume e subtotal',
       autoFilter: false,
       showHeader: false,
