@@ -95,6 +95,20 @@ function parseDateRangeFilter(
 const PAGE_VISIT_DEDUP_MS = 45_000;
 
 export class UserActivityController {
+  /** Batimento de presença: mantém lastSeenAt atualizado enquanto o usuário está com o sistema aberto. */
+  async heartbeat(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { lastSeenAt: new Date() }
+      });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   /** Registra visita de página do usuário autenticado (ele mesmo). */
   async recordPageView(req: AuthRequest, res: Response, next: NextFunction) {
     try {

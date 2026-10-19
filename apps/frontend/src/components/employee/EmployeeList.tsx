@@ -14,6 +14,7 @@ import {
   EMPLOYEE_POLO_OPTIONS,
   EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS,
   EMPLOYEE_STATUS_FILTER_OPTIONS,
+  EMPLOYEE_PRESENCE_FILTER_OPTIONS,
 } from '@/lib/selectOptionBuilders';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
@@ -30,6 +31,8 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
+import { isUserOnline, USER_PRESENCE_INTERVAL_MS } from '@/lib/userPresence';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import api from '@/lib/api';
 import { authService } from '@/lib/auth';
 import { isGennecyBotUser } from '@/lib/gennecyBot';
@@ -69,6 +72,7 @@ interface Employee {
   isActive: boolean;
   /** URL da foto de perfil (mesmo campo da tabela `users`) */
   profilePhotoUrl?: string | null;
+  lastSeenAt?: string | null;
   createdAt?: string;
   employee?: {
     id: string;
@@ -162,6 +166,7 @@ export function EmployeeList({
   const [positionFilter, setPositionFilter] = useState<string>('all');
   const [costCenterFilter, setCostCenterFilter] = useState<string>('all');
   const [clientFilter, setClientFilter] = useState<string>('all');
+  const [presenceFilter, setPresenceFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [poloFilter, setPoloFilter] = useState<string>('all');
   const [categoriaFinanceiraFilter, setCategoriaFinanceiraFilter] = useState<string>('all');
@@ -215,6 +220,7 @@ export function EmployeeList({
       return res.data;
     },
     staleTime: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(USER_PRESENCE_INTERVAL_MS),
     refetchOnWindowFocus: false,
     retry: false,
     throwOnError: false,
@@ -380,6 +386,10 @@ export function EmployeeList({
         return false;
       }
 
+      if (presenceFilter !== 'all' && isUserOnline(emp.lastSeenAt) !== (presenceFilter === 'online')) {
+        return false;
+      }
+
       const extrasActive =
         costCenterFilter !== 'all' ||
         clientFilter !== 'all' ||
@@ -415,7 +425,7 @@ export function EmployeeList({
       
       return true;
     });
-  }, [employees, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter]);
+  }, [employees, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter, presenceFilter]);
 
   const exportEmployeesToExcel = async () => {
     if (filteredEmployees.length === 0) {
@@ -727,6 +737,7 @@ export function EmployeeList({
     setPoloFilter('all');
     setCategoriaFinanceiraFilter('all');
     setModalityFilter('all');
+    setPresenceFilter('all');
     setCurrentPage(1);
   };
 
@@ -865,6 +876,21 @@ export function EmployeeList({
                             setSelectedIds(new Set());
                           }}
                           options={EMPLOYEE_STATUS_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Presença
+                        </label>
+                        <StringSingleSelectDropdown
+                          value={presenceFilter}
+                          onChange={(v) => {
+                            setPresenceFilter(v as 'all' | 'online' | 'offline');
+                            setCurrentPage(1);
+                          }}
+                          options={EMPLOYEE_PRESENCE_FILTER_OPTIONS}
                           allowEmpty={false}
                         />
                       </div>
@@ -1228,8 +1254,9 @@ export function EmployeeList({
                         ) : null}
                         <td className="px-3 sm:px-6 py-3 align-middle text-left">
                           <div className="flex items-center gap-3">
+                            <div className="relative h-11 w-11 shrink-0">
                             <div
-                              className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full ${
+                              className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${
                                 profilePhotoHref
                                   ? 'bg-gray-200 dark:bg-gray-700'
                                   : 'bg-red-600'
@@ -1248,6 +1275,19 @@ export function EmployeeList({
                                   {initials}
                                 </span>
                               )}
+                            </div>
+                            {(() => {
+                              const online = isUserOnline(employee.lastSeenAt);
+                              return (
+                                <span
+                                  className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-gray-800 ${
+                                    online ? 'bg-emerald-500' : 'bg-red-500'
+                                  }`}
+                                  title={online ? 'Online' : 'Offline'}
+                                  aria-label={online ? 'Online' : 'Offline'}
+                                />
+                              );
+                            })()}
                             </div>
                             <div className="min-w-0 text-left">
                               <ListRowNavigableLabel className="truncate font-semibold">
@@ -1476,6 +1516,18 @@ export function EmployeeList({
                           setSelectedIds(new Set());
                         }}
                         options={EMPLOYEE_STATUS_FILTER_OPTIONS}
+                        allowEmpty={false}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Presença</label>
+                      <StringSingleSelectDropdown
+                        value={presenceFilter}
+                        onChange={(v) => {
+                          setPresenceFilter(v as 'all' | 'online' | 'offline');
+                          setCurrentPage(1);
+                        }}
+                        options={EMPLOYEE_PRESENCE_FILTER_OPTIONS}
                         allowEmpty={false}
                       />
                     </div>

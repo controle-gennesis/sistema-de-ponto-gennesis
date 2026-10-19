@@ -47,6 +47,7 @@ router.get('/', requireEmployeesModuleAccess, userController.getAllUsers);
 router.get('/me/employee', userController.getMyEmployeeData);
 router.put('/me/employee', userController.updateMyEmployeeData);
 router.post('/me/page-view', userActivityController.recordPageView);
+router.post('/me/heartbeat', userActivityController.heartbeat);
 router.post('/', requireEmployeesModuleAccess, userController.createUser);
 
 // Rotas para funcionários

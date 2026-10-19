@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import api from '@/lib/api';
 import { resolvePageTitle } from '@/lib/pageTitle';
 import { hasStoredAuthToken } from '@/lib/authSession';
+import { USER_PRESENCE_INTERVAL_MS } from '@/lib/userPresence';
 
 /**
  * Envia page-views para o backend (histórico de rastreio do usuário).
@@ -32,4 +33,21 @@ export function usePageActivityTracker() {
         /* silencioso — não atrapalhar navegação */
       });
   }, [pathname]);
+
+  // Presença: batimento periódico enquanto a aba está visível.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const beat = () => {
+      if (document.hidden || !hasStoredAuthToken()) return;
+      void api.post('/users/me/heartbeat').catch(() => {
+        /* silencioso */
+      });
+    };
+    const id = window.setInterval(beat, USER_PRESENCE_INTERVAL_MS);
+    document.addEventListener('visibilitychange', beat);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', beat);
+    };
+  }, []);
 }

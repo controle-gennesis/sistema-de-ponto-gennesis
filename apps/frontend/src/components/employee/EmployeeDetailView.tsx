@@ -33,6 +33,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
 import { displayPhoneBR } from '@/lib/phone';
+import { isUserOnline } from '@/lib/userPresence';
 import { formatCpfInput, onlyDigits } from '@/lib/cpf';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
@@ -1417,10 +1418,10 @@ export function EmployeeDetailView({
             )}
           </div>
           <span
-            className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white dark:border-gray-900 ${
-              selectedEmployee.isActive ? 'bg-emerald-500' : 'bg-gray-400'
+            className={`absolute bottom-0.5 right-0.5 h-5 w-5 rounded-full border-2 border-white sm:bottom-1 sm:right-1 dark:border-gray-900 ${
+              isUserOnline(selectedEmployee.lastSeenAt) ? 'bg-emerald-500' : 'bg-red-500'
             }`}
-            title={selectedEmployee.isActive ? 'Ativo' : 'Inativo'}
+            title={isUserOnline(selectedEmployee.lastSeenAt) ? 'Online' : 'Offline'}
             aria-hidden
           />
         </div>

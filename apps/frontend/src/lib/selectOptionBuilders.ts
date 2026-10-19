@@ -58,6 +58,12 @@ export function filterOptionsWithAll(
   ];
 }
 
+export const EMPLOYEE_PRESENCE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  { value: 'online', label: 'Online' },
+  { value: 'offline', label: 'Offline' },
+]);
+
 export const EMPLOYEE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Todos' },
   { value: 'active', label: 'Ativos' },
