@@ -12,6 +12,7 @@ import {
 import {
   buildFuelSubmissionSlaLine,
   formatOpenFuelRequestBlockMessage,
+  formatOpenFuelVehicleBlockMessage,
 } from '../lib/fuelRefuelChatNotify';
 import {
   buildFuelFlowStartMessage,
@@ -375,6 +376,26 @@ function applyVehicleToPayload(
     vehicleDescription: option.description,
     vehicleType: mapVehicleUsageToFuelType(option.frotaPartic),
     vehicleId: option.id,
+  };
+}
+
+/**
+ * Veículo com solicitação em aberto (de qualquer condutor): avisa já ao escolher a placa,
+ * antes de pedir foto e observações. O bloqueio definitivo continua em `create`.
+ */
+async function vehicleAlreadyOpenAction(plate: string) {
+  const openForVehicle = await fuelRefuelRequestService.findOpenRequestsForVehicle(plate);
+  if (!openForVehicle.length) return null;
+  return {
+    sendAction: waButtons(
+      formatOpenFuelVehicleBlockMessage({
+        vehiclePlate: plate.trim().toUpperCase(),
+        requests: openForVehicle,
+      }),
+    ),
+    newStatus: 'MENU' as const,
+    newPayload: {},
+    clearPayload: true,
   };
 }
 
@@ -801,6 +822,8 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
+      const blockedVehicle = await vehicleAlreadyOpenAction(selected.plate);
+      if (blockedVehicle) return blockedVehicle;
       return askDashboardPhoto(applyVehicleToPayload(newPayload, selected));
     }
 
@@ -815,6 +838,9 @@ export async function processWhatsAppFuelFlow(params: {
       const parts = textRaw.split(/[—\-–]/).map((s) => s.trim());
       const plateRaw = parts[0] || textRaw;
       const description = parts.slice(1).join(' — ') || undefined;
+
+      const blockedManualVehicle = await vehicleAlreadyOpenAction(plateRaw);
+      if (blockedManualVehicle) return blockedManualVehicle;
 
       const registered = await findActiveVehicleByPlate(plateRaw);
       if (registered) {
