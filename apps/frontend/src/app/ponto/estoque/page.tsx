@@ -3733,7 +3733,7 @@ export default function EstoquePage() {
                     </label>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                        Número da nota fiscal *
+                        Número da nota fiscal{linkedOcStockDocuments.invoices[0]?.number ? '' : ' *'}
                       </label>
                       <input
                         type="text"
