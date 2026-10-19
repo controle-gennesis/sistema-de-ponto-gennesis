@@ -19,6 +19,8 @@ export type GastosOperacionaisTotvsApi = {
       byContract?: Array<{ contract: string; total: number }>;
     }>;
     fetchedAt?: string;
+    /** Impressão digital da configuração de naturezas usada no cálculo. */
+    naturezasConfigHash?: string;
     message?: string;
   };
 };
@@ -34,6 +36,7 @@ export type GastosOperacionaisTotvsQueryData = {
     byContract: Array<{ contract: string; total: number }>;
   }>;
   fetchedAt: string;
+  naturezasConfigHash?: string;
 };
 
 /** Query key compartilhada entre Controle Geral e o módulo Gastos Operacionais. */
@@ -102,7 +105,8 @@ export async function fetchGastosOperacionaisTotvs(): Promise<GastosOperacionais
     detailRows,
     naturezaDetailRows,
     totvsNaturezaCatalog,
-    fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString()
+    fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString(),
+    naturezasConfigHash: payload.data?.naturezasConfigHash
   };
 
   await writeGastosOperacionaisTotvsPersisted(result);

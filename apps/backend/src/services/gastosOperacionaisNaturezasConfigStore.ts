@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { normalizeGastosOperacionaisNaturezaKey } from '../constants/gastosOperacionaisDfcBlocks';
@@ -110,6 +111,25 @@ export function saveGastosNaturezasConfigStore(
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf-8');
   memoryCache = next;
   return next;
+}
+
+/**
+ * Impressão digital da parte da configuração que muda os totais (mapeamentos, blocos e desvinculadas).
+ * O frontend compara com a do cache para descartar dados calculados com uma configuração antiga.
+ */
+export function getGastosNaturezasConfigHash(
+  store: GastosNaturezasConfigStore = loadGastosNaturezasConfigStore()
+): string {
+  const payload = JSON.stringify({
+    mappings: [...store.mappings]
+      .map((m) => [m.totvsLabel, m.blockId, m.targetCanonicalLabel, m.asAlias, Boolean(m.sumAsPositiveCredit)])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    customBlocks: [...store.customBlocks]
+      .map((b) => [b.id, b.code, b.label, b.parentLabels])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    unlinked: [...store.unlinkedConfiguredKeys].sort()
+  });
+  return crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
 }
 
 export function getCustomAllowedNaturezaKeys(

@@ -1,7 +1,8 @@
 'use client';
 
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
 import {
   fetchGastosOperacionaisTotvs,
   GASTOS_OPERACIONAIS_TOTVS_GC_TIME,
@@ -65,6 +66,27 @@ export function useGastosOperacionaisTotvsQuery(options?: { enabled?: boolean })
     gcTime: GASTOS_OPERACIONAIS_TOTVS_GC_TIME,
     retry: 1
   });
+
+  // Dados em cache (memória/disco) podem ter sido calculados com outra configuração de naturezas
+  // (ex.: alguém desvinculou uma natureza em outro computador). Compara a impressão digital uma vez.
+  const configChecadaRef = useRef(false);
+  const cachedHash = query.data?.naturezasConfigHash;
+  const hasData = Boolean(query.data);
+  useEffect(() => {
+    if (!diskReady || !hasData || configChecadaRef.current) return;
+    configChecadaRef.current = true;
+    void api
+      .get<{ success?: boolean; configHash?: string }>('/contracts/gastos-operacionais/naturezas-config')
+      .then((res) => {
+        const serverHash = res.data?.configHash;
+        if (serverHash && serverHash !== cachedHash) {
+          void queryClient.invalidateQueries({ queryKey: GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY });
+        }
+      })
+      .catch(() => {
+        // Sem servidor: mantém o cache.
+      });
+  }, [diskReady, hasData, cachedHash, queryClient]);
 
   const waitingDisk = !diskReady && !query.data;
 

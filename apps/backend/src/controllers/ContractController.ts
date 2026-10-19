@@ -740,6 +740,9 @@ export class ContractController {
             detailRows,
             naturezaDetailRows: result.naturezaDetailRows,
             totvsNaturezaCatalog: result.totvsNaturezaCatalog,
+            naturezasConfigHash: (
+              await import('../services/gastosOperacionaisNaturezasConfigStore')
+            ).getGastosNaturezasConfigHash(),
             fetchedAt: new Date().toISOString(),
             costCenterCount: result.costCenterCount,
             totalRowCount: result.totalRowCount,
@@ -789,12 +792,15 @@ export class ContractController {
       }
 
       const {
-        loadGastosNaturezasConfigStore
+        loadGastosNaturezasConfigStore,
+        getGastosNaturezasConfigHash
       } = await import('../services/gastosOperacionaisNaturezasConfigStore');
 
+      const store = loadGastosNaturezasConfigStore();
       res.json({
         success: true,
-        data: loadGastosNaturezasConfigStore()
+        data: store,
+        configHash: getGastosNaturezasConfigHash(store)
       });
     } catch (error) {
       next(error);
@@ -814,13 +820,15 @@ export class ContractController {
       }
 
       const {
-        saveGastosNaturezasConfigStore
+        saveGastosNaturezasConfigStore,
+        getGastosNaturezasConfigHash
       } = await import('../services/gastosOperacionaisNaturezasConfigStore');
 
       const saved = saveGastosNaturezasConfigStore(req.body ?? {});
       res.json({
         success: true,
-        data: saved
+        data: saved,
+        configHash: getGastosNaturezasConfigHash(saved)
       });
     } catch (error) {
       next(error);

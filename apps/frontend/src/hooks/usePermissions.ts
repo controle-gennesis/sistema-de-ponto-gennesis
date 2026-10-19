@@ -207,11 +207,6 @@ export function usePermissions() {
     return items.filter((item) => fluigApproverNameKeySet.has(item.nameKey));
   };
 
-  /** Legado: quem tinha só a coluna Orçamento na aba Contratos (antes do módulo na matriz Acesso). */
-  const hasOrcamentoViaAnyAllowedContract = Object.entries(contractModuleFlags).some(
-    ([contractId, f]) =>
-      f?.orcamento === true && allowedContractIdSet.has(contractId)
-  );
   const orcamentoModuleKey = pk('/ponto/orcamento');
   const hasOrdemServicoViaAnyAllowedContract = Object.values(contractModuleFlags).some(
     (f) => f?.ordemServico === true
@@ -480,15 +475,13 @@ export function usePermissions() {
 
 
   /**
-   * Página Orçamentos: módulo na matriz Acesso, flag Orçamento em algum contrato,
-   * ou qualquer contrato Liberado (mesmo critério de canAccessContractOrcamentoTab).
+   * Página Orçamentos: exige o módulo liberado na matriz Acesso.
+   * Quais contratos aparecem para criar/importar orçamentos continua dependendo dos contratos liberados.
    */
   const canAccessOrcamentoRoutePage =
     isElevatedUser ||
     can(orcamentoModuleKey) ||
-    canAccessModule(orcamentoModuleKey) ||
-    hasOrcamentoViaAnyAllowedContract ||
-    allowedContractIds.length > 0;
+    canAccessModule(orcamentoModuleKey);
 
   /**
    * Tela global «Ordem de Serviço»:
