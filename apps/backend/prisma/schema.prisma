@@ -2523,8 +2523,17 @@ model EmpreiteiroContractAddendum {
   servicesRemoved       String?
   /// Anexo do aditivo: [{ url, name, key? }]
   files                 Json     @default("[]")
-  /// Nome/descrição de quem aprovou.
+  /// Nome de quem aprovou (preenchido na aprovação, com o nome do usuário aprovador).
   approvedByName        String?
+  /// PENDING (aguarda aprovação) | APPROVED | CORRECTION (devolvido). Só APPROVED conta no valor do contrato.
+  /// Default APPROVED: aditivos anteriores ao fluxo de aprovação já valem.
+  status                String   @default("APPROVED")
+  /// Forma de pagamento guardada até a aprovação: { paymentMode: 'new' | 'redistribute', installments: number[] }.
+  applyPlan             Json?
+  /// Motivo informado ao devolver o aditivo.
+  correctionNote        String?
+  approvedAt            DateTime?
+  approvedById          String?
   createdBy             String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -2534,6 +2543,7 @@ model EmpreiteiroContractAddendum {
   @@unique([empreiteiroContractId, number])
   @@index([empreiteiroContractId])
   @@index([effectiveDate])
+  @@index([status])
   @@map("empreiteiro_contract_addenda")
 }
 

@@ -1,22 +1,28 @@
-import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
-import { prisma } from './prisma';
+import {
+  getContractGestorCostCenterIds,
+  isCostCenterAllowedForContractGestor,
+  userHasContractGestorAssignment,
+} from './contractGestorApprovalAccess';
 
-export const EMPREITEIRO_DAILY_APPROVE_MODULE_KEY = pathToModuleKey(
-  '/ponto/controle/aprovar-medicoes-empreita'
-);
+/**
+ * Aprovação de medições de entrega e aditivos de empreita: só o gestor do centro de custo
+ * (coluna «Gestor» na aba Contratos) e o administrador.
+ */
 
-/** Permissão Controle «Aprovar medições de entrega». */
-export async function userHasEmpreiteiroDailyApprovePermission(
-  userId: string
+/** O usuário é gestor de algum contrato (condição para ver a fila de aprovação). */
+export async function userIsEmpreiteiroApprovalGestor(userId: string): Promise<boolean> {
+  return userHasContractGestorAssignment(userId);
+}
+
+/** Centros de custo em que o usuário é gestor (sem expansão para administrador). */
+export async function getEmpreiteiroGestorCostCenterIds(userId: string): Promise<string[]> {
+  return getContractGestorCostCenterIds(userId);
+}
+
+/** O gestor pode decidir sobre um item deste centro de custo? */
+export async function gestorCanDecideForCostCenter(
+  userId: string,
+  costCenterId: string | null | undefined
 ): Promise<boolean> {
-  const row = await prisma.userPermission.findFirst({
-    where: {
-      userId,
-      module: EMPREITEIRO_DAILY_APPROVE_MODULE_KEY,
-      action: PERMISSION_ACCESS_ACTION,
-      allowed: true,
-    },
-    select: { id: true },
-  });
-  return !!row;
+  return isCostCenterAllowedForContractGestor(userId, costCenterId);
 }

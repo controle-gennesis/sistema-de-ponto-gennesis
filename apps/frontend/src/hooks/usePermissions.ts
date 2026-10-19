@@ -360,11 +360,14 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
 
-  /** Aprovar/devolver medições de entrega de empreita (fila Pendentes). */
+  /**
+   * Aprovar/devolver medições de entrega e aditivos de empreita: só o gestor do centro de custo
+   * (coluna «Gestor» em Contratos) e o administrador. O backend filtra a fila pelos centros de custo dele.
+   */
   const canApproveEmpreiteiroDaily =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    can(pk('/ponto/controle/aprovar-medicoes-empreita'));
+    dpApprovalContractIds.length > 0;
 
   const canApproveOcCompras =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
@@ -708,6 +711,7 @@ export function useRoutePermission(route: string) {
     canApproveEspelhoNf,
     canApproveOc,
     canApproveMaterialRequests,
+    canApproveEmpreiteiroDaily,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
@@ -766,7 +770,7 @@ export function useRoutePermission(route: string) {
       canApproveFuel ||
       canApproveOc ||
       canApproveMaterialRequests ||
-      can(pk('/ponto/controle/aprovar-medicoes-empreita')),
+      canApproveEmpreiteiroDaily,
     '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || can(pk('/ponto/aniversariantes')),
     '/ponto/seguranca-do-trabalho': isAdministrator || can(pk('/ponto/seguranca-do-trabalho')),
