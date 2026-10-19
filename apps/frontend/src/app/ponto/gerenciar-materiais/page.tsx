@@ -1124,28 +1124,30 @@ export default function GerenciarMateriaisPage() {
                   {!loadingRmDetails && rmDetailTab === 'materiais' ? (
                     selectedRequest.items?.length ? (
                       <div className="table-scroll">
-                        <table className="w-full text-xs sm:text-sm">
+                        {/* table-fixed: colunas curtas com largura própria; só o Material quebra linha.
+                            Sem isso, um texto longo esticava a tabela e escondia Qtd/Un./Valor/Situação. */}
+                        <table className="w-full table-fixed text-xs sm:text-sm">
                           <thead>
                             <tr className="border-b border-gray-200 text-left dark:border-gray-700">
                               <th className="w-12 whitespace-nowrap pb-3 pr-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Item
                               </th>
-                              <th className="whitespace-nowrap px-2 pb-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                              <th className="w-28 whitespace-nowrap px-2 pb-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Código
                               </th>
                               <th className="px-2 pb-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Material
                               </th>
-                              <th className="whitespace-nowrap px-2 pb-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400">
+                              <th className="w-16 whitespace-nowrap px-2 pb-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Qtd
                               </th>
-                              <th className="whitespace-nowrap px-2 pb-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400">
+                              <th className="w-14 whitespace-nowrap px-2 pb-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Un.
                               </th>
-                              <th className="whitespace-nowrap px-2 pb-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400">
+                              <th className="w-32 whitespace-nowrap px-2 pb-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Valor referência
                               </th>
-                              <th className="whitespace-nowrap pb-3 pl-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400">
+                              <th className="w-24 whitespace-nowrap pb-3 pl-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400">
                                 Situação
                               </th>
                             </tr>
@@ -1160,10 +1162,10 @@ export default function GerenciarMateriaisPage() {
                                 <td className="py-3 pr-2 text-center align-top font-medium tabular-nums text-gray-500 dark:text-gray-400">
                                   {idx + 1}
                                 </td>
-                                <td className="whitespace-nowrap px-2 py-3 align-top tabular-nums text-gray-700 dark:text-gray-300">
+                                <td className="break-all px-2 py-3 align-top tabular-nums text-gray-700 dark:text-gray-300">
                                   {materialProductCode(item.material) || '—'}
                                 </td>
-                                <td className="max-w-[220px] px-2 py-3 align-top sm:max-w-none">
+                                <td className="min-w-0 px-2 py-3 align-top [overflow-wrap:anywhere]">
                                   {materialItemLabel(item)}
                                   {(item.notes || item.observation)?.trim() ? (
                                     <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
