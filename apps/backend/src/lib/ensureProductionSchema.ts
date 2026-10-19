@@ -2794,6 +2794,30 @@ async function ensureUserContractReunioesColumn(prisma: PrismaClient): Promise<v
   );
 }
 
+async function ensureUserContractPleitosFaturamentoColumns(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'user_contract_permissions'))) return;
+  const existing = await prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'user_contract_permissions' AND column_name = 'accessPleitos'`
+  );
+  const pleitosJaExistia = existing.length > 0;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessPleitos" BOOLEAN NOT NULL DEFAULT true;`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessFaturamento" BOOLEAN NOT NULL DEFAULT true;`
+  );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessResumo" BOOLEAN NOT NULL DEFAULT true;`
+  );
+  if (!pleitosJaExistia) {
+    // Pleitos seguia O.S.: preserva o acesso atual na primeira criação da coluna.
+    await prisma.$executeRawUnsafe(
+      `UPDATE "user_contract_permissions" SET "accessPleitos" = "accessOrdemServico";`
+    );
+  }
+}
+
 async function ensureUserContractLiberadoColumn(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'user_contract_permissions'))) return;
   await prisma.$executeRawUnsafe(
@@ -3222,6 +3246,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDriveStarTrashColumns(prisma);
     await ensureUserActivityTracking(prisma);
     await ensureUserContractReunioesColumn(prisma);
+    await ensureUserContractPleitosFaturamentoColumns(prisma);
     await ensureUserContractLiberadoColumn(prisma);
     await ensurePermissionAccessTables(prisma);
     await ensureAuditLogTracking(prisma);

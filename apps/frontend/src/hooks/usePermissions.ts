@@ -171,10 +171,11 @@ export function usePermissions() {
 
   type ContractModuleFlagRow = {
     orcamento: boolean;
-    relatorios: boolean;
     ordemServico: boolean;
     producaoSemanal: boolean;
-    reunioes: boolean;
+    pleitos: boolean;
+    faturamento: boolean;
+    resumo: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
@@ -484,6 +485,17 @@ export function usePermissions() {
     canAccessModule(orcamentoModuleKey);
 
   /**
+   * Página Relatórios Fotográficos: exige o módulo liberado na matriz Acesso.
+   * Contratos exibidos = contratos com Liberado (igual a FD e Orçamentos).
+   */
+  const relatoriosFotograficosKey = pk('/ponto/contratos/relatorios');
+  const canAccessRelatoriosFotograficosPage =
+    isElevatedUser || can(relatoriosFotograficosKey) || canAccessModule(relatoriosFotograficosKey);
+  /** Lista/detalhe de relatórios dentro do contrato: módulo Relatórios Fotográficos ou Contratos. */
+  const canAccessContratoRelatoriosRoutes =
+    canAccessRelatoriosFotograficosPage || can(pk('/ponto/contratos'));
+
+  /**
    * Tela global «Ordem de Serviço»:
    * exige Ver/acesso do módulo na aba Acesso + checklist O.S. em pelo menos um contrato liberado.
    * (Antes ignorava a matriz Acesso e liberava só com Contratos + flag O.S.)
@@ -544,19 +556,31 @@ export function usePermissions() {
     return allowedContractIdSet.has(contractId);
   };
 
-  const canAccessContractRelatoriosTab = (contractId: string) => {
+  /** Relatórios e Reuniões do contrato seguem o Liberado. */
+  const canAccessContractRelatoriosTab = (contractId: string) =>
+    isElevatedUser || canAccessContract(contractId);
+
+  const canAccessContractReunioesTab = (contractId: string) =>
+    isElevatedUser || canAccessContract(contractId);
+
+  const canAccessContractPleitosTab = (contractId: string) => {
     if (isElevatedUser) return true;
-    return (
-      canAccessContract(contractId) && contractModuleFlags[contractId]?.relatorios === true
-    );
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.pleitos === true;
   };
 
-  const canAccessContractReunioesTab = (contractId: string) => {
+  const canAccessContractFaturamentoTab = (contractId: string) => {
     if (isElevatedUser) return true;
-    return (
-      canAccessContract(contractId) && contractModuleFlags[contractId]?.reunioes === true
-    );
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.faturamento === true;
   };
+
+  const canAccessContractResumoTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.resumo === true;
+  };
+
+  /** Gestor do contrato (coluna Gestor): libera as abas Controle Geral e Dados. */
+  const isContractGestor = (contractId: string) =>
+    isElevatedUser || (canAccessContract(contractId) && dpApprovalContractIdSet.has(contractId));
 
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
@@ -646,6 +670,8 @@ export function usePermissions() {
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,
+    canAccessRelatoriosFotograficosPage,
+    canAccessContratoRelatoriosRoutes,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
@@ -653,6 +679,10 @@ export function usePermissions() {
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractReunioesTab,
+    canAccessContractPleitosTab,
+    canAccessContractFaturamentoTab,
+    canAccessContractResumoTab,
+    isContractGestor,
     canAccessContractOrdemServicoTab,
     canAccessContractProducaoSemanalTab,
     fluigApproverFullAccess,
@@ -706,6 +736,8 @@ export function useRoutePermission(route: string) {
     canApproveMaterialRequests,
     canApproveEmpreiteiroDaily,
     canAccessOrcamentoRoutePage,
+    canAccessRelatoriosFotograficosPage,
+    canAccessContratoRelatoriosRoutes,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
@@ -834,6 +866,8 @@ export function useRoutePermission(route: string) {
     '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/orcamentos': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
+    '/ponto/contratos/relatorios': canAccessRelatoriosFotograficosPage,
+    '/ponto/contratos/relatorios/detalhe': canAccessContratoRelatoriosRoutes,
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/contratos/socios': isAdministrator || can(pk('/ponto/contratos/socios')),
     '/ponto/contratos/gastos-operacionais':

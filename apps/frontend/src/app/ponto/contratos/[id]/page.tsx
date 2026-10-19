@@ -1053,6 +1053,10 @@ export default function ContractDetailPage() {
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractReunioesTab,
+    canAccessContractPleitosTab,
+    canAccessContractFaturamentoTab,
+    canAccessContractResumoTab,
+    isContractGestor,
     canAccessContractOrdemServicoTab,
     canAccessContractProducaoSemanalTab
   } = usePermissions();
@@ -1068,6 +1072,11 @@ export default function ContractDetailPage() {
   const canAccessReunioesAba = canAccessContractReunioesTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
+  const canAccessPleitosModulo = canAccessContractPleitosTab(contractId);
+  const canAccessFaturamentoModulo = canAccessContractFaturamentoTab(contractId);
+  const canAccessResumoModulo = canAccessContractResumoTab(contractId);
+  /** Gestor do contrato: Controle Geral e Dados. */
+  const canAccessGestorTabs = isContractGestor(contractId);
   // Liberado na aba Contratos = operar no contrato (OS, produção, etc.).
   // Editar/excluir o cadastro do contrato na listagem exige Editar/Excluir na matriz Acesso.
   const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
@@ -1988,13 +1997,30 @@ export default function ContractDetailPage() {
     return buildContractAvailableYears(contract.startDate, contract.endDate);
   }, [contract]);
 
+  const allowedMainTabs = useMemo(() => {
+    const tabs: Array<typeof mainTab> = [];
+    if (canAccessResumoModulo) tabs.push('resumo');
+    if (canAccessGestorTabs) tabs.push('controle');
+    if (canAccessProducaoSemanalModulo) tabs.push('producao');
+    if (canAccessOrdemServicoModulo) tabs.push('os');
+    if (canAccessPleitosModulo) tabs.push('pleitos');
+    if (canAccessFaturamentoModulo) tabs.push('faturamento');
+    if (canAccessGestorTabs) tabs.push('dados');
+    return tabs;
+  }, [
+    canAccessResumoModulo,
+    canAccessGestorTabs,
+    canAccessProducaoSemanalModulo,
+    canAccessOrdemServicoModulo,
+    canAccessPleitosModulo,
+    canAccessFaturamentoModulo,
+  ]);
+
   useEffect(() => {
-    if (mainTab === 'producao' && !canAccessProducaoSemanalModulo) {
-      setMainTab('resumo');
-    } else if ((mainTab === 'os' || mainTab === 'pleitos') && !canAccessOrdemServicoModulo) {
-      setMainTab('resumo');
+    if (allowedMainTabs.length > 0 && !allowedMainTabs.includes(mainTab)) {
+      setMainTab(allowedMainTabs[0]);
     }
-  }, [mainTab, canAccessProducaoSemanalModulo, canAccessOrdemServicoModulo]);
+  }, [mainTab, allowedMainTabs]);
 
   const adjYearSelectOptions = useMemo(
     () =>
@@ -4769,27 +4795,31 @@ export default function ContractDetailPage() {
               ) : null
             }
           >
-            <AppUnderlineTabButton
-              active={mainTab === 'resumo'}
-              onClick={() => setMainTab('resumo')}
-              className="whitespace-nowrap px-3 py-2.5 text-sm"
-            >
-              Resumo
-            </AppUnderlineTabButton>
-            <AppUnderlineTabButton
-              active={mainTab === 'controle'}
-              onClick={() => setMainTab('controle')}
-              className="whitespace-nowrap px-3 py-2.5 text-sm"
-            >
-              Controle Geral
-            </AppUnderlineTabButton>
+            {canAccessResumoModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'resumo'}
+                onClick={() => setMainTab('resumo')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Resumo
+              </AppUnderlineTabButton>
+            ) : null}
+            {canAccessGestorTabs ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'controle'}
+                onClick={() => setMainTab('controle')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Controle Geral
+              </AppUnderlineTabButton>
+            ) : null}
             {canAccessProducaoSemanalModulo ? (
               <AppUnderlineTabButton
                 active={mainTab === 'producao'}
                 onClick={() => setMainTab('producao')}
                 className="whitespace-nowrap px-3 py-2.5 text-sm"
               >
-                Produção
+                Produção Semanal
               </AppUnderlineTabButton>
             ) : null}
             {canAccessOrdemServicoModulo ? (
@@ -4801,7 +4831,7 @@ export default function ContractDetailPage() {
                 Ordens de Serviço
               </AppUnderlineTabButton>
                 ) : null}
-            {canAccessOrdemServicoModulo ? (
+            {canAccessPleitosModulo ? (
               <AppUnderlineTabButton
                 active={mainTab === 'pleitos'}
                 onClick={() => setMainTab('pleitos')}
@@ -4810,23 +4840,27 @@ export default function ContractDetailPage() {
                 Pleitos
               </AppUnderlineTabButton>
                 ) : null}
-            <AppUnderlineTabButton
-              active={mainTab === 'faturamento'}
-              onClick={() => setMainTab('faturamento')}
-              className="whitespace-nowrap px-3 py-2.5 text-sm"
-            >
-              Faturamento
-            </AppUnderlineTabButton>
-            <AppUnderlineTabButton
-              active={mainTab === 'dados'}
-              onClick={() => setMainTab('dados')}
-              className="whitespace-nowrap px-3 py-2.5 text-sm"
-            >
-              Dados
-            </AppUnderlineTabButton>
+            {canAccessFaturamentoModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'faturamento'}
+                onClick={() => setMainTab('faturamento')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Faturamento
+              </AppUnderlineTabButton>
+            ) : null}
+            {canAccessGestorTabs ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'dados'}
+                onClick={() => setMainTab('dados')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Dados
+              </AppUnderlineTabButton>
+            ) : null}
           </AppUnderlineTabList>
 
-          {mainTab === 'resumo' ? (
+          {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">
           <ContratoFaturamentoCharts
             faturamentoInsight={faturamentoInsight}
@@ -4844,7 +4878,7 @@ export default function ContractDetailPage() {
                           </div>
                 ) : null}
 
-          {mainTab === 'controle' ? (
+          {mainTab === 'controle' && canAccessGestorTabs ? (
           <div className="space-y-4">
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.indigo}>
             <CardHeader className="border-b-0 pb-1 !pt-5">
@@ -6051,11 +6085,11 @@ export default function ContractDetailPage() {
           </>
           ) : null}
 
-          {mainTab === 'pleitos' && canAccessOrdemServicoModulo ? (
+          {mainTab === 'pleitos' && canAccessPleitosModulo ? (
           <ContractHistoricoPleitosPanel contractId={contractId} />
           ) : null}
 
-          {mainTab === 'faturamento' ? (
+          {mainTab === 'faturamento' && canAccessFaturamentoModulo ? (
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.green}>
             <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className={cadastroListClasses.cardHeaderRow}>
@@ -6366,7 +6400,7 @@ export default function ContractDetailPage() {
               </ContractSurfaceCard>
           ) : null}
 
-          {mainTab === 'dados' ? (
+          {mainTab === 'dados' && canAccessGestorTabs ? (
             <ContractSurfaceCard>
               <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
                 <div className={cadastroListClasses.cardHeaderRow}>

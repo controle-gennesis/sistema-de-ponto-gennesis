@@ -2955,6 +2955,12 @@ model UserContractPermission {
   accessRecebimentoEntregas Boolean  @default(false)
   /// Aba Reuniões (quinzenais) em Reuniões de Contrato. Relatório mensal segue o acesso ao contrato.
   accessReunioes            Boolean  @default(false)
+  /// Aba Pleitos do contrato (antes seguia accessOrdemServico).
+  accessPleitos             Boolean  @default(true)
+  /// Aba Faturamento do contrato.
+  accessFaturamento         Boolean  @default(true)
+  /// Aba Resumo do contrato (separada de Gestor).
+  accessResumo              Boolean  @default(true)
   updatedBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt

@@ -71,11 +71,15 @@ type ContractPermRow = {
   accessOrdemServico: boolean;
   accessProducaoSemanal: boolean;
   accessReunioes: boolean;
+  accessPleitos: boolean;
+  accessFaturamento: boolean;
+  accessResumo: boolean;
 };
 
 async function loadUserContractPermissionRows(userId: string): Promise<ContractPermRow[]> {
   const canLiberado = prismaModelHasField('UserContractPermission', 'accessLiberado');
   const canReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
+  const canPleitosFat = prismaModelHasField('UserContractPermission', 'accessPleitos');
   const rows = await safePermissionRows('userContractPermission', () =>
     prisma.userContractPermission.findMany({
       where: { userId },
@@ -87,6 +91,7 @@ async function loadUserContractPermissionRows(userId: string): Promise<ContractP
         accessOrdemServico: true,
         accessProducaoSemanal: true,
         ...(canReunioes ? { accessReunioes: true } : {}),
+        ...(canPleitosFat ? { accessPleitos: true, accessFaturamento: true, accessResumo: true } : {}),
       },
     })
   );
@@ -102,6 +107,15 @@ async function loadUserContractPermissionRows(userId: string): Promise<ContractP
     accessReunioes: canReunioes
       ? Boolean((r as { accessReunioes?: boolean }).accessReunioes)
       : false,
+    accessPleitos: canPleitosFat
+      ? Boolean((r as { accessPleitos?: boolean }).accessPleitos !== false)
+      : r.accessOrdemServico,
+    accessFaturamento: canPleitosFat
+      ? Boolean((r as { accessFaturamento?: boolean }).accessFaturamento !== false)
+      : true,
+    accessResumo: canPleitosFat
+      ? Boolean((r as { accessResumo?: boolean }).accessResumo !== false)
+      : true,
   }));
 }
 
@@ -114,6 +128,9 @@ function contractFlagsFromRows(rows: ContractPermRow[]) {
       ordemServico: boolean;
       producaoSemanal: boolean;
       reunioes: boolean;
+      pleitos: boolean;
+      faturamento: boolean;
+      resumo: boolean;
     }
   > = {};
   for (const r of rows) {
@@ -123,6 +140,9 @@ function contractFlagsFromRows(rows: ContractPermRow[]) {
       ordemServico: r.accessOrdemServico,
       producaoSemanal: r.accessProducaoSemanal,
       reunioes: r.accessReunioes,
+      pleitos: r.accessPleitos,
+      faturamento: r.accessFaturamento,
+      resumo: r.accessResumo,
     };
   }
   return contractModuleFlags;
@@ -706,6 +726,9 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       ordemServico?: boolean;
       producaoSemanal?: boolean;
       reunioes?: boolean;
+      pleitos?: boolean;
+      faturamento?: boolean;
+      resumo?: boolean;
     };
     const rawModuleFlags: Record<string, ContractFlags> =
       req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
@@ -768,7 +791,10 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
               flags?.relatorios ||
               flags?.ordemServico ||
               flags?.producaoSemanal ||
-              flags?.reunioes
+              flags?.reunioes ||
+              flags?.pleitos ||
+              flags?.faturamento ||
+              flags?.resumo
           )
         )
         .map(([id]) => id);
@@ -894,6 +920,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     }
 
     const canWriteReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
+    const canWritePleitosFat = prismaModelHasField('UserContractPermission', 'accessPleitos');
     const canWriteLiberado = prismaModelHasField('UserContractPermission', 'accessLiberado');
     const canSyncRestrictedCcTable =
       shouldSyncRestrictedCc &&
@@ -953,6 +980,13 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
                 accessOrdemServico: flags.ordemServico === true,
                 accessProducaoSemanal: flags.producaoSemanal === true,
                 ...(canWriteReunioes ? { accessReunioes: flags.reunioes === true } : {}),
+                ...(canWritePleitosFat
+                  ? {
+                      accessPleitos: flags.pleitos === true,
+                      accessFaturamento: flags.faturamento === true,
+                      accessResumo: flags.resumo === true,
+                    }
+                  : {}),
               };
             }),
           });
@@ -1277,6 +1311,9 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
       ordemServico?: boolean;
       producaoSemanal?: boolean;
       reunioes?: boolean;
+      pleitos?: boolean;
+      faturamento?: boolean;
+      resumo?: boolean;
     };
     const rawModuleFlagsPos: Record<string, PosContractFlags> =
       req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
@@ -1426,6 +1463,9 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
       ordemServico: boolean;
       producaoSemanal: boolean;
       reunioes: boolean;
+      pleitos: boolean;
+      faturamento: boolean;
+      resumo: boolean;
     }> = {};
     for (const contractId of contractIdsToSave) {
       const f = rawModuleFlagsPos[contractId] ?? {};
@@ -1435,6 +1475,9 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         ordemServico: f.ordemServico !== false,
         producaoSemanal: f.producaoSemanal !== false,
         reunioes: f.reunioes === true,
+        pleitos: f.pleitos !== false,
+        faturamento: f.faturamento !== false,
+        resumo: f.resumo !== false,
       };
     }
 

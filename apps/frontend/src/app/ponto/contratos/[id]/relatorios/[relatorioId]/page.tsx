@@ -536,7 +536,7 @@ export default function RelatorioFotograficoEditorPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+    <ProtectedRoute route="/ponto/contratos/relatorios/detalhe" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <div className="w-full min-w-0 max-w-[100%] space-y-6 pb-8">
             {/* Cabeçalho: mesmo padrão de OrcamentoPageView (sem ícone, só título + subtítulo) */}

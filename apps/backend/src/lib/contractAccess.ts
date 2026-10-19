@@ -191,13 +191,18 @@ export async function assertContractSummaryAccess(
   await assertContractAccess(req, contractId);
 }
 
-/** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal, reuniões). */
+/**
+ * Flags por contrato da aba «Contratos» em permissões.
+ * `relatorios` e `reunioes` não têm mais coluna própria: seguem o Liberado (ficha do contrato).
+ */
 export type ContractScopedModuleFlag =
   | 'orcamento'
   | 'relatorios'
   | 'ordemServico'
   | 'producaoSemanal'
-  | 'reunioes';
+  | 'reunioes'
+  | 'pleitos'
+  | 'faturamento';
 
 export async function assertRecebimentoEntregasOnContract(
   req: AuthRequest,
@@ -227,40 +232,43 @@ export async function assertContractModulePermission(
     await assertContractAccess(req, contractId);
   }
 
+  // Relatórios e Reuniões seguem o Liberado (sem flag própria).
+  if (module === 'relatorios' || module === 'reunioes') return;
+
   const row = await prisma.userContractPermission.findUnique({
     where: {
       userId_contractId: { userId: req.user.id, contractId },
     },
     select: {
       accessOrcamento: true,
-      accessRelatorios: true,
       accessOrdemServico: true,
       accessProducaoSemanal: true,
-      accessReunioes: true,
+      accessPleitos: true,
+      accessFaturamento: true,
     },
   });
 
   const ok =
     module === 'orcamento'
       ? row?.accessOrcamento === true
-      : module === 'relatorios'
-        ? row?.accessRelatorios === true
-        : module === 'ordemServico'
-          ? row?.accessOrdemServico === true
-          : module === 'producaoSemanal'
-            ? row?.accessProducaoSemanal === true
-            : row?.accessReunioes === true;
+      : module === 'ordemServico'
+        ? row?.accessOrdemServico === true
+        : module === 'producaoSemanal'
+          ? row?.accessProducaoSemanal === true
+          : module === 'pleitos'
+            ? row?.accessPleitos === true
+            : row?.accessFaturamento === true;
 
   if (!ok) {
     const msg =
-      module === 'reunioes'
-        ? 'Sem permissão da aba Reuniões neste contrato'
-        : module === 'producaoSemanal'
-          ? 'Sem permissão de Produção Semanal neste contrato'
-          : module === 'ordemServico'
-            ? 'Sem permissão de Ordem de Serviço neste contrato'
-            : module === 'relatorios'
-              ? 'Sem permissão de Relatórios neste contrato'
+      module === 'producaoSemanal'
+        ? 'Sem permissão de Produção Semanal neste contrato'
+        : module === 'ordemServico'
+          ? 'Sem permissão de Ordem de Serviço neste contrato'
+          : module === 'pleitos'
+            ? 'Sem permissão de Pleitos neste contrato'
+            : module === 'faturamento'
+              ? 'Sem permissão de Faturamento neste contrato'
               : 'Sem permissão de Orçamento neste contrato';
     throw createError(msg, 403);
   }

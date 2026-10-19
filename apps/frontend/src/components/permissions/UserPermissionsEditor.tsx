@@ -9,6 +9,7 @@ import {
   FileText,
   LayoutDashboard,
   Layers,
+  Info,
   MoreVertical,
   RotateCcw,
   ShieldCheck,
@@ -58,20 +59,23 @@ const ORCAMENTO_MODULE_KEY = pathToModuleKey('/ponto/orcamento');
 
 type PermissionItem = { module: string; action: string };
 
+/** Relatórios e Reuniões seguem o Liberado (sem coluna própria). Gestor vem de dpApprovalContractIds. */
 type ContractModuleFlags = {
   orcamento: boolean;
-  relatorios: boolean;
   ordemServico: boolean;
   producaoSemanal: boolean;
-  reunioes: boolean;
+  pleitos: boolean;
+  faturamento: boolean;
+  resumo: boolean;
 };
 
 const emptyContractModuleFlags = (): ContractModuleFlags => ({
   orcamento: false,
-  relatorios: false,
   ordemServico: false,
   producaoSemanal: false,
-  reunioes: false,
+  pleitos: false,
+  faturamento: false,
+  resumo: false,
 });
 
 /** Quem tinha a coluna Orçamento antiga passa a ter Ver em Orçamentos na matriz Acesso. */
@@ -185,7 +189,7 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .sort()
     .map((id) => {
       const f = flags[id];
-      return `${id}:${f.orcamento ? 1 : 0}${f.relatorios ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.reunioes ? 1 : 0}`;
+      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}`;
     })
     .join(',');
 }
@@ -1599,10 +1603,11 @@ export function UserPermissionsEditor({
       if (
         !value &&
         !nextFlags.orcamento &&
-        !nextFlags.relatorios &&
         !nextFlags.ordemServico &&
         !nextFlags.producaoSemanal &&
-        !nextFlags.reunioes
+        !nextFlags.pleitos &&
+        !nextFlags.faturamento &&
+        !nextFlags.resumo
       ) {
         const next = { ...prev };
         delete next[contractId];
@@ -2436,27 +2441,56 @@ export function UserPermissionsEditor({
               <PermissionPageHeader
                 icon={FileText}
                 title="Contratos"
-                subtitle="Liberado define em quais contratos a pessoa opera (Caixinha, FD, Orçamentos…). A ficha com dados sensíveis só abre com Contratos em Acesso."
-                actions={permissionActionsButton}
+                subtitle="Defina em quais contratos a pessoa atua e o que ela acessa em cada um."
+                actions={
+                  <div className="flex items-center gap-2">
+                    <div className="group relative">
+                      <span
+                        aria-label="Como funcionam as permissões por contrato"
+                        className="inline-flex h-10 w-10 cursor-help items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      >
+                        <Info className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-[22rem] max-w-[85vw] rounded-xl border border-gray-200 bg-white p-4 text-left text-sm leading-relaxed text-gray-700 opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                      >
+                        <p className="mb-3 font-semibold text-gray-900 dark:text-gray-100">
+                          Permissões por contrato
+                        </p>
+                        <dl className="space-y-3">
+                          <div>
+                            <dt className="font-semibold text-gray-900 dark:text-gray-100">Liberado</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">
+                              Contratos em que a pessoa atua (Caixinha, Ficha de Demanda, Orçamentos, O.S.).
+                              {selectedSet.has(CONTRACTS_MODULE_KEY)
+                                ? ' Com o módulo Contratos em Acesso, ela também abre a ficha do contrato.'
+                                : ' Para abrir a ficha do contrato, é preciso o módulo Contratos em Acesso.'}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="font-semibold text-gray-900 dark:text-gray-100">Gestor</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">
+                              Aprova requisições e OCs do contrato e acessa Controle Geral e Dados.
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="font-semibold text-gray-900 dark:text-gray-100">
+                              Resumo, Prod. Sem., O.S., Pleitos e Faturamento
+                            </dt>
+                            <dd className="text-gray-600 dark:text-gray-300">
+                              Cada uma libera a aba correspondente dentro do contrato.
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                    </div>
+                    {permissionActionsButton}
+                  </div>
+                }
               />
             </CardHeader>
             <CardContent>
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                <strong>Liberado</strong> — aparece em Caixinha, Ficha de Demanda, Orçamentos, OS, etc.
-                {!selectedSet.has(CONTRACTS_MODULE_KEY) ? (
-                  <>
-                    {' '}
-                    Sem o módulo <strong>Contratos</strong> em Acesso, a pessoa <strong>não</strong>{' '}
-                    abre a ficha do contrato.
-                  </>
-                ) : (
-                  <> Com <strong>Contratos</strong> em Acesso, também abre a ficha do contrato.</>
-                )}{' '}
-                A página <strong>Orçamentos</strong> libera-se na aba Acesso; os contratos visíveis lá
-                são os marcados em Liberado.
-              </p>
-            </div>
             {contractsList.length === 0 ? (
               <div className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhum contrato cadastrado ainda.
@@ -2482,37 +2516,44 @@ export function UserPermissionsEditor({
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Gestor do contrato: aprova requisições de materiais e OCs na fase gestor deste contrato. Solicitações internas usam a permissão Controle «Aprovar Solicitações Restritas»."
+                          title="Gestor do contrato: aprova requisições de materiais e OCs na fase gestor deste contrato e acessa as abas Controle Geral e Dados. Solicitações internas usam a permissão Controle «Aprovar Solicitações Restritas»."
                         >
                           Gestor
                         </th>
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Acesso à aba Relatórios neste contrato"
+                          title="Acesso à aba Resumo neste contrato"
                         >
-                          Relatórios
+                          Resumo
                         </th>
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Acesso às Ordens de Serviço neste contrato"
-                        >
-                          O.S.
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Acesso à Produção Semanal neste contrato"
+                          title="Acesso à aba Produção Semanal neste contrato"
                         >
                           Prod. Sem.
                         </th>
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Acesso à aba Reuniões (quinzenais). Relatório Mensal fica liberado com o contrato."
+                          title="Acesso à aba Ordens de Serviço neste contrato"
                         >
-                          Reuniões
+                          O.S.
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Pleitos neste contrato"
+                        >
+                          Pleitos
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Faturamento neste contrato"
+                        >
+                          Faturamento
                         </th>
                       </tr>
                     </thead>
@@ -2604,18 +2645,9 @@ export function UserPermissionsEditor({
                             <td className="px-1 py-3.5 text-center align-middle">
                               <div className="flex justify-center">
                                 <PermissionMatrixCheckbox
-                                  checked={flags.relatorios}
-                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'relatorios', next)}
-                                  aria-label={`Relatórios — ${c.name}`}
-                                />
-                              </div>
-                            </td>
-                            <td className="px-1 py-3.5 text-center align-middle">
-                              <div className="flex justify-center">
-                                <PermissionMatrixCheckbox
-                                  checked={flags.ordemServico}
-                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'ordemServico', next)}
-                                  aria-label={`Ordem de Serviço — ${c.name}`}
+                                  checked={flags.resumo}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'resumo', next)}
+                                  aria-label={`Resumo — ${c.name}`}
                                 />
                               </div>
                             </td>
@@ -2631,9 +2663,27 @@ export function UserPermissionsEditor({
                             <td className="px-1 py-3.5 text-center align-middle">
                               <div className="flex justify-center">
                                 <PermissionMatrixCheckbox
-                                  checked={flags.reunioes}
-                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'reunioes', next)}
-                                  aria-label={`Reuniões — ${c.name}`}
+                                  checked={flags.ordemServico}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'ordemServico', next)}
+                                  aria-label={`Ordem de Serviço — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.pleitos}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'pleitos', next)}
+                                  aria-label={`Pleitos — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.faturamento}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'faturamento', next)}
+                                  aria-label={`Faturamento — ${c.name}`}
                                 />
                               </div>
                             </td>

@@ -7,6 +7,7 @@ const controller = new RelatorioFotograficoController();
 
 router.use(authenticate);
 
+router.get('/', (req, res, next) => controller.getAll(req as any, res, next));
 router.get('/:contractId', (req, res, next) => controller.getList(req as any, res, next));
 router.post('/:contractId', (req, res, next) => controller.create(req as any, res, next));
 router.get('/:contractId/:relatorioId', (req, res, next) => controller.get(req as any, res, next));

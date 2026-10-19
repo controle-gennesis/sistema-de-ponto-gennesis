@@ -141,21 +141,6 @@ export class ReuniaoController {
       }
 
       let contractIds: string[] | null = access.filter === 'ids' ? access.ids : null;
-      if (!req.user.isAdmin) {
-        const reunioesRows = await prisma.userContractPermission.findMany({
-          where: {
-            userId: req.user.id,
-            accessReunioes: true,
-            ...(contractIds ? { contractId: { in: contractIds } } : {}),
-          },
-          select: { contractId: true },
-        });
-        contractIds = reunioesRows.map((r) => r.contractId);
-        if (contractIds.length === 0) {
-          return res.json({ success: true, data: [], weekKey });
-        }
-      }
-
       const where = contractIds ? { id: { in: contractIds } } : {};
 
       const contracts = await prisma.contract.findMany({

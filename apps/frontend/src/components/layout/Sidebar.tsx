@@ -304,6 +304,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveMaterialRequests,
     canAccessOsRoutePage,
     canAccessOrcamentoRoutePage,
+    canAccessRelatoriosFotograficosPage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
     fluigApproverNameKeys,
@@ -1136,6 +1137,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Calculator,
             description: 'Orçamentos dos contratos liberados',
             permission: canAccessOrcamentoRoutePage,
+            section: 'Obras'
+          },
+          {
+            name: 'Relatórios Fotográficos',
+            href: '/ponto/contratos/relatorios',
+            icon: ImagePlus,
+            description: 'Relatórios fotográficos dos contratos liberados',
+            permission: canAccessRelatoriosFotograficosPage,
             section: 'Obras'
           },
           {

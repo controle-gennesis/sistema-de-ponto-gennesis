@@ -56,7 +56,7 @@ export class ContractPleitoController {
   async getPleitosByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractModulePermission(req, contractId, 'ordemServico');
+      await assertContractModulePermission(req, contractId, 'pleitos');
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
@@ -75,7 +75,7 @@ export class ContractPleitoController {
   async createPleito(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
-      await assertContractModulePermission(req, contractId, 'ordemServico');
+      await assertContractModulePermission(req, contractId, 'pleitos');
 
       const b = req.body;
 

@@ -44,7 +44,6 @@ export function pathToModuleKey(href: string): string {
  * Permanecem em `PERMISSION_MODULES` para sincronização/orfãos; a matriz «Acesso» as ignora na UI.
  */
 export const PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX: readonly string[] = [
-  pathToModuleKey('/ponto/contratos/relatorios'),
   /** Legado: acesso migrado para Controle «Gerenciar página de aprovadores». */
   pathToModuleKey('/ponto/fluig/aprovadores'),
 ];
