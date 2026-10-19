@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, Eye, FileText, Loader2, Trash2, Upload, X } from 'lucide-react';
 import { loadPdfjs } from '@/lib/loadPdfjs';
+import toast from 'react-hot-toast';
+import { downloadUploadFile } from '@/lib/downloadUploadFile';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
 
@@ -33,6 +35,7 @@ function fileExtLabel(name: string): string {
 
 const cardActionBtnCls =
   'inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white shadow-sm backdrop-blur-sm hover:bg-black/75';
+
 
 type PreviewKind = 'image' | 'pdf' | 'other';
 
@@ -152,6 +155,20 @@ export function FilePreviewCard({
     };
   }, [lightbox, href]);
 
+  const [baixando, setBaixando] = useState(false);
+  /** `download` em <a> é ignorado quando o arquivo vem de outra origem: baixa por blob. */
+  const baixar = async () => {
+    if (!file.fileUrl || baixando) return;
+    setBaixando(true);
+    try {
+      await downloadUploadFile(file.fileUrl, file.originalName);
+    } catch {
+      toast.error('Não foi possível baixar o arquivo.');
+    } finally {
+      setBaixando(false);
+    }
+  };
+
   const openPreview = () => {
     if (!href) return;
     if (image) setLightbox('image');
@@ -262,16 +279,23 @@ export function FilePreviewCard({
                 >
                   <Eye className="h-3.5 w-3.5" />
                 </button>
-                <a
-                  href={href}
-                  download={file.originalName}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void baixar();
+                  }}
+                  disabled={baixando}
                   title="Baixar"
                   aria-label={`Baixar ${file.originalName}`}
-                  className={cardActionBtnCls}
-                  onClick={(e) => e.stopPropagation()}
+                  className={`${cardActionBtnCls} disabled:opacity-60`}
                 >
-                  <Download className="h-3.5 w-3.5" />
-                </a>
+                  {baixando ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                </button>
               </>
             ) : null}
             {onRemove ? (
@@ -300,7 +324,7 @@ export function FilePreviewCard({
       {lightbox && href && typeof document !== 'undefined'
         ? createPortal(
             <div
-              className="fixed inset-0 flex items-center justify-center bg-black/80 p-4"
+              className="fixed inset-0 flex items-center justify-center bg-black/80 p-2"
               style={{ zIndex: Z_LIGHTBOX }}
               role="dialog"
               aria-modal="true"
@@ -316,7 +340,7 @@ export function FilePreviewCard({
                 <X className="h-[22px] w-[22px]" />
               </button>
               <div
-                className="flex max-h-[88vh] max-w-[92vw] flex-col items-center justify-center"
+                className="flex max-h-[99vh] max-w-[98vw] flex-col items-center justify-center"
                 onClick={(e) => e.stopPropagation()}
               >
                 {lightbox === 'image' ? (
@@ -328,7 +352,7 @@ export function FilePreviewCard({
                   />
                 ) : lightbox === 'pdf' ? (
                   pdfPreviewLoading ? (
-                    <div className="flex h-[80vh] w-[min(90vw,900px)] items-center justify-center rounded-xl bg-white">
+                    <div className="flex h-[94vh] w-[96vw] items-center justify-center rounded-xl bg-white">
                       <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
                     </div>
                   ) : pdfPreviewError || !pdfPreviewUrl ? (
@@ -343,20 +367,21 @@ export function FilePreviewCard({
                         >
                           Abrir em nova aba
                         </a>
-                        <a
-                          href={href}
-                          download={file.originalName}
+                        <button
+                          type="button"
+                          onClick={() => void baixar()}
+                          disabled={baixando}
                           className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-gray-800"
                         >
                           Baixar
-                        </a>
+                        </button>
                       </div>
                     </div>
                   ) : (
                     <iframe
                       title={file.originalName}
                       src={pdfPreviewUrl}
-                      className="h-[80vh] w-[min(90vw,900px)] rounded-xl bg-white"
+                      className="h-[94vh] w-[96vw] rounded-xl bg-white"
                     />
                   )
                 ) : (
@@ -373,13 +398,14 @@ export function FilePreviewCard({
                       >
                         Abrir em nova aba
                       </a>
-                      <a
-                        href={href}
-                        download={file.originalName}
+                      <button
+                        type="button"
+                        onClick={() => void baixar()}
+                        disabled={baixando}
                         className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-gray-800"
                       >
                         Baixar
-                      </a>
+                      </button>
                     </div>
                   </div>
                 )}
