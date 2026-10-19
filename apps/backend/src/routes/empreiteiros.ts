@@ -98,6 +98,9 @@ router.patch('/:id/contracts/:linkId/installments/:installmentId', (req, res, ne
 router.post('/:id/contracts/:linkId/addenda', (req, res, next) =>
   controller.addAddendum(req as any, res as any, next)
 );
+router.patch('/:id/contracts/:linkId/addenda/:addendumId', (req, res, next) =>
+  controller.updateAddendum(req as any, res as any, next)
+);
 router.delete('/:id/contracts/:linkId/addenda/:addendumId', (req, res, next) =>
   controller.deleteAddendum(req as any, res as any, next)
 );

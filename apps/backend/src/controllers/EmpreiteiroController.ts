@@ -425,10 +425,14 @@ function serializeAddendum(row: {
   status?: string | null;
   correctionNote?: string | null;
   approvedAt?: Date | null;
+  applyPlan?: Prisma.JsonValue | null;
   createdBy: string | null;
   createdAt: Date;
 }) {
+  const plan = parseAddendumApplyPlan(row.applyPlan);
   return {
+    paymentMode: plan.paymentMode,
+    installments: plan.installments,
     id: row.id,
     number: row.number,
     reason: row.reason,
@@ -444,6 +448,41 @@ function serializeAddendum(row: {
     createdBy: row.createdBy,
     createdAt: row.createdAt,
   };
+}
+
+/** Valida e normaliza os dados de um aditivo (criação e correção). */
+function parseAddendumInput(
+  body: any,
+  installments: Array<{ id: string; number: number; amount: Prisma.Decimal; status: string | null; note: string | null }>
+) {
+  const reason = str(body?.reason) || str(body?.motivo);
+  if (!reason) throw createError('Informe o motivo do aditivo', 400);
+  const amountNum = parseMoneyInput(body?.amount ?? body?.valor, true);
+  if (amountNum == null || amountNum === 0) {
+    throw createError('Informe o valor do aditivo (diferente de zero)', 400);
+  }
+  const effectiveDate =
+    parseDateField(body?.effectiveDate ?? body?.date, 'Data do aditivo') || new Date();
+  const servicesAdded = optionalStr(body?.servicesAdded);
+  const files = parsePaymentFiles(body?.files);
+  const paymentMode: 'new' | 'redistribute' =
+    body?.paymentMode === 'redistribute' || body?.redistributeInstallments === true
+      ? 'redistribute'
+      : 'new';
+  const newInstallmentAmounts =
+    paymentMode === 'new' && amountNum > 0 ? parseAddendumInstallmentAmounts(body, amountNum) : [];
+  if (paymentMode === 'redistribute') {
+    const openInstallments = installments.filter(
+      (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
+    );
+    if (openInstallments.length === 0) {
+      throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
+    }
+    // Só valida (valor reduzido que zeraria parcela). A redistribuição de fato acontece na aprovação.
+    splitAddendumAcrossInstallments(openInstallments, amountNum);
+  }
+  const applyPlan: AddendumApplyPlan = { paymentMode, installments: newInstallmentAmounts };
+  return { reason, amountNum, effectiveDate, servicesAdded, files, applyPlan };
 }
 
 function buildInstallmentCreates(
@@ -3236,44 +3275,12 @@ export class EmpreiteiroController {
       });
       if (!link) throw createError('Contrato de serviço não encontrado', 404);
 
-      const reason = str(req.body?.reason) || str(req.body?.motivo);
-      if (!reason) throw createError('Informe o motivo do aditivo', 400);
-      const amountNum = parseMoneyInput(req.body?.amount ?? req.body?.valor, true);
-      if (amountNum == null || amountNum === 0) {
-        throw createError('Informe o valor do aditivo (diferente de zero)', 400);
-      }
-      const effectiveDate =
-        parseDateField(req.body?.effectiveDate ?? req.body?.date, 'Data do aditivo') ||
-        new Date();
-      const servicesAdded = optionalStr(req.body?.servicesAdded);
+      const { reason, amountNum, effectiveDate, servicesAdded, files, applyPlan } =
+        parseAddendumInput(req.body, link.installments);
       const servicesRemoved = optionalStr(req.body?.servicesRemoved);
-      const files = parsePaymentFiles(req.body?.files);
-      const paymentMode =
-        req.body?.paymentMode === 'redistribute' || req.body?.redistributeInstallments === true
-          ? 'redistribute'
-          : 'new';
-      const newInstallmentAmounts =
-        paymentMode === 'new' && amountNum > 0 ? parseAddendumInstallmentAmounts(req.body, amountNum) : [];
       const nextNumber = (link.addenda[0]?.number || 0) + 1;
-      const openInstallments =
-        paymentMode === 'redistribute'
-          ? link.installments.filter(
-              (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
-            )
-          : [];
-      if (paymentMode === 'redistribute' && openInstallments.length === 0) {
-        throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
-      }
-      if (paymentMode === 'redistribute') {
-        // Só valida (valor reduzido que zeraria parcela). A redistribuição de fato acontece na aprovação.
-        splitAddendumAcrossInstallments(openInstallments, amountNum);
-      }
 
       // O aditivo nasce PENDENTE: não altera valor do contrato nem parcelas até ser aprovado.
-      const applyPlan: AddendumApplyPlan = {
-        paymentMode,
-        installments: newInstallmentAmounts,
-      };
       const updated = await prisma.$transaction(async (tx) => {
         await tx.empreiteiroContractAddendum.create({
           data: {
@@ -3301,6 +3308,59 @@ export class EmpreiteiroController {
         success: true,
         data: serializeEmpreiteiro(updated, counts),
         message: `Aditivo nº ${nextNumber} enviado para aprovação`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Corrige um aditivo devolvido e o reenvia para aprovação. */
+  async updateAddendum(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const { id, linkId, addendumId } = req.params;
+      const addendum = await prisma.empreiteiroContractAddendum.findFirst({
+        where: { id: addendumId, empreiteiroContractId: linkId, empreiteiroContract: { empreiteiroId: id } },
+        include: {
+          empreiteiroContract: {
+            include: {
+              installments: {
+                select: { id: true, number: true, amount: true, status: true, note: true },
+                orderBy: { number: 'asc' },
+              },
+            },
+          },
+        },
+      });
+      if (!addendum) throw createError('Aditivo não encontrado', 404);
+      if (normalizeAddendumStatus(addendum.status) !== 'CORRECTION') {
+        throw createError('Só é possível corrigir um aditivo que foi devolvido', 400);
+      }
+      const { reason, amountNum, effectiveDate, servicesAdded, files, applyPlan } =
+        parseAddendumInput(req.body, addendum.empreiteiroContract.installments);
+
+      await prisma.empreiteiroContractAddendum.update({
+        where: { id: addendumId },
+        data: {
+          reason,
+          effectiveDate,
+          amount: new Prisma.Decimal(amountNum.toFixed(2)),
+          servicesAdded,
+          files: files as Prisma.InputJsonValue,
+          applyPlan: applyPlan as unknown as Prisma.InputJsonValue,
+          status: 'PENDING',
+          correctionNote: null,
+        },
+      });
+      const updated = await prisma.empreiteiro.findUniqueOrThrow({
+        where: { id },
+        include: empreiteiroInclude,
+      });
+      const counts = await measurementCountsForEmpreiteiro(id);
+      res.json({
+        success: true,
+        data: serializeEmpreiteiro(updated, counts),
+        message: `Aditivo nº ${addendum.number} corrigido e reenviado para aprovação`,
       });
     } catch (error) {
       next(error);

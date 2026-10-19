@@ -99,6 +99,8 @@ interface ServiceAddendum {
   /** PENDING (aguarda aprovação) | APPROVED | CORRECTION (devolvido). Só APPROVED vale no contrato. */
   status?: 'PENDING' | 'APPROVED' | 'CORRECTION' | string;
   correctionNote?: string | null;
+  paymentMode?: 'new' | 'redistribute';
+  installments?: number[];
   createdAt?: string;
 }
 
@@ -534,6 +536,8 @@ export default function EmpreiteirosPage() {
     useState<EmpreiteiroContractStatus>('IN_PROGRESS');
   const [savingContractLink, setSavingContractLink] = useState(false);
   const [addingAddendumForId, setAddingAddendumForId] = useState<string | null>(null);
+  /** Aditivo devolvido que está sendo corrigido (null = lançando um novo). */
+  const [editingAddendum, setEditingAddendum] = useState<{ id: string; number: number } | null>(null);
   const [addendumReason, setAddendumReason] = useState('');
   const [addendumAmount, setAddendumAmount] = useState('');
   const [addendumDate, setAddendumDate] = useState('');
@@ -1052,6 +1056,7 @@ export default function EmpreiteirosPage() {
 
   const resetAddendumForm = () => {
     setAddingAddendumForId(null);
+    setEditingAddendum(null);
     setAddendumReason('');
     setAddendumAmount('');
     setAddendumDate('');
@@ -1061,6 +1066,28 @@ export default function EmpreiteirosPage() {
     setAddendumScheduleMode('avista');
     setAddendumParcelCount('6');
     setAddendumParcelAmounts([]);
+  };
+
+  /** Abre o formulário preenchido com os dados do aditivo devolvido. */
+  const startEditAddendum = (linkId: string, ad: ServiceAddendum) => {
+    const parcels = ad.installments ?? [];
+    setEditingAddendum({ id: ad.id, number: ad.number });
+    setAddendumReason(ad.reason || '');
+    setAddendumAmount(formatCurrencyInputBrFromNumber(ad.amount));
+    setAddendumDate(ad.effectiveDate ? String(ad.effectiveDate).slice(0, 10) : '');
+    setAddendumServicesAdded(ad.servicesAdded || '');
+    setAddendumFiles(Array.isArray(ad.files) ? ad.files : []);
+    setAddendumPayMode(ad.paymentMode === 'redistribute' ? 'redistribute' : 'new');
+    if (parcels.length >= 2) {
+      setAddendumScheduleMode('parcelado');
+      setAddendumParcelCount(String(parcels.length));
+      setAddendumParcelAmounts(parcels.map((value) => formatCurrencyInputBrFromNumber(value)));
+    } else {
+      setAddendumScheduleMode('avista');
+      setAddendumParcelCount('6');
+      setAddendumParcelAmounts([]);
+    }
+    setAddingAddendumForId(linkId);
   };
 
   const uploadAddendumFile = async (file: File | null | undefined) => {
@@ -1131,7 +1158,7 @@ export default function EmpreiteirosPage() {
     }
     setSavingContractLink(true);
     try {
-      const res = await api.post(`/empreiteiros/${viewingItem.id}/contracts/${linkId}/addenda`, {
+      const payload = {
         reason,
         amount,
         effectiveDate: addendumDate || null,
@@ -1139,16 +1166,23 @@ export default function EmpreiteirosPage() {
         files: addendumFiles,
         paymentMode: addendumPayMode,
         ...(installments ? { installments } : {}),
-      });
+      };
+      const baseUrl = `/empreiteiros/${viewingItem.id}/contracts/${linkId}/addenda`;
+      const res = editingAddendum
+        ? await api.patch(`${baseUrl}/${editingAddendum.id}`, payload)
+        : await api.post(baseUrl, payload);
       const data = res.data?.data as EmpreiteiroRow | undefined;
       if (data?.id) {
         setViewingItem(data);
         queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
       }
       resetAddendumForm();
-      toast.success(res.data?.message || 'Aditivo lançado');
+      toast.success(res.data?.message || (editingAddendum ? 'Aditivo corrigido e reenviado' : 'Aditivo lançado'));
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Não foi possível lançar o aditivo');
+      toast.error(
+        error.response?.data?.message ||
+          (editingAddendum ? 'Não foi possível corrigir o aditivo' : 'Não foi possível lançar o aditivo')
+      );
     } finally {
       setSavingContractLink(false);
     }
@@ -3696,15 +3730,7 @@ export default function EmpreiteirosPage() {
                                       resetAddendumForm();
                                       return;
                                     }
-                                    setAddendumReason('');
-                                    setAddendumAmount('');
-                                    setAddendumDate('');
-                                    setAddendumServicesAdded('');
-                                    setAddendumFiles([]);
-                                    setAddendumPayMode('new');
-                                    setAddendumScheduleMode('avista');
-                                    setAddendumParcelCount('6');
-                                    setAddendumParcelAmounts([]);
+                                    resetAddendumForm();
                                     setAddingAddendumForId(link.id);
                                   }}
                                   className="inline-flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -3753,18 +3779,34 @@ export default function EmpreiteirosPage() {
                                             Devolvido
                                           </span>
                                         ) : null}
-                                        {canManageCadastro && ad.number === lastAddendumNumber ? (
-                                          <button
-                                            type="button"
-                                            disabled={savingContractLink}
-                                            onClick={() =>
-                                              void handleDeleteAddendum(link.id, ad.id)
-                                            }
-                                            className="ml-auto text-gray-400 hover:text-red-600"
-                                            aria-label="Excluir aditivo"
-                                          >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                          </button>
+                                        {canManageCadastro &&
+                                        (ad.status === 'CORRECTION' || ad.number === lastAddendumNumber) ? (
+                                          <div className="ml-auto flex items-center gap-2">
+                                            {ad.status === 'CORRECTION' ? (
+                                              <button
+                                                type="button"
+                                                disabled={savingContractLink}
+                                                onClick={() => startEditAddendum(link.id, ad)}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                                              >
+                                                <Pencil className="h-3 w-3" />
+                                                Corrigir e reenviar
+                                              </button>
+                                            ) : null}
+                                            {ad.number === lastAddendumNumber ? (
+                                              <button
+                                                type="button"
+                                                disabled={savingContractLink}
+                                                onClick={() =>
+                                                  void handleDeleteAddendum(link.id, ad.id)
+                                                }
+                                                className="text-gray-400 hover:text-red-600"
+                                                aria-label="Excluir aditivo"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            ) : null}
+                                          </div>
                                         ) : null}
                                       </div>
                                       <p className="mt-0.5 text-gray-600 dark:text-gray-300">
@@ -3815,6 +3857,11 @@ export default function EmpreiteirosPage() {
                             )}
                             {addingAddendumForId === link.id ? (
                               <div className="space-y-2 rounded-lg border border-dashed border-red-300 bg-red-50/30 p-2.5 dark:border-red-900/50 dark:bg-red-950/20">
+                                {editingAddendum ? (
+                                  <p className="text-xs font-semibold text-red-700 dark:text-red-300">
+                                    Corrigindo aditivo nº {editingAddendum.number}
+                                  </p>
+                                ) : null}
                                 <div>
                                   <label className={labelClass}>Motivo *</label>
                                   <input
@@ -4082,7 +4129,11 @@ export default function EmpreiteirosPage() {
                                   onClick={() => void handleAddAddendum(link.id)}
                                   className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                 >
-                                  {savingContractLink ? 'Enviando…' : 'Enviar para aprovação'}
+                                  {savingContractLink
+                                    ? 'Enviando…'
+                                    : editingAddendum
+                                      ? 'Reenviar para aprovação'
+                                      : 'Enviar para aprovação'}
                                 </button>
                               </div>
                             ) : null}
