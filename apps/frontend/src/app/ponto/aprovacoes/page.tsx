@@ -42,7 +42,7 @@ import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
 import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
 import { RmApprovalsSection } from './_components/RmApprovalsSection';
-import { MedicaoApprovalsSection } from './_components/MedicaoApprovalsSection';
+import { MedicaoAditivoApprovalsSection } from './_components/MedicaoAditivoApprovalsSection';
 import {
   AprovacoesTabsNav,
   type AprovacaoTabId,
@@ -659,7 +659,7 @@ function AprovacoesPage() {
     if (canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro) {
       tabs.push({
         id: 'medicao',
-        label: 'Medições de Entrega',
+        label: 'Medições de Entrega/Aditivos',
         count: approvalCounts.medicao,
       });
     }
@@ -1401,7 +1401,7 @@ function AprovacoesPage() {
           {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
 
           {canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro && activeTab === 'medicao' && (
-            <MedicaoApprovalsSection />
+            <MedicaoAditivoApprovalsSection />
           )}
 
           <Modal

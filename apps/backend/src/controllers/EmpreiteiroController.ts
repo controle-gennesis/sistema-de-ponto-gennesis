@@ -6,7 +6,11 @@ import { prisma } from '../lib/prisma';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 import { PhotoService } from '../services/PhotoService';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
-import { userHasEmpreiteiroDailyApprovePermission } from '../lib/empreiteiroDailyApprovalAccess';
+import {
+  getEmpreiteiroGestorCostCenterIds,
+  gestorCanDecideForCostCenter,
+  userIsEmpreiteiroApprovalGestor,
+} from '../lib/empreiteiroDailyApprovalAccess';
 
 const photoService = new PhotoService();
 
@@ -59,6 +63,36 @@ function normalizeInstallmentStatus(value: unknown): InstallmentStatus {
 
 type InstallmentDb = Prisma.TransactionClient | typeof prisma;
 
+type AddendumStatus = 'PENDING' | 'APPROVED' | 'CORRECTION';
+
+function normalizeAddendumStatus(raw: unknown): AddendumStatus {
+  const value = String(raw ?? '').toUpperCase();
+  if (value === 'PENDING' || value === 'CORRECTION') return value;
+  return 'APPROVED';
+}
+
+function isAddendumApproved(raw: unknown): boolean {
+  return normalizeAddendumStatus(raw) === 'APPROVED';
+}
+
+/** Como o valor do aditivo entra nas parcelas — guardado até a aprovação. */
+type AddendumApplyPlan = {
+  paymentMode: 'new' | 'redistribute';
+  /** Valores das parcelas novas (só no modo 'new' com aditivo positivo). */
+  installments: number[];
+};
+
+function parseAddendumApplyPlan(raw: unknown): AddendumApplyPlan {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const installments = Array.isArray(value.installments)
+    ? value.installments.map((row) => Number(row)).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  return {
+    paymentMode: value.paymentMode === 'redistribute' ? 'redistribute' : 'new',
+    installments,
+  };
+}
+
 /**
  * Redistribui o saldo do contrato nas parcelas ainda PENDING,
  * para a soma das parcelas bater o valor vigente (planejado + aditivos).
@@ -72,7 +106,7 @@ async function redistributePendingInstallmentAmounts(
     where: { id: empreiteiroContractId },
     select: {
       plannedValue: true,
-      addenda: { select: { amount: true } },
+      addenda: { select: { amount: true, status: true } },
       installments: {
         select: { id: true, number: true, amount: true, status: true },
         orderBy: { number: 'asc' },
@@ -82,10 +116,10 @@ async function redistributePendingInstallmentAmounts(
   if (!link) return;
 
   const base = link.plannedValue != null ? Number(link.plannedValue) : 0;
-  const addendaTotal = (link.addenda || []).reduce(
-    (sum, a) => sum + (a.amount != null ? Number(a.amount) : 0),
-    0
-  );
+  // Aditivo pendente ou devolvido ainda não vale: só os aprovados entram no valor vigente.
+  const addendaTotal = (link.addenda || [])
+    .filter((a) => isAddendumApproved(a.status))
+    .reduce((sum, a) => sum + (a.amount != null ? Number(a.amount) : 0), 0);
   const contractValue = Number((base + addendaTotal).toFixed(2));
   if (!(contractValue > 0)) return;
 
@@ -388,6 +422,9 @@ function serializeAddendum(row: {
   servicesRemoved: string | null;
   files: Prisma.JsonValue;
   approvedByName: string | null;
+  status?: string | null;
+  correctionNote?: string | null;
+  approvedAt?: Date | null;
   createdBy: string | null;
   createdAt: Date;
 }) {
@@ -401,6 +438,9 @@ function serializeAddendum(row: {
     servicesRemoved: row.servicesRemoved,
     files: Array.isArray(row.files) ? row.files : [],
     approvedByName: row.approvedByName,
+    status: normalizeAddendumStatus(row.status),
+    correctionNote: row.correctionNote ?? null,
+    approvedAt: row.approvedAt ?? null,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
   };
@@ -754,6 +794,9 @@ type ContractLinkRow = {
     servicesRemoved: string | null;
     files: Prisma.JsonValue;
     approvedByName: string | null;
+    status?: string | null;
+    correctionNote?: string | null;
+    approvedAt?: Date | null;
     createdBy: string | null;
     createdAt: Date;
   }>;
@@ -870,8 +913,10 @@ function serializeContractLink(
     row.costCenter?.name || row.contract?.costCenter?.name || '';
   const installments = (row.installments ?? []).map(serializeInstallment);
   const addenda = (row.addenda ?? []).map(serializeAddendum);
+  const approvedAddenda = addenda.filter((a) => a.status === 'APPROVED');
   const baseValue = row.plannedValue != null ? Number(row.plannedValue) : 0;
-  const addendaTotal = addenda.reduce((sum, a) => sum + a.amount, 0);
+  // Só aditivo aprovado altera o valor vigente.
+  const addendaTotal = approvedAddenda.reduce((sum, a) => sum + a.amount, 0);
   const currentValue = Number((baseValue + addendaTotal).toFixed(2));
   return {
     id: row.id,
@@ -882,7 +927,7 @@ function serializeContractLink(
     /** Soma dos aditivos. */
     addendaTotal,
     /** Valor vigente = planejado + aditivos. */
-    currentValue: row.plannedValue != null || addenda.length > 0 ? currentValue : null,
+    currentValue: row.plannedValue != null || approvedAddenda.length > 0 ? currentValue : null,
     location: row.location ?? null,
     contractId: row.contractId ?? null,
     costCenterId: row.costCenterId ?? row.costCenter?.id ?? null,
@@ -899,7 +944,9 @@ function serializeContractLink(
     installmentsReleased: installments.filter((i) => i.status === 'RELEASED').length,
     installmentsPaid: installments.filter((i) => i.status === 'PAID').length,
     addenda,
-    addendaCount: addenda.length,
+    /** Só aprovados (os que valem no contrato). */
+    addendaCount: approvedAddenda.length,
+    addendaPendingCount: addenda.filter((a) => a.status === 'PENDING').length,
     /** Nome do contrato de serviço (não o contrato do sistema). */
     contratoNome: serviceName,
     contractNumber: row.contract?.number ?? '',
@@ -1608,21 +1655,71 @@ async function ensureEmpreiteiroModuleAccess(
   }
 }
 
-/** Fiscal/interno com Controle «Aprovar medições de entrega». Conta de empreita não aprova. */
-async function assertCanApproveDailyMeasurement(req: AuthRequest) {
+/**
+ * Medições de entrega e aditivos: só o gestor do centro de custo aprova (e vê); o administrador vê tudo.
+ * Conta de empreita não aprova. Devolve o escopo: null = administrador (tudo) ou a lista de
+ * centros de custo em que o usuário é gestor.
+ */
+async function resolveEmpreiteiroApprovalScope(req: AuthRequest): Promise<string[] | null> {
   if (!req.user?.id) throw createError('Usuário não autenticado', 401);
-  if (req.user.isAdmin) return;
+  if (req.user.isAdmin) return null;
   const scope = await resolveEmpreiteiroScope(req.user.id);
   if (scope.scoped) {
     throw createError('Sua conta não pode aprovar medições de entrega', 403);
   }
-  const allowed = await userHasEmpreiteiroDailyApprovePermission(req.user.id);
-  if (!allowed) {
+  if (!(await userIsEmpreiteiroApprovalGestor(req.user.id))) {
     throw createError(
-      'Sem permissão para aprovar medições de entrega. Libere em Permissões → Controle → Aprovar medições de entrega.',
+      'Somente o gestor do centro de custo pode aprovar medições de entrega e aditivos',
       403
     );
   }
+  return getEmpreiteiroGestorCostCenterIds(req.user.id);
+}
+
+/** Confere se o usuário pode decidir sobre um item deste centro de custo (admin sempre pode). */
+async function assertCanDecideForCostCenter(
+  req: AuthRequest,
+  costCenterId: string | null | undefined
+) {
+  if (req.user?.isAdmin) return;
+  if (req.user?.id && (await gestorCanDecideForCostCenter(req.user.id, costCenterId))) return;
+  throw createError('Só o gestor do centro de custo deste item pode aprovar ou devolver', 403);
+}
+
+/** Centro de custo do contrato de serviço: o próprio ou, na falta, o do contrato do sistema ligado. */
+const serviceContractCostCenterSelect = {
+  costCenterId: true,
+  contract: { select: { costCenterId: true } },
+} as const;
+
+function effectiveServiceCostCenterId(
+  link:
+    | { costCenterId: string | null; contract?: { costCenterId: string | null } | null }
+    | null
+    | undefined
+): string | null {
+  return link?.costCenterId ?? link?.contract?.costCenterId ?? null;
+}
+
+function serviceContractScopeWhere(costCenterIds: string[]): Prisma.EmpreiteiroContractWhereInput {
+  return {
+    OR: [
+      { costCenterId: { in: costCenterIds } },
+      { costCenterId: null, contract: { costCenterId: { in: costCenterIds } } },
+    ],
+  };
+}
+
+function measurementScopeWhere(
+  costCenterIds: string[]
+): Prisma.EmpreiteiroDailyMeasurementWhereInput {
+  return {
+    OR: [
+      { empreiteiroContract: { is: serviceContractScopeWhere(costCenterIds) } },
+      // Medição sem contrato de serviço: usa o contrato do sistema.
+      { empreiteiroContractId: null, contract: { costCenterId: { in: costCenterIds } } },
+    ],
+  };
 }
 
 function assertTeamPhotoPresent(teamPhoto: TeamPhotoStored | null) {
@@ -2652,10 +2749,13 @@ export class EmpreiteiroController {
     }
   }
 
-  /** Fila global do fiscal. Sem phase (ou PENDING) devolve só o que aguarda aprovação. */
+  /**
+   * Fila de aprovação. Sem phase (ou PENDING) devolve só o que aguarda aprovação.
+   * O gestor vê só as medições dos centros de custo dele; o administrador vê tudo.
+   */
   async listPendingDailyMeasurements(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await assertCanApproveDailyMeasurement(req);
+      const approvalScope = await resolveEmpreiteiroApprovalScope(req);
       const phase = str(req.query.phase).toUpperCase();
       const statusWhere =
         phase === 'APPROVED'
@@ -2666,7 +2766,10 @@ export class EmpreiteiroController {
               ? {}
               : { status: 'SUBMITTED' as const };
       const items = await prisma.empreiteiroDailyMeasurement.findMany({
-        where: statusWhere,
+        where:
+          approvalScope === null
+            ? statusWhere
+            : { AND: [statusWhere, measurementScopeWhere(approvalScope)] },
         include: {
           ...dailyMeasurementInclude,
           empreiteiro: {
@@ -2904,11 +3007,19 @@ export class EmpreiteiroController {
   async approveDailyMeasurement(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id, measurementId } = req.params;
-      await assertCanApproveDailyMeasurement(req);
+      await resolveEmpreiteiroApprovalScope(req);
       const item = await prisma.empreiteiroDailyMeasurement.findFirst({
         where: { id: measurementId, empreiteiroId: id },
+        include: {
+          empreiteiroContract: { select: serviceContractCostCenterSelect },
+          contract: { select: { costCenterId: true } },
+        },
       });
       if (!item) throw createError('Medição não encontrada', 404);
+      await assertCanDecideForCostCenter(
+        req,
+        effectiveServiceCostCenterId(item.empreiteiroContract) ?? item.contract?.costCenterId
+      );
       const status = normalizeDailyStatus((item as { status?: string | null }).status);
       if (status === 'APPROVED') {
         throw createError('Esta medição já está aprovada', 400);
@@ -2965,11 +3076,19 @@ export class EmpreiteiroController {
   async registerDailyMeasurementExecution(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id, measurementId } = req.params;
-      await assertCanApproveDailyMeasurement(req);
+      await resolveEmpreiteiroApprovalScope(req);
       const item = await prisma.empreiteiroDailyMeasurement.findFirst({
         where: { id: measurementId, empreiteiroId: id },
+        include: {
+          empreiteiroContract: { select: serviceContractCostCenterSelect },
+          contract: { select: { costCenterId: true } },
+        },
       });
       if (!item) throw createError('Medição não encontrada', 404);
+      await assertCanDecideForCostCenter(
+        req,
+        effectiveServiceCostCenterId(item.empreiteiroContract) ?? item.contract?.costCenterId
+      );
       const status = normalizeDailyStatus((item as { status?: string | null }).status);
       if (status !== 'APPROVED') {
         throw createError('Aprove a medição antes de dar baixa no executado', 400);
@@ -3128,7 +3247,6 @@ export class EmpreiteiroController {
         new Date();
       const servicesAdded = optionalStr(req.body?.servicesAdded);
       const servicesRemoved = optionalStr(req.body?.servicesRemoved);
-      const approvedByName = optionalStr(req.body?.approvedByName ?? req.body?.approvedBy);
       const files = parsePaymentFiles(req.body?.files);
       const paymentMode =
         req.body?.paymentMode === 'redistribute' || req.body?.redistributeInstallments === true
@@ -3146,11 +3264,16 @@ export class EmpreiteiroController {
       if (paymentMode === 'redistribute' && openInstallments.length === 0) {
         throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
       }
-      const redistributed =
-        paymentMode === 'redistribute'
-          ? splitAddendumAcrossInstallments(openInstallments, amountNum)
-          : [];
+      if (paymentMode === 'redistribute') {
+        // Só valida (valor reduzido que zeraria parcela). A redistribuição de fato acontece na aprovação.
+        splitAddendumAcrossInstallments(openInstallments, amountNum);
+      }
 
+      // O aditivo nasce PENDENTE: não altera valor do contrato nem parcelas até ser aprovado.
+      const applyPlan: AddendumApplyPlan = {
+        paymentMode,
+        installments: newInstallmentAmounts,
+      };
       const updated = await prisma.$transaction(async (tx) => {
         await tx.empreiteiroContractAddendum.create({
           data: {
@@ -3162,35 +3285,179 @@ export class EmpreiteiroController {
             servicesAdded,
             servicesRemoved,
             files: files as Prisma.InputJsonValue,
-            approvedByName,
+            status: 'PENDING',
+            applyPlan: applyPlan as unknown as Prisma.InputJsonValue,
             createdBy: req.user?.id || null,
           },
         });
-        if (newInstallmentAmounts.length > 0) {
+        return tx.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
+      });
+
+      const counts = await measurementCountsForEmpreiteiro(id);
+      res.json({
+        success: true,
+        data: serializeEmpreiteiro(updated, counts),
+        message: `Aditivo nº ${nextNumber} enviado para aprovação`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Fila de aprovação de aditivos. O gestor vê só os aditivos dos centros de custo dele;
+   * o administrador vê tudo.
+   */
+  async listPendingAddenda(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const approvalScope = await resolveEmpreiteiroApprovalScope(req);
+      const phase = str(req.query.phase).toUpperCase();
+      const statusWhere =
+        phase === 'APPROVED'
+          ? { status: 'APPROVED' }
+          : phase === 'REJECTED' || phase === 'CORRECTION'
+            ? { status: 'CORRECTION' }
+            : phase === 'ALL'
+              ? {}
+              : { status: 'PENDING' };
+      const items = await prisma.empreiteiroContractAddendum.findMany({
+        where:
+          approvalScope === null
+            ? statusWhere
+            : {
+                AND: [
+                  statusWhere,
+                  { empreiteiroContract: serviceContractScopeWhere(approvalScope) },
+                ],
+              },
+        include: {
+          empreiteiroContract: {
+            select: {
+              id: true,
+              name: true,
+              empreiteiro: { select: { id: true, name: true, specialty: true } },
+            },
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+      });
+      const userIds = [
+        ...new Set(
+          items
+            .map((row) => row.createdBy)
+            .filter((value): value is string => Boolean(value))
+        ),
+      ];
+      const users = userIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const userNameById = new Map(users.map((user) => [user.id, user.name]));
+      res.json({
+        success: true,
+        data: items.map((row) => {
+          const plan = parseAddendumApplyPlan(row.applyPlan);
+          return {
+            ...serializeAddendum(row),
+            empreiteiroId: row.empreiteiroContract.empreiteiro.id,
+            empreiteiroContractId: row.empreiteiroContractId,
+            serviceName: row.empreiteiroContract.name,
+            empreiteiro: {
+              id: row.empreiteiroContract.empreiteiro.id,
+              name: row.empreiteiroContract.empreiteiro.name,
+              specialty: row.empreiteiroContract.empreiteiro.specialty,
+            },
+            createdByName: row.createdBy ? userNameById.get(row.createdBy) || null : null,
+            paymentMode: plan.paymentMode,
+            installments: plan.installments,
+          };
+        }),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Aprova o aditivo e só então aplica valor, parcelas e anexos no contrato de serviço. */
+  async approveAddendum(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await resolveEmpreiteiroApprovalScope(req);
+      const { id, linkId, addendumId } = req.params;
+      const addendum = await prisma.empreiteiroContractAddendum.findFirst({
+        where: {
+          id: addendumId,
+          empreiteiroContractId: linkId,
+          empreiteiroContract: { empreiteiroId: id },
+        },
+        include: { empreiteiroContract: { select: serviceContractCostCenterSelect } },
+      });
+      if (!addendum) throw createError('Aditivo não encontrado', 404);
+      await assertCanDecideForCostCenter(
+        req,
+        effectiveServiceCostCenterId(addendum.empreiteiroContract)
+      );
+      if (normalizeAddendumStatus(addendum.status) !== 'PENDING') {
+        throw createError('Só é possível aprovar aditivo que está aguardando aprovação', 400);
+      }
+
+      const approver = req.user?.id
+        ? await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } })
+        : null;
+
+      await prisma.$transaction(async (tx) => {
+        const link = await tx.empreiteiroContract.findFirst({
+          where: { id: linkId, empreiteiroId: id },
+          include: {
+            installments: {
+              select: { id: true, number: true, amount: true, status: true, note: true },
+              orderBy: { number: 'asc' },
+            },
+          },
+        });
+        if (!link) throw createError('Contrato de serviço não encontrado', 404);
+
+        const plan = parseAddendumApplyPlan(addendum.applyPlan);
+        const amountNum = Number(addendum.amount);
+
+        if (plan.paymentMode === 'redistribute') {
+          const open = link.installments.filter(
+            (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
+          );
+          if (open.length === 0) {
+            throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
+          }
+          for (const row of splitAddendumAcrossInstallments(open, amountNum)) {
+            await tx.empreiteiroContractInstallment.update({
+              where: { id: row.id },
+              data: {
+                amount: new Prisma.Decimal((row.amountCents / 100).toFixed(2)),
+                note: row.note,
+              },
+            });
+          }
+        } else if (plan.installments.length > 0) {
           let nextParcel = link.installments.reduce((max, row) => Math.max(max, row.number), 0);
-          for (const parcelAmount of newInstallmentAmounts) {
+          for (const parcelAmount of plan.installments) {
             nextParcel += 1;
             await tx.empreiteiroContractInstallment.create({
               data: {
                 empreiteiroContractId: linkId,
                 number: nextParcel,
                 amount: new Prisma.Decimal(parcelAmount.toFixed(2)),
-                dueDate: effectiveDate,
+                dueDate: addendum.effectiveDate,
                 status: 'PENDING',
-                note: `Aditivo nº ${nextNumber}`,
+                note: `Aditivo nº ${addendum.number}`,
               },
             });
           }
         }
-        for (const row of redistributed) {
-          await tx.empreiteiroContractInstallment.update({
-            where: { id: row.id },
-            data: {
-              amount: new Prisma.Decimal((row.amountCents / 100).toFixed(2)),
-              note: row.note,
-            },
-          });
-        }
+
+        const files = parsePaymentFiles(addendum.files);
         if (files.length > 0) {
           const current = Array.isArray(link.files) ? link.files : [];
           const existingUrls = new Set(
@@ -3212,25 +3479,53 @@ export class EmpreiteiroController {
             data: { files: merged as Prisma.InputJsonValue },
           });
         }
-        return tx.empreiteiro.findUniqueOrThrow({
-          where: { id },
-          include: empreiteiroInclude,
+
+        await tx.empreiteiroContractAddendum.update({
+          where: { id: addendumId },
+          data: {
+            status: 'APPROVED',
+            approvedAt: new Date(),
+            approvedById: req.user?.id || null,
+            approvedByName: approver?.name || null,
+            correctionNote: null,
+          },
         });
       });
 
-      const counts = await measurementCountsForEmpreiteiro(id);
-      res.json({
-        success: true,
-        data: serializeEmpreiteiro(updated, counts),
-        message:
-          paymentMode === 'redistribute'
-            ? `Aditivo nº ${nextNumber} lançado e redistribuído nas parcelas em aberto`
-            : newInstallmentAmounts.length > 1
-              ? `Aditivo nº ${nextNumber} lançado em ${newInstallmentAmounts.length} parcelas`
-              : newInstallmentAmounts.length === 1
-                ? `Aditivo nº ${nextNumber} lançado e parcela criada`
-                : `Aditivo nº ${nextNumber} lançado`,
+      res.json({ success: true, message: `Aditivo nº ${addendum.number} aprovado` });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Devolve o aditivo com o motivo. Nada foi aplicado no contrato, então não há o que desfazer. */
+  async returnAddendum(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await resolveEmpreiteiroApprovalScope(req);
+      const { id, linkId, addendumId } = req.params;
+      const note = str(req.body?.correctionNote ?? req.body?.note);
+      if (!note) throw createError('Explique o que precisa ser corrigido', 400);
+      const addendum = await prisma.empreiteiroContractAddendum.findFirst({
+        where: {
+          id: addendumId,
+          empreiteiroContractId: linkId,
+          empreiteiroContract: { empreiteiroId: id },
+        },
+        include: { empreiteiroContract: { select: serviceContractCostCenterSelect } },
       });
+      if (!addendum) throw createError('Aditivo não encontrado', 404);
+      await assertCanDecideForCostCenter(
+        req,
+        effectiveServiceCostCenterId(addendum.empreiteiroContract)
+      );
+      if (normalizeAddendumStatus(addendum.status) !== 'PENDING') {
+        throw createError('Só é possível devolver aditivo que está aguardando aprovação', 400);
+      }
+      await prisma.empreiteiroContractAddendum.update({
+        where: { id: addendumId },
+        data: { status: 'CORRECTION', correctionNote: note },
+      });
+      res.json({ success: true, message: `Aditivo nº ${addendum.number} devolvido` });
     } catch (error) {
       next(error);
     }
@@ -3303,15 +3598,23 @@ export class EmpreiteiroController {
   async returnDailyMeasurement(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id, measurementId } = req.params;
-      await assertCanApproveDailyMeasurement(req);
+      await resolveEmpreiteiroApprovalScope(req);
       const note = str(req.body?.correctionNote ?? req.body?.note);
       if (!note) throw createError('Informe o que precisa ser corrigido', 400);
       if (note.length > 2000) throw createError('Observação muito longa', 400);
 
       const item = await prisma.empreiteiroDailyMeasurement.findFirst({
         where: { id: measurementId, empreiteiroId: id },
+        include: {
+          empreiteiroContract: { select: serviceContractCostCenterSelect },
+          contract: { select: { costCenterId: true } },
+        },
       });
       if (!item) throw createError('Medição não encontrada', 404);
+      await assertCanDecideForCostCenter(
+        req,
+        effectiveServiceCostCenterId(item.empreiteiroContract) ?? item.contract?.costCenterId
+      );
       const status = normalizeDailyStatus((item as { status?: string | null }).status);
       if (status === 'APPROVED') {
         throw createError('Medição aprovada não pode ser devolvida', 400);

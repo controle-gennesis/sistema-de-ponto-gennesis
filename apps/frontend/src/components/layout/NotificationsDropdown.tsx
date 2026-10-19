@@ -236,7 +236,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canApproveEmpreiteiroDaily && counts.medicao > 0) {
       list.push({
         id: 'medicao',
-        title: 'Medições de entrega',
+        title: 'Medições de entrega/Aditivos',
         description: 'Aguardando aprovação',
         count: counts.medicao,
         href: '/ponto/aprovacoes?tab=medicao',

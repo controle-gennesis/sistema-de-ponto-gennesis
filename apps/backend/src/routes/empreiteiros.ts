@@ -74,6 +74,9 @@ router.get('/linkable-users', (req, res, next) =>
 router.get('/daily-measurements/pending', (req, res, next) =>
   controller.listPendingDailyMeasurements(req as any, res as any, next)
 );
+router.get('/addenda/pending', (req, res, next) =>
+  controller.listPendingAddenda(req as any, res as any, next)
+);
 router.post('/:id/contracts', (req, res, next) =>
   controller.addContract(req as any, res as any, next)
 );
@@ -97,6 +100,12 @@ router.post('/:id/contracts/:linkId/addenda', (req, res, next) =>
 );
 router.delete('/:id/contracts/:linkId/addenda/:addendumId', (req, res, next) =>
   controller.deleteAddendum(req as any, res as any, next)
+);
+router.post('/:id/contracts/:linkId/addenda/:addendumId/approve', (req, res, next) =>
+  controller.approveAddendum(req as any, res as any, next)
+);
+router.post('/:id/contracts/:linkId/addenda/:addendumId/return', (req, res, next) =>
+  controller.returnAddendum(req as any, res as any, next)
 );
 router.get('/:id/daily-measurements', (req, res, next) =>
   controller.listDailyMeasurements(req as any, res as any, next)

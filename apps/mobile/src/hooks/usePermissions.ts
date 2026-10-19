@@ -138,8 +138,8 @@ export function usePermissions() {
   const canApproveOcGestor = isElevated || dpApprovalContractIds.length > 0;
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
-  const canApproveEmpreiteiroDaily =
-    isElevated || can(pathToModuleKey('/ponto/controle/aprovar-medicoes-empreita'));
+  /** Medições de entrega e aditivos: só o gestor do centro de custo (a API filtra a fila) e o administrador. */
+  const canApproveEmpreiteiroDaily = isElevated || dpApprovalContractIds.length > 0;
 
   const canSeeAprovacoes =
     canAccessDpApproverPages ||

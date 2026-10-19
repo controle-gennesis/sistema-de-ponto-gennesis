@@ -96,6 +96,9 @@ interface ServiceAddendum {
   servicesRemoved?: string | null;
   files?: PaymentFile[];
   approvedByName?: string | null;
+  /** PENDING (aguarda aprovação) | APPROVED | CORRECTION (devolvido). Só APPROVED vale no contrato. */
+  status?: 'PENDING' | 'APPROVED' | 'CORRECTION' | string;
+  correctionNote?: string | null;
   createdAt?: string;
 }
 
@@ -106,6 +109,8 @@ interface EmpreiteiroContractLink {
   description?: string | null;
   plannedValue?: number | null;
   addendaTotal?: number | null;
+  /** Aditivos aguardando aprovação (ainda não valem no contrato). */
+  addendaPendingCount?: number;
   currentValue?: number | null;
   location?: string | null;
   contractId?: string | null;
@@ -533,8 +538,6 @@ export default function EmpreiteirosPage() {
   const [addendumAmount, setAddendumAmount] = useState('');
   const [addendumDate, setAddendumDate] = useState('');
   const [addendumServicesAdded, setAddendumServicesAdded] = useState('');
-  const [addendumServicesRemoved, setAddendumServicesRemoved] = useState('');
-  const [addendumApprovedBy, setAddendumApprovedBy] = useState('');
   const [addendumFiles, setAddendumFiles] = useState<PaymentFile[]>([]);
   /** new = nova condição (à vista ou parcelado) · redistribute = divide nas parcelas em aberto */
   const [addendumPayMode, setAddendumPayMode] = useState<'new' | 'redistribute'>('new');
@@ -1053,8 +1056,6 @@ export default function EmpreiteirosPage() {
     setAddendumAmount('');
     setAddendumDate('');
     setAddendumServicesAdded('');
-    setAddendumServicesRemoved('');
-    setAddendumApprovedBy('');
     setAddendumFiles([]);
     setAddendumPayMode('new');
     setAddendumScheduleMode('avista');
@@ -1135,8 +1136,6 @@ export default function EmpreiteirosPage() {
         amount,
         effectiveDate: addendumDate || null,
         servicesAdded: addendumServicesAdded.trim() || null,
-        servicesRemoved: addendumServicesRemoved.trim() || null,
-        approvedByName: addendumApprovedBy.trim() || null,
         files: addendumFiles,
         paymentMode: addendumPayMode,
         ...(installments ? { installments } : {}),
@@ -3669,6 +3668,11 @@ export default function EmpreiteirosPage() {
                             (link.addendaCount || 0) > 0
                               ? ` · original ${formatMoneyBr(link.plannedValue) || '—'}`
                               : ''}
+                            {(link.addendaPendingCount || 0) > 0
+                              ? ` · ${link.addendaPendingCount} aditivo${
+                                  (link.addendaPendingCount || 0) === 1 ? '' : 's'
+                                } aguardando aprovação`
+                              : ''}
                           </p>
 
                           <>
@@ -3696,8 +3700,6 @@ export default function EmpreiteirosPage() {
                                     setAddendumAmount('');
                                     setAddendumDate('');
                                     setAddendumServicesAdded('');
-                                    setAddendumServicesRemoved('');
-                                    setAddendumApprovedBy('');
                                     setAddendumFiles([]);
                                     setAddendumPayMode('new');
                                     setAddendumScheduleMode('avista');
@@ -3742,6 +3744,15 @@ export default function EmpreiteirosPage() {
                                         <span className="text-gray-400">
                                           {formatDateBr(ad.effectiveDate)}
                                         </span>
+                                        {ad.status === 'PENDING' ? (
+                                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                            Aguardando aprovação
+                                          </span>
+                                        ) : ad.status === 'CORRECTION' ? (
+                                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                                            Devolvido
+                                          </span>
+                                        ) : null}
                                         {canManageCadastro && ad.number === lastAddendumNumber ? (
                                           <button
                                             type="button"
@@ -3768,6 +3779,9 @@ export default function EmpreiteirosPage() {
                                           : null,
                                         ad.approvedByName
                                           ? `Aprovado por: ${ad.approvedByName}`
+                                          : null,
+                                        ad.status === 'CORRECTION' && ad.correctionNote
+                                          ? `Motivo da devolução: ${ad.correctionNote}`
                                           : null,
                                       ]
                                         .filter(Boolean)
@@ -3854,25 +3868,6 @@ export default function EmpreiteirosPage() {
                                   />
                                 </div>
                                 <div>
-                                  <label className={labelClass}>Serviços retirados</label>
-                                  <input
-                                    type="text"
-                                    value={addendumServicesRemoved}
-                                    onChange={(e) => setAddendumServicesRemoved(e.target.value)}
-                                    className={inputClass}
-                                  />
-                                </div>
-                                <div>
-                                  <label className={labelClass}>Responsável pela aprovação</label>
-                                  <input
-                                    type="text"
-                                    value={addendumApprovedBy}
-                                    onChange={(e) => setAddendumApprovedBy(e.target.value)}
-                                    className={inputClass}
-                                    placeholder=""
-                                  />
-                                </div>
-                                <div>
                                   <label className={labelClass}>Contrato atualizado</label>
                                   <input
                                     type="file"
@@ -3903,7 +3898,7 @@ export default function EmpreiteirosPage() {
                                         : 'Anexar o novo contrato atualizado'}
                                     </button>
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                      O arquivo aparece em Contrato, junto com os que já estão anexados.
+                                      Depois de aprovado, o arquivo aparece em Contrato, junto com os que já estão anexados.
                                     </p>
                                   </div>
                                 </div>
@@ -4087,7 +4082,7 @@ export default function EmpreiteirosPage() {
                                   onClick={() => void handleAddAddendum(link.id)}
                                   className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                 >
-                                  {savingContractLink ? 'Salvando…' : 'Lançar aditivo'}
+                                  {savingContractLink ? 'Enviando…' : 'Enviar para aprovação'}
                                 </button>
                               </div>
                             ) : null}

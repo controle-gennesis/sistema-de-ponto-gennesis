@@ -99,6 +99,29 @@ export function formatOpenFuelRequestBlockMessage(params: {
   return lines.filter((line, i, arr) => line !== '' || arr[i - 1] !== '').join('\n').trim();
 }
 
+/** Placa sem espaços/hífen e em maiúsculas, para comparar «ABC-1D23» com «abc1d23». */
+export function normalizeVehiclePlate(plate: string | null | undefined): string {
+  return String(plate ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+export function formatOpenFuelVehicleBlockMessage(params: {
+  vehiclePlate: string;
+  requests: Array<{ displayNumber: number; status: FuelRefuelRequestStatus }>;
+}): string {
+  const lines = [
+    `O veículo ${params.vehiclePlate} já tem abastecimento em andamento. Aguarde a conclusão para solicitar novamente.`,
+    '',
+  ];
+  for (const row of params.requests) {
+    lines.push(`Solicitação #${row.displayNumber}`);
+    lines.push(`Fase atual: ${fuelOpenRequestPhaseLabel(row.status)}`);
+    lines.push('');
+  }
+  return lines.filter((line, i, arr) => line !== '' || arr[i - 1] !== '').join('\n').trim();
+}
+
 export function formatFuelWaitingLine(displayNumber: number, status: FuelRefuelRequestStatus): string {
   const label = STATUS_WAITING_LABEL[status] ?? status;
   return `• Solicitação #${displayNumber}: ${label}`;

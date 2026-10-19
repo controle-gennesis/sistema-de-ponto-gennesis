@@ -18,6 +18,8 @@ import { assertWeeklyQuotaAvailable } from '../lib/fuelWeeklyQuota';
 import {
   FUEL_OPEN_REQUEST_STATUSES,
   formatOpenFuelRequestBlockMessage,
+  formatOpenFuelVehicleBlockMessage,
+  normalizeVehiclePlate,
 } from '../lib/fuelRefuelChatNotify';
 import { createError } from '../middleware/errorHandler';
 import {
@@ -192,6 +194,29 @@ export class FuelRefuelRequestService {
     });
   }
 
+  /**
+   * Solicitações em aberto (Gestor, Suprimentos ou Liberado) deste veículo, de qualquer condutor.
+   * A placa é comparada sem hífen/espaço e sem diferença de maiúscula.
+   */
+  async findOpenRequestsForVehicle(vehiclePlate: string | null | undefined) {
+    const normalized = normalizeVehiclePlate(vehiclePlate);
+    if (!normalized) return [];
+
+    const rows = await prisma.fuelRefuelRequest.findMany({
+      where: { status: { in: FUEL_OPEN_REQUEST_STATUSES } },
+      orderBy: { requestedAt: 'desc' },
+      select: {
+        id: true,
+        displayNumber: true,
+        status: true,
+        vehiclePlate: true,
+        driverName: true,
+        requesterId: true,
+      },
+    });
+    return rows.filter((row) => normalizeVehiclePlate(row.vehiclePlate) === normalized);
+  }
+
   async create(input: CreateFuelRefuelRequestInput) {
     const costCenter = input.costCenter?.trim() || null;
     const contractId = input.contractId?.trim() || null;
@@ -209,6 +234,18 @@ export class FuelRefuelRequestService {
         formatOpenFuelRequestBlockMessage({
           driverName: input.driverName.trim(),
           requests: openRequests,
+        }),
+        400,
+      );
+    }
+
+    // Um veículo não pode ter duas solicitações em aberto, mesmo com condutores diferentes.
+    const openForVehicle = await this.findOpenRequestsForVehicle(input.vehiclePlate);
+    if (openForVehicle.length) {
+      throw createError(
+        formatOpenFuelVehicleBlockMessage({
+          vehiclePlate: input.vehiclePlate.trim().toUpperCase(),
+          requests: openForVehicle,
         }),
         400,
       );

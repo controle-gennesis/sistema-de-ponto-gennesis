@@ -109,9 +109,17 @@ export function useApprovalNotificationCounts() {
     queryKey: ['empreiteiro-daily-measurements-pending', 'count'],
     enabled: enabled && canApproveEmpreiteiroDaily,
     queryFn: async () => {
-      const res = await api.get('/empreiteiros/daily-measurements/pending');
-      const rows = res.data?.data;
-      return Array.isArray(rows) ? rows.length : 0;
+      // A aba "Medições de Entrega/Aditivos" soma as duas filas pendentes.
+      const [measurements, addenda] = await Promise.all([
+        api.get('/empreiteiros/daily-measurements/pending'),
+        api.get('/empreiteiros/addenda/pending'),
+      ]);
+      const measurementRows = measurements.data?.data;
+      const addendaRows = addenda.data?.data;
+      return (
+        (Array.isArray(measurementRows) ? measurementRows.length : 0) +
+        (Array.isArray(addendaRows) ? addendaRows.length : 0)
+      );
     },
     refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,

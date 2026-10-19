@@ -7,6 +7,7 @@ import {
 } from '../lib/employeeCpfLookup';
 import {
   formatOpenFuelRequestBlockMessage,
+  formatOpenFuelVehicleBlockMessage,
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
@@ -492,6 +493,20 @@ export class GennecyFuelFlowService {
         const parts = body.split(/[—\-–]/).map((s) => s.trim());
         const plate = parts[0] || body;
         const description = parts.slice(1).join(' — ') || undefined;
+
+        // Veículo com solicitação em aberto (de qualquer condutor): avisa antes de pedir mais dados.
+        const openForVehicle = await fuelRefuelRequestService.findOpenRequestsForVehicle(plate);
+        if (openForVehicle.length) {
+          await cancelSession(params.chatId, params.userId);
+          return {
+            handled: true,
+            reply: formatOpenFuelVehicleBlockMessage({
+              vehiclePlate: plate.trim().toUpperCase(),
+              requests: openForVehicle,
+            }),
+          };
+        }
+
         await upsertSession(params.chatId, params.userId, 'ASK_VEHICLE_TYPE', {
           ...payload,
           vehiclePlate: plate,
