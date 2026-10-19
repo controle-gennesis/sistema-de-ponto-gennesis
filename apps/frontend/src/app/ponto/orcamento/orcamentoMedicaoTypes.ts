@@ -76,6 +76,8 @@ export interface RotulosColunasMedicao {
   N?: string;
   /** Coluna empolamento / % */
   pct?: string;
+  /** Coluna de detalhes (à esquerda da descrição). Padrão na UI: «DETALHES». */
+  detalhes?: string;
 }
 
 /**

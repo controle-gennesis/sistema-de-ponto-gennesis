@@ -62,7 +62,7 @@ type Props = {
     opts?: { formulaRaw?: string }
   ) => void;
   updateRotuloColunaMedicao?: (
-    campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct',
+    campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct' | 'detalhes',
     rotulo: string
   ) => void;
   updateObservacaoMedicao?: (texto: string) => void;
@@ -99,7 +99,7 @@ type Props = {
  * Larguras da grade: a 1ª linha do thead (item) ocupa a coluna Descrição + colSpan no restante;
  * `<colgroup>` define a grade de fato (w-* nas células sozinho não segura o layout).
  */
-const COLS_MEDIC_PCT = { desc: 44, med: 7 } as const;
+const COLS_MEDIC_PCT = { item: 6, desc: 38, med: 7 } as const;
 
 const colDesc = 'min-w-[18rem] sm:min-w-[22rem]';
 const colMed = 'min-w-[2.75rem] max-w-[4.25rem]';
@@ -117,6 +117,8 @@ const thRest =
 /** Só no thead da grade de colunas (não reutilizar em linhas de seção do tbody). */
 const thFirstSticky = `${memorialThStickySecondBase} ${thFirst}`;
 const thRestSticky = `${memorialThStickySecondBase} ${thRest}`;
+/** Coluna estreita à esquerda (nº do item): células vazias abaixo da faixa do item. */
+const tdItemCol = `${MEMORIAL_ROW_H} border-b border-r border-gray-200 bg-white p-0 dark:border-gray-600 dark:bg-gray-900`;
 const tdFirst =
   `${MEMORIAL_ROW_H} px-3 sm:px-3.5 py-0 align-middle text-left border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colDesc}`;
 const tdRest =
@@ -3040,21 +3042,24 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       onClick={onAbrirMenu}
       onContextMenu={onAbrirMenu}
     >
-      {/* Descrição: nº do item (colorido) | texto — até a coluna C */}
+      {/* Nº do item (colorido) em coluna própria */}
+      <th
+        className={`sticky top-0 z-30 ${MEMORIAL_TITLE_ROW_MIN_H} !p-0 align-middle !border-x-0 !border-t-0 !border-b !border-r !border-gray-200 dark:!border-gray-600 !shadow-none ${
+          estiloTitulo ? '' : 'bg-red-600 text-white dark:bg-red-950/90'
+        }`}
+        style={estiloTitulo}
+        aria-label={`Item ${itemRotulo || '—'}`}
+      >
+        <div className="flex h-full min-h-[2.75rem] w-full items-center justify-center px-1 text-sm font-bold tabular-nums">
+          {itemRotulo || '—'}
+        </div>
+      </th>
+      {/* Descrição do item — até a coluna C */}
       <th
         className={`sticky top-0 z-30 ${MEMORIAL_TITLE_ROW_MIN_H} !p-0 align-middle text-sm font-bold !border-x-0 !border-t-0 !border-b !border-r !border-gray-200 dark:!border-gray-600 !bg-white dark:!bg-gray-900 !shadow-none ${colDesc}`}
       >
         <div className="flex h-full min-h-[2.75rem] w-full items-stretch">
-          <div
-            className={`flex shrink-0 items-center justify-center px-2.5 font-bold tabular-nums sm:min-w-[3.5rem] sm:px-3 ${
-              estiloTitulo ? '' : 'bg-red-600 text-white dark:bg-red-950/90'
-            }`}
-            style={estiloTitulo}
-            aria-label={`Item ${itemRotulo || '—'}`}
-          >
-            {itemRotulo || '—'}
-          </div>
-          <div className="flex min-w-0 flex-1 items-center border-l border-gray-200 bg-white px-3 py-2.5 dark:border-gray-600 dark:bg-gray-900 sm:px-3.5">
+          <div className="flex min-w-0 flex-1 items-center bg-white px-3 py-2.5 dark:bg-gray-900 sm:px-3.5">
             <p className="min-w-0 flex-1 whitespace-normal break-words text-left text-sm font-bold uppercase leading-relaxed text-gray-900 dark:text-gray-100">
               {itemDescricao}
             </p>
@@ -3219,6 +3224,21 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
     return (
       <tr className={gradeTableRowTrCls} data-linha-medicao={LINHA_ROTULOS}>
+        <th className={thRestSticky} style={stickyHeaderTopStyle}>
+          <MemorialCampoLocal
+            committedValue={dim.rotulosColunas?.detalhes ?? 'DETALHES'}
+            onCommit={(raw) => updateRotuloColunaMedicao?.('detalhes', raw.trim() || 'DETALHES')}
+            disabled={readOnly || !updateRotuloColunaMedicao}
+            editando={rotuloAberto === `${LINHA_ROTULOS}:detalhes`}
+            onPedirEdicao={() => setRotuloAberto(`${LINHA_ROTULOS}:detalhes`)}
+            onBlur={() =>
+              setRotuloAberto((atual) => (atual === `${LINHA_ROTULOS}:detalhes` ? null : atual))
+            }
+            className={inputThRotuloCls}
+            placeholder="DETALHES"
+            ariaLabel="Rótulo da coluna Detalhes"
+          />
+        </th>
         <CelulaCabecalho
           as="th"
           col={0}
@@ -3306,11 +3326,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       <tr
         key={idx}
         data-linha-medicao={idx}
-        className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
+        className={gradeTableRowTrCls}
         onMouseDown={ehCargaEntulho ? undefined : marcarPressaoLinha}
         onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
+        <td className={thRest} aria-hidden />
         <CelulaCabecalho
           as="td"
           col={0}
@@ -3617,6 +3638,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onClick={e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
+        <td className={tdItemCol} aria-hidden />
         <td className={tdFirstBody} data-col-medicao={0}>
           {marcasCelula(idx, 'descricao')}
           <div className={caixaFocoDescricaoCls}>
@@ -3798,6 +3820,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       : [];
     return (
       <tr className={gradeTableRowTrCls}>
+        <td className={tdItemCol} aria-hidden />
         <td colSpan={8} className={`${tdFirst} !border-r-0`}>
           <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
             Total
@@ -3854,9 +3877,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     >
       <div ref={tabelaScrollRef} className="relative overflow-x-auto">
       <table
-        className={`w-full min-w-[56rem] table-fixed border-separate border-spacing-0 text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}
+        className={`w-full min-w-[60rem] table-fixed border-separate border-spacing-0 text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}
       >
         <colgroup>
+          <col style={{ width: `${COLS_MEDIC_PCT.item}%` }} />
           <col style={{ width: `${COLS_MEDIC_PCT.desc}%` }} />
           {Array.from({ length: 8 }, (_, i) => (
             <col key={i} style={{ width: `${COLS_MEDIC_PCT.med}%` }} />
@@ -3949,7 +3973,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             <tbody>
               <tr className={gradeTableRowTrCls}>
                 <td
-                  colSpan={colEmpty}
+                  colSpan={colEmpty + 1}
                   className="border-b border-gray-200 bg-slate-50/60 px-6 py-8 text-center dark:border-gray-600 dark:bg-gray-900/50"
                 >
                   <div className="flex justify-center">
@@ -3982,7 +4006,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <tbody>
             <tr className={gradeTableRowTrCls}>
               <td
-                colSpan={colEmpty}
+                colSpan={colEmpty + 1}
                 className="border-b border-gray-200 bg-slate-50/40 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/40"
               >
                 <p className="mx-auto max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">

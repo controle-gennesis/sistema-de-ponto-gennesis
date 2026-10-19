@@ -38,6 +38,8 @@ export type OrcamentoExcelRowKind =
   | 'item'
   | 'titulo'
   | 'itemBarra'
+  /** Linha de composição no analítico (usa a cor de composição da aparência). */
+  | 'composicao'
   | 'subtitulo'
   | 'cabecalho'
   | 'total'
@@ -96,6 +98,8 @@ export type OrcamentoExcelSheetSpec = {
   showHeader?: boolean;
   /** Cores desta aba. Se omitido, usa a aparência geral do arquivo. */
   aparencia?: OrcamentoExcelAparencia;
+  /** Tamanho da fonte (pt) das linhas de item e do cabeçalho das colunas. */
+  tamanhos?: { item?: number; header?: number };
 };
 
 export type OrcamentoExcelAparencia = {
@@ -108,6 +112,9 @@ export type OrcamentoExcelAparencia = {
   /** Faixa do item na memória de cálculo. */
   itemFundo?: string;
   itemTexto?: string;
+  /** Linha de composição no analítico. */
+  composicaoFundo?: string;
+  composicaoTexto?: string;
   fonte?: string;
 };
 
@@ -231,6 +238,10 @@ async function fillWorkbook(
     const headerFg = hexToArgb(aparencia?.headerTexto, HEADER_FG);
     const itemBg = hexToArgb(aparencia?.itemFundo, tituloBg);
     const itemFg = hexToArgb(aparencia?.itemTexto, tituloFg);
+    const composicaoBg = hexToArgb(aparencia?.composicaoFundo, 'FFF1F5F9');
+    const composicaoFg = hexToArgb(aparencia?.composicaoTexto, TITLE_TEXT);
+    const tamItem = spec.tamanhos?.item ?? 10;
+    const tamHeader = spec.tamanhos?.header ?? 8;
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
     const cabecalho = spec.cabecalho && colCount >= 14 ? spec.cabecalho : undefined;
@@ -290,7 +301,7 @@ async function fillWorkbook(
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
         cell.value = col.header;
-        cell.font = { name: fontName, size: 8, bold: true, color: { argb: headerFg } };
+        cell.font = { name: fontName, size: tamHeader, bold: true, color: { argb: headerFg } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
         cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true, shrinkToFit: false };
         applyThinBorder(cell);
@@ -324,7 +335,7 @@ async function fillWorkbook(
           (mergeTo != null && colunaEhDescricao(spec.columns[mergeTo]?.header))
             ? 'left'
             : 'center';
-        cell.font = { name: fontName, size: 10, color: { argb: TITLE_TEXT } };
+        cell.font = { name: fontName, size: tamItem, color: { argb: TITLE_TEXT } };
         cell.alignment = {
           vertical: 'middle',
           horizontal: alinhamento,
@@ -378,6 +389,9 @@ async function fillWorkbook(
             horizontal: colunaEhDescricao(col?.header) ? 'left' : 'center',
             wrapText: true,
           };
+        } else if (kind === 'composicao') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: composicaoBg } };
+          cell.font = { name: fontName, size: tamItem, bold: true, color: { argb: composicaoFg } };
         } else if (kind === 'subtitulo') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subtituloBg } };
           cell.font = { name: fontName, size: 10, bold: true, color: { argb: subtituloFg } };

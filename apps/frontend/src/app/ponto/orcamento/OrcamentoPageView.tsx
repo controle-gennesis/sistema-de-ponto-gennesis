@@ -13858,7 +13858,7 @@ export function OrcamentoPageView({
 
   const updateRotuloColunaMedicao = (
     itemKey: string,
-    campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct',
+    campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct' | 'detalhes',
     rotulo: string
   ) => {
     if (gradeTravadaRef.current) return;
@@ -14712,6 +14712,7 @@ export function OrcamentoPageView({
     return {
       name: 'Orçamento',
       aparencia: aparenciaMontagem,
+      tamanhos: { item: 11, header: 12 },
       title: 'Orçamento',
       cabecalho: {
         linhas: [
@@ -15128,7 +15129,7 @@ export function OrcamentoPageView({
           formulas[9] = `ROUND(G{r}*H{r},2)`;
         }
       }
-      rows.push({ kind: 'item', values, formulas });
+      rows.push({ kind: l.kind === 'composicao' ? 'composicao' : 'item', values, formulas });
     }
     return {
       name: 'Analítico',
@@ -15392,10 +15393,9 @@ export function OrcamentoPageView({
       });
       rows.push({
         kind: 'cabecalho',
-        merge: [0, 1],
         values: [
+          (rotulos?.detalhes ?? 'DETALHES').trim() || 'DETALHES',
           (rotulos?.descricao ?? 'DESCRIÇÃO:').trim() || 'DESCRIÇÃO:',
-          '',
           rotulos?.C || 'C',
           rotulos?.L || 'L',
           rotulos?.H || 'H',
@@ -15419,10 +15419,9 @@ export function OrcamentoPageView({
           if (ln.cabecalhoSecao) {
             rows.push({
               kind: 'cabecalho',
-              merge: [0, 1],
               values: [
-                descLinha,
                 '',
+                descLinha,
                 rotulos?.C || 'C',
                 rotulos?.L || 'L',
                 rotulos?.H || 'H',
@@ -15451,7 +15450,7 @@ export function OrcamentoPageView({
           if (primeiraLinhaDados < 0) primeiraLinhaDados = rows.length;
           ultimaLinhaDados = rows.length;
           if (linhaMedicaoEstaVazia(ln)) {
-            rows.push({ kind: 'item', merge: [0, 1], values: empty() });
+            rows.push({ kind: 'item', values: empty() });
             continue;
           }
           for (const [campo, formulaRaw] of Object.entries(ln.formulas ?? {})) {
@@ -15462,10 +15461,9 @@ export function OrcamentoPageView({
           }
           rows.push({
             kind: 'item',
-            merge: [0, 1],
             values: [
-              descLinha,
               '',
+              descLinha,
               celula(ln.C || 0),
               celula(ln.L || 0),
               celula(ln.H || 0),
@@ -15482,20 +15480,19 @@ export function OrcamentoPageView({
         const celula = (n: number): number | '' => (Number.isFinite(n) && n !== 0 ? n : '');
         rows.push({
           kind: 'item',
-          merge: [0, 1],
-          values: [row.item.descricao || '', '', '', '', '', '', '', '', '', celula(row.quantidade)],
+          values: ['', row.item.descricao || '', '', '', '', '', '', '', '', celula(row.quantidade)],
         });
       }
 
       const totalValues = empty();
-      totalValues[0] = 'TOTAL';
+      totalValues[1] = 'TOTAL';
       totalValues[9] = totalSub;
       totalPorRotulo.set(rotulo.trim(), rows.length);
       rows.push({
         kind: 'total',
         values: totalValues,
-        merge: [0, 8],
-        tones: { 0: 'label', 9: 'item' },
+        merge: [1, 8],
+        tones: { 0: 'plain', 1: 'label', 9: 'item' },
         ...(primeiraLinhaDados >= 0
           ? { formulas: { 9: `SUM(J{R${primeiraLinhaDados}}:J{R${ultimaLinhaDados}})` } }
           : {}),
