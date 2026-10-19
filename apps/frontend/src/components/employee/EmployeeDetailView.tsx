@@ -33,7 +33,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
 import { displayPhoneBR } from '@/lib/phone';
-import { isUserOnline } from '@/lib/userPresence';
+import { isUserOnline, USER_PRESENCE_INTERVAL_MS } from '@/lib/userPresence';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { formatCpfInput, onlyDigits } from '@/lib/cpf';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
@@ -489,6 +490,28 @@ export function EmployeeDetailView({
   useEffect(() => {
     if (selectedEmployeeDetail) setSelectedEmployee(selectedEmployeeDetail);
   }, [selectedEmployeeDetail]);
+
+  // Presença (bolinha do cabeçalho): atualiza só o lastSeenAt, sem mexer no restante da ficha.
+  const { data: presenceLastSeenAt } = useQuery({
+    queryKey: ['employee-presence', userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      const res = await api.get(`/users/${userId}`);
+      return (res.data?.data?.lastSeenAt ?? null) as string | null;
+    },
+    refetchInterval: () => visibleTabRefetchInterval(USER_PRESENCE_INTERVAL_MS),
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+  });
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setPresenceNow(Date.now()), 10_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const headerOnline = isUserOnline(
+    presenceLastSeenAt !== undefined ? presenceLastSeenAt : selectedEmployee?.lastSeenAt,
+    presenceNow
+  );
 
   // Buscar registros de ponto do funcionário selecionado
   const { data: employeeRecordsData, isLoading: loadingRecords } = useQuery({
@@ -1419,9 +1442,9 @@ export function EmployeeDetailView({
           </div>
           <span
             className={`absolute bottom-0.5 right-0.5 h-5 w-5 rounded-full border-2 border-white sm:bottom-1 sm:right-1 dark:border-gray-900 ${
-              isUserOnline(selectedEmployee.lastSeenAt) ? 'bg-emerald-500' : 'bg-red-500'
+              headerOnline ? 'bg-emerald-500' : 'bg-red-500'
             }`}
-            title={isUserOnline(selectedEmployee.lastSeenAt) ? 'Online' : 'Offline'}
+            title={headerOnline ? 'Online' : 'Offline'}
             aria-hidden
           />
         </div>

@@ -167,6 +167,12 @@ export function EmployeeList({
   const [costCenterFilter, setCostCenterFilter] = useState<string>('all');
   const [clientFilter, setClientFilter] = useState<string>('all');
   const [presenceFilter, setPresenceFilter] = useState<'all' | 'online' | 'offline'>('all');
+  // Relógio da presença: re-renderiza a lista mesmo quando a busca volta sem mudanças.
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setPresenceNow(Date.now()), 10_000);
+    return () => window.clearInterval(id);
+  }, []);
   const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [poloFilter, setPoloFilter] = useState<string>('all');
   const [categoriaFinanceiraFilter, setCategoriaFinanceiraFilter] = useState<string>('all');
@@ -386,7 +392,7 @@ export function EmployeeList({
         return false;
       }
 
-      if (presenceFilter !== 'all' && isUserOnline(emp.lastSeenAt) !== (presenceFilter === 'online')) {
+      if (presenceFilter !== 'all' && isUserOnline(emp.lastSeenAt, presenceNow) !== (presenceFilter === 'online')) {
         return false;
       }
 
@@ -425,7 +431,7 @@ export function EmployeeList({
       
       return true;
     });
-  }, [employees, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter, presenceFilter]);
+  }, [employees, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter, presenceFilter, presenceNow]);
 
   const exportEmployeesToExcel = async () => {
     if (filteredEmployees.length === 0) {
@@ -1277,7 +1283,7 @@ export function EmployeeList({
                               )}
                             </div>
                             {(() => {
-                              const online = isUserOnline(employee.lastSeenAt);
+                              const online = isUserOnline(employee.lastSeenAt, presenceNow);
                               return (
                                 <span
                                   className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-gray-800 ${
