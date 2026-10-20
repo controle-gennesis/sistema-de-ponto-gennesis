@@ -3944,6 +3944,31 @@ export default function EmpreiteirosPage() {
                                         ? 'Enviando…'
                                         : 'Anexar o novo contrato atualizado'}
                                     </button>
+                                    {addendumFiles.length > 0 ? (
+                                      <ul className="space-y-1">
+                                        {addendumFiles.map((file, fileIndex) => (
+                                          <li
+                                            key={`${file.url}-${fileIndex}`}
+                                            className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200"
+                                          >
+                                            <Paperclip className="h-3 w-3 shrink-0 text-emerald-600" />
+                                            <span className="truncate">{file.name || 'contrato atualizado'}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setAddendumFiles((prev) =>
+                                                  prev.filter((_, index) => index !== fileIndex)
+                                                )
+                                              }
+                                              className="ml-auto text-gray-400 hover:text-red-600"
+                                              aria-label="Remover anexo"
+                                            >
+                                              <X className="h-3.5 w-3.5" />
+                                            </button>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
                                       Depois de aprovado, o arquivo aparece em Contrato, junto com os que já estão anexados.
                                     </p>

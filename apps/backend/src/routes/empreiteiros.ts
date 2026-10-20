@@ -8,9 +8,10 @@ import { EmpreiteiroController } from '../controllers/EmpreiteiroController';
 
 const router = Router();
 const controller = new EmpreiteiroController();
+const UPLOAD_MAX_MB = 50;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: UPLOAD_MAX_MB * 1024 * 1024 },
 });
 
 const TEAM_FILE_EXT = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx'];
@@ -32,7 +33,12 @@ router.post(
   (req: AuthRequest, res: Response, next: NextFunction) => {
     upload.single('file')(req, res, (err: unknown) => {
       if (err) {
-        const msg = err instanceof Error ? err.message : 'Erro no upload';
+        const tooLarge = (err as { code?: string })?.code === 'LIMIT_FILE_SIZE';
+        const msg = tooLarge
+          ? `Arquivo muito grande (máximo ${UPLOAD_MAX_MB} MB)`
+          : err instanceof Error
+            ? err.message
+            : 'Erro no upload';
         res.status(400).json({ success: false, message: msg });
         return;
       }
