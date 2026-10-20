@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
-import { LocationService, parseAllowedLocations, parsePunchQrToken, punchQrPayload } from '../services/LocationService';
+import { LocationService, parseAllowedLocations, parsePunchQrToken, punchQrPayload, methodsForLocation } from '../services/LocationService';
 import { PhotoService } from '../services/PhotoService';
 import { faceMatchService } from '../services/FaceMatchService';
 import { HolidayService } from '../services/HolidayService';
@@ -58,6 +58,19 @@ async function persistPunchExtras(
   } catch (error) {
     console.warn('[TimeRecord] persistPunchExtras', error);
   }
+}
+
+/**
+ * Formas de bater ponto permitidas, vindas das configurações da empresa:
+ * - só rosto (selfie conferida com a foto cadastrada);
+ * - só QR da localidade (sem selfie);
+ * - as duas: a pessoa escolhe uma (nunca precisa das duas).
+ * Sem nenhuma marcada, vale o rosto (padrão seguro).
+ */
+export function resolvePunchMethods(flags: { requireFaceMatch: boolean; requirePunchQr: boolean }) {
+  const qr = Boolean(flags.requirePunchQr);
+  const face = Boolean(flags.requireFaceMatch) || !qr;
+  return { face, qr };
 }
 
 async function loadPunchFlags(): Promise<{ requireFaceMatch: boolean; requirePunchQr: boolean }> {
@@ -193,19 +206,7 @@ export class TimeRecordController {
         }
       }
 
-      if (!photo) {
-        throw createError(
-          'Tire uma foto do rosto para registrar o ponto. A selfie é confrontada com a foto de ponto cadastrada no painel.',
-          400
-        );
-      }
-
-      const photoResult = await photoService.uploadPhoto(photo, userId);
-      const photoUrl = photoResult.url;
-      const photoKey = photoResult.key;
-
       const punchFlags = await loadPunchFlags();
-      const requirePunchQr = punchFlags.requirePunchQr;
 
       const allowedPunchLocations =
         parseAllowedLocations(employee.allowedLocations).length > 0
@@ -218,9 +219,22 @@ export class TimeRecordController {
           locationService.findLocationByQrToken(geofencePolicy.locations, scannedPunchQr)
         : null;
 
-      if (requirePunchQr && !scannedPunchQr) {
+      // Forma de bater ponto: a do local do QR lido; sem QR, a do local onde a pessoa está
+      // (posição dentro do raio); fora de qualquer local, a configuração geral.
+      const gpsLocation = hasCoordinates
+        ? locationService.locationAtCoordinates(latNum!, lonNum!, allowedPunchLocations)
+        : null;
+      const methods = methodsForLocation(qrLocation ?? gpsLocation, resolvePunchMethods(punchFlags));
+
+      // Caminho do QR: vale quando o QR da localidade é aceito como forma de bater ponto.
+      const qrAccepted = methods.qr && Boolean(scannedPunchQr);
+      if (!qrAccepted && !photo) {
         throw createError(
-          'Leia o QR Code da localidade para registrar o ponto neste site.',
+          methods.face
+            ? methods.qr
+              ? 'Confirme o rosto (selfie) ou leia o QR Code da localidade para registrar o ponto.'
+              : 'Tire uma foto do rosto para registrar o ponto. A selfie é confrontada com a foto de ponto cadastrada no painel.'
+            : 'Leia o QR Code da localidade para registrar o ponto neste site.',
           400
         );
       }
@@ -249,22 +263,30 @@ export class TimeRecordController {
       let faceMatchSimilarity: number | null = null;
       let faceMatchReason = '';
 
-      const face = await faceMatchService.comparePunchToProfile({
-        facePhotoUrl: employee.user?.facePhotoUrl,
-        facePhotoKey: employee.user?.facePhotoKey,
-        punchPhotoUrl: photoUrl || null,
-        punchPhotoKey: photoKey || null,
-        requireMatch: true,
-      });
-      faceMatchStatus = face.status;
-      faceMatchSimilarity = face.similarity;
-      faceMatchReason = face.reason;
+      // Foto enviada (opcional no caminho do QR): guarda no registro.
+      const photoResult = photo ? await photoService.uploadPhoto(photo, userId) : null;
+      const photoUrl = photoResult?.url ?? null;
+      const photoKey = photoResult?.key ?? null;
 
-      if (face.status === 'no_profile_photo' || face.status === 'no_punch_photo') {
-        throw createError(face.reason, 400);
-      }
-      if (face.status === 'mismatch' || face.status === 'unavailable') {
-        throw createError(face.reason, 400);
+      // Conferência facial só no caminho do rosto; com QR válido, o QR basta.
+      if (!qrAccepted) {
+        const face = await faceMatchService.comparePunchToProfile({
+          facePhotoUrl: employee.user?.facePhotoUrl,
+          facePhotoKey: employee.user?.facePhotoKey,
+          punchPhotoUrl: photoUrl || null,
+          punchPhotoKey: photoKey || null,
+          requireMatch: true,
+        });
+        faceMatchStatus = face.status;
+        faceMatchSimilarity = face.similarity;
+        faceMatchReason = face.reason;
+
+        if (face.status === 'no_profile_photo' || face.status === 'no_punch_photo') {
+          throw createError(face.reason, 400);
+        }
+        if (face.status === 'mismatch' || face.status === 'unavailable') {
+          throw createError(face.reason, 400);
+        }
       }
       if (faceMatchReason) {
         locationReason = locationReason
@@ -524,8 +546,10 @@ export class TimeRecordController {
           geofenceEnabled: policy.enabled,
           geofenceBlockOutside: policy.blockOutside,
           geofenceRequireLocation: policy.requireLocation,
-          requireFaceMatch: true,
-          requirePunchQr: punchFlags.requirePunchQr,
+          // `punchMethods` diz o que a pessoa pode usar; os dois campos antigos acompanham.
+          punchMethods: resolvePunchMethods(punchFlags),
+          requireFaceMatch: resolvePunchMethods(punchFlags).face,
+          requirePunchQr: resolvePunchMethods(punchFlags).qr,
           hasFacePhoto,
           hasProfilePhoto: hasFacePhoto,
           facePhotoUrl: employee?.user?.facePhotoUrl || null,
@@ -537,6 +561,8 @@ export class TimeRecordController {
             longitude: loc.longitude,
             radius: loc.radius,
             hasQr: Boolean(loc.qrToken),
+            // null = segue a configuração geral (punchMethods).
+            punchMethod: loc.punchMethod ?? null,
           })),
         },
       });

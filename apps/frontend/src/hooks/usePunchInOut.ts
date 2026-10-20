@@ -46,6 +46,9 @@ export const usePunchInOut = () => {
         }
       }
       formData.append('observation', data.observation || '');
+      if (data.punchQrToken) {
+        formData.append('punchQrToken', data.punchQrToken);
+      }
 
       const response = await api.post('/time-records/punch', formData);
       return response.data;

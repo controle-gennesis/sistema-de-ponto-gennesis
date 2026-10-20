@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, Clock, AlertCircle, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, Camera, X, RotateCcw, CheckCircle, Download, AlertTriangle } from 'lucide-react';
+import { QrCode, MapPin, Clock, AlertCircle, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, Camera, X, RotateCcw, CheckCircle, Download, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +15,7 @@ import api from '@/lib/api';
 import { APP_TITLE } from '@/lib/pageTitle';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { PunchQrScanner } from '@/components/ponto/PunchQrScanner';
 
 interface PunchCardProps {
   onSuccess?: () => void;
@@ -50,6 +51,76 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
     },
   });
   const locationRequired = !!geofence?.enabled && geofence.requireLocation;
+
+  // Formas de bater ponto permitidas pela empresa: rosto, QR da localidade ou as duas (escolhe uma).
+  const { data: punchPolicy } = useQuery({
+    queryKey: ['punch-policy'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const res = await api.get<{
+        success: boolean;
+        data: {
+          punchMethods?: { face: boolean; qr: boolean };
+          locations?: Array<{
+            latitude: number;
+            longitude: number;
+            radius: number;
+            punchMethod?: 'FACE' | 'QR' | 'BOTH' | null;
+          }>;
+        };
+      }>('/time-records/punch-policy');
+      return {
+        general: res.data?.data?.punchMethods ?? { face: true, qr: false },
+        locations: res.data?.data?.locations ?? [],
+      };
+    },
+  });
+  // Forma de bater ponto: a do local onde a pessoa está (dentro do raio); senão, a geral.
+  const currentLocationMethod = (() => {
+    if (!location || !punchPolicy?.locations?.length) return null;
+    const dist = (la1: number, lo1: number, la2: number, lo2: number) => {
+      const rad = (d: number) => (d * Math.PI) / 180;
+      const a =
+        Math.sin(rad(la2 - la1) / 2) ** 2 +
+        Math.cos(rad(la1)) * Math.cos(rad(la2)) * Math.sin(rad(lo2 - lo1) / 2) ** 2;
+      return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+    const inside = punchPolicy.locations
+      .map((l) => ({ l, d: dist(location.latitude, location.longitude, l.latitude, l.longitude) }))
+      .filter((x) => x.d <= x.l.radius)
+      .sort((x, y) => x.d - y.d)[0];
+    return inside?.l.punchMethod ?? null;
+  })();
+  const faceAllowed =
+    currentLocationMethod === 'QR' ? false : currentLocationMethod ? true : punchPolicy?.general.face ?? true;
+  const qrAllowed =
+    currentLocationMethod === 'FACE' ? false : currentLocationMethod ? true : punchPolicy?.general.qr ?? false;
+  const bothAllowed = faceAllowed && qrAllowed;
+  const [method, setMethod] = useState<'face' | 'qr'>('face');
+  const activeMethod: 'face' | 'qr' = bothAllowed ? method : qrAllowed ? 'qr' : 'face';
+  const [qrScanning, setQrScanning] = useState(false);
+  const [qrToken, setQrToken] = useState<string | null>(null);
+  const [qrLocationName, setQrLocationName] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  const handleQrScanned = async (raw: string) => {
+    setQrScanning(false);
+    const token = raw.trim().replace(/^gennesis-punch:/i, '').replace(/^punch:/i, '');
+    if (!token) return;
+    try {
+      const res = await api.post<{ data?: { name?: string } }>('/time-records/resolve-punch-qr', { token });
+      setQrToken(token);
+      setQrLocationName(res.data?.data?.name || 'Localidade autorizada');
+      setQrError(null);
+    } catch (err: any) {
+      setQrToken(null);
+      setQrLocationName(null);
+      setQrError(err?.response?.data?.message || err?.response?.data?.error || 'QR inválido');
+    }
+  };
+  const qrDone = qrAllowed && !!qrToken && !!qrLocationName;
+  const faceDone = faceAllowed && !!capturedPhoto;
+  const methodDone = (activeMethod === 'face' && faceDone) || (activeMethod === 'qr' && qrDone);
   const { 
     punchInOut, 
     loading: punchLoading, 
@@ -200,8 +271,12 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   };
 
   const handlePunch = async () => {
-    if (!capturedPhoto) {
-      alert('Por favor, tire uma foto antes de bater o ponto');
+    if (!methodDone) {
+      alert(
+        activeMethod === 'qr'
+          ? 'Leia o QR Code da localidade antes de bater o ponto'
+          : 'Por favor, tire uma foto antes de bater o ponto'
+      );
       return;
     }
 
@@ -218,7 +293,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
         type: selectedType,
         latitude: location?.latitude || null,
         longitude: location?.longitude || null,
-        photo: capturedPhoto,
+        ...(activeMethod === 'face' ? { photo: capturedPhoto } : { punchQrToken: qrToken }),
         observation: observation.trim(),
       } as any);
       
@@ -231,6 +306,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
       // Atualizar o último registro para o próximo tipo
       setLastRecord(selectedType);
       setCapturedPhoto(null);
+      setQrToken(null);
+      setQrLocationName(null);
       setObservation('');
       
       // Atualizar registros e verificar se todos os pontos foram completados
@@ -571,7 +648,67 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
               )}
             </div>
 
-            {/* Seção de Foto */}
+            {/* Confirmação: rosto (selfie) ou QR da localidade — uma só, com alternância */}
+            {bothAllowed && (
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+                {([
+                  { id: 'face' as const, label: 'Rosto', icon: <Camera className="h-3.5 w-3.5" /> },
+                  { id: 'qr' as const, label: 'QR da localidade', icon: <QrCode className="h-3.5 w-3.5" /> },
+                ]).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setMethod(opt.id);
+                      if (opt.id === 'qr') {
+                        handleCloseCamera();
+                      } else {
+                        setQrScanning(false);
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors ${
+                      activeMethod === opt.id
+                        ? 'bg-white text-red-600 shadow-sm dark:bg-gray-700 dark:text-red-300'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {activeMethod === 'qr' && (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  QR da localidade *
+                </label>
+                {qrScanning ? (
+                  <PunchQrScanner onScan={(raw) => void handleQrScanned(raw)} onCancel={() => setQrScanning(false)} />
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setQrError(null);
+                        setQrScanning(true);
+                      }}
+                      className="w-full rounded-lg border border-dashed border-gray-300 p-3 transition-colors hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-gray-500 dark:hover:bg-gray-700"
+                    >
+                      <div className="flex items-center justify-center space-x-2">
+                        <QrCode className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                        <span className="text-sm text-gray-600 dark:text-gray-300">
+                          {qrDone ? `QR lido: ${qrLocationName} — ler de novo` : 'Ler QR da localidade'}
+                        </span>
+                      </div>
+                    </button>
+                    {qrError && <p className="text-xs text-red-600">{qrError}</p>}
+                  </>
+                )}
+              </div>
+            )}
+
+            {activeMethod === 'face' && (
             <div className="space-y-2">
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                 Foto do Funcionário *
@@ -692,6 +829,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 </div>
               )}
             </div>
+            )}
 
             {/* Campo de Observação */}
             <div className="space-y-1">
@@ -714,9 +852,9 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
             {/* Botão de Confirmar */}
             <button
               onClick={handlePunch}
-              disabled={punchLoading || !capturedPhoto}
+              disabled={punchLoading || !methodDone}
               className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 ${
-                punchLoading || !capturedPhoto
+                punchLoading || !methodDone
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-red-600 hover:bg-red-700 text-white'
               }`}

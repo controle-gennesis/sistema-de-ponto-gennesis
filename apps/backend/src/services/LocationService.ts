@@ -15,6 +15,30 @@ export interface Location {
   radius: number; // em metros
   /** Token do QR de ponto associado a esta localidade. */
   qrToken?: string | null;
+  /**
+   * Forma de bater ponto neste local: só rosto, só QR da localidade ou as duas (a pessoa escolhe
+   * uma). Sem valor, vale a configuração geral.
+   */
+  punchMethod?: 'FACE' | 'QR' | 'BOTH' | null;
+}
+
+export type PunchMethods = { face: boolean; qr: boolean };
+
+/** Formas de bater ponto de um local; sem regra própria, usa `base` (configuração geral). */
+export function methodsForLocation(
+  location: Pick<Location, 'punchMethod'> | null | undefined,
+  base: PunchMethods
+): PunchMethods {
+  switch (location?.punchMethod) {
+    case 'FACE':
+      return { face: true, qr: false };
+    case 'QR':
+      return { face: false, qr: true };
+    case 'BOTH':
+      return { face: true, qr: true };
+    default:
+      return base;
+  }
 }
 
 /** Política de cerca virtual configurada em CompanySettings. */
@@ -40,6 +64,8 @@ export function parseAllowedLocations(raw: unknown): Location[] {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
     const radius = Number(entry.radius);
     const qrTokenRaw = String(entry.qrToken ?? entry.punchQrToken ?? '').trim();
+    const methodRaw = String(entry.punchMethod ?? '').trim().toUpperCase();
+    const punchMethod = methodRaw === 'FACE' || methodRaw === 'QR' || methodRaw === 'BOTH' ? methodRaw : null;
     return [
       {
         id: String(entry.id ?? `${latitude},${longitude}`),
@@ -48,6 +74,7 @@ export function parseAllowedLocations(raw: unknown): Location[] {
         longitude,
         radius: Number.isFinite(radius) && radius > 0 ? radius : 300,
         qrToken: qrTokenRaw || null,
+        punchMethod,
       },
     ];
   });
@@ -373,6 +400,17 @@ export class LocationService {
     return (
       locations.find((loc) => String(loc.qrToken || '').trim().toLowerCase() === needle) || null
     );
+  }
+
+  /** Local cujo raio contém a posição (o mais próximo, se houver mais de um); senão, null. */
+  locationAtCoordinates(
+    latitude: number,
+    longitude: number,
+    locations: Location[]
+  ): Location | null {
+    const nearest = this.nearestLocation(latitude, longitude, locations);
+    if (!nearest) return null;
+    return nearest.distance <= nearest.location.radius ? nearest.location : null;
   }
 
   nearestLocation(

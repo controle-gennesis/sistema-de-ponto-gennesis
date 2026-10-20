@@ -40,6 +40,8 @@ export interface TimeRecordFormData {
   longitude?: number;
   photo?: string | File;
   observation?: string;
+  /** Token lido do QR da localidade (forma alternativa à selfie). */
+  punchQrToken?: string;
 }
 
 export interface VacationFormData {

@@ -18,6 +18,7 @@ function sanitizeGeofenceLocationsPayload(raw: unknown) {
     longitude: loc.longitude,
     radius: Math.max(10, Math.round(loc.radius) || 1000),
     qrToken: String(loc.qrToken || '').trim() || newPunchQrToken(),
+    punchMethod: loc.punchMethod || null,
   }));
 
   for (const loc of locations) {

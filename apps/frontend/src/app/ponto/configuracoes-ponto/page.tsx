@@ -20,6 +20,8 @@ import {
   punchQrPayload,
 } from '@/lib/punchLocationQr';
 import api from '@/lib/api';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type GeofenceLocation = {
   id: string;
@@ -28,7 +30,24 @@ type GeofenceLocation = {
   longitude: number;
   radius: number;
   qrToken?: string | null;
+  /** Forma de bater ponto neste local; vazio = segue a configuração geral. */
+  punchMethod?: PunchMethod | null;
 };
+
+type PunchMethod = 'FACE' | 'QR' | 'BOTH';
+
+const PUNCH_METHOD_LABEL: Record<PunchMethod, string> = {
+  FACE: 'Rosto',
+  QR: 'QR da localidade',
+  BOTH: 'Rosto ou QR',
+};
+
+const PUNCH_METHOD_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Padrão (configuração geral)' },
+  { value: 'FACE', label: 'Rosto' },
+  { value: 'QR', label: 'QR da localidade' },
+  { value: 'BOTH', label: 'Rosto ou QR (a pessoa escolhe)' },
+]);
 
 type CompanySettings = {
   id: string;
@@ -58,6 +77,7 @@ type LocationDraft = {
   latitude: string;
   longitude: string;
   radius: string;
+  punchMethod: '' | PunchMethod;
 };
 
 function emptyLocationDraft(): LocationDraft {
@@ -67,6 +87,7 @@ function emptyLocationDraft(): LocationDraft {
     latitude: '',
     longitude: '',
     radius: '1000',
+    punchMethod: '',
   };
 }
 
@@ -87,6 +108,7 @@ function seedLocations(settings: CompanySettings): GeofenceLocation[] {
       longitude: Number(loc.longitude),
       radius: Math.max(10, Number(loc.radius) || settings.maxDistanceMeters || 1000),
       qrToken: loc.qrToken || null,
+      punchMethod: loc.punchMethod || null,
     }));
   }
   return [
@@ -180,7 +202,8 @@ export default function ConfiguracoesPontoPage() {
       geofenceEnabled: !!settings.geofenceEnabled,
       geofenceBlockOutside: settings.geofenceBlockOutside ?? true,
       geofenceRequireLocation: settings.geofenceRequireLocation ?? true,
-      requireFaceMatch: !!settings.requireFaceMatch,
+      // Sem QR ligado o rosto sempre vale (padrão); com QR ligado, o rosto é opcional.
+      requireFaceMatch: !!settings.requireFaceMatch || !settings.requirePunchQr,
       requirePunchQr: !!settings.requirePunchQr,
       locations: seedLocations(settings),
     });
@@ -193,7 +216,7 @@ export default function ConfiguracoesPontoPage() {
         geofenceEnabled: payload.geofenceEnabled,
         geofenceBlockOutside: payload.geofenceBlockOutside,
         geofenceRequireLocation: payload.geofenceRequireLocation,
-        requireFaceMatch: true,
+        requireFaceMatch: payload.requireFaceMatch || !payload.requirePunchQr,
         requirePunchQr: payload.requirePunchQr,
         geofenceLocations: payload.locations,
         maxDistanceMeters: first?.radius ?? 1000,
@@ -224,6 +247,7 @@ export default function ConfiguracoesPontoPage() {
       latitude: String(loc.latitude),
       longitude: String(loc.longitude),
       radius: String(loc.radius),
+      punchMethod: loc.punchMethod || '',
     });
     setLocationModalOpen(true);
   };
@@ -283,6 +307,7 @@ export default function ConfiguracoesPontoPage() {
       longitude,
       radius: Math.round(radius),
       qrToken: form.locations.find((loc) => loc.id === locationDraft.id)?.qrToken || null,
+      punchMethod: locationDraft.punchMethod || null,
     };
 
     setForm({
@@ -420,18 +445,30 @@ export default function ConfiguracoesPontoPage() {
                   />
 
                   <ToggleRow
-                    title="Confrontar biometria facial"
-                    description="Obrigatório: toda batida tira uma selfie e compara com a foto de ponto cadastrada na ficha do colaborador (três pontos → Definir foto do ponto). A foto de perfil não entra nesse confronto. Sem a foto de ponto, ou se o rosto não bater, a batida é recusada. O QR da localidade continua disponível abaixo."
-                    checked
-                    disabled
-                    onChange={() => undefined}
+                    title="Bater ponto com o rosto (padrão)"
+                    description="A batida tira uma selfie e compara com a foto de ponto cadastrada na ficha do colaborador (três pontos → Definir foto do ponto). A foto de perfil não entra nesse confronto. Cada local pode ter a sua própria forma, definida na lista abaixo."
+                    checked={form.requireFaceMatch}
+                    onChange={(value) =>
+                      setForm({
+                        ...form,
+                        requireFaceMatch: value,
+                        // Pelo menos uma forma precisa ficar ligada.
+                        requirePunchQr: value ? form.requirePunchQr : true,
+                      })
+                    }
                   />
 
                   <ToggleRow
-                    title="Exigir QR Code da localidade"
-                    description="O colaborador só registra o ponto depois de ler o QR associado ao local de prestação do serviço."
+                    title="Bater ponto com o QR Code da localidade (padrão)"
+                    description="O colaborador registra o ponto lendo o QR associado ao local, sem selfie. Com o rosto também ligado, ele escolhe uma das duas formas (nunca precisa das duas); no app, é só virar a câmera. Vale para os locais sem forma própria."
                     checked={form.requirePunchQr}
-                    onChange={(value) => setForm({ ...form, requirePunchQr: value })}
+                    onChange={(value) =>
+                      setForm({
+                        ...form,
+                        requirePunchQr: value,
+                        requireFaceMatch: value ? form.requireFaceMatch : true,
+                      })
+                    }
                   />
 
                   <div
@@ -483,6 +520,14 @@ export default function ConfiguracoesPontoPage() {
                                 {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)} · raio{' '}
                                 {loc.radius} m
                                 {loc.qrToken ? ` · QR gennesis-punch:${loc.qrToken}` : ''}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                                Ponto:{' '}
+                                <span className="text-red-600 dark:text-red-300">
+                                  {loc.punchMethod
+                                    ? PUNCH_METHOD_LABEL[loc.punchMethod]
+                                    : 'padrão (configuração geral)'}
+                                </span>
                               </p>
                             </button>
                             <div className="flex shrink-0 items-center gap-1">
@@ -564,6 +609,25 @@ export default function ConfiguracoesPontoPage() {
                     className={FORM_FIELD_INPUT_CLS}
                     autoFocus
                   />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Forma de bater ponto neste local
+                  </label>
+                  <StringSingleSelectDropdown
+                    value={locationDraft.punchMethod}
+                    onChange={(value) =>
+                      setLocationDraft({ ...locationDraft, punchMethod: value as '' | PunchMethod })
+                    }
+                    options={PUNCH_METHOD_OPTIONS}
+                    allowEmpty={false}
+                    disableSearch
+                    matchTriggerWidth
+                    className="w-full"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Quem estiver dentro do raio deste local bate ponto pela forma escolhida.
+                  </p>
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
