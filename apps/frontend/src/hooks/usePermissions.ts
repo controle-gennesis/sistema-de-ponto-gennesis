@@ -490,7 +490,7 @@ export function usePermissions() {
    * Página Relatórios Fotográficos: exige o módulo liberado na matriz Acesso.
    * Contratos exibidos = contratos com Liberado (igual a FD e Orçamentos).
    */
-  const relatoriosFotograficosKey = pk('/ponto/contratos/relatorios');
+  const relatoriosFotograficosKey = pk('/ponto/relatorios-fotograficos');
   const canAccessRelatoriosFotograficosPage =
     isElevatedUser || can(relatoriosFotograficosKey) || canAccessModule(relatoriosFotograficosKey);
   /** Lista/detalhe de relatórios dentro do contrato: módulo Relatórios Fotográficos ou Contratos. */
@@ -869,8 +869,8 @@ export function useRoutePermission(route: string) {
     '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/orcamentos': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
-    '/ponto/contratos/relatorios': canAccessRelatoriosFotograficosPage,
-    '/ponto/contratos/relatorios/detalhe': canAccessContratoRelatoriosRoutes,
+    '/ponto/relatorios-fotograficos': canAccessRelatoriosFotograficosPage,
+    '/ponto/relatorios-fotograficos/detalhe': canAccessContratoRelatoriosRoutes,
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/contratos/socios': isAdministrator || can(pk('/ponto/contratos/socios')),
     '/ponto/contratos/gastos-operacionais':

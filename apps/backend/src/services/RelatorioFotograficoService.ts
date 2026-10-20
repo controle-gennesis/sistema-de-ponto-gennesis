@@ -29,11 +29,31 @@ export interface RelatorioFotograficoData {
 
 export type RelatorioCamposData = RelatorioFotograficoData['campos'];
 
+/** Dados resumidos do relatório guardados no índice (evita abrir cada relatório para listar). */
+export interface RelatorioResumo {
+  os: string;
+  unidade: string;
+  solicitante: string;
+  fotos: number;
+}
+
 export interface RelatorioIndexEntry {
   id: string;
   titulo: string;
   createdAt: string;
   updatedAt: string;
+  resumo?: RelatorioResumo;
+}
+
+function resumoDoRelatorio(
+  data: Pick<RelatorioFotograficoData, 'campos'> & { fotos?: FotoItem[] }
+): RelatorioResumo {
+  return {
+    os: String(data.campos?.os ?? '').trim(),
+    unidade: String(data.campos?.unidade ?? '').trim(),
+    solicitante: String(data.campos?.solicitante ?? '').trim(),
+    fotos: Array.isArray(data.fotos) ? data.fotos.filter((f) => f?.src).length : 0,
+  };
 }
 
 export interface RelatorioIndex {
@@ -133,6 +153,19 @@ export class RelatorioFotograficoService {
     return idx ?? { relatorios: [] };
   }
 
+  /** Índice com o resumo de cada relatório; relatórios antigos (sem resumo) são completados uma vez. */
+  async getIndexComResumo(contractId: string): Promise<RelatorioIndex> {
+    const idx = await this.getIndex(contractId);
+    const faltando = idx.relatorios.filter((r) => !r.resumo);
+    if (faltando.length === 0) return idx;
+    for (const entry of faltando) {
+      const data = await this.getRelatorio(contractId, entry.id);
+      entry.resumo = resumoDoRelatorio(data ?? EMPTY_DATA);
+    }
+    await this.writeJson(this.getIndexKey(contractId), idx);
+    return idx;
+  }
+
   async createRelatorio(
     contractId: string,
     titulo: string,
@@ -140,12 +173,6 @@ export class RelatorioFotograficoService {
   ): Promise<RelatorioIndexEntry> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const entry: RelatorioIndexEntry = { id, titulo, createdAt: now, updatedAt: now };
-
-    const idx = await this.getIndex(contractId);
-    idx.relatorios.push(entry);
-    await this.writeJson(this.getIndexKey(contractId), idx);
-
     const data: RelatorioFotograficoData = {
       ...EMPTY_DATA,
       campos: {
@@ -153,6 +180,17 @@ export class RelatorioFotograficoService {
         ...(initialCampos ?? {}),
       },
     };
+    const entry: RelatorioIndexEntry = {
+      id,
+      titulo,
+      createdAt: now,
+      updatedAt: now,
+      resumo: resumoDoRelatorio(data),
+    };
+
+    const idx = await this.getIndex(contractId);
+    idx.relatorios.push(entry);
+    await this.writeJson(this.getIndexKey(contractId), idx);
     await this.writeJson(this.getRelatorioKey(contractId, id), data);
 
     return entry;
@@ -174,6 +212,7 @@ export class RelatorioFotograficoService {
     const entry = idx.relatorios.find((r) => r.id === relatorioId);
     if (entry) {
       entry.updatedAt = new Date().toISOString();
+      entry.resumo = resumoDoRelatorio(data);
       if (titulo !== undefined) entry.titulo = titulo;
       await this.writeJson(this.getIndexKey(contractId), idx);
     }

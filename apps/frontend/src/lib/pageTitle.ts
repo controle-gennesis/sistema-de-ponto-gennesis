@@ -8,10 +8,10 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
   '/ponto/agenda': { title: 'Agenda', category: 'Principal' },
   '/ponto/cronogramas': { title: 'Cronogramas', category: 'Engenharia', href: '/ponto/cronogramas' },
   '/ponto/orcamentos': { title: 'Orçamentos', category: 'Engenharia', href: '/ponto/orcamentos' },
-  '/ponto/contratos/relatorios': {
+  '/ponto/relatorios-fotograficos': {
     title: 'Relatórios Fotográficos',
     category: 'Engenharia',
-    href: '/ponto/contratos/relatorios',
+    href: '/ponto/relatorios-fotograficos',
   },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },

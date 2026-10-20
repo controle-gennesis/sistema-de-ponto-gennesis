@@ -29,7 +29,7 @@ export class RelatorioFotograficoController {
       const lists = await Promise.all(
         contracts.map(async (c) => {
           try {
-            const idx = await service.getIndex(c.id);
+            const idx = await service.getIndexComResumo(c.id);
             return idx.relatorios.map((r) => ({
               ...r,
               contractId: c.id,

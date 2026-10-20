@@ -1141,7 +1141,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Relatórios Fotográficos',
-            href: '/ponto/contratos/relatorios',
+            href: '/ponto/relatorios-fotograficos',
             icon: ImagePlus,
             description: 'Relatórios fotográficos dos contratos liberados',
             permission: canAccessRelatoriosFotograficosPage,

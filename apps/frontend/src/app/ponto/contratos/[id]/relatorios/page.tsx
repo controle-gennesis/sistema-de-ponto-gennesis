@@ -306,7 +306,7 @@ export default function ContratoRelatoriosPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos/relatorios/detalhe" contractId={contractId}>
+    <ProtectedRoute route="/ponto/relatorios-fotograficos/detalhe" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           {/* Header de página: Voltar à esquerda, título/subtítulo centralizado */}
