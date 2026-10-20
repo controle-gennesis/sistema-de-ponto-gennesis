@@ -4,6 +4,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  InputAccessoryView,
   Keyboard,
   Modal,
   Platform,
@@ -43,6 +44,7 @@ type Props = {
 const BRAND = '#ce3736';
 const RESEND_SECONDS = 60;
 const CODE_LENGTH = 6;
+const NO_KEYBOARD_BAR = 'noKeyboardBarForgot';
 const SHEET_BOTTOM_PAD = Platform.OS === 'ios' ? 26 : 18;
 
 async function postJson(path: string, body: Record<string, unknown>) {
@@ -336,6 +338,13 @@ export default function ForgotPasswordModal({
   ];
 
   return (
+    <>
+    {/* View vazia como barra do teclado: tira o "Done" que o iOS põe sozinho no teclado numérico. */}
+    {Platform.OS === 'ios' ? (
+      <InputAccessoryView nativeID={NO_KEYBOARD_BAR}>
+        <View />
+      </InputAccessoryView>
+    ) : null}
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Animated.View
@@ -431,6 +440,7 @@ export default function ForgotPasswordModal({
                       onFocus={() => setCodeFocused(true)}
                       onBlur={() => setCodeFocused(false)}
                       keyboardType="number-pad"
+                      inputAccessoryViewID={NO_KEYBOARD_BAR}
                       maxLength={CODE_LENGTH}
                       textContentType="oneTimeCode"
                       autoComplete="sms-otp"
@@ -559,6 +569,7 @@ export default function ForgotPasswordModal({
         </Animated.View>
       </View>
     </Modal>
+    </>
   );
 }
 

@@ -25,14 +25,13 @@ import {
   Calendar,
   MapPin,
   Pencil,
+  Phone,
   ScanFace,
   KeyRound,
   LogOut,
   Moon,
   Sun,
   ChevronRight,
-  Eye,
-  EyeOff,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +42,16 @@ import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 import { api } from '../services/api';
 import { saveBiometricCredentials } from '../services/biometricAuth';
 import type { User as AuthUser } from '../types';
+
+/** 61999998888 -> (61) 9 9999-8888 (ou (61) 9999-8888 com 10 dígitos). */
+function formatPhone(input: string): string {
+  const d = input.replace(/\D/g, '').slice(0, 11);
+  if (d.length === 0) return '';
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 3)} ${d.slice(3, 7)}-${d.slice(7)}`;
+}
 
 type InfoRow = {
   key: string;
@@ -57,7 +66,6 @@ export default function ProfileScreen() {
   const navigation = useNavigation();
   const { user, updateUser, logout, biometric, enableBiometrics, disableBiometrics } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
-  const [cpfVisible, setCpfVisible] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdCurrent, setPwdCurrent] = useState('');
@@ -255,21 +263,7 @@ export default function ProfileScreen() {
     rows.push({ key: 'email', label: 'Email', value: user.email, icon: Mail });
   }
   if (user?.cpf) {
-    const digits = String(user.cpf).replace(/\D/g, '');
-    const masked =
-      digits.length === 11 ? `${digits.slice(0, 3)}.***.***-${digits.slice(9)}` : '•••••••••••';
-    rows.push({
-      key: 'cpf',
-      label: 'CPF',
-      value: cpfVisible ? user.cpf : masked,
-      icon: User,
-      onPress: () => setCpfVisible((v) => !v),
-      accessory: cpfVisible ? (
-        <EyeOff size={18} color={colors.textSecondary} strokeWidth={2} />
-      ) : (
-        <Eye size={18} color={colors.textSecondary} strokeWidth={2} />
-      ),
-    });
+    rows.push({ key: 'cpf', label: 'CPF', value: user.cpf, icon: User });
   }
   if (user?.employee?.birthDate) {
     rows.push({
@@ -285,6 +279,15 @@ export default function ProfileScreen() {
       label: 'Setor',
       value: user.employee.department,
       icon: Briefcase,
+    });
+  }
+  if (user?.employee) {
+    const phoneDigits = String(user.employee.phone ?? '').replace(/\D/g, '');
+    rows.push({
+      key: 'phone',
+      label: 'Telefone',
+      value: phoneDigits ? formatPhone(phoneDigits) : 'Não informado',
+      icon: Phone,
     });
   }
   if (user?.employee?.company) {
@@ -691,8 +694,10 @@ const getStyles = (colors: any, isDark: boolean) =>
     modalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'center',
-      padding: 24,
+      // Na parte de cima da tela: com o teclado aberto o cartão (e o Cancelar) ficava por trás dele.
+      justifyContent: 'flex-start',
+      paddingHorizontal: 24,
+      paddingTop: 110,
     },
     modalCard: {
       backgroundColor: colors.card,
@@ -734,6 +739,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       textAlign: 'center',
       color: colors.textSecondary,
       fontWeight: '600',
-      paddingVertical: 6,
+      paddingVertical: 12,
     },
   });

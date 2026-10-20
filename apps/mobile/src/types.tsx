@@ -4,6 +4,8 @@ export interface Employee {
   employeeId: string; // Matrícula
   department: string;
   position: string;
+  /** Celular de contato (só dígitos, com DDD). */
+  phone?: string | null;
   hireDate: string;
   birthDate?: string;
   salary: number;
