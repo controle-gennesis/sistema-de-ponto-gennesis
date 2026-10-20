@@ -333,7 +333,11 @@ export type FuelUrgencyChartGroup = {
   ownerContractId: string;
   ownerName: string;
   contractNames: string[];
+  /** Todos os contratos do grupo de cota (dono + vinculados). */
+  contractIds: string[];
   urgencyReais: number;
+  /** Semanas em que houve urgência (dentro do filtro de datas). */
+  weeks: Array<{ weekStart: string; weekEnd: string; amountReais: number }>;
 };
 
 function ymdUtc(value: Date): string {
@@ -406,12 +410,18 @@ export async function listFuelUrgencyChart(
   ]);
   const { resolveRoot } = buildQuotaResolver(contracts);
   const byOwner = new Map<string, number>();
+  const weeksByOwner = new Map<string, FuelUrgencyChartGroup['weeks']>();
   for (const row of rows) {
     const weekStart = row.weekStart instanceof Date ? row.weekStart : new Date(row.weekStart);
     if (Number.isNaN(weekStart.getTime())) continue;
     if (!weekOverlapsRange(weekStart, from, to)) continue;
     const ownerId = resolveRoot(row.contractId);
-    byOwner.set(ownerId, roundMoney((byOwner.get(ownerId) ?? 0) + (asNumber(row.amount) ?? 0)));
+    const amountReais = roundMoney(asNumber(row.amount) ?? 0);
+    byOwner.set(ownerId, roundMoney((byOwner.get(ownerId) ?? 0) + amountReais));
+    const startYmd = ymdUtc(weekStart);
+    const list = weeksByOwner.get(ownerId) ?? [];
+    list.push({ weekStart: startYmd, weekEnd: addDaysYmd(startYmd, 6), amountReais });
+    weeksByOwner.set(ownerId, list);
   }
 
   return Array.from(byOwner.entries())
@@ -431,7 +441,9 @@ export async function listFuelUrgencyChart(
         ownerContractId: ownerId,
         ownerName: contractNames[0],
         contractNames,
+        contractIds: Array.from(new Set([ownerId, ...members.map((member) => member.id)])),
         urgencyReais,
+        weeks: (weeksByOwner.get(ownerId) ?? []).sort((a, b) => b.weekStart.localeCompare(a.weekStart)),
       };
     })
     .filter((group) => group.urgencyReais > 0)

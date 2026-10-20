@@ -221,6 +221,8 @@ type FuelQuotaGroup = {
   ownerContractId: string;
   ownerName: string;
   contractNames?: string[];
+  contractIds?: string[];
+  weeks?: Array<{ weekStart: string; weekEnd: string; amountReais: number }>;
   weeklyBudgetReais: number | null;
   urgencyReais?: number | null;
   usedReais: number;
@@ -363,10 +365,12 @@ function UrgencyByContractChart({
   groups,
   isLoading,
   periodLabel,
+  onSelect,
 }: {
   groups: FuelQuotaGroup[];
   isLoading: boolean;
   periodLabel?: string;
+  onSelect?: (group: FuelQuotaGroup) => void;
 }) {
   const theme = useChartTheme();
   const rows = groups
@@ -376,6 +380,7 @@ function UrgencyByContractChart({
       const urgencia = g.urgencyReais ?? 0;
       const contractNames = quotaContractNames(g);
       return {
+        group: g,
         name: g.ownerContractId,
         contractNames,
         fullName: contractNames.join(' · '),
@@ -396,8 +401,8 @@ function UrgencyByContractChart({
       title="Urgências por contrato"
       subtitle={
         periodLabel
-          ? `Urgência lançada de ${periodLabel}. A barra maior é quem mais passou da cota nesse período.`
-          : 'Urgência lançada em todo o período. O filtro de datas acima limita a um mês ou intervalo.'
+          ? `Urgência lançada de ${periodLabel}. Clique no contrato ou na barra para ver as semanas e os abastecimentos.`
+          : 'Urgência lançada em todo o período. Clique no contrato ou na barra para ver as semanas e os abastecimentos.'
       }
       Icon={TrendingUp}
     >
@@ -439,6 +444,12 @@ function UrgencyByContractChart({
                       textAnchor="end"
                       fill={theme.chartTick}
                       fontSize={11}
+                      className="cursor-pointer hover:underline"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (row) onSelect?.(row.group);
+                      }}
                     >
                       {lines.map((line, index) => (
                         <tspan key={`${line}-${index}`} x={x} dy={index === 0 ? startDy : 14}>
@@ -464,7 +475,17 @@ function UrgencyByContractChart({
                   (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
                 }
               />
-              <Bar dataKey="urgencia" radius={[0, 6, 6, 0]} maxBarSize={22}>
+              <Bar
+                dataKey="urgencia"
+                radius={[0, 6, 6, 0]}
+                maxBarSize={22}
+                cursor="pointer"
+                onClick={(data) => {
+                  const payload = data as { group?: FuelQuotaGroup; payload?: { group?: FuelQuotaGroup } };
+                  const group = payload.payload?.group ?? payload.group;
+                  if (group) onSelect?.(group);
+                }}
+              >
                 {rows.map((row, i) => (
                   <Cell key={row.fullName} fill={i === 0 ? '#dc2626' : '#d97706'} />
                 ))}
@@ -693,6 +714,7 @@ function AnalisesCombustivelContent() {
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [rankDrillDown, setRankDrillDown] = useState<RankDrillDown | null>(null);
+  const [urgencyDrillDown, setUrgencyDrillDown] = useState<FuelQuotaGroup | null>(null);
 
   const { data: rows = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['fuel-refuel-requests-analytics'],
@@ -867,6 +889,109 @@ function AnalisesCombustivelContent() {
     });
     router.push(`/ponto/solicitacoes-combustivel?${params.toString()}`);
   };
+
+  /** Abastecimentos concluídos do grupo nas semanas em que houve urgência. */
+  const urgencyRequests = useMemo(() => {
+    if (!urgencyDrillDown) return [];
+    const contractIds = new Set(urgencyDrillDown.contractIds ?? [urgencyDrillDown.ownerContractId]);
+    const weeks = urgencyDrillDown.weeks ?? [];
+    return rows
+      .filter((r) => r.status === 'COMPLETED' && r.contract?.id && contractIds.has(r.contract.id))
+      .filter((r) => {
+        const ymd = resolveRowYmd(r);
+        return !!ymd && weeks.some((w) => ymd >= w.weekStart && ymd <= w.weekEnd);
+      })
+      .map((r) => ({
+        row: r,
+        liters: toNum(r.litersRefueled),
+        total: totalValue(r.litersRefueled, r.pricePerLiter),
+      }))
+      .sort((a, b) => (resolveRowDate(b.row)?.getTime() ?? 0) - (resolveRowDate(a.row)?.getTime() ?? 0));
+  }, [rows, urgencyDrillDown]);
+
+  const fmtYmd = (ymd: string) => {
+    const [year, month, day] = ymd.split('-');
+    return `${day}/${month}/${year}`;
+  };
+
+  const urgencyDrillDownModal = (
+    <Modal
+      isOpen={Boolean(urgencyDrillDown)}
+      onClose={() => setUrgencyDrillDown(null)}
+      title={`Urgência: ${urgencyDrillDown ? quotaContractNames(urgencyDrillDown).join(' · ') : ''}`}
+      size="lg"
+    >
+      <div className="space-y-4">
+        <div>
+          <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+            Semanas em que a urgência foi lançada.
+          </p>
+          <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+            {(urgencyDrillDown?.weeks ?? []).map((week) => (
+              <li
+                key={week.weekStart}
+                className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
+              >
+                <span className="text-gray-700 dark:text-gray-200">
+                  {fmtYmd(week.weekStart)} a {fmtYmd(week.weekEnd)}
+                </span>
+                <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                  {formatCurrency(week.amountReais)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+            Abastecimentos concluídos nessas semanas. Clique para abrir na fila.
+          </p>
+          {urgencyRequests.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-500">
+              Nenhum abastecimento nessas semanas.
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+              {urgencyRequests.map(({ row, liters, total }) => {
+                const when = resolveRowDate(row);
+                return (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openRequestInQueue(row.id, row.vehiclePlate || String(row.displayNumber))
+                      }
+                      className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          #{row.displayNumber}
+                          <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                            {when ? format(when, 'dd/MM/yyyy', { locale: ptBR }) : '—'}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                          {[row.driverName, row.vehiclePlate, shortContractName(row)]
+                            .filter(Boolean)
+                            .join(' · ') || '—'}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-sm tabular-nums">
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">
+                          {formatCurrency(total ?? 0)}
+                        </p>
+                        <p className="text-xs text-gray-400">{formatLiters(liters ?? 0)}</p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
 
   const rankDrillDownModal = (
     <Modal
@@ -1170,6 +1295,7 @@ function AnalisesCombustivelContent() {
         groups={urgencyGroups}
         isLoading={loadingUrgency}
         periodLabel={urgencyPeriodLabel || undefined}
+        onSelect={setUrgencyDrillDown}
       />
 
       <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-2">
@@ -1432,6 +1558,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
       {rankDrillDownModal}
+      {urgencyDrillDownModal}
     </div>
   );
 }
