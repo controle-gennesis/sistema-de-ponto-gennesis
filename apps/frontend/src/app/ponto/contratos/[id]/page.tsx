@@ -1080,8 +1080,8 @@ export default function ContractDetailPage() {
   // Liberado na aba Contratos = operar no contrato (OS, produção, etc.).
   // Editar/excluir o cadastro do contrato na listagem exige Editar/Excluir na matriz Acesso.
   const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
-  /** Resumo Abastecimento/Caixinha no contrato: quem tem Liberado (abre a ficha) vê os valores. */
-  const canSeeContratoResumoFinanceiro = hasThisContractAccess;
+  /** Resumo financeiro do topo (Saldo pendente, Abastecimento, Caixinha, Meta): só para o Gestor do contrato (ou admin). */
+  const canSeeContratoResumoFinanceiro = canAccessGestorTabs;
   const canCreateContrato =
     isElevatedUser || permissions.canCreateContracts || hasThisContractAccess;
   const canEditContrato =
