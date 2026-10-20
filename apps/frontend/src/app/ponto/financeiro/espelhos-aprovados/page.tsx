@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, Search } from 'lucide-react';
+import { FileSpreadsheet, Paperclip, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -42,7 +42,12 @@ import {
   type EspelhoFederalRates,
   type EspelhoMirrorDraft,
 } from '@/lib/exportEspelhoNfLayout';
-import { resolveEspelhoApprovalStatus } from '@/lib/espelhoNfApproval';
+import {
+  ESPELHO_APPROVAL_STATUS_LABELS,
+  finalizeEspelhoWithNf,
+  resolveEspelhoApprovalStatus,
+  type EspelhoApprovalStatus,
+} from '@/lib/espelhoNfApproval';
 import { useEspelhoNfBootstrap } from '@/hooks/useEspelhoNfBootstrap';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
@@ -56,6 +61,11 @@ type ApprovedMirror = EspelhoMirrorDraft & {
   createdAt?: string;
   approvalDecidedAt?: string | null;
   approvalDecidedByName?: string;
+  /** APPROVED = aguardando NF; FINALIZED = NF anexada. */
+  status: EspelhoApprovalStatus;
+  nfNumber?: string;
+  finalizedAt?: string | null;
+  finalizedByName?: string;
   nfAttachment?: Attachment;
   xmlAttachment?: Attachment;
 };
@@ -65,6 +75,22 @@ function humanFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+const NF_MAX_BYTES = 10 * 1024 * 1024;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+const STATUS_BADGE_CLASS: Partial<Record<EspelhoApprovalStatus, string>> = {
+  APPROVED: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  FINALIZED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+};
 
 function formatDateBr(value?: string | null): string {
   const raw = String(value ?? '').trim();
@@ -112,6 +138,11 @@ export default function EspelhosAprovadosPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<ApprovedMirror | null>(null);
+  const queryClient = useQueryClient();
+  const [nfTarget, setNfTarget] = useState<ApprovedMirror | null>(null);
+  const [nfFile, setNfFile] = useState<File | null>(null);
+  const [nfNumber, setNfNumber] = useState('');
+  const [nfSaving, setNfSaving] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -149,7 +180,10 @@ export default function EspelhosAprovadosPage() {
     const bankById = new Map(banks.map((b) => [b.id, b]));
     const taxById = new Map(taxCodes.map((t) => [t.id, t]));
     return ((bootstrap?.mirrors ?? []) as Array<Record<string, unknown>>)
-      .filter((m) => resolveEspelhoApprovalStatus(String(m.id ?? ''), String(m.approvalStatus ?? '')) === 'APPROVED')
+      .filter((m) => {
+        const st = resolveEspelhoApprovalStatus(String(m.id ?? ''), String(m.approvalStatus ?? ''));
+        return st === 'APPROVED' || st === 'FINALIZED';
+      })
       .map((m) => {
         const providerId = String(m.providerId ?? '');
         const takerId = String(m.takerId ?? '');
@@ -161,6 +195,10 @@ export default function EspelhosAprovadosPage() {
           createdAt: m.createdAt ? String(m.createdAt) : undefined,
           approvalDecidedAt: m.approvalDecidedAt ? String(m.approvalDecidedAt) : null,
           approvalDecidedByName: String(m.approvalDecidedByName ?? ''),
+          status: resolveEspelhoApprovalStatus(String(m.id ?? ''), String(m.approvalStatus ?? '')),
+          nfNumber: String(m.nfNumber ?? ''),
+          finalizedAt: m.finalizedAt ? String(m.finalizedAt) : null,
+          finalizedByName: String(m.finalizedByName ?? ''),
           measurementRef: String(m.measurementRef ?? ''),
           costCenterId: String(m.costCenterId ?? ''),
           dueDate: String(m.dueDate ?? ''),
@@ -230,6 +268,46 @@ export default function EspelhosAprovadosPage() {
     toast.success('Arquivo PDF gerado.');
   };
 
+  const openNfModal = (mirror: ApprovedMirror) => {
+    setNfTarget(mirror);
+    setNfFile(null);
+    setNfNumber(mirror.nfNumber ?? '');
+  };
+
+  const confirmNf = async () => {
+    if (!nfTarget || nfSaving) return;
+    if (!nfFile) {
+      toast.error('Selecione o arquivo da nota fiscal.');
+      return;
+    }
+    if (nfFile.size > NF_MAX_BYTES) {
+      toast.error('O arquivo da nota fiscal deve ter até 10 MB.');
+      return;
+    }
+    setNfSaving(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(nfFile);
+      await finalizeEspelhoWithNf(nfTarget.id, {
+        nfNumber,
+        attachment: {
+          name: nfFile.name,
+          mimeType: nfFile.type || 'application/octet-stream',
+          size: nfFile.size,
+          dataUrl,
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: ['espelho-nf-bootstrap'] });
+      setNfTarget(null);
+      setDetail(null);
+      toast.success('Nota fiscal anexada. Espelho finalizado.');
+    } catch (e) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || 'Não foi possível anexar a nota fiscal.');
+    } finally {
+      setNfSaving(false);
+    }
+  };
+
   const handleDownloadAttachment = (attachment: Attachment) => {
     const anchor = document.createElement('a');
     anchor.href = attachment.dataUrl;
@@ -254,7 +332,7 @@ export default function EspelhosAprovadosPage() {
     <PageStack>
       <ListPageHeader
         title="Espelhos de NF"
-        description="Espelhos aprovados, prontos para o Financeiro."
+        description="Espelhos aprovados: anexe a nota fiscal para finalizar."
       />
 
       <Card className="w-full">
@@ -327,6 +405,7 @@ export default function EspelhosAprovadosPage() {
                         ['right', 'Valor da medição'],
                         ['center', 'Vencimento'],
                         ['center', 'Aprovado em'],
+                        ['center', 'Status'],
                         ['right', 'Ação'],
                       ].map(([align, label]) => (
                         <th
@@ -372,17 +451,44 @@ export default function EspelhosAprovadosPage() {
                           <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                             {formatDateBr(m.approvalDecidedAt)}
                           </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-center sm:px-6">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_BADGE_CLASS[m.status] ?? ''}`}
+                            >
+                              {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
+                            </span>
+                          </td>
                           <td
                             className="px-3 py-3 text-right sm:px-6"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              onClick={() => handleExportPdf(m)}
-                              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                            >
-                              Exportar PDF
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              {m.status === 'APPROVED' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openNfModal(m)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                                >
+                                  <Paperclip className="h-3.5 w-3.5" aria-hidden />
+                                  Anexar NF
+                                </button>
+                              ) : m.nfAttachment ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAttachment(m.nfAttachment!)}
+                                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                >
+                                  Baixar NF
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => handleExportPdf(m)}
+                                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                              >
+                                Exportar PDF
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -426,9 +532,16 @@ export default function EspelhosAprovadosPage() {
                   <DetailInfoSection
                     title="Aprovação"
                     fields={[
-                      { label: 'Status', value: 'Aprovado' },
+                      { label: 'Status', value: ESPELHO_APPROVAL_STATUS_LABELS[detail.status] },
                       { label: 'Aprovado em', value: formatDateBr(detail.approvalDecidedAt) },
                       { label: 'Aprovado por', value: detail.approvalDecidedByName || '—' },
+                      ...(detail.status === 'FINALIZED'
+                        ? [
+                            { label: 'Nº da nota fiscal', value: detail.nfNumber || '—' },
+                            { label: 'Finalizado em', value: formatDateBr(detail.finalizedAt) },
+                            { label: 'Finalizado por', value: detail.finalizedByName || '—' },
+                          ]
+                        : []),
                     ]}
                   />
                   <DetailInfoSection
@@ -502,6 +615,15 @@ export default function EspelhosAprovadosPage() {
               </DetailInfoSection>
             ) : null}
             <DetailInfoActions>
+              {detail.status === 'APPROVED' ? (
+                <button
+                  type="button"
+                  onClick={() => openNfModal(detail)}
+                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Anexar NF
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => handleExportPdf(detail)}
@@ -512,6 +634,72 @@ export default function EspelhosAprovadosPage() {
             </DetailInfoActions>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal
+        isOpen={!!nfTarget}
+        onClose={() => !nfSaving && setNfTarget(null)}
+        title="Anexar nota fiscal"
+        size="md"
+        closeOnOverlayClick={!nfSaving}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Ao anexar a nota fiscal, o espelho{' '}
+            <span className="font-semibold text-gray-900 dark:text-gray-100">
+              {nfTarget?.measurementRef.trim() || nfTarget?.takerName || ''}
+            </span>{' '}
+            fica <strong>Finalizado</strong> e a NF passa a aparecer na página de Espelhos de NF.
+          </p>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Nota fiscal (PDF ou imagem) *
+            </label>
+            <input
+              type="file"
+              accept=".pdf,image/*"
+              disabled={nfSaving}
+              onChange={(e) => setNfFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50 dark:text-gray-300 dark:file:border-gray-600 dark:file:bg-gray-800 dark:file:text-gray-200"
+            />
+            {nfFile ? (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {nfFile.name} ({humanFileSize(nfFile.size)})
+              </p>
+            ) : null}
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Nº da nota fiscal
+            </label>
+            <input
+              type="text"
+              value={nfNumber}
+              onChange={(e) => setNfNumber(e.target.value)}
+              placeholder="Ex: 1234"
+              disabled={nfSaving}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setNfTarget(null)}
+              disabled={nfSaving}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void confirmNf()}
+              disabled={nfSaving || !nfFile}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+            >
+              {nfSaving ? 'Anexando…' : 'Anexar e finalizar'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </PageStack>
   );

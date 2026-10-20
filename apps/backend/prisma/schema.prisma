@@ -1402,6 +1402,11 @@ model EspelhoNfMirror {
   approvalDecidedAt           DateTime?
   approvalDecidedById         String?
   approvalDecidedByName       String?
+  /// Nº da nota fiscal informado pelo Financeiro ao anexar a NF (finaliza o espelho).
+  nfNumber                    String?
+  finalizedAt                 DateTime?
+  finalizedById               String?
+  finalizedByName             String?
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 

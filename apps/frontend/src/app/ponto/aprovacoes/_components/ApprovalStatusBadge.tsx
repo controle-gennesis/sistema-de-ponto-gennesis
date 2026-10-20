@@ -46,7 +46,7 @@ export function dpToApprovalStatus(status: string): ApprovalStatusKind {
 
 /** Espelho NF */
 export function espelhoToApprovalStatus(status: string): ApprovalStatusKind {
-  if (status === 'APPROVED') return 'aprovado';
+  if (status === 'APPROVED' || status === 'FINALIZED') return 'aprovado';
   if (status === 'CANCELLED') return 'cancelado';
   return 'pendente';
 }

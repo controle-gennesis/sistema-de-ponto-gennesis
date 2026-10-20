@@ -24,7 +24,8 @@ const requireEspelhoNfRead = requireAnyModuleAccess([
   ESPELHOS_APROVADOS_KEY,
 ]);
 
-const APPROVAL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'SENT_FOR_CORRECTION', 'CANCELLED'] as const;
+/** APPROVED = aprovado e aguardando a NF do Financeiro; FINALIZED = NF anexada. */
+const APPROVAL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'SENT_FOR_CORRECTION', 'CANCELLED', 'FINALIZED'] as const;
 type MirrorApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 function normApprovalStatus(v: unknown): MirrorApprovalStatus {
   const s = String(v ?? '');
@@ -185,7 +186,10 @@ router.get('/bootstrap', requireEspelhoNfRead, async (_req, res, next) => {
           approvalStatus: normApprovalStatus(m.approvalStatus),
           approvalComment: m.approvalComment ?? '',
           approvalDecidedAt: m.approvalDecidedAt?.toISOString?.() ?? null,
-          approvalDecidedByName: m.approvalDecidedByName ?? ''
+          approvalDecidedByName: m.approvalDecidedByName ?? '',
+          nfNumber: m.nfNumber ?? '',
+          finalizedAt: m.finalizedAt?.toISOString?.() ?? null,
+          finalizedByName: m.finalizedByName ?? ''
         }))
       }
     });
@@ -207,9 +211,12 @@ router.post('/mirrors/:id/approval', requireModuleAccess(APROVAR_ESPELHO_NF_KEY)
 
     const mirror = await p.espelhoNfMirror.findUnique({
       where: { id },
-      select: { id: true, costCenterId: true }
+      select: { id: true, costCenterId: true, approvalStatus: true }
     });
     if (!mirror) return next(createError('Espelho não encontrado', 404));
+    if (normApprovalStatus(mirror.approvalStatus) === 'FINALIZED') {
+      return next(createError('Espelho finalizado não pode ter a decisão alterada.', 400));
+    }
 
     if (!req.user?.isAdmin) {
       const scoped = await prisma.userEspelhoNfApprovalCostCenter.findMany({
@@ -241,13 +248,79 @@ router.post('/mirrors/:id/approval', requireModuleAccess(APROVAR_ESPELHO_NF_KEY)
   }
 });
 
+/**
+ * Financeiro anexa a nota fiscal (e, se quiser, informa o nº da NF): o espelho aprovado fica FINALIZED.
+ * Só espelhos aprovados (aguardando NF) aceitam o anexo; o PUT /bootstrap não mexe nesses campos.
+ */
+router.post(
+  '/mirrors/:id/nf',
+  requireAnyModuleAccess([ESPELHOS_APROVADOS_KEY]),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const p = prisma as any;
+      const id = String(req.params.id ?? '');
+      const att = (req.body?.attachment ?? {}) as Record<string, unknown>;
+      const dataUrl = String(att.dataUrl ?? '');
+      const name = String(att.name ?? '').trim();
+      if (!dataUrl || !name) return next(createError('Anexe o arquivo da nota fiscal.', 400));
+      const size = Number(att.size);
+      if (Number.isFinite(size) && size > 10 * 1024 * 1024) {
+        return next(createError('O arquivo da nota fiscal deve ter até 10 MB.', 400));
+      }
+      const nfNumber = String(req.body?.nfNumber ?? '').trim();
+
+      const hasFinalization = Boolean(
+        p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some((field: any) => field?.name === 'nfNumber')
+      );
+      if (!hasFinalization) {
+        return next(createError('Prisma Client desatualizado para o módulo Espelho NF. Reinicie o backend.', 500));
+      }
+
+      const mirror = await p.espelhoNfMirror.findUnique({
+        where: { id },
+        select: { id: true, approvalStatus: true }
+      });
+      if (!mirror) return next(createError('Espelho não encontrado', 404));
+      const status = normApprovalStatus(mirror.approvalStatus);
+      if (status !== 'APPROVED' && status !== 'FINALIZED') {
+        return next(createError('Só é possível anexar a NF em espelhos aprovados.', 400));
+      }
+
+      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+      await p.espelhoNfMirror.update({
+        where: { id },
+        data: {
+          nfAttachmentName: name,
+          nfAttachmentMimeType: String(att.mimeType ?? '') || 'application/octet-stream',
+          nfAttachmentSize: Number.isFinite(size) ? size : null,
+          nfAttachmentDataUrl: dataUrl,
+          nfNumber: nfNumber || null,
+          approvalStatus: 'FINALIZED',
+          finalizedAt: new Date(),
+          finalizedById: req.user!.id,
+          finalizedByName: user?.name ?? null
+        }
+      });
+      return res.status(200).json({ success: true });
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
 /** Quem criou/editou reenvia o espelho: volta para Aguardando aprovação. */
 router.post('/mirrors/:id/resubmit', requireModuleAccess(ESPELHO_NF_KEY), async (req, res, next) => {
   try {
     const p = prisma as any;
     const id = String(req.params.id ?? '');
-    const mirror = await p.espelhoNfMirror.findUnique({ where: { id }, select: { id: true } });
+    const mirror = await p.espelhoNfMirror.findUnique({
+      where: { id },
+      select: { id: true, approvalStatus: true }
+    });
     if (!mirror) return next(createError('Espelho não encontrado', 404));
+    if (normApprovalStatus(mirror.approvalStatus) === 'FINALIZED') {
+      return next(createError('Espelho finalizado não pode ser reenviado.', 400));
+    }
     await p.espelhoNfMirror.update({
       where: { id },
       data: {
@@ -353,6 +426,9 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
         (field: any) => field?.name === 'approvalStatus'
       )
     );
+    const mirrorHasFinalization = Boolean(
+      p?._runtimeDataModel?.models?.EspelhoNfMirror?.fields?.some((field: any) => field?.name === 'nfNumber')
+    );
     const approvalById = new Map<string, any>();
     if (mirrorHasApproval) {
       const existing = await p.espelhoNfMirror.findMany({
@@ -362,7 +438,15 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
           approvalComment: true,
           approvalDecidedAt: true,
           approvalDecidedById: true,
-          approvalDecidedByName: true
+          approvalDecidedByName: true,
+          // A NF anexada pelo Financeiro também é do servidor: o PUT nunca a sobrescreve.
+          nfAttachmentName: true,
+          nfAttachmentMimeType: true,
+          nfAttachmentSize: true,
+          nfAttachmentDataUrl: true,
+          ...(mirrorHasFinalization
+            ? { nfNumber: true, finalizedAt: true, finalizedById: true, finalizedByName: true }
+            : {})
         }
       });
       for (const row of existing) approvalById.set(row.id, row);
@@ -520,13 +604,27 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
             bankAccountId: String(item.bankAccountId ?? ''),
             taxCodeId: String(item.taxCodeId ?? ''),
             createdAt: item.createdAt ? new Date(String(item.createdAt)) : undefined,
-            nfAttachmentName: item?.nfAttachment?.name ? String(item.nfAttachment.name) : null,
-            nfAttachmentMimeType: item?.nfAttachment?.mimeType ? String(item.nfAttachment.mimeType) : null,
-            nfAttachmentSize:
-              item?.nfAttachment?.size != null && Number.isFinite(Number(item.nfAttachment.size))
-                ? Number(item.nfAttachment.size)
-                : null,
-            nfAttachmentDataUrl: item?.nfAttachment?.dataUrl ? String(item.nfAttachment.dataUrl) : null,
+            ...(approvalById.has(String(item.id))
+              ? {
+                  nfAttachmentName: approvalById.get(String(item.id)).nfAttachmentName ?? null,
+                  nfAttachmentMimeType: approvalById.get(String(item.id)).nfAttachmentMimeType ?? null,
+                  nfAttachmentSize: approvalById.get(String(item.id)).nfAttachmentSize ?? null,
+                  nfAttachmentDataUrl: approvalById.get(String(item.id)).nfAttachmentDataUrl ?? null
+                }
+              : {
+                  nfAttachmentName: null,
+                  nfAttachmentMimeType: null,
+                  nfAttachmentSize: null,
+                  nfAttachmentDataUrl: null
+                }),
+            ...(mirrorHasFinalization && approvalById.has(String(item.id))
+              ? {
+                  nfNumber: approvalById.get(String(item.id)).nfNumber ?? null,
+                  finalizedAt: approvalById.get(String(item.id)).finalizedAt ?? null,
+                  finalizedById: approvalById.get(String(item.id)).finalizedById ?? null,
+                  finalizedByName: approvalById.get(String(item.id)).finalizedByName ?? null
+                }
+              : {}),
             xmlAttachmentName: item?.xmlAttachment?.name ? String(item.xmlAttachment.name) : null,
             xmlAttachmentMimeType: item?.xmlAttachment?.mimeType ? String(item.xmlAttachment.mimeType) : null,
             xmlAttachmentSize:

@@ -572,7 +572,9 @@ function AprovacoesPage() {
     const byPhase =
       espelhoPhase === 'ALL'
         ? espelhoApprovals
-        : espelhoApprovals.filter((m) => m.status === espelhoPhase);
+        : espelhoApprovals.filter(
+            (m) => (m.status === 'FINALIZED' ? 'APPROVED' : m.status) === espelhoPhase
+          );
     if (!q) return byPhase;
     return byPhase.filter((m) => {
       const title = `${m.takerName} ${m.measurementRef} ${m.measurementAmount} ${m.id}`.toLowerCase();
@@ -589,7 +591,9 @@ function AprovacoesPage() {
       CANCELLED: 0,
     };
     for (const item of espelhoApprovals) {
-      counts[item.status] = (counts[item.status] ?? 0) + 1;
+      // Espelho finalizado (NF anexada) segue contando como aprovado para quem aprova.
+      const phase = item.status === 'FINALIZED' ? 'APPROVED' : item.status;
+      counts[phase] = (counts[phase] ?? 0) + 1;
     }
     return counts;
   }, [espelhoApprovals]);

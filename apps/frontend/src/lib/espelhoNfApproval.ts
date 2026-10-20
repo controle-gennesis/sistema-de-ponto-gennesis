@@ -4,7 +4,9 @@ export type EspelhoApprovalStatus =
   | 'PENDING_APPROVAL'
   | 'APPROVED'
   | 'SENT_FOR_CORRECTION'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  /** NF anexada pelo Financeiro (fim do fluxo). */
+  | 'FINALIZED';
 
 export type EspelhoApprovalRecord = {
   status: EspelhoApprovalStatus;
@@ -15,11 +17,18 @@ export type EspelhoApprovalRecord = {
 const ESPELHO_APPROVAL_STORAGE_KEY = 'espelho-nf-approval-status-by-id';
 
 export const ESPELHO_APPROVAL_STATUS_LABELS: Record<EspelhoApprovalStatus, string> = {
-  PENDING_APPROVAL: 'Aguardando aprovação',
-  APPROVED: 'Aprovado',
+  PENDING_APPROVAL: 'Em aprovação',
+  /** Aprovado: aguarda o Financeiro anexar a nota fiscal. */
+  APPROVED: 'Aguardando NF',
   SENT_FOR_CORRECTION: 'Enviado para correção',
-  CANCELLED: 'Cancelado'
+  CANCELLED: 'Cancelado',
+  FINALIZED: 'Finalizado'
 };
+
+/** Espelho aprovado (aguardando NF) ou já finalizado — libera PDF e bloqueia exclusão/edição. */
+export function isEspelhoApprovedOrFinalized(status: EspelhoApprovalStatus): boolean {
+  return status === 'APPROVED' || status === 'FINALIZED';
+}
 
 function hasWindow(): boolean {
   return typeof window !== 'undefined';
@@ -51,6 +60,7 @@ export function resolveEspelhoApprovalStatus(
   if (inlineStatus === 'APPROVED') return 'APPROVED';
   if (inlineStatus === 'SENT_FOR_CORRECTION') return 'SENT_FOR_CORRECTION';
   if (inlineStatus === 'CANCELLED') return 'CANCELLED';
+  if (inlineStatus === 'FINALIZED') return 'FINALIZED';
   const fromMap = getEspelhoApprovalStatusMap()[mirrorId]?.status;
   if (fromMap === 'APPROVED') return 'APPROVED';
   if (fromMap === 'SENT_FOR_CORRECTION') return 'SENT_FOR_CORRECTION';
@@ -90,6 +100,20 @@ export async function decideEspelhoApproval(
     comment: comment?.trim() || undefined
   });
   removeEspelhoApprovalStatus(mirrorId);
+}
+
+/** Financeiro anexa a nota fiscal (e opcionalmente informa o nº): o espelho fica Finalizado. */
+export async function finalizeEspelhoWithNf(
+  mirrorId: string,
+  payload: {
+    nfNumber?: string;
+    attachment: { name: string; mimeType: string; size: number; dataUrl: string };
+  }
+): Promise<void> {
+  await api.post(`/espelho-nf/mirrors/${encodeURIComponent(mirrorId)}/nf`, {
+    nfNumber: payload.nfNumber?.trim() || undefined,
+    attachment: payload.attachment
+  });
 }
 
 /** Reenvio para aprovação (espelho editado ou corrigido): volta para "Aguardando aprovação". */

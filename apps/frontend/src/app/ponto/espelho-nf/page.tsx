@@ -185,6 +185,10 @@ type SavedMirror = MirrorDraft & {
   approvalStatus?: EspelhoApprovalStatus;
   nfAttachment?: MirrorAttachment;
   xmlAttachment?: MirrorAttachment;
+  /** Preenchidos pelo Financeiro ao anexar a NF (espelho Finalizado). */
+  nfNumber?: string;
+  finalizedAt?: string | null;
+  finalizedByName?: string;
 };
 
 function newSavedMirrorId(): string {
@@ -484,7 +488,9 @@ const ESPELHO_APPROVAL_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
   SENT_FOR_CORRECTION:
     'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
   CANCELLED:
-    'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+    'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
+  FINALIZED:
+    'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
 };
 
 const INITIAL_TAKER_FORM: Omit<ServiceTaker, 'id'> = {
@@ -2125,38 +2131,6 @@ export default function EspelhoNfPage() {
     toast.success('Altere os campos e clique em Salvar para concluir a edição.');
   };
 
-  const handleAttachDetailFile = async (kind: 'nfAttachment' | 'xmlAttachment', file: File | null) => {
-    if (!detailMirror || !file) return;
-    if (file.size > MIRROR_ATTACHMENT_MAX_BYTES) {
-      toast.error('Arquivo muito grande. Limite de 10 MB.');
-      return;
-    }
-    try {
-      const attachment: MirrorAttachment = {
-        name: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size,
-        dataUrl: await fileToDataUrl(file)
-      };
-      const mirrorId = detailMirror.id;
-      setSavedDrafts((prev) =>
-        prev.map((m) => (m.id === mirrorId ? { ...m, [kind]: attachment } : m))
-      );
-      setDetailMirror((prev) => (prev && prev.id === mirrorId ? { ...prev, [kind]: attachment } : prev));
-      toast.success(kind === 'nfAttachment' ? 'Nota fiscal anexada.' : 'XML anexado.');
-    } catch {
-      toast.error('Não foi possível anexar o arquivo.');
-    }
-  };
-
-  const handleRemoveDetailAttachment = (kind: 'nfAttachment' | 'xmlAttachment') => {
-    if (!detailMirror) return;
-    const mirrorId = detailMirror.id;
-    setSavedDrafts((prev) => prev.map((m) => (m.id === mirrorId ? { ...m, [kind]: undefined } : m)));
-    setDetailMirror((prev) => (prev && prev.id === mirrorId ? { ...prev, [kind]: undefined } : prev));
-    toast.success('Anexo removido.');
-  };
-
   const handleDownloadAttachment = (attachment: MirrorAttachment) => {
     const anchor = document.createElement('a');
     anchor.href = attachment.dataUrl;
@@ -3548,7 +3522,8 @@ export default function EspelhoNfPage() {
                               setMirrorActionMenu(null);
                               handleEditSavedMirror(mirrorMenuItem);
                             }}
-                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                            disabled={menuApproval === 'FINALIZED'}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
                             <Pencil className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                             <span>Editar</span>
@@ -3561,7 +3536,7 @@ export default function EspelhoNfPage() {
                               setMirrorActionMenu(null);
                               handleDeleteSavedMirror(mirrorMenuItem.id);
                             }}
-                            disabled={menuApproval === 'APPROVED'}
+                            disabled={menuApproval === 'APPROVED' || menuApproval === 'FINALIZED'}
                             className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
                             <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
@@ -3588,7 +3563,7 @@ export default function EspelhoNfPage() {
                               );
                               toast.success('Arquivo PDF gerado.');
                             }}
-                            disabled={menuApproval !== 'APPROVED'}
+                            disabled={menuApproval !== 'APPROVED' && menuApproval !== 'FINALIZED'}
                             className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                           >
                             <FileText className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
@@ -3667,57 +3642,50 @@ export default function EspelhoNfPage() {
                     </>
                   );
                 })()}
-                <DetailInfoSection title="Anexos">
-                  <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {(
-                      [
-                        { key: 'nfAttachment', label: 'Nota fiscal (PDF ou imagem)', accept: '.pdf,image/*' },
-                        { key: 'xmlAttachment', label: 'XML da nota fiscal', accept: '.xml,text/xml,application/xml' },
-                      ] as const
-                    ).map(({ key, label, accept }) => {
-                      const att = detailMirror[key];
-                      return (
-                        <div key={key} className="space-y-2 py-3">
-                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
-                          {att ? (
-                            <div className="flex flex-wrap items-center gap-2 text-sm">
-                              <span className="min-w-[12rem] grow break-all text-gray-900 dark:text-gray-100">
-                                {att.name} ({humanFileSize(att.size)})
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAttachment(att)}
-                                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                              >
-                                Baixar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveDetailAttachment(key)}
-                                className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
-                              >
-                                Remover
-                              </button>
-                            </div>
-                          ) : null}
-                          <label className="inline-flex cursor-pointer items-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
-                            {att ? 'Substituir arquivo' : 'Selecionar arquivo'}
-                            <input
-                              type="file"
-                              accept={accept}
-                              onChange={(e) => {
-                                const file = e.target.files?.[0] ?? null;
-                                void handleAttachDetailFile(key, file);
-                                e.currentTarget.value = '';
-                              }}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </DetailInfoSection>
+                <DetailInfoSection
+                  title="Nota fiscal"
+                  fields={[
+                    {
+                      label: 'Situação',
+                      value:
+                        resolveEspelhoApprovalStatus(detailMirror.id, detailMirror.approvalStatus) ===
+                        'FINALIZED'
+                          ? 'Finalizado'
+                          : resolveEspelhoApprovalStatus(detailMirror.id, detailMirror.approvalStatus) ===
+                              'APPROVED'
+                            ? 'Aguardando a NF do Financeiro'
+                            : 'Disponível após a aprovação',
+                    },
+                    ...(detailMirror.nfNumber ? [{ label: 'Nº da nota fiscal', value: detailMirror.nfNumber }] : []),
+                    ...(detailMirror.finalizedAt
+                      ? [
+                          {
+                            label: 'Finalizado em',
+                            value: new Date(detailMirror.finalizedAt).toLocaleDateString('pt-BR'),
+                          },
+                        ]
+                      : []),
+                    ...(detailMirror.finalizedByName
+                      ? [{ label: 'Anexada por', value: detailMirror.finalizedByName }]
+                      : []),
+                  ]}
+                />
+                {detailMirror.nfAttachment ? (
+                  <DetailInfoSection title="Arquivo da nota fiscal">
+                    <div className="flex flex-wrap items-center gap-2 py-3 text-sm">
+                      <span className="min-w-[12rem] grow break-all text-gray-900 dark:text-gray-100">
+                        {detailMirror.nfAttachment.name} ({humanFileSize(detailMirror.nfAttachment.size)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAttachment(detailMirror.nfAttachment!)}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Baixar
+                      </button>
+                    </div>
+                  </DetailInfoSection>
+                ) : null}
                 <DetailInfoActions>
                   <button
                     type="button"
@@ -3726,7 +3694,7 @@ export default function EspelhoNfPage() {
                         detailMirror.id,
                         detailMirror.approvalStatus
                       );
-                      if (detailApprovalStatus !== 'APPROVED') {
+                      if (detailApprovalStatus !== 'APPROVED' && detailApprovalStatus !== 'FINALIZED') {
                         toast.error('O PDF só pode ser baixado quando o espelho estiver aprovado.');
                         return;
                       }
@@ -3746,8 +3714,9 @@ export default function EspelhoNfPage() {
                       toast.success('Arquivo PDF gerado.');
                     }}
                     disabled={
-                      resolveEspelhoApprovalStatus(detailMirror.id, detailMirror.approvalStatus) !==
-                      'APPROVED'
+                      !['APPROVED', 'FINALIZED'].includes(
+                        resolveEspelhoApprovalStatus(detailMirror.id, detailMirror.approvalStatus)
+                      )
                     }
                     className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:pointer-events-none disabled:opacity-50"
                   >

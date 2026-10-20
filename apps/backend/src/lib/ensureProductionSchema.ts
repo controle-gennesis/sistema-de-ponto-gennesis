@@ -464,6 +464,18 @@ async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureEspelhoNfMirrorFinalizationColumns(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'espelho_nf_mirrors'))) return;
+  for (const col of [
+    '"nfNumber" TEXT',
+    '"finalizedAt" TIMESTAMP(3)',
+    '"finalizedById" TEXT',
+    '"finalizedByName" TEXT',
+  ]) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "espelho_nf_mirrors" ADD COLUMN IF NOT EXISTS ${col};`);
+  }
+}
+
 async function ensureEspelhoNfMirrorApprovalColumns(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'espelho_nf_mirrors'))) return;
   if (await columnExists(prisma, 'espelho_nf_mirrors', 'approvalStatus')) return;
@@ -3211,6 +3223,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDemandSheetApprovals(prisma);
     await ensureDemandSheetPurchaseCancelled(prisma);
     await ensureEspelhoNfMirrorApprovalColumns(prisma);
+    await ensureEspelhoNfMirrorFinalizationColumns(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);
