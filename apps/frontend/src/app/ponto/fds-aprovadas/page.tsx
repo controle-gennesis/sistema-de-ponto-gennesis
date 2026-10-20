@@ -126,6 +126,7 @@ export default function FdsAprovadasPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<PurchaseStatusFilter>('ALL');
+  const [contratoFilter, setContratoFilter] = useState('ALL');
   const [statCardFilter, setStatCardFilter] = useState<StatCardFilter>('ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -172,14 +173,24 @@ export default function FdsAprovadasPage() {
     }),
     [allRecords]
   );
+  const contratoOptions = useMemo(() => {
+    const nomes = Array.from(
+      new Set(allRecords.map((r) => r.contratoNome?.trim()).filter((n): n is string => !!n))
+    ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return labeledToSelectOptions([
+      { value: 'ALL', label: 'Todos' },
+      ...nomes.map((n) => ({ value: n, label: n })),
+    ]);
+  }, [allRecords]);
   const records = useMemo(
     () =>
       allRecords.filter(
         (r) =>
           matchesStatCard(r.purchaseStatus, statCardFilter) &&
-          matchesPurchaseStatus(r.purchaseStatus, purchaseStatusFilter)
+          matchesPurchaseStatus(r.purchaseStatus, purchaseStatusFilter) &&
+          (contratoFilter === 'ALL' || r.contratoNome?.trim() === contratoFilter)
       ),
-    [allRecords, statCardFilter, purchaseStatusFilter]
+    [allRecords, statCardFilter, purchaseStatusFilter, contratoFilter]
   );
   const listHeader = LIST_HEADER_BY_FILTER[statCardFilter];
   const ListHeaderIcon = listHeader.Icon;
@@ -190,14 +201,14 @@ export default function FdsAprovadasPage() {
   const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
   const endItem = Math.min(startIndex + ITEMS_PER_PAGE, totalFiltered);
   const isListEmpty = !loadingList && totalFiltered === 0;
-  const hasActiveFilter = purchaseStatusFilter !== 'ALL';
+  const hasActiveFilter = purchaseStatusFilter !== 'ALL' || contratoFilter !== 'ALL';
   const rowForActionMenu = rowActionMenu
     ? records.find((r) => r.id === rowActionMenu.rowId) ?? null
     : null;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, purchaseStatusFilter, statCardFilter]);
+  }, [searchTerm, purchaseStatusFilter, contratoFilter, statCardFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -527,10 +538,26 @@ export default function FdsAprovadasPage() {
               />
             </div>
 
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Contrato
+              </label>
+              <StringSingleSelectDropdown
+                value={contratoFilter}
+                onChange={(value) => setContratoFilter(value)}
+                options={contratoOptions}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
               <button
                 type="button"
-                onClick={() => setPurchaseStatusFilter('ALL')}
+                onClick={() => {
+                  setPurchaseStatusFilter('ALL');
+                  setContratoFilter('ALL');
+                }}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
               >
                 Limpar filtros
