@@ -15727,13 +15727,12 @@ export function OrcamentoPageView({
     };
   };
 
-  /** Pacote: Orçamento + Memória de cálculo + Analítico + Ficha de demanda no mesmo .xlsx. */
+  /** Pacote: Orçamento + Memória de cálculo + Analítico no mesmo .xlsx (a Ficha de demanda tem exportação própria). */
   const exportarOrcamentoCompleto = async () => {
     const sheets = [
       montarSheetOrcamentoDetalhado(),
       montarSheetMemoriaCalculo(),
       montarSheetOrcamentoAnalitico(),
-      montarSheetFichaDemanda(),
     ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
     if (!sheets.length) {
       toast.error('Não há dados para exportar.');
@@ -15745,7 +15744,7 @@ export function OrcamentoPageView({
       contrato: nomeContrato,
       aparencia: aparenciaMontagem,
     });
-    toast.success('Orçamento exportado (Orçamento, Memória de cálculo, Analítico e Ficha de demanda).');
+    toast.success('Orçamento exportado (Orçamento, Memória de cálculo e Analítico).');
   };
 
   const exportarCronogramaExcel = async () => {
