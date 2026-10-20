@@ -23,7 +23,8 @@ type UploadMultipartOptions = {
   /** Path relativo da API, ex.: `/api/auth/me/photo` */
   path: string;
   fieldName: string;
-  file: UploadFileInput;
+  /** Sem arquivo, envia só os campos (ex.: ponto lido pelo QR da localidade, sem selfie). */
+  file?: UploadFileInput;
   method?: 'POST' | 'PUT' | 'PATCH';
   fields?: Record<string, string>;
 };
@@ -43,8 +44,10 @@ export async function uploadMultipartFile<T = unknown>(
         if (value != null) form.append(key, value);
       }
     }
-    const blob = await fetch(file.uri).then((r) => r.blob());
-    form.append(fieldName, blob, file.name);
+    if (file) {
+      const blob = await fetch(file.uri).then((r) => r.blob());
+      form.append(fieldName, blob, file.name);
+    }
     const res =
       method === 'PATCH'
         ? await api.patch(path, form)
@@ -54,6 +57,21 @@ export async function uploadMultipartFile<T = unknown>(
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(json?.message || json?.error || 'Erro no upload');
+    }
+    return (json?.data ?? json) as T;
+  }
+
+  // Sem arquivo: requisição comum com os campos (o upload nativo exige um arquivo).
+  if (!file) {
+    const res =
+      method === 'PATCH'
+        ? await api.patch(path, fields ?? {})
+        : method === 'PUT'
+          ? await api.put(path, fields ?? {})
+          : await api.post(path, fields ?? {});
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json?.message || json?.error || 'Erro no envio');
     }
     return (json?.data ?? json) as T;
   }

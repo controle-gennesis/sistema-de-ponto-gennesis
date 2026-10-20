@@ -14,6 +14,9 @@ import {
   useWindowDimensions,
   Platform,
   Vibration,
+  Animated,
+  Easing,
+  Keyboard,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -21,12 +24,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
   Check,
+  CloudUpload,
   LogIn,
   LogOut,
   MapPin,
   PersonStanding,
   QrCode,
   RotateCw,
+  ScanFace,
+  SwitchCamera,
   Utensils,
   X,
 } from 'lucide-react-native';
@@ -42,7 +48,7 @@ import api from '../services/api';
 import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 import { resolveMediaUrl } from '../utils/resolveMediaUrl';
 import { isNetworkError } from '../utils/network';
-import { enqueuePendingPunch } from '../services/punchOfflineQueue';
+import { enqueuePendingPunch, pendingPunchCount } from '../services/punchOfflineQueue';
 
 enum TimeRecordType {
   ENTRY = 'ENTRY',
@@ -66,6 +72,8 @@ type PunchPolicyLocation = {
   longitude: number;
   radius: number;
   hasQr?: boolean;
+  /** Forma de bater ponto neste local; null = segue a configuração geral. */
+  punchMethod?: 'FACE' | 'QR' | 'BOTH' | null;
 };
 
 type PunchPolicy = {
@@ -74,6 +82,8 @@ type PunchPolicy = {
   geofenceRequireLocation: boolean;
   requireFaceMatch: boolean;
   requirePunchQr: boolean;
+  /** O que a pessoa pode usar pra bater ponto: rosto, QR ou os dois (escolhe um). */
+  punchMethods?: { face: boolean; qr: boolean };
   hasFacePhoto?: boolean;
   hasProfilePhoto: boolean;
   facePhotoUrl?: string | null;
@@ -167,6 +177,36 @@ function metersToLatitudeDelta(meters: number) {
 }
 
 /** Um único leque: forte na bolinha e some no final (sem borda dura). */
+/**
+ * Círculo + pin de um local autorizado. Memoizado: a tela re-renderiza todo segundo (relógio) e,
+ * sem isso, o pin era recriado e o balão (nome/raio) fechava ou nem abria.
+ */
+const PunchLocationMarker = React.memo(function PunchLocationMarker({
+  loc,
+  inside,
+}: {
+  loc: PunchPolicyLocation;
+  inside: boolean;
+}) {
+  return (
+    <>
+      <Circle
+        center={{ latitude: loc.latitude, longitude: loc.longitude }}
+        radius={loc.radius}
+        strokeWidth={2}
+        strokeColor={inside ? 'rgba(22,163,74,0.9)' : 'rgba(220,38,38,0.85)'}
+        fillColor={inside ? 'rgba(22,163,74,0.18)' : 'rgba(220,38,38,0.14)'}
+      />
+      <Marker
+        coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
+        title={loc.name}
+        description={`Raio ${loc.radius} m`}
+        pinColor={inside ? '#16a34a' : '#dc2626'}
+      />
+    </>
+  );
+});
+
 function HeadingVisionCone({ color }: { color: string }) {
   const gid = color.replace('#', '');
   return (
@@ -203,9 +243,80 @@ export default function PunchScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [arriveFlash, setArriveFlash] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [pendingPunches, setPendingPunches] = useState(0);
+
+  // Batidas guardadas no aparelho esperando sinal: confere ao abrir, a cada poucos segundos e
+  // quando a conexão muda (a sincronização roda em segundo plano e esvazia a fila).
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void pendingPunchCount().then((n) => {
+        if (alive) setPendingPunches(n);
+      });
+    };
+    refresh();
+    const timer = setInterval(refresh, 6000);
+    const unsubscribe = NetInfo.addEventListener(() => refresh());
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, []);
+
+  // iOS: sobe o conteúdo acima do teclado (o campo de observação ficava escondido atrás dele).
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const subs = [
+      Keyboard.addListener('keyboardWillChangeFrame', (e) =>
+        setKeyboardHeight(Math.max(0, windowHeight - e.endCoordinates.screenY))
+      ),
+      Keyboard.addListener('keyboardWillHide', () => setKeyboardHeight(0)),
+    ];
+    return () => subs.forEach((sub) => sub.remove());
+  }, [windowHeight]);
+
+  useEffect(() => {
+    if (!showSuccessModal) return;
+    successPop.setValue(0);
+    successPulse.setValue(0);
+    successFade.setValue(0);
+    // Vibração curta de confirmação (no iOS o sistema usa a vibração padrão).
+    try {
+      Vibration.vibrate([0, 40, 50, 80]);
+    } catch {
+      /* ignore */
+    }
+    Animated.sequence([
+      Animated.delay(120),
+      Animated.parallel([
+        Animated.spring(successPop, {
+          toValue: 1,
+          friction: 4.5,
+          tension: 140,
+          useNativeDriver: true,
+        }),
+        Animated.timing(successPulse, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(successFade, {
+          toValue: 1,
+          duration: 380,
+          delay: 160,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+  }, [showSuccessModal, successFade, successPop, successPulse]);
   const [loading, setLoading] = useState(false);
   const [observation, setObservation] = useState('');
-  const [todayRecords, setTodayRecords] = useState<Array<{ type: string }>>([]);
+  const [todayRecords, setTodayRecords] = useState<Array<{ type: string; timestamp?: string }>>([]);
   const [allPointsCompleted, setAllPointsCompleted] = useState(false);
   const [selectedType, setSelectedType] = useState<TimeRecordType>(TimeRecordType.ENTRY);
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
@@ -214,6 +325,10 @@ export default function PunchScreen() {
   const [address, setAddress] = useState('Obtendo localização');
   const [loadingDots, setLoadingDots] = useState(1);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  // Animação do "ponto registrado": o check salta com mola e um anel se expande por trás.
+  const successPop = useRef(new Animated.Value(0)).current;
+  const successPulse = useRef(new Animated.Value(0)).current;
+  const successFade = useRef(new Animated.Value(0)).current;
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showFacePhotoModal, setShowFacePhotoModal] = useState(false);
@@ -695,8 +810,15 @@ export default function PunchScreen() {
   }, [faceCameraMode, faceCameraOpen, runFaceScanTick]);
 
   const punchInOut = async () => {
-    if (!photo || !faceConfirmed) {
-      Alert.alert('Conferência facial', 'Abra a câmera e aguarde a confirmação do rosto.');
+    if (!methodDone) {
+      Alert.alert(
+        bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência facial',
+        bothAllowed
+          ? 'Abra a câmera e confirme o rosto ou leia o QR da localidade.'
+          : qrAllowed
+            ? 'Leia o QR Code do local onde o serviço será prestado.'
+            : 'Abra a câmera e aguarde a confirmação do rosto.'
+      );
       return;
     }
     if (!location) {
@@ -726,11 +848,7 @@ export default function PunchScreen() {
         }
       }
     }
-    if (punchPolicy?.requirePunchQr && !scannedPunchQr) {
-      Alert.alert('QR da localidade', 'Leia o QR Code do local onde o serviço será prestado.');
-      return;
-    }
-    if (!hasPunchFacePhoto(punchPolicy)) {
+    if (!usingQrOnly && !hasPunchFacePhoto(punchPolicy)) {
       setShowFacePhotoModal(true);
       return;
     }
@@ -756,7 +874,7 @@ export default function PunchScreen() {
       const data = await uploadMultipartFile<{ punchLocationName?: string | null }>({
         path: '/api/time-records/punch',
         fieldName: 'photo',
-        file: { uri: photo, name: 'punch_photo.jpg', type: 'image/jpeg' },
+        file: usingQrOnly || !photo ? undefined : { uri: photo, name: 'punch_photo.jpg', type: 'image/jpeg' },
         fields: {
           type: selectedType,
           latitude: location.coords.latitude.toString(),
@@ -784,7 +902,7 @@ export default function PunchScreen() {
       setScannedLocationName(data?.punchLocationName || scannedLocationName);
       void fetchTodayRecords();
     } catch (error: unknown) {
-      if (isNetworkError(error) && photo && location) {
+      if (isNetworkError(error) && photo && location && !usingQrOnly) {
         try {
           await enqueuePendingPunch({
             type: selectedType,
@@ -795,6 +913,7 @@ export default function PunchScreen() {
             punchQrToken: scannedPunchQr || undefined,
             photoUri: photo,
           });
+          void pendingPunchCount().then(setPendingPunches);
           setSuccessData({
             type: punchTypeLabels[selectedType],
             time: `${hours}:${minutes}:${seconds}`,
@@ -821,6 +940,31 @@ export default function PunchScreen() {
       Alert.alert('Erro ao registrar ponto', error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Botão único: abre a câmera no método permitido (rosto por padrão; QR se só ele vale). */
+  const openPunchCamera = async () => {
+    if (faceAllowed) {
+      await openFaceCamera();
+    } else {
+      await openPunchQrScanner();
+    }
+  };
+
+  /** Vira a câmera: rosto (frontal) <-> QR (traseira), sem sair da tela de câmera. */
+  const flipPunchCamera = async () => {
+    if (faceCameraOpen) {
+      // Rosto -> QR: para a leitura do rosto sem apagar o que já foi confirmado.
+      faceMatchedRef.current = false;
+      faceScanLockRef.current = false;
+      setFaceScanBusy(false);
+      setFaceCameraOpen(false);
+      qrLockRef.current = false;
+      setQrScannerOpen(true);
+    } else {
+      setQrScannerOpen(false);
+      await startFaceCheckCamera();
     }
   };
 
@@ -866,7 +1010,6 @@ export default function PunchScreen() {
   };
 
   const selectedPunch = PUNCH_TYPES.find((p) => p.type === selectedType);
-  const SelectedIcon = selectedPunch?.Icon || LogIn;
   const dateLabel = currentTime.toLocaleDateString('pt-BR', {
     weekday: 'long',
     day: 'numeric',
@@ -892,6 +1035,27 @@ export default function PunchScreen() {
   if (punchPolicy?.geofenceEnabled && nearestFence) {
     fenceOk = nearestFence.distance <= nearestFence.loc.radius;
   }
+
+  // Formas permitidas de bater ponto: as do local onde a pessoa está (dentro do raio); fora de
+  // qualquer local, a configuração geral. Rosto, QR ou as duas (escolhe uma).
+  const currentPunchLocation =
+    nearestFence && nearestFence.distance <= nearestFence.loc.radius ? nearestFence.loc : null;
+  const generalMethods = {
+    face: punchPolicy?.punchMethods?.face ?? true,
+    qr: punchPolicy?.punchMethods?.qr ?? Boolean(punchPolicy?.requirePunchQr),
+  };
+  const locationMethod = currentPunchLocation?.punchMethod ?? null;
+  const faceAllowed =
+    locationMethod === 'QR' ? false : locationMethod ? true : generalMethods.face;
+  const qrAllowed =
+    locationMethod === 'FACE' ? false : locationMethod ? true : generalMethods.qr;
+  const bothAllowed = faceAllowed && qrAllowed;
+  const faceDone = faceAllowed && faceConfirmed && Boolean(photo);
+  const qrDone = qrAllowed && Boolean(scannedPunchQr) && Boolean(scannedLocationName);
+  const methodDone = faceDone || qrDone;
+  // Com o QR lido e aceito, o QR basta (sem selfie); senão vale o rosto.
+  const usingQrOnly = qrDone && !faceDone;
+
 
   const mapLocations = punchPolicy?.locations ?? [];
   const showGeoMap =
@@ -970,14 +1134,7 @@ export default function PunchScreen() {
     Boolean(punchPolicy?.geofenceBlockOutside) &&
     !fenceOk;
 
-  const punchBlocked =
-    loading ||
-    !photo ||
-    !faceConfirmed ||
-    !location ||
-    allPointsCompleted ||
-    outsideBlocked ||
-    Boolean(punchPolicy?.requirePunchQr && !scannedPunchQr);
+  const punchBlocked = loading || !methodDone || !location || allPointsCompleted || outsideBlocked;
 
   const registeredFacePhotoUri = resolveMediaUrl(punchPolicy?.facePhotoUrl ?? null);
   const confirmedFacePreviewUri = registeredFacePhotoUri || photo;
@@ -986,15 +1143,21 @@ export default function PunchScreen() {
     ? 'Todos os pontos de hoje já foram registrados.'
     : outsideBlocked
       ? 'Fora da área autorizada — aproxime-se do local para registrar.'
-      : !location && !faceConfirmed
-        ? 'Permita a localização e confirme o rosto para continuar.'
-        : location && !faceConfirmed
-          ? 'Abra a câmera e aguarde a confirmação do rosto.'
-          : !location && faceConfirmed
-            ? 'Obtendo localização...'
-            : punchPolicy?.requirePunchQr && !scannedPunchQr
+      : !location && !methodDone
+        ? bothAllowed
+          ? 'Permita a localização e confirme o rosto ou leia o QR para continuar.'
+          : qrAllowed
+            ? 'Permita a localização e leia o QR da localidade para continuar.'
+            : 'Permita a localização e confirme o rosto para continuar.'
+        : location && !methodDone
+          ? bothAllowed
+            ? 'Abra a câmera: confirme o rosto ou vire para ler o QR da localidade.'
+            : qrAllowed
               ? 'Leia o QR da localidade para concluir.'
-              : 'Tudo pronto para registrar.';
+              : 'Abra a câmera e aguarde a confirmação do rosto.'
+          : !location && methodDone
+            ? 'Obtendo localização...'
+            : 'Tudo pronto para registrar.';
 
   if (cameraPermission === null || locationPermission === null) {
     return (
@@ -1033,8 +1196,9 @@ export default function PunchScreen() {
       <AppHeader showBack title="Registrar ponto" onBack={askLeave} />
 
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
-        contentContainerStyle={styles.body}
+        contentContainerStyle={[styles.body, keyboardHeight > 0 ? { paddingBottom: keyboardHeight + 24 } : null]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -1047,21 +1211,101 @@ export default function PunchScreen() {
             })}
           </Text>
           <Text style={styles.date}>{dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}</Text>
-          <View style={styles.nextChip}>
-            <SelectedIcon size={14} color={colors.primary} strokeWidth={2.3} />
-            <Text style={styles.nextChipLabel}>Próximo</Text>
-            <Text style={styles.nextChipValue}>{selectedPunch?.label}</Text>
+          <View style={styles.timeline}>
+            {PUNCH_TYPES.map((step, index) => {
+              const record = todayRecords.find((rec) => rec.type === step.type);
+              const done = Boolean(record);
+              const isNext = !done && !allPointsCompleted && step.type === selectedType;
+              const StepIcon = step.Icon;
+              const time = record?.timestamp
+                ? new Date(record.timestamp).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '';
+              return (
+                <React.Fragment key={step.type}>
+                  {index > 0 ? (
+                    <View
+                      style={[
+                        styles.timelineLine,
+                        done || todayRecords.some((rec) => rec.type === PUNCH_TYPES[index - 1].type)
+                          ? styles.timelineLineDone
+                          : null,
+                      ]}
+                    />
+                  ) : null}
+                  <View style={styles.timelineStep}>
+                    <View
+                      style={[
+                        styles.timelineDot,
+                        done ? styles.timelineDotDone : null,
+                        isNext ? styles.timelineDotNext : null,
+                      ]}
+                    >
+                      {done ? (
+                        <Check size={15} color="#fff" strokeWidth={3} />
+                      ) : (
+                        <StepIcon
+                          size={16}
+                          color={isNext ? '#fff' : colors.textSecondary}
+                          strokeWidth={2.4}
+                        />
+                      )}
+                    </View>
+                    <Text style={[styles.timelineLabel, isNext ? styles.timelineLabelNext : null]}>
+                      {step.label}
+                    </Text>
+                    <Text style={styles.timelineTime}>{time || ' '}</Text>
+                  </View>
+                </React.Fragment>
+              );
+            })}
           </View>
         </View>
 
+        {pendingPunches > 0 ? (
+          <View style={styles.pendingNotice} accessibilityRole="alert">
+            <CloudUpload size={16} color={isDark ? '#fbbf24' : '#b45309'} strokeWidth={2.2} />
+            <Text style={styles.pendingNoticeText}>
+              {pendingPunches === 1
+                ? '1 ponto aguardando envio'
+                : `${pendingPunches} pontos aguardando envio`}
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.box}>
-          <FormFieldLabel label="Conferência do rosto" required style={styles.boxTitle} />
-          <Text style={styles.boxHint}>
-            {faceConfirmed
-              ? 'Rosto confirmado. Pode registrar o ponto.'
-              : 'Abra a câmera e aguarde a confirmação automática'}
-          </Text>
-          {faceConfirmed && confirmedFacePreviewUri ? (
+          <View style={styles.confirmHeader}>
+            <View style={styles.homeIcon}>
+              {bothAllowed ? (
+                <Camera size={20} color={colors.primary} strokeWidth={2.2} />
+              ) : faceAllowed ? (
+                <ScanFace size={20} color={colors.primary} strokeWidth={2.2} />
+              ) : (
+                <QrCode size={20} color={colors.primary} strokeWidth={2.2} />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <FormFieldLabel
+                label={bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência do rosto'}
+                required
+                style={styles.confirmTitle}
+              />
+              <Text style={styles.confirmHint}>
+                {faceDone
+                  ? 'Rosto confirmado. Pode registrar o ponto.'
+                  : qrDone
+                    ? `QR lido: ${scannedLocationName}. Pode registrar o ponto.`
+                    : bothAllowed
+                      ? 'Abra a câmera: confirme o rosto ou vire para ler o QR da localidade'
+                      : qrAllowed
+                        ? 'Leia o QR Code do local onde o serviço será prestado'
+                        : 'Abra a câmera e aguarde a confirmação automática'}
+              </Text>
+            </View>
+          </View>
+          {faceDone && confirmedFacePreviewUri ? (
             <TouchableOpacity
               onPress={() => setShowPhoto(true)}
               activeOpacity={0.9}
@@ -1071,11 +1315,21 @@ export default function PunchScreen() {
             </TouchableOpacity>
           ) : null}
           <View style={styles.photoActions}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => void openFaceCamera()} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => void openPunchCamera()} activeOpacity={0.85}>
               <View style={styles.btnRow}>
-                <Camera size={18} color="#fff" strokeWidth={2.2} />
+                {faceAllowed ? (
+                  <Camera size={18} color="#fff" strokeWidth={2.2} />
+                ) : (
+                  <QrCode size={18} color="#fff" strokeWidth={2.2} />
+                )}
                 <Text style={styles.primaryBtnText}>
-                  {faceConfirmed ? 'Conferir de novo' : 'Abrir câmera'}
+                  {methodDone
+                    ? faceAllowed
+                      ? 'Conferir de novo'
+                      : 'Ler de novo'
+                    : faceAllowed
+                      ? 'Abrir câmera'
+                      : 'Ler QR da localidade'}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -1085,8 +1339,8 @@ export default function PunchScreen() {
         <View style={styles.box}>
           <FormFieldLabel label="Localização" style={styles.boxTitle} />
           <View style={styles.locationRow}>
-            <View style={styles.locationIcon}>
-              <MapPin size={18} color={colors.primary} strokeWidth={2.2} />
+            <View style={styles.homeIcon}>
+              <MapPin size={20} color={colors.primary} strokeWidth={2.2} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.locationText}>
@@ -1106,39 +1360,25 @@ export default function PunchScreen() {
                 showsMyLocationButton={false}
                 toolbarEnabled={false}
               >
-                {mapLocations.map((loc) => {
-                  const inside =
-                    haversineMeters(
-                      location.coords.latitude,
-                      location.coords.longitude,
-                      loc.latitude,
-                      loc.longitude
-                    ) <= loc.radius;
-                  return (
-                    <React.Fragment key={loc.id}>
-                      <Circle
-                        center={{ latitude: loc.latitude, longitude: loc.longitude }}
-                        radius={loc.radius}
-                        strokeWidth={2}
-                        strokeColor={inside ? 'rgba(22,163,74,0.9)' : 'rgba(220,38,38,0.85)'}
-                        fillColor={inside ? 'rgba(22,163,74,0.18)' : 'rgba(220,38,38,0.14)'}
-                      />
-                      <Marker
-                        coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
-                        title={loc.name}
-                        description={`Raio ${loc.radius} m`}
-                        pinColor={inside ? '#16a34a' : '#dc2626'}
-                      />
-                    </React.Fragment>
-                  );
-                })}
+                {mapLocations.map((loc) => (
+                  <PunchLocationMarker
+                    key={loc.id}
+                    loc={loc}
+                    inside={
+                      haversineMeters(
+                        location.coords.latitude,
+                        location.coords.longitude,
+                        loc.latitude,
+                        loc.longitude
+                      ) <= loc.radius
+                    }
+                  />
+                ))}
                 <Marker
                   coordinate={{
                     latitude: location.coords.latitude,
                     longitude: location.coords.longitude,
                   }}
-                  title="Você"
-                  description={fenceOk ? 'Área ativada' : 'A caminho'}
                   anchor={{ x: 0.5, y: 0.85 }}
                   flat
                   tracksViewChanges
@@ -1162,7 +1402,7 @@ export default function PunchScreen() {
                         styles.youMarker,
                         {
                           backgroundColor: fenceOk ? '#16a34a' : '#2563eb',
-                          borderColor: arriveFlash ? '#fbbf24' : '#fff',
+                          borderColor: '#fff',
                         },
                       ]}
                     >
@@ -1171,43 +1411,8 @@ export default function PunchScreen() {
                   </View>
                 </Marker>
               </MapView>
-              <View style={styles.mapLegend}>
-                <View style={styles.mapLegendItem}>
-                  <View style={[styles.mapDot, { backgroundColor: fenceOk ? '#16a34a' : '#2563eb' }]} />
-                  <Text style={styles.mapLegendText}>Você</Text>
-                </View>
-                <View style={styles.mapLegendItem}>
-                  <View style={[styles.mapDot, { backgroundColor: '#16a34a' }]} />
-                  <Text style={styles.mapLegendText}>Dentro do raio</Text>
-                </View>
-                <View style={styles.mapLegendItem}>
-                  <View style={[styles.mapDot, { backgroundColor: '#dc2626' }]} />
-                  <Text style={styles.mapLegendText}>Fora do raio</Text>
-                </View>
-              </View>
             </View>
           ) : null}
-        </View>
-
-        <View style={styles.box}>
-          <FormFieldLabel
-            label="QR da localidade"
-            required={Boolean(punchPolicy?.requirePunchQr)}
-            style={styles.boxTitle}
-          />
-          <Text style={styles.boxHint}>Identifique o local da batida</Text>
-          <TouchableOpacity
-            style={scannedLocationName ? styles.secondaryBtn : styles.darkBtn}
-            onPress={() => void openPunchQrScanner()}
-            activeOpacity={0.85}
-          >
-            <View style={styles.btnRow}>
-              <QrCode size={18} color={scannedLocationName ? colors.text : '#fff'} strokeWidth={2.2} />
-              <Text style={scannedLocationName ? styles.secondaryBtnText : styles.darkBtnText}>
-                {scannedLocationName ? `QR lido: ${scannedLocationName}` : 'Ler QR da localidade'}
-              </Text>
-            </View>
-          </TouchableOpacity>
         </View>
 
         <View style={styles.box}>
@@ -1216,6 +1421,10 @@ export default function PunchScreen() {
             style={styles.input}
             value={observation}
             onChangeText={setObservation}
+            onFocus={() => {
+              // Espera o teclado abrir e leva o campo pra dentro da tela.
+              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 280);
+            }}
             placeholder="Opcional"
             placeholderTextColor={colors.textSecondary}
             multiline
@@ -1252,13 +1461,15 @@ export default function PunchScreen() {
       </Modal>
 
       <Modal
-        visible={faceCameraOpen}
+        visible={faceCameraOpen || qrScannerOpen}
         animationType="slide"
         presentationStyle="fullScreen"
         statusBarTranslucent
-        onRequestClose={closeFaceCamera}
+        onRequestClose={() => (faceCameraOpen ? closeFaceCamera() : setQrScannerOpen(false))}
       >
         <View style={styles.scannerContainer}>
+          {faceCameraOpen ? (
+            <>
           <CameraView
             ref={faceCameraRef}
             style={StyleSheet.absoluteFill}
@@ -1307,17 +1518,9 @@ export default function PunchScreen() {
             <X size={22} color="#fff" />
             <Text style={styles.scannerCloseText}>Cancelar</Text>
           </TouchableOpacity>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={qrScannerOpen}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setQrScannerOpen(false)}
-      >
-        <View style={styles.scannerContainer}>
+            </>
+          ) : (
+            <>
           <CameraView
             style={StyleSheet.absoluteFill}
             facing="back"
@@ -1342,6 +1545,19 @@ export default function PunchScreen() {
             <X size={22} color="#fff" />
             <Text style={styles.scannerCloseText}>Cancelar</Text>
           </TouchableOpacity>
+            </>
+          )}
+          {bothAllowed && (qrScannerOpen || (faceCameraOpen && faceCameraMode === 'check')) ? (
+            <TouchableOpacity
+              style={[styles.flipBtn, { top: Math.max(insets.top + 12, 28) }]}
+              onPress={() => void flipPunchCamera()}
+              activeOpacity={0.85}
+              accessibilityLabel={qrScannerOpen ? 'Voltar para o rosto' : 'Ler QR da localidade'}
+            >
+              <SwitchCamera size={20} color="#fff" strokeWidth={2.2} />
+              <Text style={styles.flipBtnText}>{qrScannerOpen ? 'Rosto' : 'QR do local'}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </Modal>
 
@@ -1349,18 +1565,59 @@ export default function PunchScreen() {
         <Pressable style={styles.modalBackdrop} onPress={() => { setShowSuccessModal(false); navigation.goBack(); }}>
           <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.successRing}>
-              <View style={styles.successIcon}>
+              {/* anel que se expande e some por trás do check */}
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.successPulse,
+                  {
+                    opacity: successPulse.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.45, 0] }),
+                    transform: [
+                      { scale: successPulse.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.9] }) },
+                    ],
+                  },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.successIcon,
+                  {
+                    opacity: successPop.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 1, 1] }),
+                    transform: [
+                      { scale: successPop.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] }) },
+                    ],
+                  },
+                ]}
+              >
                 <Check size={28} color="#fff" strokeWidth={3} />
-              </View>
+              </Animated.View>
             </View>
-            <Text style={styles.modalTitle}>Ponto registrado</Text>
+            <Animated.Text
+              style={[
+                styles.modalTitle,
+                {
+                  opacity: successFade,
+                  transform: [{ translateY: successFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+                },
+              ]}
+            >
+              Ponto registrado
+            </Animated.Text>
             {successData ? (
-              <View style={styles.successMeta}>
+              <Animated.View
+                style={[
+                  styles.successMeta,
+                  {
+                    opacity: successFade,
+                    transform: [{ translateY: successFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+                  },
+                ]}
+              >
                 <Text style={styles.successLine}>{successData.type}</Text>
                 <Text style={styles.successSub}>
                   {successData.date} · {successData.time}
                 </Text>
-              </View>
+              </Animated.View>
             ) : null}
             <TouchableOpacity
               style={styles.primaryBtn}
@@ -1474,10 +1731,53 @@ const getStyles = (colors: any, isDark: boolean) =>
     emptyTitle: { color: colors.text, fontSize: 17, fontWeight: '700' },
     hero: { alignItems: 'center', marginBottom: 8, paddingTop: 4 },
     clock: {
-      fontSize: 40,
+      fontSize: 38,
       fontWeight: '800',
-      letterSpacing: -1.2,
+      letterSpacing: -1,
       color: colors.text,
+      // Dígitos de largura fixa: o relógio não "balança" a cada segundo.
+      fontVariant: ['tabular-nums'],
+    },
+    timeline: {
+      marginTop: 18,
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      paddingHorizontal: 4,
+    },
+    timelineStep: { width: 64, alignItems: 'center' },
+    timelineDot: {
+      // Quadradinho arredondado, como o fundo do ícone da lista vazia.
+      width: 36,
+      height: 36,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? colors.card : colors.surface,
+    },
+    timelineDotDone: { backgroundColor: '#16a34a' },
+    timelineDotNext: { backgroundColor: colors.primary },
+    timelineLine: {
+      flex: 1,
+      height: 2,
+      marginTop: 17,
+      borderRadius: 1,
+      backgroundColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.12)',
+    },
+    timelineLineDone: { backgroundColor: '#16a34a' },
+    timelineLabel: {
+      marginTop: 6,
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    timelineLabelNext: { color: colors.primary, fontWeight: '800' },
+    timelineTime: {
+      marginTop: 1,
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      fontVariant: ['tabular-nums'],
     },
     date: {
       marginTop: 6,
@@ -1485,26 +1785,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontSize: 14,
       fontWeight: '500',
     },
-    nextChip: {
-      marginTop: 14,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      backgroundColor: isDark ? colors.card : colors.surface,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
-    },
-    nextChipLabel: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    nextChipValue: { fontSize: 13, fontWeight: '700', color: colors.primary },
     box: {
       borderWidth: StyleSheet.hairlineWidth * 1.5,
       borderRadius: 16,
@@ -1544,7 +1824,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       justifyContent: 'center',
       backgroundColor: isDark ? 'rgba(206,55,54,0.16)' : 'rgba(206,55,54,0.1)',
     },
-    locationText: { color: colors.text, fontSize: 14, fontWeight: '600', lineHeight: 20 },
+    locationText: { color: colors.textSecondary, fontSize: 13, fontWeight: '500', lineHeight: 18 },
     coords: { marginTop: 4, color: colors.textSecondary, fontSize: 12, fontWeight: '500' },
     mapWrap: {
       marginTop: 12,
@@ -1553,6 +1833,48 @@ const getStyles = (colors: any, isDark: boolean) =>
       borderWidth: StyleSheet.hairlineWidth * 1.5,
       borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
       backgroundColor: isDark ? colors.card : colors.surface,
+    },
+    pendingNotice: {
+      marginTop: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderRadius: 12,
+      backgroundColor: isDark ? 'rgba(245,158,11,0.14)' : 'rgba(245,158,11,0.12)',
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? 'rgba(245,158,11,0.3)' : 'rgba(217,119,6,0.25)',
+    },
+    pendingNoticeText: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: '600',
+      color: isDark ? '#fbbf24' : '#b45309',
+    },
+    confirmHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+    // Mesmas medidas dos cartões da tela de início (Agenda, Tarefas).
+    homeIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${colors.primary}14`,
+    },
+    confirmTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.text,
+      letterSpacing: -0.3,
+      marginBottom: 0,
+    },
+    confirmHint: {
+      marginTop: 2,
+      fontSize: 13,
+      fontWeight: '500',
+      lineHeight: 18,
+      color: colors.textSecondary,
     },
     mapWrapActive: {
       borderColor: '#16a34a',
@@ -1593,29 +1915,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       shadowOffset: { width: 0, height: 2 },
       elevation: 3,
       zIndex: 2,
-    },
-    mapLegend: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 14,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
-    },
-    mapLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    mapDot: { width: 8, height: 8, borderRadius: 4 },
-    mapLegendText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-    input: {
-      minHeight: 88,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderRadius: 12,
-      padding: 12,
-      color: colors.text,
-      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.surface,
-      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
-      fontSize: 15,
-      fontWeight: '500',
     },
     charCount: {
       marginTop: 8,
@@ -1717,6 +2016,19 @@ const getStyles = (colors: any, isDark: boolean) =>
       borderRadius: 999,
     },
     scannerCloseText: { color: '#fff', fontWeight: '700' },
+    flipBtn: {
+      position: 'absolute',
+      right: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 999,
+      zIndex: 20,
+    },
+    flipBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
     faceScanBusy: {
       position: 'absolute',
       alignSelf: 'center',
@@ -1751,6 +2063,13 @@ const getStyles = (colors: any, isDark: boolean) =>
       justifyContent: 'center',
       backgroundColor: isDark ? 'rgba(22, 163, 74, 0.18)' : 'rgba(22, 163, 74, 0.12)',
       marginBottom: 16,
+    },
+    successPulse: {
+      position: 'absolute',
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: '#16a34a',
     },
     successIcon: {
       width: 52,
