@@ -15,7 +15,7 @@ const storage = {
   },
 };
 
-export type ActivityKind = 'fuel' | 'reservation';
+export type ActivityKind = 'fuel' | 'reservation' | 'dp' | 'workorder';
 
 export type ActivityNotification = {
   id: string;
@@ -66,7 +66,65 @@ export async function saveFeed(items: ActivityNotification[]) {
 }
 
 export function activityPageTitle(kind: ActivityKind): string {
-  return kind === 'fuel' ? 'Combustível' : 'Frota';
+  switch (kind) {
+    case 'fuel':
+      return 'Combustível';
+    case 'dp':
+      return 'Solicitações';
+    case 'workorder':
+      return 'Chamados';
+    default:
+      return 'Frota';
+  }
+}
+
+/** Nome da aba (rota) que mostra cada tipo de notificação. */
+export function activityTabRoute(kind: ActivityKind): 'Combustivel' | 'Reservas' | 'DpRequests' | 'GestaoOs' {
+  switch (kind) {
+    case 'fuel':
+      return 'Combustivel';
+    case 'dp':
+      return 'DpRequests';
+    case 'workorder':
+      return 'GestaoOs';
+    default:
+      return 'Reservas';
+  }
+}
+
+const WORK_ORDER_STATUS_LABEL: Record<string, string> = {
+  OPEN: 'Aberta',
+  UNDER_REVIEW: 'Em análise',
+  APPROVED: 'Aprovada',
+  SAFETY_CHECK: 'Verificação de segurança',
+  IN_PROGRESS: 'Em execução',
+  WAITING_PARTS: 'Aguardando peça',
+  COMPLETED: 'Concluída',
+  REWORK: 'Em ajuste',
+  CLOSED: 'Encerrada',
+  CANCELLED: 'Cancelada',
+};
+
+export function workOrderStatusLabel(status: string): string {
+  return WORK_ORDER_STATUS_LABEL[status] || status;
+}
+
+export function workOrderStatusTitle(status: string): string {
+  return `Chamado: ${workOrderStatusLabel(status).toLowerCase()}`;
+}
+
+export function workOrderStatusMessage(status: string, displayCode?: string | null): string {
+  const ref = formatRef(displayCode);
+  return `O chamado${ref ? ` ${ref}` : ''} agora está: ${workOrderStatusLabel(status).toLowerCase()}`;
+}
+
+export function dpStatusTitle(label: string): string {
+  return `Solicitação: ${label.toLowerCase()}`;
+}
+
+export function dpStatusMessage(label: string, displayCode?: string | null): string {
+  const ref = formatRef(displayCode);
+  return `A solicitação${ref ? ` ${ref}` : ''} agora está: ${label.toLowerCase()}`;
 }
 
 export function fuelStatusTitle(status: string): string {
@@ -177,6 +235,8 @@ export function reservationStatusBody(status: string, displayCode?: string | nul
 export function activitySubtitle(item: ActivityNotification): string {
   const code = item.displayCode?.trim() || null;
   if (item.kind === 'fuel') return fuelStatusMessage(item.status, code);
+  if (item.kind === 'workorder') return workOrderStatusMessage(item.status, code);
+  if (item.kind === 'dp') return item.body;
   return reservationStatusMessage(item.status, code);
 }
 

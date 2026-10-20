@@ -85,7 +85,18 @@ export default function SamsungTabBar({ state, descriptors, navigation }: Bottom
             android_ripple={null}
             style={styles.item}
           >
-            <Icon size={SAMSUNG_TAB_ICON} color={color} strokeWidth={1.85} />
+            <View>
+              <Icon size={SAMSUNG_TAB_ICON} color={color} strokeWidth={1.85} />
+              {options.tabBarBadge != null && options.tabBarBadge !== '' ? (
+                String(options.tabBarBadge).trim() === '' ? (
+                  <View style={[styles.dot, { backgroundColor: active, borderColor: bg }]} />
+                ) : (
+                  <View style={[styles.badge, { backgroundColor: active, borderColor: bg }]}>
+                    <Text style={styles.badgeText}>{String(options.tabBarBadge)}</Text>
+                  </View>
+                )
+              ) : null}
+            </View>
             <Text
               numberOfLines={1}
               adjustsFontSizeToFit={isLong}
@@ -114,6 +125,28 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingHorizontal: 2,
   },
+  dot: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -12,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontSize: 9, fontWeight: '800', lineHeight: 11 },
   label: {
     fontSize: 10,
     fontWeight: '600',

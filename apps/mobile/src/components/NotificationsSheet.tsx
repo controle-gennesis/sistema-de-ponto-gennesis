@@ -15,6 +15,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import {
   ActivityNotification,
+  activityTabRoute,
   activitySubtitle,
   formatRelativeTime,
 } from '../notifications/activityStorage';
@@ -54,7 +55,7 @@ export default function NotificationsSheet() {
     markAsRead(item.id);
     closeSheet();
     setTimeout(() => {
-      const screen = item.kind === 'fuel' ? 'Combustivel' : 'Reservas';
+      const screen = activityTabRoute(item.kind);
       navigation.navigate('Main', { screen });
     }, 220);
   };

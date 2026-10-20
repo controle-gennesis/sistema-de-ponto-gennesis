@@ -42,6 +42,23 @@ type ExtWebSocket = WebSocket & { userId?: string };
 /** Sockets por usuário (várias abas). */
 const userSockets = new Map<string, Set<ExtWebSocket>>();
 
+/**
+ * Sockets do canal de atualizações (`?channel=updates`): só recebem avisos de que algum dado
+ * mudou, pra o app (tab bar, sino) atualizar na hora em vez de esperar o polling.
+ */
+const updateSockets = new Map<string, Set<ExtWebSocket>>();
+
+/** Avisa todos os apps conectados que dados mudaram (o app decide o que recarregar). */
+export function broadcastDataChanged(scopes: string[]) {
+  if (updateSockets.size === 0) return;
+  const raw = JSON.stringify({ type: 'data:changed', scopes });
+  for (const set of updateSockets.values()) {
+    for (const sock of set) {
+      if (sock.readyState === WebSocket.OPEN) sock.send(raw);
+    }
+  }
+}
+
 /** callId → participantes da chamada 1:1 */
 const activeCalls = new Map<string, CallRecord>();
 
@@ -303,9 +320,29 @@ export function attachCallSignaling(server: Server): void {
       ws.close(4001, 'unauthorized');
       return;
     }
+    const isUpdatesChannel = url.searchParams.get('channel') === 'updates';
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET) as { id: string };
       ws.userId = decoded.id;
+      if (isUpdatesChannel) {
+        let set = updateSockets.get(decoded.id);
+        if (!set) {
+          set = new Set();
+          updateSockets.set(decoded.id, set);
+        }
+        set.add(ws);
+        ws.on('close', () => {
+          const cur = updateSockets.get(decoded.id);
+          if (!cur) return;
+          cur.delete(ws);
+          if (cur.size === 0) updateSockets.delete(decoded.id);
+        });
+        // Mantém a conexão viva atrás de proxies (Railway etc.): ping do cliente → pong.
+        ws.on('message', (raw) => {
+          if (raw.toString() === 'ping') ws.send('pong');
+        });
+        return;
+      }
       addSocket(decoded.id, ws);
     } catch {
       ws.close(4002, 'invalid token');

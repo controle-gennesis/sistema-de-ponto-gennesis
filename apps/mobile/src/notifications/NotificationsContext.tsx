@@ -10,10 +10,19 @@ import React, {
 } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { usePermissions } from '../hooks/usePermissions';
+import { fetchMyDpRequests, STATUS_LABELS as DP_STATUS_LABELS } from '../services/dpRequests';
+import { fetchMyWorkOrders } from '../services/gestaoOs';
+import { useRealtimeUpdates } from './useRealtimeUpdates';
 import api from '../services/api';
 import {
+  ActivityKind,
   ActivityNotification,
   StatusSnapshot,
+  dpStatusMessage,
+  dpStatusTitle,
+  workOrderStatusMessage,
+  workOrderStatusTitle,
   fuelStatusMessage,
   fuelStatusTitle,
   loadFeed,
@@ -34,6 +43,10 @@ const POLL_MS = 40_000;
 type NotificationsContextValue = {
   notifications: ActivityNotification[];
   unreadCount: number;
+  /** Não lidas por tipo (alimenta as bolinhas da tab bar). */
+  unreadByKind: Record<ActivityKind, number>;
+  /** Marca como lidas as notificações de um tipo (ao abrir a aba correspondente). */
+  markKindRead: (kind: ActivityKind) => void;
   sheetVisible: boolean;
   openSheet: () => void;
   closeSheet: () => void;
@@ -68,17 +81,20 @@ type ReservationRow = {
   veiculoPlaca?: string | null;
 };
 
-function snapKey(kind: 'fuel' | 'reservation', id: string) {
+function snapKey(kind: ActivityKind, id: string) {
   return `${kind}:${id}`;
 }
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
+  const { canSeeDpRequests, canSeeGestaoOs } = usePermissions();
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [sheetVisible, setSheetVisible] = useState(false);
   const snapshotRef = useRef<StatusSnapshot>({});
   const seededRef = useRef(false);
   const pollingRef = useRef(false);
+  /** Aviso em tempo real que chegou no meio de uma consulta: roda de novo ao terminar. */
+  const rerunRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +113,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const applyDiff = useCallback(
     (
       rows: Array<{
-        kind: 'fuel' | 'reservation';
+        kind: ActivityKind;
         id: string;
         status: string;
         updatedAt: string;
@@ -118,14 +134,23 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         if (!before) continue;
         if (before.status === row.status) continue;
 
-        const title =
-          row.kind === 'fuel'
-            ? fuelStatusTitle(row.status)
-            : reservationStatusTitle(row.status);
-        const body =
-          row.kind === 'fuel'
-            ? fuelStatusMessage(row.status, row.displayCode)
-            : reservationStatusMessage(row.status, row.displayCode);
+        let title: string;
+        let body: string;
+        if (row.kind === 'fuel') {
+          title = fuelStatusTitle(row.status);
+          body = fuelStatusMessage(row.status, row.displayCode);
+        } else if (row.kind === 'workorder') {
+          title = workOrderStatusTitle(row.status);
+          body = workOrderStatusMessage(row.status, row.displayCode);
+        } else if (row.kind === 'dp') {
+          const label =
+            (DP_STATUS_LABELS as Record<string, string>)[row.status] || row.status;
+          title = dpStatusTitle(label);
+          body = dpStatusMessage(label, row.displayCode);
+        } else {
+          title = reservationStatusTitle(row.status);
+          body = reservationStatusMessage(row.status, row.displayCode);
+        }
 
         fresh.push({
           id: `${key}:${row.status}:${row.updatedAt}`,
@@ -161,8 +186,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
+
   const refresh = useCallback(async () => {
-    if (!isAuthenticated || !user?.id || pollingRef.current) return;
+    if (!isAuthenticated || !user?.id) return;
+    if (pollingRef.current) {
+      rerunRef.current = true;
+      return;
+    }
     pollingRef.current = true;
     try {
       const [fuelRes, reservationRes] = await Promise.all([
@@ -176,6 +207,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       const fuelRows = (fuelRes.ok ? (fuelJson?.data || []) : []) as FuelRow[];
       const myReservations = (reservationRes.ok ? (reservationJson?.data || []) : []) as ReservationRow[];
 
+      // Solicitações e chamados: falha em um não derruba os outros nem o resto do polling.
+      const [dpResult, workOrderResult] = await Promise.allSettled([
+        canSeeDpRequests ? fetchMyDpRequests('all') : Promise.resolve([]),
+        canSeeGestaoOs ? fetchMyWorkOrders() : Promise.resolve([]),
+      ]);
+      const dpRows = dpResult.status === 'fulfilled' && Array.isArray(dpResult.value) ? dpResult.value : [];
+      const workOrderRows =
+        workOrderResult.status === 'fulfilled' && Array.isArray(workOrderResult.value)
+          ? workOrderResult.value
+          : [];
+
       const normalized = [
         ...fuelRows.map((r) => ({
           kind: 'fuel' as const,
@@ -186,6 +228,21 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             r.displayNumber != null && String(r.displayNumber).trim()
               ? String(r.displayNumber)
               : undefined,
+        })),
+        ...dpRows.map((r) => ({
+          kind: 'dp' as const,
+          id: r.id,
+          status: r.status,
+          updatedAt: r.createdAt || new Date().toISOString(),
+          displayCode: r.displayNumber != null ? String(r.displayNumber) : undefined,
+        })),
+        ...workOrderRows.map((r) => ({
+          kind: 'workorder' as const,
+          id: r.id,
+          status: r.status,
+          updatedAt: new Date().toISOString(),
+          displayCode:
+            r.osNumber != null ? `OS ${r.osNumber}` : r.displayNumber != null ? String(r.displayNumber) : undefined,
         })),
         ...myReservations.map((r) => ({
           kind: 'reservation' as const,
@@ -201,8 +258,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       // silencioso: badge/feed não devem quebrar o app
     } finally {
       pollingRef.current = false;
+      if (rerunRef.current) {
+        rerunRef.current = false;
+        void refreshRef.current();
+      }
     }
-  }, [applyDiff, isAuthenticated, user?.id]);
+  }, [applyDiff, canSeeDpRequests, canSeeGestaoOs, isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -215,6 +280,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     }, POLL_MS);
     return () => clearInterval(id);
   }, [isAuthenticated, refresh]);
+
+  // Tempo real: o backend avisa quando algo muda e o refresh roda na hora.
+  useRealtimeUpdates(isAuthenticated, () => {
+    void refresh();
+  });
 
   useEffect(() => {
     const onChange = (state: AppStateStatus) => {
@@ -248,6 +318,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const markKindRead = useCallback((kind: ActivityKind) => {
+    setNotifications((curr) => {
+      if (!curr.some((n) => n.kind === kind && !n.read)) return curr;
+      const next = curr.map((n) => (n.kind === kind && !n.read ? { ...n, read: true } : n));
+      void saveFeed(next);
+      return next;
+    });
+  }, []);
+
   const openSheet = useCallback(() => {
     setSheetVisible(true);
   }, []);
@@ -266,6 +345,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [notifications],
   );
 
+  const unreadByKind = useMemo(() => {
+    const acc: Record<ActivityKind, number> = { fuel: 0, reservation: 0, dp: 0, workorder: 0 };
+    for (const n of notifications) {
+      if (!n.read) acc[n.kind] += 1;
+    }
+    return acc;
+  }, [notifications]);
+
   useEffect(() => {
     if (Platform.OS === 'web') return;
     void syncAppIconBadge(unreadCount);
@@ -281,6 +368,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     () => ({
       notifications,
       unreadCount,
+      unreadByKind,
+      markKindRead,
       sheetVisible,
       openSheet,
       closeSheet,
@@ -292,6 +381,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [
       notifications,
       unreadCount,
+      unreadByKind,
+      markKindRead,
       sheetVisible,
       openSheet,
       closeSheet,
@@ -313,6 +404,8 @@ export function useNotifications() {
     return {
       notifications: [] as ActivityNotification[],
       unreadCount: 0,
+      unreadByKind: { fuel: 0, reservation: 0, dp: 0, workorder: 0 } as Record<ActivityKind, number>,
+      markKindRead: (_kind: ActivityKind) => undefined,
       sheetVisible: false,
       openSheet: () => undefined,
       closeSheet: () => undefined,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Platform, Pressable, Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeBottomTabNavigator } from '@react-navigation/bottom-tabs/unstable';
@@ -14,6 +14,9 @@ import VehicleReservationsScreen from '../screens/VehicleReservationsScreen';
 import DpRequestsScreen from '../screens/DpRequestsScreen';
 import GestaoOsListScreen from '../screens/GestaoOsListScreen';
 import { usePermissions } from '../hooks/usePermissions';
+import { useNotifications } from '../notifications/NotificationsContext';
+import { useTabBadges } from './useTabBadges';
+import type { ActivityKind } from '../notifications/activityStorage';
 import { useTheme } from '../context/ThemeContext';
 import { type FabBarTabName } from './fabBarEvents';
 import { useChromeVisibility } from './ChromeVisibilityContext';
@@ -44,6 +47,13 @@ const IosCombustivel = wrapTabScreen(FuelRequestsScreen);
 const IosReservas = wrapTabScreen(VehicleReservationsScreen);
 const IosDpRequests = wrapTabScreen(DpRequestsScreen);
 const IosGestaoOs = wrapTabScreen(GestaoOsListScreen);
+
+const TAB_KIND: Record<string, ActivityKind | undefined> = {
+  Combustivel: 'fuel',
+  Reservas: 'reservation',
+  DpRequests: 'dp',
+  GestaoOs: 'workorder',
+};
 
 const FAB_TABS = new Set<string>(['Combustivel', 'Reservas', 'DpRequests', 'GestaoOs']);
 
@@ -79,6 +89,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
   const chrome = useChromeVisibility();
   const listeners = useFabListeners(onTabChange);
   const tabBarHidden = chrome?.visible === false;
+  const badges = useTabBadges();
+  const badgeStyle = { backgroundColor: colors.primary };
 
   return (
     <NativeTab.Navigator
@@ -102,6 +114,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
           title: 'Início',
           tabBarLabel: 'Início',
           tabBarIcon: sfIcon('house.fill'),
+          tabBarBadge: badges.Home,
+          tabBarBadgeStyle: badgeStyle,
         }}
       />
       {canSeeCombustivel ? (
@@ -112,6 +126,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
             title: 'Abastecimento',
             tabBarLabel: 'Abastecimento',
             tabBarIcon: sfIcon('fuelpump.fill'),
+            tabBarBadge: badges.Combustivel,
+            tabBarBadgeStyle: badgeStyle,
           }}
         />
       ) : null}
@@ -123,6 +139,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
             title: 'Frota',
             tabBarLabel: 'Frota',
             tabBarIcon: sfIcon('car.fill'),
+            tabBarBadge: badges.Reservas,
+            tabBarBadgeStyle: badgeStyle,
           }}
         />
       ) : null}
@@ -134,6 +152,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
             title: 'Solicitações',
             tabBarLabel: 'Solicitações',
             tabBarIcon: sfIcon('tray.full.fill'),
+            tabBarBadge: badges.DpRequests,
+            tabBarBadgeStyle: badgeStyle,
           }}
         />
       ) : null}
@@ -145,6 +165,8 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
             title: 'Chamados',
             tabBarLabel: 'Chamados',
             tabBarIcon: sfIcon('wrench.and.screwdriver.fill'),
+            tabBarBadge: badges.GestaoOs,
+            tabBarBadgeStyle: badgeStyle,
           }}
         />
       ) : null}
@@ -163,6 +185,7 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
   const androidBottomPad = getAndroidTabBarBottomPad(insets.bottom);
   const androidTabBarH = getAndroidTabBarHeight(insets.bottom);
   const tabBarH = getTabBarHeight(insets.bottom);
+  const badges = useTabBadges();
 
   return (
     <AndroidTab.Navigator
@@ -189,6 +212,13 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
           paddingHorizontal: 0,
         },
         tabBarAllowFontScaling: true,
+        tabBarBadge: badges[route.name as keyof typeof badges],
+        tabBarBadgeStyle: {
+          backgroundColor: colors.primary,
+          color: '#ffffff',
+          fontSize: 10,
+          fontWeight: '700',
+        },
         tabBarStyle: samsung
           ? {
               backgroundColor: 'transparent',
@@ -277,6 +307,13 @@ export default function BottomTabNavigator() {
   const { canSeePonto } = usePermissions();
   const [activeTab, setActiveTab] = useState('Home');
   const showCreateFab = FAB_TABS.has(activeTab);
+  const { unreadByKind, markKindRead } = useNotifications();
+
+  // Abrir a aba (ou receber atualização com ela aberta) apaga a bolinha dela.
+  useEffect(() => {
+    const kind = TAB_KIND[activeTab];
+    if (kind && unreadByKind[kind] > 0) markKindRead(kind);
+  }, [activeTab, unreadByKind, markKindRead]);
 
   return (
     <View style={styles.root}>

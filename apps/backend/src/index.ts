@@ -159,6 +159,7 @@ import { getPrismaPoolConfig, prisma } from './lib/prisma';
 import { getPasswordHashImplementation } from './lib/passwordHash';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
+import { realtimeChangeNotifier } from './middleware/realtimeChangeNotifier';
 
 ensureNfeSecretsFromEnv();
 logNfeRuntimeStatus();
@@ -375,6 +376,8 @@ const passwordResetLimiter = rateLimit({
 });
 
 app.use(limiter);
+// Avisa os apps conectados (WebSocket) quando algo muda — atualiza tab bar/sino em tempo real
+app.use(realtimeChangeNotifier);
 app.use('/api/auth/me', authMeLimiter);
 app.use('/api/auth/login', authLoginLimiter);
 app.use('/api/auth/forgot-password', passwordResetLimiter);

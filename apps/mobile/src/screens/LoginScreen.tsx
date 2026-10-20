@@ -25,8 +25,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { Eye, EyeOff, UserRound, Lock, MessageCircle, X, Check, ScanFace } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuth, LAST_FIRST_NAME_KEY } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_CONFIG } from '../config/api';
 import { normalizeLoginIdentifierInput } from '../lib/cpf';
 import { SPLASH_BG, SPLASH_LOGO_SIZE } from '../components/AuthBrandSplash';
 import AuthGradientBackground from '../components/AuthGradientBackground';
@@ -264,7 +264,9 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   });
 
   const canSubmit = identifier.trim().length > 0 && password.length > 0 && !loading && !bioLoading;
-  const styles = useMemo(() => getStyles(insets.bottom), [insets.bottom]);
+  const { isDark } = useTheme();
+  const accent = isDark ? '#f87171' : BRAND;
+  const styles = useMemo(() => getStyles(insets.bottom, isDark), [insets.bottom, isDark]);
   const showBiometric = biometric.enabled && biometric.available;
 
   const offerBiometrics = (id: string, pass: string) => {
@@ -412,12 +414,6 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
-            {__DEV__ ? (
-              <Text style={styles.dev} numberOfLines={1}>
-                {API_CONFIG.BASE_URL.replace(/^https?:\/\//, '')}
-              </Text>
-            ) : null}
-
             <View style={styles.formFields}>
               <View style={styles.inputContainer}>
                 <View style={styles.fieldIcon}>
@@ -495,9 +491,9 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
                   accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                 >
                   {showPassword ? (
-                    <EyeOff size={20} color="#6b7280" />
+                    <EyeOff size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
                   ) : (
-                    <Eye size={20} color="#6b7280" />
+                    <Eye size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
                   )}
                 </TouchableOpacity>
               </View>
@@ -544,10 +540,10 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
                 activeOpacity={0.9}
               >
                 {bioLoading ? (
-                  <ActivityIndicator color={BRAND} />
+                  <ActivityIndicator color={accent} />
                 ) : (
                   <>
-                    <ScanFace size={18} color={BRAND} strokeWidth={2.2} />
+                    <ScanFace size={18} color={accent} strokeWidth={2.2} />
                     <Text style={styles.bioButtonText}>Entrar com {biometric.label}</Text>
                   </>
                 )}
@@ -571,7 +567,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Esqueceu a senha?</Text>
               <Pressable onPress={() => setShowHelp(false)} hitSlop={10}>
-                <X size={20} color="#52525b" strokeWidth={2} />
+                <X size={20} color={isDark ? '#d1d5db' : '#52525b'} strokeWidth={2} />
               </Pressable>
             </View>
             <Text style={styles.modalBody}>
@@ -595,8 +591,25 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   );
 }
 
-const getStyles = (bottomInset: number) =>
-  StyleSheet.create({
+const getStyles = (bottomInset: number, isDark: boolean) => {
+  // Folha do formulário: clara por padrão, escura quando o tema do app é escuro.
+  const C = {
+    sheet: isDark ? '#111827' : '#ffffff',
+    inputBorder: isDark ? '#374151' : '#e5e7eb',
+    inputBg: isDark ? '#1f2937' : '#ffffff',
+    inputText: isDark ? '#f9fafb' : '#111827',
+    checkBorder: isDark ? '#4b5563' : '#d1d5db',
+    checkBg: isDark ? '#1f2937' : '#ffffff',
+    rememberText: isDark ? '#d1d5db' : '#4b5563',
+    buttonOff: isDark ? 'rgba(206,55,54,0.5)' : '#e5e7eb',
+    buttonTextOff: isDark ? 'rgba(255,255,255,0.75)' : '#9ca3af',
+    accentText: isDark ? '#f87171' : BRAND,
+    bioBg: isDark ? 'rgba(248,113,113,0.12)' : 'rgba(206,55,54,0.07)',
+    modalCard: isDark ? '#1f2937' : '#ffffff',
+    modalTitle: isDark ? '#f9fafb' : '#111111',
+    modalBody: isDark ? '#d1d5db' : '#52525b',
+  };
+  return StyleSheet.create({
     root: {
       flex: 1,
       backgroundColor: SPLASH_BG,
@@ -649,7 +662,7 @@ const getStyles = (bottomInset: number) =>
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: '#ffffff',
+      backgroundColor: C.sheet,
       borderTopLeftRadius: 32,
       borderTopRightRadius: 32,
       zIndex: 4,
@@ -665,12 +678,6 @@ const getStyles = (bottomInset: number) =>
       paddingTop: 28,
       paddingBottom: Math.max(bottomInset, 16) + 12,
       flexGrow: 1,
-    },
-    dev: {
-      marginBottom: 18,
-      fontSize: 11,
-      color: '#9ca3af',
-      textAlign: 'center',
     },
     formFields: {
       gap: 18,
@@ -689,13 +696,13 @@ const getStyles = (bottomInset: number) =>
     },
     input: {
       borderWidth: 1,
-      borderColor: '#e5e7eb',
+      borderColor: C.inputBorder,
       borderRadius: 10,
       paddingVertical: 14,
       paddingHorizontal: 16,
       fontSize: 16,
-      color: '#111827',
-      backgroundColor: '#ffffff',
+      color: C.inputText,
+      backgroundColor: C.inputBg,
     },
     inputWithIcon: {
       paddingLeft: 42,
@@ -731,8 +738,8 @@ const getStyles = (bottomInset: number) =>
       height: 20,
       borderRadius: 6,
       borderWidth: 1.5,
-      borderColor: '#d1d5db',
-      backgroundColor: '#fff',
+      borderColor: C.checkBorder,
+      backgroundColor: C.checkBg,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -742,19 +749,19 @@ const getStyles = (bottomInset: number) =>
     },
     rememberText: {
       fontSize: 13,
-      color: '#4b5563',
+      color: C.rememberText,
       fontWeight: '500',
     },
     forgot: {
       fontSize: 13,
       fontWeight: '600',
-      color: BRAND,
+      color: C.accentText,
     },
     error: {
       marginTop: 8,
       marginBottom: 4,
       fontSize: 13,
-      color: BRAND,
+      color: C.accentText,
     },
     button: {
       marginTop: 18,
@@ -765,7 +772,7 @@ const getStyles = (bottomInset: number) =>
       justifyContent: 'center',
     },
     buttonOff: {
-      backgroundColor: '#e5e7eb',
+      backgroundColor: C.buttonOff,
     },
     buttonText: {
       color: '#fff',
@@ -774,22 +781,22 @@ const getStyles = (bottomInset: number) =>
       letterSpacing: 0.2,
     },
     buttonTextOff: {
-      color: '#9ca3af',
+      color: C.buttonTextOff,
     },
     bioButton: {
       marginTop: 12,
       height: 54,
       borderRadius: 999,
       borderWidth: 1.5,
-      borderColor: BRAND,
-      backgroundColor: '#fff',
+      borderColor: C.accentText,
+      backgroundColor: C.bioBg,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 8,
     },
     bioButtonText: {
-      color: BRAND,
+      color: C.accentText,
       fontSize: 15,
       fontWeight: '700',
     },
@@ -806,7 +813,7 @@ const getStyles = (bottomInset: number) =>
       paddingHorizontal: 24,
     },
     modalCard: {
-      backgroundColor: '#fff',
+      backgroundColor: C.modalCard,
       borderRadius: 18,
       padding: 22,
     },
@@ -819,12 +826,12 @@ const getStyles = (bottomInset: number) =>
     modalTitle: {
       fontSize: 17,
       fontWeight: '700',
-      color: '#111111',
+      color: C.modalTitle,
     },
     modalBody: {
       fontSize: 14,
       lineHeight: 21,
-      color: '#52525b',
+      color: C.modalBody,
       marginBottom: 20,
     },
     whatsappBtn: {
@@ -842,3 +849,4 @@ const getStyles = (bottomInset: number) =>
       fontWeight: '600',
     },
   });
+};
