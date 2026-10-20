@@ -493,9 +493,6 @@ export function usePermissions() {
   const relatoriosFotograficosKey = pk('/ponto/relatorios-fotograficos');
   const canAccessRelatoriosFotograficosPage =
     isElevatedUser || can(relatoriosFotograficosKey) || canAccessModule(relatoriosFotograficosKey);
-  /** Lista/detalhe de relatórios dentro do contrato: módulo Relatórios Fotográficos ou Contratos. */
-  const canAccessContratoRelatoriosRoutes =
-    canAccessRelatoriosFotograficosPage || can(pk('/ponto/contratos'));
 
   /**
    * Tela global «Ordem de Serviço»:
@@ -558,9 +555,9 @@ export function usePermissions() {
     return allowedContractIdSet.has(contractId);
   };
 
-  /** Relatórios e Reuniões do contrato seguem o Liberado. */
+  /** Relatórios do contrato: módulo Relatórios Fotográficos (Acesso) + contrato Liberado. Reuniões seguem o Liberado. */
   const canAccessContractRelatoriosTab = (contractId: string) =>
-    isElevatedUser || canAccessContract(contractId);
+    isElevatedUser || (canAccessRelatoriosFotograficosPage && canAccessContract(contractId));
 
   const canAccessContractReunioesTab = (contractId: string) =>
     isElevatedUser || canAccessContract(contractId);
@@ -674,7 +671,6 @@ export function usePermissions() {
     contractModuleFlags,
     canAccessOrcamentoRoutePage,
     canAccessRelatoriosFotograficosPage,
-    canAccessContratoRelatoriosRoutes,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
@@ -740,7 +736,6 @@ export function useRoutePermission(route: string) {
     canApproveEmpreiteiroDaily,
     canAccessOrcamentoRoutePage,
     canAccessRelatoriosFotograficosPage,
-    canAccessContratoRelatoriosRoutes,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
@@ -870,7 +865,6 @@ export function useRoutePermission(route: string) {
     '/ponto/orcamentos': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/relatorios-fotograficos': canAccessRelatoriosFotograficosPage,
-    '/ponto/relatorios-fotograficos/detalhe': canAccessContratoRelatoriosRoutes,
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
     '/ponto/contratos/socios': isAdministrator || can(pk('/ponto/contratos/socios')),
     '/ponto/contratos/gastos-operacionais':

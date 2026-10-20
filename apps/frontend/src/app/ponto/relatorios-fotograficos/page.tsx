@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileImage, Filter, Plus, Search, X } from 'lucide-react';
+import { Eye, FileImage, Filter, Plus, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -13,6 +13,8 @@ import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   RowActionMenuCell,
@@ -87,6 +89,9 @@ export default function RelatoriosFotograficosPage() {
   const [novoTitulo, setNovoTitulo] = useState('');
   const [novoCampos, setNovoCampos] = useState<CamposData>(CAMPOS_VAZIOS);
   const [deleteTarget, setDeleteTarget] = useState<RelatorioRow | null>(null);
+  const [editTarget, setEditTarget] = useState<RelatorioRow | null>(null);
+  const [editTitulo, setEditTitulo] = useState('');
+  const [editCampos, setEditCampos] = useState<CamposData>(CAMPOS_VAZIOS);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -131,6 +136,45 @@ export default function RelatoriosFotograficosPage() {
     [contratosLiberados]
   );
 
+  // Funcionários para o campo Solicitante (foto, nome e CPF) — carregados só quando um formulário abre.
+  const { data: employeesData, isLoading: loadingEmployees } = useQuery({
+    queryKey: ['relatorios-fotograficos', 'solicitantes'],
+    queryFn: async () => {
+      const now = new Date();
+      const res = await api.get(
+        `/payroll/employees?month=${now.getMonth() + 1}&year=${now.getFullYear()}&page=1&limit=500`
+      );
+      return res.data;
+    },
+    enabled: createModalOpen || Boolean(editTarget),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const solicitanteOptions = useMemo(() => {
+    const lista = Array.isArray(employeesData?.data?.employees) ? employeesData.data.employees : [];
+    const vistos = new Map<string, { value: string; name: string; cpf: string | null; profilePhotoUrl: string | null }>();
+    for (const e of lista as Array<{ id?: string; name?: string; cpf?: string; profilePhotoUrl?: string }>) {
+      const name = String(e?.name ?? '').trim();
+      if (!e?.id || !name || vistos.has(String(e.id))) continue;
+      vistos.set(String(e.id), {
+        value: name,
+        name,
+        cpf: e.cpf ? String(e.cpf) : null,
+        profilePhotoUrl: e.profilePhotoUrl ? String(e.profilePhotoUrl) : null,
+      });
+    }
+    return toPersonSelectOptions(
+      Array.from(vistos.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+    );
+  }, [employeesData]);
+
+  /** Mantém no seletor um solicitante já salvo que não esteja mais na lista (texto livre antigo). */
+  const opcoesSolicitante = (atual: string) =>
+    atual && !solicitanteOptions.some((o) => o.value === atual)
+      ? [{ value: atual, label: atual }, ...solicitanteOptions]
+      : solicitanteOptions;
+
   const relatorios = useMemo<RelatorioRow[]>(() => {
     const raw = (relatoriosData?.data ?? []) as Array<Omit<RelatorioRow, 'id' | 'relatorioId'> & { id: string }>;
     return raw.map((r) => ({ ...r, relatorioId: r.id, id: `${r.contractId}:${r.id}` }));
@@ -173,7 +217,7 @@ export default function RelatoriosFotograficosPage() {
       queryClient.invalidateQueries({ queryKey: ['relatorios-fotograficos'] });
       setCreateModalOpen(false);
       toast.success('Relatório criado!');
-      router.push(`/ponto/contratos/${vars.contractId}/relatorios/${res.data.id}`);
+      router.push(`/ponto/relatorios-fotograficos/${vars.contractId}/${res.data.id}`);
     },
     onError: () => toast.error('Erro ao criar relatório.'),
   });
@@ -189,6 +233,52 @@ export default function RelatoriosFotograficosPage() {
     onError: () => toast.error('Erro ao excluir.'),
   });
 
+  // Dados completos do relatório em edição (o PUT regrava o documento inteiro, então parte do que está salvo).
+  const { data: editBodyRes, isLoading: loadingEditBody } = useQuery({
+    queryKey: ['relatorio-fotografico', editTarget?.contractId, editTarget?.relatorioId],
+    queryFn: async () =>
+      (await api.get(`/relatorios-fotograficos/${editTarget!.contractId}/${editTarget!.relatorioId}`)).data,
+    enabled: Boolean(editTarget),
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const editBody = editBodyRes?.data as { campos?: CamposData } | undefined;
+
+  useEffect(() => {
+    if (editBody?.campos) setEditCampos({ ...CAMPOS_VAZIOS, ...editBody.campos });
+  }, [editBody]);
+
+  const editarMutation = useMutation({
+    mutationFn: async () => {
+      if (!editTarget || !editBody) throw new Error('Dados não carregados');
+      await api.put(`/relatorios-fotograficos/${editTarget.contractId}/${editTarget.relatorioId}`, {
+        data: { ...editBody, campos: editCampos },
+        titulo: editTitulo.trim(),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['relatorios-fotograficos'] });
+      queryClient.invalidateQueries({ queryKey: ['relatorio-fotografico'] });
+      setEditTarget(null);
+      toast.success('Relatório atualizado!');
+    },
+    onError: () => toast.error('Erro ao salvar alterações.'),
+  });
+
+  const abrirModalEdicao = (row: RelatorioRow) => {
+    setEditTitulo(row.titulo);
+    setEditCampos(CAMPOS_VAZIOS);
+    setEditTarget(row);
+  };
+
+  const confirmarEdicao = () => {
+    if (!editTitulo.trim()) {
+      toast.error('Informe o título do relatório.');
+      return;
+    }
+    editarMutation.mutate();
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
@@ -196,7 +286,7 @@ export default function RelatoriosFotograficosPage() {
   };
 
   const abrirRelatorio = (row: RelatorioRow) =>
-    router.push(`/ponto/contratos/${row.contractId}/relatorios/${row.relatorioId}`);
+    router.push(`/ponto/relatorios-fotograficos/${row.contractId}/${row.relatorioId}`);
 
   const abrirModalCriacao = () => {
     setNovoContractId('');
@@ -405,8 +495,15 @@ export default function RelatoriosFotograficosPage() {
                       onClose={closeRowActionMenu}
                       onEdit={() => {
                         closeRowActionMenu();
-                        abrirRelatorio(rowForActionMenu);
+                        abrirModalEdicao(rowForActionMenu);
                       }}
+                      extraItems={[
+                        {
+                          label: 'Abrir relatório',
+                          icon: <Eye className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />,
+                          onClick: () => abrirRelatorio(rowForActionMenu),
+                        },
+                      ]}
                       onDelete={() => {
                         closeRowActionMenu();
                         setDeleteTarget(rowForActionMenu);
@@ -519,14 +616,28 @@ export default function RelatoriosFotograficosPage() {
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       {label}
                     </label>
-                    <input
-                      type="text"
-                      value={novoCampos[key]}
-                      placeholder={placeholder}
-                      onChange={(e) => setNovoCampos((prev) => ({ ...prev, [key]: e.target.value }))}
-                      className={inputClass}
-                      disabled={criarMutation.isPending}
-                    />
+                    {key === 'solicitante' ? (
+                      <SingleSelectSearchDropdown
+                        value={novoCampos.solicitante}
+                        onChange={(v) => setNovoCampos((prev) => ({ ...prev, solicitante: v }))}
+                        options={opcoesSolicitante(novoCampos.solicitante)}
+                        allowEmpty
+                        disabled={criarMutation.isPending || loadingEmployees}
+                        placeholder={loadingEmployees ? 'Carregando funcionários...' : 'Selecione o solicitante'}
+                        searchPlaceholder="Pesquisar funcionário..."
+                        emptyOptionsMessage="Nenhum funcionário encontrado"
+                        noFocusRing
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={novoCampos[key]}
+                        placeholder={placeholder}
+                        onChange={(e) => setNovoCampos((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className={inputClass}
+                        disabled={criarMutation.isPending}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -550,6 +661,99 @@ export default function RelatoriosFotograficosPage() {
                 </button>
               </div>
             </div>
+          </Modal>
+
+          <Modal
+            isOpen={Boolean(editTarget)}
+            onClose={() => !editarMutation.isPending && setEditTarget(null)}
+            title="Editar relatório"
+            size="lg"
+            closeOnOverlayClick={!editarMutation.isPending}
+          >
+            {loadingEditBody ? (
+              <div className="py-12">
+                <Loading message="Carregando dados…" size="md" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Contrato
+                  </label>
+                  <input type="text" value={editTarget?.contractName ?? ''} disabled className={`${inputClass} opacity-70`} />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Título do relatório *
+                  </label>
+                  <input
+                    type="text"
+                    value={editTitulo}
+                    onChange={(e) => setEditTitulo(e.target.value)}
+                    placeholder="Ex: Relatório Fotográfico - OS 001/2025"
+                    className={inputClass}
+                    disabled={editarMutation.isPending}
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {(
+                    [
+                      { key: 'os' as const, label: 'Ordem de Serviço nº', placeholder: 'Ex: 123/2026' },
+                      { key: 'os2' as const, label: 'OS Secundária', placeholder: 'Ex: 124/2026' },
+                      { key: 'unidade' as const, label: 'Unidade', placeholder: 'Ex: Taguatinga' },
+                      { key: 'lote' as const, label: 'Lote', placeholder: 'Ex: Lote 01' },
+                      { key: 'solicitante' as const, label: 'Solicitante', placeholder: 'Nome do solicitante' },
+                    ] as const
+                  ).map(({ key, label, placeholder }) => (
+                    <div key={key} className={key === 'solicitante' ? 'sm:col-span-2' : ''}>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {label}
+                      </label>
+                      {key === 'solicitante' ? (
+                        <SingleSelectSearchDropdown
+                          value={editCampos.solicitante}
+                          onChange={(v) => setEditCampos((prev) => ({ ...prev, solicitante: v }))}
+                          options={opcoesSolicitante(editCampos.solicitante)}
+                          allowEmpty
+                          disabled={editarMutation.isPending || loadingEmployees}
+                          placeholder={loadingEmployees ? 'Carregando funcionários...' : 'Selecione o solicitante'}
+                          searchPlaceholder="Pesquisar funcionário..."
+                          emptyOptionsMessage="Nenhum funcionário encontrado"
+                          noFocusRing
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={editCampos[key]}
+                          placeholder={placeholder}
+                          onChange={(e) => setEditCampos((prev) => ({ ...prev, [key]: e.target.value }))}
+                          className={inputClass}
+                          disabled={editarMutation.isPending}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={() => setEditTarget(null)}
+                    disabled={editarMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmarEdicao}
+                    disabled={editarMutation.isPending || !editBody}
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    {editarMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
+                  </button>
+                </div>
+              </div>
+            )}
           </Modal>
 
           <Modal

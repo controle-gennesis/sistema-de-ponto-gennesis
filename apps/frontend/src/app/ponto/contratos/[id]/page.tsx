@@ -2935,7 +2935,7 @@ export default function ContractDetailPage() {
         value: canAccessRelatorios ? String(relatoriosCount) : '—',
         subtitle: canAccessRelatorios ? undefined : 'Sem acesso',
         loading: canAccessRelatorios && loadingRelatoriosCount,
-        href: canAccessRelatorios ? `/ponto/contratos/${contractId}/relatorios` : undefined,
+        href: canAccessRelatorios ? '/ponto/relatorios-fotograficos' : undefined,
       },
       {
         title: 'Reuniões',
