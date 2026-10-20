@@ -42,23 +42,6 @@ export default function HomeAprovacoesCard() {
   const total = Number(data?.total || 0);
   const hasPending = total > 0;
 
-  const breakdownParts = useMemo(() => {
-    if (!data) return [] as string[];
-    const parts: string[] = [];
-    if (canAccessDpApproverPages && data.dp > 0) parts.push(`Internas ${data.dp}`);
-    if (canApproveFuel && data.fuel > 0) parts.push(`Combustível ${data.fuel}`);
-    if (canApproveFd && data.fd > 0) parts.push(`FD ${data.fd}`);
-    if (canApproveMaterialRequests && data.rm > 0) parts.push(`RM ${data.rm}`);
-    if (canApproveOc && data.oc > 0) parts.push(`OC ${data.oc}`);
-    return parts.slice(0, 3);
-  }, [
-    data,
-    canAccessDpApproverPages,
-    canApproveFuel,
-    canApproveFd,
-    canApproveMaterialRequests,
-    canApproveOc,
-  ]);
 
   if (permissionsLoading || !canSeeAprovacoes || !hasAnyQueue) {
     return null;
@@ -67,7 +50,7 @@ export default function HomeAprovacoesCard() {
   return (
     <>
       <TouchableOpacity
-        style={[styles.card, hasPending ? styles.cardPending : null]}
+        style={styles.card}
         onPress={() => setSheetOpen(true)}
         activeOpacity={0.84}
         accessibilityRole="button"
@@ -98,17 +81,6 @@ export default function HomeAprovacoesCard() {
                 <Text style={styles.heroSub}>aguardando sua revisão</Text>
               </View>
             </View>
-
-            {breakdownParts.length > 0 ? (
-              <View style={styles.breakdownRow}>
-                {breakdownParts.map((part, index) => (
-                  <React.Fragment key={part}>
-                    {index > 0 ? <View style={styles.breakdownDot} /> : null}
-                    <Text style={styles.breakdownItem}>{part}</Text>
-                  </React.Fragment>
-                ))}
-              </View>
-            ) : null}
 
             <View style={styles.cta}>
               <Text style={styles.ctaText}>Revisar agora</Text>
@@ -156,9 +128,6 @@ const getStyles = (colors: any, isDark: boolean) =>
         android: { elevation: isDark ? 0 : 3 },
         default: {},
       }),
-    },
-    cardPending: {
-      borderColor: isDark ? 'rgba(239,68,68,0.28)' : 'rgba(206,55,54,0.16)',
     },
     header: {
       flexDirection: 'row',
@@ -229,25 +198,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontWeight: '500',
       color: colors.textSecondary,
       lineHeight: 19,
-    },
-    breakdownRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 8,
-      zIndex: 1,
-    },
-    breakdownItem: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(15,23,42,0.48)',
-      letterSpacing: -0.1,
-    },
-    breakdownDot: {
-      width: 3,
-      height: 3,
-      borderRadius: 2,
-      backgroundColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(15,23,42,0.22)',
     },
     cta: {
       marginTop: 2,

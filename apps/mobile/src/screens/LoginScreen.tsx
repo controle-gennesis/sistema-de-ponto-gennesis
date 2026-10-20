@@ -21,12 +21,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { Eye, EyeOff, UserRound, Lock, MessageCircle, X, Check, ScanFace } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, LAST_FIRST_NAME_KEY } from '../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '../config/api';
 import { normalizeLoginIdentifierInput } from '../lib/cpf';
 import { SPLASH_BG, SPLASH_LOGO_SIZE } from '../components/AuthBrandSplash';
+import AuthGradientBackground from '../components/AuthGradientBackground';
 
 const SUPPORT_WHATSAPP = '5561981622021';
 const SUPPORT_URL = `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(
@@ -38,12 +41,49 @@ const LOGO_SIZE = SPLASH_LOGO_SIZE;
 const BRAND = '#ce3736';
 const SHEET_TOP = Math.round(SCREEN_H * 0.4);
 const TITLES_BLOCK_H = 58;
+// Sheet fora da tela (com folga pra sombra) enquanto a tela faz o papel de splash.
+const SHEET_OFFSCREEN_TOP = SCREEN_H + 48;
+
+function greetingPrefix() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Bom dia';
+  if (hour < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
 
 type Props = {
   fromBootSplash?: boolean;
+  /**
+   * `false` = a tela fica como splash (fundo + logo pulsando no centro, nada mais). Ao virar
+   * `true` a MESMA logo sobe até o lugar dela no Login. Uma instância só, sem troca de tela.
+   */
+  active?: boolean;
 };
 
-export default function LoginScreen({ fromBootSplash = true }: Props) {
+export default function LoginScreen({ fromBootSplash = true, active = true }: Props) {
+  const [greeting] = useState(greetingPrefix);
+  const [firstName, setFirstName] = useState('');
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(LAST_FIRST_NAME_KEY)
+      .then((name) => {
+        const clean = String(name || '').trim();
+        if (alive && clean) {
+          setFirstName(clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase());
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const logoPulse = useRef(new Animated.Value(1)).current;
+  const hidNativeSplash = useRef(false);
+  const hideNativeSplash = () => {
+    if (hidNativeSplash.current) return;
+    hidNativeSplash.current = true;
+    void SplashScreen.hideAsync().catch(() => {});
+  };
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -68,8 +108,10 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   const bioPrompted = useRef(false);
   const bioInFlight = useRef(false);
   // Anima só o `top` do sheet (JS). O translateY da intro fica num filho — sem conflito.
-  const sheetTopAnim = useRef(new Animated.Value(SHEET_TOP)).current;
+  const sheetTopAnim = useRef(new Animated.Value(SHEET_OFFSCREEN_TOP)).current;
   const sheetTopAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     void refreshBiometric();
@@ -80,6 +122,7 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const runTop = (toValue: number, duration: number) => {
+      if (!activeRef.current) return;
       sheetTopAnimRef.current?.stop();
       sheetTopAnimRef.current = Animated.timing(sheetTopAnim, {
         toValue,
@@ -128,10 +171,52 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   const logoTopFinal = insets.top + Math.max(10, (redBand - brandFinalH) / 2);
   const logoTravel = logoTopFinal - logoTopSplash;
 
+  // Fase de splash: logo pulsando no centro. Só solta o splash nativo com o fundo já decodificado.
   useEffect(() => {
+    const fallback = setTimeout(hideNativeSplash, 400);
+    return () => clearTimeout(fallback);
+  }, []);
+
+  useEffect(() => {
+    if (active) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoPulse, {
+          toValue: 1.04,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoPulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, logoPulse]);
+
+  useEffect(() => {
+    if (!active) return;
     const delay = fromBootSplash ? 160 : 900;
     const timer = setTimeout(() => {
       Animated.parallel([
+        Animated.timing(sheetTopAnim, {
+          toValue: SHEET_TOP,
+          duration: 1200,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: false,
+        }),
+        // Assenta a logo em escala 1 enquanto ela sobe.
+        Animated.timing(logoPulse, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
         Animated.timing(progress, {
           toValue: 1,
           duration: 1200,
@@ -152,16 +237,23 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
       });
     }, delay);
     return () => clearTimeout(timer);
-  }, [fromBootSplash, progress, titlesAnim]);
+  }, [active, fromBootSplash, progress, titlesAnim, logoPulse, sheetTopAnim]);
 
   const logoTranslateY = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, logoTravel],
   });
 
-  const sheetTranslateY = progress.interpolate({
+  // Faixa vermelha final (até um pouco abaixo do topo do sheet, p/ cobrir as curvas).
+  const bgFinalScale = Math.min(1, (SHEET_TOP + 60) / SCREEN_H);
+  const bgScaleY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [SCREEN_H - SHEET_TOP, 0],
+    outputRange: [1, bgFinalScale],
+  });
+  // scaleY escala pelo centro; compensa pra manter o topo da imagem fixo.
+  const bgTranslateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, (SCREEN_H / 2) * (bgFinalScale - 1)],
   });
 
   const titlesOpacity = titlesAnim;
@@ -257,8 +349,18 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={hideNativeSplash}>
       <StatusBar style="light" translucent backgroundColor="transparent" />
+      {/* O degradê encolhe junto com a faixa vermelha, pra aparecer inteiro acima do sheet. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.bgImage,
+          { transform: [{ translateY: bgTranslateY }, { scaleY: bgScaleY }] },
+        ]}
+      >
+        <AuthGradientBackground />
+      </Animated.View>
 
       <Animated.View
         pointerEvents="none"
@@ -270,12 +372,14 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
           },
         ]}
       >
-        <Image
-          source={require('../../assets/logobranca.png')}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityLabel="Gennesis"
-        />
+        <Animated.View style={{ transform: [{ scale: logoPulse }] }}>
+          <Image
+            source={require('../../assets/logo-auth.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="Gennesis"
+          />
+        </Animated.View>
         <Animated.View
           style={[
             styles.titles,
@@ -285,16 +389,15 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
             },
           ]}
         >
-          <Text style={styles.headline}>Bem-vindo de volta</Text>
+          <Text style={styles.headline}>{firstName ? `${greeting}, ${firstName}!` : `${greeting}, seja bem-vindo!`}</Text>
           <Text style={styles.subheadline}>Entre na sua conta para continuar</Text>
         </Animated.View>
       </Animated.View>
 
-      {/* Outer: anima `top` (JS). Inner: intro translateY (nativo). */}
+      {/* O sheet inteiro (fundo branco incluso) fica fora da tela na fase de splash; a intro
+          anima o `top` dele (JS, o mesmo valor que o teclado usa). */}
       <Animated.View style={[styles.sheet, { top: sheetTopAnim }]}>
-        <Animated.View
-          style={[styles.flex, { transform: [{ translateY: sheetTranslateY }] }]}
-        >
+        <View style={styles.flex}>
           <KeyboardAvoidingView
             style={styles.flex}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -454,7 +557,7 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
             <Text style={styles.footer}>© {new Date().getFullYear()} Gennesis Conecta</Text>
           </ScrollView>
           </KeyboardAvoidingView>
-        </Animated.View>
+        </View>
       </Animated.View>
 
       <Modal
@@ -500,6 +603,13 @@ const getStyles = (bottomInset: number) =>
     },
     flex: {
       flex: 1,
+    },
+    bgImage: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: SCREEN_H,
     },
     brandStage: {
       position: 'absolute',

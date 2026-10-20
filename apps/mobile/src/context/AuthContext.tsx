@@ -30,6 +30,9 @@ interface AuthContextType {
   disableBiometrics: () => Promise<void>;
 }
 
+/** Primeiro nome de quem entrou por último neste aparelho (sobrevive ao logout). */
+export const LAST_FIRST_NAME_KEY = 'lastUserFirstName';
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface AuthProviderProps {
@@ -82,6 +85,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUnauthorizedHandler(() => setUser(null));
     return () => setUnauthorizedHandler(null);
   }, []);
+
+  // Guarda só o primeiro nome pra saudação da tela de login (o `user` é apagado no logout).
+  useEffect(() => {
+    const first = String(user?.name || '').trim().split(/\s+/)[0];
+    if (first) void storage.setItem(LAST_FIRST_NAME_KEY, first).catch(() => {});
+  }, [user?.name]);
 
   const hydrateUserFromStorage = async () => {
     const token = await storage.getItem('token');

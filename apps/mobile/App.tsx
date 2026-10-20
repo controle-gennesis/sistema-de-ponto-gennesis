@@ -106,7 +106,10 @@ function AppNavigator() {
     setShowBootSplash(false);
   }, [bootReady, bootFade, isAuthenticated, showBootSplash]);
 
-  if (showBootSplash && !bootReady) {
+  // Deslogado: o próprio Login faz o papel de splash (fundo + logo pulsando) e, quando o app
+  // fica pronto, a mesma logo sobe até o lugar dela — uma tela só, sem troca no meio.
+  // Logado (ou ainda restaurando a sessão com token): splash comum até a Home.
+  if (showBootSplash && !bootReady && isAuthenticated) {
     return <AuthBrandSplash />;
   }
 
@@ -182,7 +185,7 @@ function AppNavigator() {
             }}
           >
             <Stack.Screen name="Login">
-              {() => <LoginScreen fromBootSplash />}
+              {() => <LoginScreen fromBootSplash active={bootReady} />}
             </Stack.Screen>
           </Stack.Navigator>
         )}

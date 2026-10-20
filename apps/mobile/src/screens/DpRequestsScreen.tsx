@@ -2659,9 +2659,9 @@ function getStyles(colors: any, isDark: boolean) {
     list: { gap: 10 },
     empty: { alignItems: 'center', paddingVertical: 56, gap: 8, paddingHorizontal: 24 },
     emptyIcon: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      width: 56,
+      height: 56,
+      borderRadius: 16,
       backgroundColor: isDark ? colors.card : colors.surface,
       alignItems: 'center',
       justifyContent: 'center',

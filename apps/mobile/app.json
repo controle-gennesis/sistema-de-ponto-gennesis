@@ -48,8 +48,8 @@
       "favicon": "./assets/favicon.png"
     },
     "splash": {
-      "image": "./assets/logobranca.png",
-      "resizeMode": "contain",
+      "image": "./assets/splash-native.png",
+      "resizeMode": "cover",
       "backgroundColor": "#ce3736"
     },
     "androidStatusBar": {
@@ -110,10 +110,9 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/logobranca.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#ce3736",
-          "imageWidth": 96
+          "image": "./assets/splash-native.png",
+          "resizeMode": "cover",
+          "backgroundColor": "#ce3736"
         }
       ],
       [

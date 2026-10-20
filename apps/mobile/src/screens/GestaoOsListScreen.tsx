@@ -11,6 +11,7 @@ import {
   Modal,
   ActivityIndicator,
   Pressable,
+  Platform,
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
@@ -21,6 +22,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertTriangle,
+  CheckCircle,
+  Filter,
   MapPin,
   QrCode,
   Search,
@@ -113,6 +116,8 @@ export default function GestaoOsListScreen() {
 
   const [search, setSearch] = useState('');
   const [cardFilter, setCardFilter] = useState<CardFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [filterOpen, setFilterOpen] = useState(false);
   const [qrToken, setQrToken] = useState('');
   const [tokenOpen, setTokenOpen] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
@@ -210,6 +215,7 @@ export default function GestaoOsListScreen() {
     const statuses = FILTER_STATUS[cardFilter];
     return rows.filter((item) => {
       if (statuses && !statuses.includes(item.status)) return false;
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
       if (!q) return true;
       const hay = [
         item.osNumber != null ? `OS #${item.osNumber}` : '',
@@ -223,7 +229,7 @@ export default function GestaoOsListScreen() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [rows, search, cardFilter]);
+  }, [rows, search, cardFilter, statusFilter]);
 
   const chips: { key: CardFilter; label: string; count: number }[] = useMemo(() => {
     const countFor = (key: CardFilter) => {
@@ -252,7 +258,7 @@ export default function GestaoOsListScreen() {
   const listHeader = (
     <View>
       <Text style={styles.pageTitle}>Chamados</Text>
-      <Text style={styles.pageSubtitle}>Acompanhe seus chamados e o histórico dos atendimentos</Text>
+      <Text style={styles.pageSubtitle}>Acompanhe seus chamados</Text>
 
         {memberships.length > 1 ? (
           <View style={styles.companyRow}>
@@ -316,11 +322,26 @@ export default function GestaoOsListScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
+        <TouchableOpacity
+          style={[styles.filterBtn, statusFilter !== 'all' && styles.filterBtnActive]}
+          onPress={() => setFilterOpen(true)}
+          activeOpacity={0.75}
+          accessibilityLabel="Filtrar status"
+        >
+          <Filter
+            size={18}
+            color={statusFilter !== 'all' ? '#fff' : colors.primary}
+            strokeWidth={2.2}
+          />
+          {statusFilter !== 'all' ? <View style={styles.filterDot} /> : null}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.listHeader}>
         <Text style={styles.listHeading}>
-          {cardFilter === 'all'
+          {statusFilter !== 'all'
+            ? STATUS_LABEL[statusFilter] || statusFilter
+            : cardFilter === 'all'
             ? 'Meus Chamados'
             : chips.find((c) => c.key === cardFilter)?.label || 'Meus Chamados'}
         </Text>
@@ -430,6 +451,46 @@ export default function GestaoOsListScreen() {
           );
         }}
       />
+
+      <Modal
+        visible={filterOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFilterOpen(false)}
+      >
+        <View style={styles.filterOverlay}>
+          <View style={styles.filterSheet}>
+            <Text style={styles.filterSheetTitle}>Filtro de status</Text>
+            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+              {['all', ...Object.keys(STATUS_LABEL)].map((key) => (
+                <TouchableOpacity
+                  key={key}
+                  style={styles.filterOptionRow}
+                  onPress={() => {
+                    setStatusFilter(key);
+                    setFilterOpen(false);
+                  }}
+                >
+                  <Text style={styles.filterOptionText}>
+                    {key === 'all' ? 'Todos' : STATUS_LABEL[key]}
+                  </Text>
+                  {statusFilter === key ? (
+                    <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => setFilterOpen(false)}
+              style={{ marginTop: 8, paddingVertical: 8 }}
+            >
+              <Text style={{ textAlign: 'center', color: colors.textSecondary, fontWeight: '600' }}>
+                Fechar
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={Boolean(followTarget)}
@@ -658,9 +719,9 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     pageSubtitle: {
       color: colors.textSecondary,
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: '500',
-      marginBottom: 12,
+      marginBottom: 18,
     },
     companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   companyChip: {
@@ -696,72 +757,114 @@ const getStyles = (colors: any, isDark: boolean) =>
       opacity: 0.7,
     },
     chipCountActive: { color: 'rgba(255,255,255,0.85)', opacity: 1 },
-    searchRow: { marginBottom: 14 },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: 10,
+      marginBottom: 16,
+    },
     searchBox: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-    paddingHorizontal: 12,
-      height: 44,
-      borderRadius: 12,
+      gap: 10,
       backgroundColor: isDark ? colors.card : colors.surface,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      minHeight: 48,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
     },
     searchInput: {
       flex: 1,
+      paddingVertical: Platform.OS === 'ios' ? 12 : 8,
       color: colors.text,
-      fontSize: 14,
-      fontWeight: '500',
-      paddingVertical: 0,
+      fontSize: 15,
     },
+    filterBtn: {
+      width: 48,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      backgroundColor: isDark ? colors.card : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+    },
+    filterBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    filterDot: {
+      position: 'absolute',
+      top: 10,
+      right: 10,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: '#fff',
+    },
+    filterOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+    filterSheet: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 18,
+      borderTopRightRadius: 18,
+      padding: 18,
+      paddingBottom: 28,
+    },
+    filterSheetTitle: { color: colors.text, fontSize: 17, fontWeight: '700', marginBottom: 12 },
+    filterOptionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+    },
+    filterOptionText: { color: colors.text, fontSize: 15, fontWeight: '500', flex: 1, paddingRight: 12 },
     listHeader: {
       flexDirection: 'row',
-      alignItems: 'baseline',
+      alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: 12,
     },
-    listHeading: { color: colors.text, fontSize: 16, fontWeight: '700' },
-    listHeadingMeta: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
-    empty: { alignItems: 'center', paddingTop: 36, paddingHorizontal: 24 },
+    listHeading: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.text,
+      letterSpacing: -0.3,
+    },
+    listHeadingMeta: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+    empty: { alignItems: 'center', paddingVertical: 56, gap: 8, paddingHorizontal: 24 },
     emptyIcon: {
       width: 56,
       height: 56,
       borderRadius: 16,
+      backgroundColor: isDark ? colors.card : colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: isDark ? colors.card : colors.surface,
-      marginBottom: 14,
+      marginBottom: 8,
     },
-    emptyTitle: { color: colors.text, fontSize: 17, fontWeight: '700', marginBottom: 6 },
-    emptyText: {
-      color: colors.textSecondary,
-      fontSize: 14,
-      fontWeight: '500',
-      textAlign: 'center',
-      lineHeight: 20,
-    },
+    emptyTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
+    emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
     card: {
       backgroundColor: colors.card,
-      borderRadius: 16,
-      padding: 14,
+      borderRadius: 18,
+      padding: 16,
       marginBottom: 10,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.06)',
     },
     cardTop: {
       flexDirection: 'row',
-      alignItems: 'center',
       justifyContent: 'space-between',
+      alignItems: 'center',
       gap: 10,
       marginBottom: 8,
     },
-    cardNumber: { color: colors.text, fontSize: 15, fontWeight: '700', flexShrink: 1 },
-    badge: {
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 8,
+    cardNumber: {
+      fontWeight: '700',
+      color: colors.textSecondary,
+      fontSize: 13,
+      letterSpacing: 0.2,
+      flexShrink: 1,
     },
+    badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
     badgeText: { fontSize: 11, fontWeight: '700' },
     cardRole: {
       color: colors.primary,
@@ -772,18 +875,13 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 6,
     },
     cardRoute: {
-      color: colors.text,
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: '600',
-      lineHeight: 20,
-      marginBottom: 6,
+      color: colors.text,
+      marginBottom: 8,
+      letterSpacing: -0.2,
     },
-    cardSub: {
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontWeight: '500',
-      marginBottom: 4,
-    },
+    cardSub: { fontSize: 13, color: colors.textSecondary, marginTop: 2, marginBottom: 4 },
     locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -798,10 +896,10 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     cardHint: {
       color: colors.textSecondary,
-      fontSize: 12,
-      fontWeight: '500',
-      marginTop: 8,
-      opacity: 0.75,
+      fontSize: 11,
+      fontWeight: '600',
+      marginTop: 10,
+      letterSpacing: -0.1,
     },
     scannerContainer: {
       flex: 1,

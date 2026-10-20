@@ -15,25 +15,33 @@ import {
   InteractionManager,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   User,
   Mail,
   Briefcase,
   Calendar,
   MapPin,
-  ArrowLeft,
-  Bell,
   Pencil,
   ScanFace,
+  KeyRound,
+  LogOut,
+  Moon,
+  Sun,
+  ChevronRight,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { useNotifications } from '../notifications/NotificationsContext';
+import AppHeader from '../components/AppHeader';
 import UserAvatar from '../components/UserAvatar';
 import { uploadMultipartFile } from '../utils/uploadMultipartFile';
+import { api } from '../services/api';
+import { saveBiometricCredentials } from '../services/biometricAuth';
 import type { User as AuthUser } from '../types';
 
 type InfoRow = {
@@ -41,14 +49,20 @@ type InfoRow = {
   label: string;
   value: string;
   icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  onPress?: () => void;
+  accessory?: React.ReactNode;
 };
 
 export default function ProfileScreen() {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
-  const { user, updateUser, biometric, enableBiometrics, disableBiometrics } = useAuth();
-  const { colors, isDark } = useTheme();
-  const { unreadCount, openSheet } = useNotifications();
+  const { user, updateUser, logout, biometric, enableBiometrics, disableBiometrics } = useAuth();
+  const { colors, isDark, toggleTheme } = useTheme();
+  const [cpfVisible, setCpfVisible] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdCurrent, setPwdCurrent] = useState('');
+  const [pwdNew, setPwdNew] = useState('');
+  const [pwdConfirm, setPwdConfirm] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [bioPasswordOpen, setBioPasswordOpen] = useState(false);
@@ -179,6 +193,61 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const closePasswordModal = () => {
+    setPwdOpen(false);
+    setPwdCurrent('');
+    setPwdNew('');
+    setPwdConfirm('');
+  };
+
+  const submitPasswordChange = async () => {
+    if (!pwdCurrent || !pwdNew || !pwdConfirm) {
+      Alert.alert('Senha', 'Preencha todos os campos.');
+      return;
+    }
+    if (pwdNew.length < 8) {
+      Alert.alert('Senha', 'A nova senha precisa ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (pwdNew !== pwdConfirm) {
+      Alert.alert('Senha', 'A confirmação não confere com a nova senha.');
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      const res = await api.put('/api/auth/change-password', {
+        currentPassword: pwdCurrent,
+        newPassword: pwdNew,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.message || json?.error || 'Não foi possível alterar a senha.');
+      }
+      // A troca revoga as sessões antigas; guarda o token novo para manter este aparelho logado.
+      const newToken = json?.data?.token;
+      if (newToken) await AsyncStorage.setItem('token', newToken);
+      if (biometric.enabled) {
+        const identifier = String(user?.email || user?.cpf || '').trim();
+        if (identifier) await saveBiometricCredentials(identifier, pwdNew);
+      }
+      closePasswordModal();
+      Alert.alert('Pronto', 'Senha alterada com sucesso.');
+    } catch (err) {
+      Alert.alert('Senha', err instanceof Error ? err.message : 'Não foi possível alterar a senha.');
+    } finally {
+      setPwdBusy(false);
+    }
+  };
+
+  const confirmLogout = () => {
+    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Sair', style: 'destructive', onPress: () => void logout() },
+    ]);
+  };
+
+  const appVersion = Constants.expoConfig?.version || '';
+
   const roleLabel = user?.employee?.position || user?.role || 'Colaborador';
 
   const rows: InfoRow[] = [];
@@ -186,7 +255,21 @@ export default function ProfileScreen() {
     rows.push({ key: 'email', label: 'Email', value: user.email, icon: Mail });
   }
   if (user?.cpf) {
-    rows.push({ key: 'cpf', label: 'CPF', value: user.cpf, icon: User });
+    const digits = String(user.cpf).replace(/\D/g, '');
+    const masked =
+      digits.length === 11 ? `${digits.slice(0, 3)}.***.***-${digits.slice(9)}` : '•••••••••••';
+    rows.push({
+      key: 'cpf',
+      label: 'CPF',
+      value: cpfVisible ? user.cpf : masked,
+      icon: User,
+      onPress: () => setCpfVisible((v) => !v),
+      accessory: cpfVisible ? (
+        <EyeOff size={18} color={colors.textSecondary} strokeWidth={2} />
+      ) : (
+        <Eye size={18} color={colors.textSecondary} strokeWidth={2} />
+      ),
+    });
   }
   if (user?.employee?.birthDate) {
     rows.push({
@@ -229,82 +312,49 @@ export default function ProfileScreen() {
     });
   }
 
-  const badge = unreadCount > 9 ? '9+' : String(unreadCount);
-  const heroBg = '#ce3736';
-
   return (
     <View style={styles.safeArea}>
-      <StatusBar style="light" translucent backgroundColor="transparent" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <AppHeader showBack title="Perfil" />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.hero, { backgroundColor: heroBg, paddingTop: insets.top + 6 }]}>
-          <View style={styles.heroTop}>
+        <View style={styles.profileCard}>
+          <View style={styles.avatarWrap}>
+            <UserAvatar
+              uri={user?.profilePhotoUrl}
+              size={104}
+              backgroundColor={isDark ? colors.screenRoot : colors.surface}
+              iconColor={colors.primary}
+            />
             <TouchableOpacity
-              onPress={() => navigation.goBack()}
-              style={styles.heroIconBtn}
-              hitSlop={8}
-              accessibilityLabel="Voltar"
+              style={styles.editPhotoBtn}
+              onPress={openPhotoPicker}
+              activeOpacity={0.85}
+              disabled={uploadingPhoto}
+              accessibilityLabel="Alterar foto de perfil"
+              hitSlop={6}
             >
-              <ArrowLeft size={22} color="#fff" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.heroTitle}>Perfil</Text>
-            <TouchableOpacity
-              onPress={openSheet}
-              style={styles.heroIconBtn}
-              hitSlop={8}
-              accessibilityLabel="Notificações"
-            >
-              <View>
-                <Bell size={20} color="#fff" strokeWidth={2.1} />
-                {unreadCount > 0 ? (
-                  <View style={styles.badge}>
-                    <Text style={[styles.badgeText, { color: heroBg }]}>{badge}</Text>
-                  </View>
-                ) : null}
-              </View>
+              {uploadingPhoto ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Pencil size={12} color="#fff" strokeWidth={2.4} />
+              )}
             </TouchableOpacity>
           </View>
-
-          <View style={styles.heroProfile}>
-            <View style={styles.avatarWrap}>
-              <UserAvatar
-                uri={user?.profilePhotoUrl}
-                size={96}
-                backgroundColor="rgba(255,255,255,0.18)"
-                iconColor="#fff"
-              />
-              <TouchableOpacity
-                style={styles.editPhotoBtn}
-                onPress={openPhotoPicker}
-                activeOpacity={0.85}
-                disabled={uploadingPhoto}
-                accessibilityLabel="Alterar foto de perfil"
-                hitSlop={6}
-              >
-                <View style={styles.editPhotoBtnInner}>
-                  {uploadingPhoto ? (
-                    <ActivityIndicator size="small" color="#ce3736" />
-                  ) : (
-                    <Pencil size={14} color="#ce3736" strokeWidth={2.4} />
-                  )}
-                </View>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.name} numberOfLines={2}>
-              {user?.name || 'Colaborador'}
-            </Text>
-            <Text style={styles.role} numberOfLines={1}>
-              {roleLabel}
-            </Text>
-          </View>
+          <Text style={styles.name} numberOfLines={2}>
+            {user?.name || 'Colaborador'}
+          </Text>
+          <Text style={styles.role} numberOfLines={1}>
+            {roleLabel}
+          </Text>
         </View>
 
         <View style={styles.body}>
           <Text style={styles.sectionTitle}>Informações</Text>
-          <View style={styles.infoList}>
+          <View style={styles.sectionCard}>
             {rows.length === 0 ? (
               <Text style={styles.emptyText}>Nenhuma informação disponível.</Text>
             ) : (
@@ -313,7 +363,12 @@ export default function ProfileScreen() {
                 return (
                   <View key={row.key}>
                     {index > 0 ? <View style={styles.divider} /> : null}
-                    <View style={styles.infoItem}>
+                    <TouchableOpacity
+                      style={styles.infoItem}
+                      onPress={row.onPress}
+                      disabled={!row.onPress}
+                      activeOpacity={0.7}
+                    >
                       <View style={styles.infoIcon}>
                         <Icon size={18} color={colors.primary} strokeWidth={2} />
                       </View>
@@ -321,42 +376,137 @@ export default function ProfileScreen() {
                         <Text style={styles.infoLabel}>{row.label}</Text>
                         <Text style={styles.infoValue}>{row.value}</Text>
                       </View>
-                    </View>
+                      {row.accessory ?? null}
+                    </TouchableOpacity>
                   </View>
                 );
               })
             )}
           </View>
 
-          {Platform.OS !== 'web' ? (
-            <>
-              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Acesso</Text>
-              <View style={styles.bioRow}>
-                <View style={styles.infoIcon}>
-                  <ScanFace size={18} color={colors.primary} strokeWidth={2} />
+          <Text style={styles.sectionTitle}>Acesso</Text>
+          <View style={styles.sectionCard}>
+            {Platform.OS !== 'web' ? (
+              <>
+                <View style={styles.bioRow}>
+                  <View style={styles.infoIcon}>
+                    <ScanFace size={18} color={colors.primary} strokeWidth={2} />
+                  </View>
+                  <View style={styles.infoText}>
+                    <Text style={styles.infoValue}>Entrar com {biometric.label}</Text>
+                    <Text style={[styles.infoLabel, { marginTop: 2, marginBottom: 0 }]}>
+                      {biometric.available
+                        ? biometric.enabled
+                          ? 'Ativado neste aparelho'
+                          : 'Desativado'
+                        : 'Indisponível neste aparelho'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={biometric.enabled}
+                    onValueChange={onToggleBiometrics}
+                    style={{ alignSelf: 'center' }}
+                    disabled={bioBusy || !biometric.available}
+                    trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
+                    thumbColor={biometric.enabled ? colors.primary : '#f4f4f5'}
+                  />
                 </View>
-                <View style={styles.infoText}>
-                  <Text style={styles.infoLabel}>Entrar com {biometric.label}</Text>
-                  <Text style={styles.infoValue}>
-                    {biometric.available
-                      ? biometric.enabled
-                        ? 'Ativado neste aparelho'
-                        : 'Após o primeiro acesso, use facial ou digital'
-                      : 'Indisponível neste aparelho'}
-                  </Text>
-                </View>
-                <Switch
-                  value={biometric.enabled}
-                  onValueChange={onToggleBiometrics}
-                  disabled={bioBusy || !biometric.available}
-                  trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
-                  thumbColor={biometric.enabled ? colors.primary : '#f4f4f5'}
-                />
+                <View style={styles.divider} />
+              </>
+            ) : null}
+            <TouchableOpacity
+              style={styles.bioRow}
+              onPress={() => setPwdOpen(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.infoIcon}>
+                <KeyRound size={18} color={colors.primary} strokeWidth={2} />
               </View>
-            </>
-          ) : null}
+              <View style={styles.infoText}>
+                <Text style={styles.infoValue}>Alterar senha</Text>
+              </View>
+              <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sectionTitle}>Preferências</Text>
+          <View style={styles.sectionCard}>
+            <View style={styles.bioRow}>
+              <View style={styles.infoIcon}>
+                {isDark ? (
+                  <Moon size={18} color={colors.primary} strokeWidth={2} />
+                ) : (
+                  <Sun size={18} color={colors.primary} strokeWidth={2} />
+                )}
+              </View>
+              <View style={styles.infoText}>
+                <Text style={styles.infoValue}>Tema escuro</Text>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={toggleTheme}
+                style={{ alignSelf: 'center' }}
+                trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
+                thumbColor={isDark ? colors.primary : '#f4f4f5'}
+              />
+            </View>
+          </View>
+
+          <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout} activeOpacity={0.8}>
+            <LogOut size={18} color={colors.primary} strokeWidth={2.2} />
+            <Text style={styles.logoutText}>Sair da conta</Text>
+          </TouchableOpacity>
+
+          {appVersion ? <Text style={styles.versionText}>Versão {appVersion}</Text> : null}
         </View>
       </ScrollView>
+
+      <Modal visible={pwdOpen} transparent animationType="fade" onRequestClose={closePasswordModal}>
+        <Pressable style={styles.modalOverlay} onPress={closePasswordModal}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Alterar senha</Text>
+            <TextInput
+              value={pwdCurrent}
+              onChangeText={setPwdCurrent}
+              placeholder="Senha atual"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              style={styles.modalInput}
+              autoFocus
+            />
+            <TextInput
+              value={pwdNew}
+              onChangeText={setPwdNew}
+              placeholder="Nova senha (mín. 8 caracteres)"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              style={styles.modalInput}
+            />
+            <TextInput
+              value={pwdConfirm}
+              onChangeText={setPwdConfirm}
+              placeholder="Confirmar nova senha"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              style={styles.modalInput}
+            />
+            <TouchableOpacity
+              style={styles.modalPrimary}
+              onPress={() => void submitPasswordChange()}
+              disabled={pwdBusy}
+            >
+              {pwdBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.modalPrimaryText}>Salvar</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={closePasswordModal}>
+              <Text style={styles.modalCancel}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={bioPasswordOpen}
@@ -411,110 +561,66 @@ const getStyles = (colors: any, isDark: boolean) =>
       backgroundColor: colors.screenRoot,
     },
     scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
       paddingBottom: 40,
       backgroundColor: colors.screenRoot,
       flexGrow: 1,
     },
-    hero: {
-      borderBottomLeftRadius: 36,
-      borderBottomRightRadius: 36,
-      paddingHorizontal: 16,
-      paddingBottom: 22,
-      marginBottom: 20,
-      overflow: 'hidden',
-    },
-    heroTop: {
-      flexDirection: 'row',
+    profileCard: {
       alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 18,
-    },
-    heroIconBtn: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroTitle: {
-      color: '#fff',
-      fontSize: 17,
-      fontWeight: '700',
-      letterSpacing: -0.2,
-    },
-    badge: {
-      position: 'absolute',
-      top: -4,
-      right: -6,
-      minWidth: 14,
-      height: 14,
-      borderRadius: 4,
-      paddingHorizontal: 3,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    badgeText: {
-      fontSize: 9,
-      fontWeight: '800',
-      lineHeight: 11,
-    },
-    heroProfile: {
-      alignItems: 'center',
-      marginBottom: 4,
+      paddingTop: 8,
+      paddingBottom: 28,
     },
     avatarWrap: {
-      width: 96,
-      height: 96,
-      marginBottom: 14,
+      width: 104,
+      height: 104,
+      marginBottom: 16,
     },
     editPhotoBtn: {
       position: 'absolute',
-      top: 0,
       right: 0,
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: '#ce3736',
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-    editPhotoBtnInner: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: '#fff',
+      bottom: 0,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.primary,
+      borderWidth: 3,
+      borderColor: colors.screenRoot,
       alignItems: 'center',
       justifyContent: 'center',
     },
     name: {
-      color: '#fff',
-      fontSize: 22,
+      color: colors.text,
+      fontSize: 24,
       fontWeight: '700',
-      letterSpacing: -0.3,
+      letterSpacing: -0.5,
       textAlign: 'center',
       paddingHorizontal: 12,
     },
     role: {
-      color: 'rgba(255,255,255,0.88)',
+      color: colors.textSecondary,
       fontSize: 14,
       fontWeight: '500',
       marginTop: 4,
       textAlign: 'center',
     },
-    body: {
-      paddingHorizontal: 20,
-    },
+    body: {},
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: '700',
       color: colors.text,
-      letterSpacing: -0.3,
-      marginBottom: 12,
-      textAlign: 'center',
+      fontSize: 13,
+      fontWeight: '700',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      marginBottom: 10,
+      opacity: 0.55,
     },
-    infoList: {
-      marginBottom: 16,
+    sectionCard: {
+      backgroundColor: colors.card,
+      borderRadius: 18,
+      paddingHorizontal: 16,
+      paddingVertical: 4,
+      marginBottom: 20,
     },
     emptyText: {
       color: colors.textSecondary,
@@ -562,8 +668,25 @@ const getStyles = (colors: any, isDark: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      paddingVertical: 8,
+      paddingVertical: 12,
+    },
+    logoutBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      height: 48,
+      borderRadius: 14,
+      backgroundColor: colors.card,
       marginBottom: 16,
+    },
+    logoutText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
+    versionText: {
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '500',
+      opacity: 0.8,
     },
     modalOverlay: {
       flex: 1,

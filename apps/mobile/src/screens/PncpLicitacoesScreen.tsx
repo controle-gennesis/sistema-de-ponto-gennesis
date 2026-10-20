@@ -1275,9 +1275,9 @@ const getStyles = (colors: any, isDark: boolean) =>
     cardHint: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, opacity: 0.8 },
     empty: { alignItems: 'center', paddingVertical: 56, gap: 8, paddingHorizontal: 24 },
     emptyIcon: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      width: 56,
+      height: 56,
+      borderRadius: 16,
       backgroundColor: isDark ? colors.card : colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
