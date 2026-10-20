@@ -86,6 +86,8 @@ model User {
   updatedFdApprovalContracts                UserFdApprovalContract[]             @relation("UserFdApprovalContractUpdatedBy")
   userFuelApprovalContracts                 UserFuelApprovalContract[]           @relation("UserFuelApprovalContractUser")
   updatedFuelApprovalContracts              UserFuelApprovalContract[]           @relation("UserFuelApprovalContractUpdatedBy")
+  userEmpreiteiroApprovalContracts          UserEmpreiteiroApprovalContract[]    @relation("UserEmpreiteiroApprovalContractUser")
+  updatedEmpreiteiroApprovalContracts       UserEmpreiteiroApprovalContract[]    @relation("UserEmpreiteiroApprovalContractUpdatedBy")
   userDpRequestViewCostCenters              UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUser")
   updatedDpRequestViewCostCenters           UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUpdatedBy")
   userEspelhoNfApprovalCostCenters          UserEspelhoNfApprovalCostCenter[]    @relation("UserEspelhoNfApprovalCostCenterUser")
@@ -1458,6 +1460,7 @@ model Contract {
   dpApprovalUsers           UserDpApprovalContract[]
   fdApprovalUsers           UserFdApprovalContract[]
   fuelApprovalUsers         UserFuelApprovalContract[]
+  empreiteiroApprovalUsers  UserEmpreiteiroApprovalContract[]
   demandSheetApprovals      DemandSheetApproval[]
   materialDeliveries        MaterialDelivery[]
   fuelRefuelRequests        FuelRefuelRequest[]
@@ -3055,6 +3058,25 @@ model UserFuelApprovalContract {
   @@map("user_fuel_approval_contracts")
 }
 
+/// Contratos em que o usuário pode aprovar medições de entrega e aditivos de empreita.
+model UserEmpreiteiroApprovalContract {
+  id         String   @id @default(cuid())
+  userId     String
+  contractId String
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation("UserEmpreiteiroApprovalContractUser", fields: [userId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  updater  User?    @relation("UserEmpreiteiroApprovalContractUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, contractId])
+  @@index([userId])
+  @@index([contractId])
+  @@map("user_empreiteiro_approval_contracts")
+}
+
 /// Centros de custo cujas solicitações internas o usuário pode ver (além das próprias).
 model UserDpRequestViewCostCenter {
   id           String   @id @default(cuid())
@@ -3126,6 +3148,7 @@ model PositionPermissionTemplate {
   restrictedDpApprovalCostCenterSectors Json @default("{}")
   fdApprovalContractIds             Json     @default("[]")
   fuelApprovalContractIds           Json     @default("[]")
+  empreiteiroApprovalContractIds    Json     @default("[]")
   dpRequestViewCostCenterIds        Json     @default("[]")
   espelhoNfApprovalCostCenterIds    Json     @default("[]")
   /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal, recebimentoEntregas }

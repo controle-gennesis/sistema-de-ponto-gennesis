@@ -150,6 +150,7 @@ export function usePermissions() {
   const fdApprovalContractIdSet = new Set(fdApprovalContractIds);
   const fuelApprovalContractIds: string[] = permissionData?.fuelApprovalContractIds ?? [];
   const fuelApprovalContractIdSet = new Set(fuelApprovalContractIds);
+  const empreiteiroApprovalContractIds: string[] = permissionData?.empreiteiroApprovalContractIds ?? [];
   const espelhoNfApprovalCostCenterIds: string[] =
     permissionData?.espelhoNfApprovalCostCenterIds ?? [];
   const espelhoNfApprovalSeesAll = isAdministrator || !!permissionData?.isAdmin;
@@ -363,7 +364,8 @@ export function usePermissions() {
   const canApproveEmpreiteiroDaily =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    dpApprovalContractIds.length > 0;
+    dpApprovalContractIds.length > 0 ||
+    (can(pk('/ponto/controle/aprovar-medicoes-empreita')) && empreiteiroApprovalContractIds.length > 0);
 
   const canApproveOcCompras =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
@@ -635,6 +637,7 @@ export function usePermissions() {
     fdApprovalContractIdSet,
     fuelApprovalContractIds,
     fuelApprovalContractIdSet,
+    empreiteiroApprovalContractIds,
     espelhoNfApprovalCostCenterIds,
     espelhoNfApprovalSeesAll,
     canApproveRestrictedDpRequests,

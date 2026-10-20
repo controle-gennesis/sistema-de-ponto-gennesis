@@ -80,6 +80,8 @@ type AddendumApplyPlan = {
   paymentMode: 'new' | 'redistribute';
   /** Valores das parcelas novas (só no modo 'new' com aditivo positivo). */
   installments: number[];
+  /** Gravado na aprovação do modo 'redistribute': quanto (em centavos) cada parcela recebeu, para poder desfazer. */
+  applied?: Array<{ id: string; cents: number }>;
 };
 
 function parseAddendumApplyPlan(raw: unknown): AddendumApplyPlan {
@@ -87,9 +89,16 @@ function parseAddendumApplyPlan(raw: unknown): AddendumApplyPlan {
   const installments = Array.isArray(value.installments)
     ? value.installments.map((row) => Number(row)).filter((n) => Number.isFinite(n) && n > 0)
     : [];
+  const applied = Array.isArray(value.applied)
+    ? value.applied
+        .map((row) => row as { id?: unknown; cents?: unknown })
+        .filter((row) => typeof row?.id === 'string' && Number.isFinite(Number(row?.cents)))
+        .map((row) => ({ id: row.id as string, cents: Number(row.cents) }))
+    : undefined;
   return {
     paymentMode: value.paymentMode === 'redistribute' ? 'redistribute' : 'new',
     installments,
+    ...(applied && applied.length > 0 ? { applied } : {}),
   };
 }
 
@@ -1708,7 +1717,7 @@ async function resolveEmpreiteiroApprovalScope(req: AuthRequest): Promise<string
   }
   if (!(await userIsEmpreiteiroApprovalGestor(req.user.id))) {
     throw createError(
-      'Somente o gestor do centro de custo pode aprovar medições de entrega e aditivos',
+      'Somente o gestor do contrato (ou quem recebeu essa permissão) pode aprovar medições de entrega e aditivos',
       403
     );
   }
@@ -1722,7 +1731,7 @@ async function assertCanDecideForCostCenter(
 ) {
   if (req.user?.isAdmin) return;
   if (req.user?.id && (await gestorCanDecideForCostCenter(req.user.id, costCenterId))) return;
-  throw createError('Só o gestor do centro de custo deste item pode aprovar ou devolver', 403);
+  throw createError('Só quem aprova o centro de custo deste item pode aprovar ou devolver', 403);
 }
 
 /** Centro de custo do contrato de serviço: o próprio ou, na falta, o do contrato do sistema ligado. */
@@ -3483,6 +3492,7 @@ export class EmpreiteiroController {
 
         const plan = parseAddendumApplyPlan(addendum.applyPlan);
         const amountNum = Number(addendum.amount);
+        let appliedPlan: AddendumApplyPlan = plan;
 
         if (plan.paymentMode === 'redistribute') {
           const open = link.installments.filter(
@@ -3491,7 +3501,15 @@ export class EmpreiteiroController {
           if (open.length === 0) {
             throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
           }
-          for (const row of splitAddendumAcrossInstallments(open, amountNum)) {
+          const split = splitAddendumAcrossInstallments(open, amountNum);
+          appliedPlan = {
+            ...plan,
+            applied: split.map((row) => {
+              const before = open.find((o) => o.id === row.id);
+              return { id: row.id, cents: row.amountCents - Math.round(Number(before?.amount ?? 0) * 100) };
+            }),
+          };
+          for (const row of split) {
             await tx.empreiteiroContractInstallment.update({
               where: { id: row.id },
               data: {
@@ -3544,6 +3562,7 @@ export class EmpreiteiroController {
           where: { id: addendumId },
           data: {
             status: 'APPROVED',
+            applyPlan: appliedPlan as unknown as Prisma.InputJsonValue,
             approvedAt: new Date(),
             approvedById: req.user?.id || null,
             approvedByName: approver?.name || null,
@@ -3629,7 +3648,50 @@ export class EmpreiteiroController {
         );
       }
 
+      // Aditivo aprovado em "redistribuir": devolve às parcelas o que ele somou/subtraiu.
+      const plan = parseAddendumApplyPlan(addendum.applyPlan);
+      const revert =
+        isAddendumApproved(addendum.status) && plan.paymentMode === 'redistribute' ? plan.applied ?? [] : [];
+      const revertRows =
+        revert.length > 0
+          ? await prisma.empreiteiroContractInstallment.findMany({
+              where: { id: { in: revert.map((r) => r.id) } },
+              select: { id: true, number: true, amount: true, status: true },
+            })
+          : [];
+      const revertUpdates: Array<{ id: string; amount: Prisma.Decimal }> = [];
+      for (const item of revert) {
+        const row = revertRows.find((r) => r.id === item.id);
+        if (!row) {
+          throw createError(
+            'Não é possível excluir este aditivo: uma parcela que recebeu o valor dele foi removida',
+            400
+          );
+        }
+        const status = String(row.status || 'PENDING').toUpperCase();
+        if (status === 'PAID' || status === 'RELEASED') {
+          throw createError(
+            `Não é possível excluir este aditivo: a parcela ${row.number} que recebeu o valor dele já foi liberada ou paga`,
+            400
+          );
+        }
+        const nextCents = Math.round(Number(row.amount) * 100) - item.cents;
+        if (nextCents < 1) {
+          throw createError(
+            `Não é possível excluir este aditivo: a parcela ${row.number} ficaria com valor zerado ou negativo`,
+            400
+          );
+        }
+        revertUpdates.push({ id: row.id, amount: new Prisma.Decimal((nextCents / 100).toFixed(2)) });
+      }
+
       const empreiteiro = await prisma.$transaction(async (tx) => {
+        for (const upd of revertUpdates) {
+          await tx.empreiteiroContractInstallment.update({
+            where: { id: upd.id },
+            data: { amount: upd.amount },
+          });
+        }
         if (createdInstallments.length > 0) {
           await tx.empreiteiroContractInstallment.deleteMany({
             where: { id: { in: createdInstallments.map((row) => row.id) } },

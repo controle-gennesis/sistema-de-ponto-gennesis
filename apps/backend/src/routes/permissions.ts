@@ -25,6 +25,7 @@ import {
 import { isDfAdmLocalLabel, parseDpApprovalSectorsMap, sanitizeDpApprovalSectors } from '../lib/dpApprovalSectors';
 import { FD_APPROVE_MODULE_KEY } from '../lib/fdApprovalAccess';
 import { FUEL_APPROVE_MODULE_KEY } from '../lib/fuelApprovalAccess';
+import { EMPREITEIRO_APPROVE_MODULE_KEY } from '../lib/empreiteiroDailyApprovalAccess';
 
 const ESPELHO_NF_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
 
@@ -306,6 +307,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           restrictedDpApprovalCostCenterSectors: {},
           fdApprovalContractIds: [],
           fuelApprovalContractIds: [],
+          empreiteiroApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           espelhoNfApprovalCostCenterIds: [],
           gestorCostCenterIds: [],
@@ -385,6 +387,17 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         });
       }
     );
+    const empreiteiroApprovalContractIds = await safePermissionRows<{ contractId: string }>(
+      'me/userEmpreiteiroApprovalContract',
+      async () => {
+        const delegate = (prisma as any).userEmpreiteiroApprovalContract;
+        if (!delegate?.findMany) return [];
+        return delegate.findMany({
+          where: { userId: meUserId },
+          select: { contractId: true },
+        });
+      }
+    );
 
     const dpRequestViewCostCenterIds = await safePermissionRows<{ costCenterId: string }>(
       'me/userDpRequestViewCostCenter',
@@ -436,6 +449,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         restrictedDpApprovalCostCenterSectors: toRestrictedSectorsMap(restrictedDpApprovalRows),
         fdApprovalContractIds: fdApprovalContractIds.map((r) => r.contractId),
         fuelApprovalContractIds: fuelApprovalContractIds.map((r) => r.contractId),
+        empreiteiroApprovalContractIds: empreiteiroApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         espelhoNfApprovalCostCenterIds: espelhoNfApprovalCostCenterIds.map((r) => r.costCenterId),
         gestorCostCenterIds,
@@ -647,6 +661,16 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
             select: { contractId: true },
           });
         });
+    const empreiteiroApprovalContractIds = isAdmin
+      ? []
+      : await safePermissionRows<{ contractId: string }>('userEmpreiteiroApprovalContract', async () => {
+          const delegate = (prisma as any).userEmpreiteiroApprovalContract;
+          if (!delegate?.findMany) return [];
+          return delegate.findMany({
+            where: { userId },
+            select: { contractId: true },
+          });
+        });
 
     const dpRequestViewCostCenterIds = isAdmin
       ? []
@@ -688,6 +712,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         restrictedDpApprovalCostCenterSectors: toRestrictedSectorsMap(restrictedDpApprovalRows),
         fdApprovalContractIds: fdApprovalContractIds.map((r) => r.contractId),
         fuelApprovalContractIds: fuelApprovalContractIds.map((r) => r.contractId),
+        empreiteiroApprovalContractIds: empreiteiroApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         espelhoNfApprovalCostCenterIds: espelhoNfApprovalCostCenterIds.map((r) => r.costCenterId),
         contractModuleFlags,
@@ -716,6 +741,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawFuelContracts = req.body?.fuelApprovalContractIds;
     const shouldSyncFuelContracts = Array.isArray(rawFuelContracts);
+    const rawEmpreiteiroContracts = req.body?.empreiteiroApprovalContractIds;
+    const shouldSyncEmpreiteiroContracts = Array.isArray(rawEmpreiteiroContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
     const rawEspelhoCc = req.body?.espelhoNfApprovalCostCenterIds;
@@ -890,6 +917,19 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         fuelContractIdsToSave = fuelContractIdsToSave.filter((id) => ok.has(id));
       }
     }
+    let empreiteiroContractIdsToSave: string[] = [];
+    if (shouldSyncEmpreiteiroContracts) {
+      const hasEmpreiteiroPerm = normalized.some((p) => p.module === EMPREITEIRO_APPROVE_MODULE_KEY);
+      empreiteiroContractIdsToSave = hasEmpreiteiroPerm ? asStringIdArray(rawEmpreiteiroContracts) : [];
+      if (empreiteiroContractIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: empreiteiroContractIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        empreiteiroContractIdsToSave = empreiteiroContractIdsToSave.filter((id) => ok.has(id));
+      }
+    }
 
     let viewCcIdsToSave: string[] = [];
     if (shouldSyncViewCc) {
@@ -934,6 +974,10 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       shouldSyncFuelContracts &&
       hasPrismaDelegate('userFuelApprovalContract') &&
       (await publicTableExists('user_fuel_approval_contracts'));
+    const canSyncEmpreiteiroContractsTable =
+      shouldSyncEmpreiteiroContracts &&
+      hasPrismaDelegate('userEmpreiteiroApprovalContract') &&
+      (await publicTableExists('user_empreiteiro_approval_contracts'));
     const canSyncViewCcTable =
       shouldSyncViewCc &&
       hasPrismaDelegate('userDpRequestViewCostCenter') &&
@@ -1046,6 +1090,18 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         if (fuelContractIdsToSave.length > 0) {
           await tx.userFuelApprovalContract.createMany({
             data: fuelContractIdsToSave.map((contractId) => ({
+              userId,
+              contractId,
+              updatedBy: req.user!.id,
+            })),
+          });
+        }
+      }
+      if (canSyncEmpreiteiroContractsTable) {
+        await tx.userEmpreiteiroApprovalContract.deleteMany({ where: { userId } });
+        if (empreiteiroContractIdsToSave.length > 0) {
+          await tx.userEmpreiteiroApprovalContract.createMany({
+            data: empreiteiroContractIdsToSave.map((contractId) => ({
               userId,
               contractId,
               updatedBy: req.user!.id,
@@ -1178,6 +1234,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           restrictedDpApprovalCostCenterSectors: {},
           fdApprovalContractIds: [],
           fuelApprovalContractIds: [],
+          empreiteiroApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           espelhoNfApprovalCostCenterIds: [],
           contractModuleFlags: {},
@@ -1200,6 +1257,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           restrictedDpApprovalCostCenterSectors: {},
           fdApprovalContractIds: [],
           fuelApprovalContractIds: [],
+          empreiteiroApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           espelhoNfApprovalCostCenterIds: [],
           contractModuleFlags: {},
@@ -1235,6 +1293,10 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
     const fuelApprovalContractIds = Array.isArray(idsRawFuelContracts)
       ? idsRawFuelContracts.filter((x): x is string => typeof x === 'string')
       : [];
+    const idsRawEmpreiteiroContracts = (row as { empreiteiroApprovalContractIds?: unknown }).empreiteiroApprovalContractIds;
+    const empreiteiroApprovalContractIds = Array.isArray(idsRawEmpreiteiroContracts)
+      ? idsRawEmpreiteiroContracts.filter((x): x is string => typeof x === 'string')
+      : [];
     const idsRawView = (row as { dpRequestViewCostCenterIds?: unknown }).dpRequestViewCostCenterIds;
     const dpRequestViewCostCenterIds = Array.isArray(idsRawView)
       ? idsRawView.filter((x): x is string => typeof x === 'string')
@@ -1260,6 +1322,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
         restrictedDpApprovalCostCenterSectors,
         fdApprovalContractIds,
         fuelApprovalContractIds,
+        empreiteiroApprovalContractIds,
         dpRequestViewCostCenterIds,
         espelhoNfApprovalCostCenterIds,
         contractModuleFlags,
@@ -1301,6 +1364,8 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawFuelContracts = req.body?.fuelApprovalContractIds;
     const shouldSyncFuelContracts = Array.isArray(rawFuelContracts);
+    const rawEmpreiteiroContracts = req.body?.empreiteiroApprovalContractIds;
+    const shouldSyncEmpreiteiroContracts = Array.isArray(rawEmpreiteiroContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
     const rawEspelhoCc = req.body?.espelhoNfApprovalCostCenterIds;
@@ -1427,6 +1492,19 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         fuelContractIdsToSave = fuelContractIdsToSave.filter((id) => ok.has(id));
       }
     }
+    let empreiteiroContractIdsToSave: string[] = [];
+    if (shouldSyncEmpreiteiroContracts) {
+      const hasEmpreiteiroPerm = normalized.some((p) => p.module === EMPREITEIRO_APPROVE_MODULE_KEY);
+      empreiteiroContractIdsToSave = hasEmpreiteiroPerm ? asStringIdArray(rawEmpreiteiroContracts) : [];
+      if (empreiteiroContractIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: empreiteiroContractIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        empreiteiroContractIdsToSave = empreiteiroContractIdsToSave.filter((id) => ok.has(id));
+      }
+    }
 
     let viewCcIdsToSave: string[] = [];
     if (shouldSyncViewCc) {
@@ -1497,6 +1575,9 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const fuelContractsJson = (
       shouldSyncFuelContracts ? fuelContractIdsToSave : []
     ) as unknown as Prisma.InputJsonValue;
+    const empreiteiroContractsJson = (
+      shouldSyncEmpreiteiroContracts ? empreiteiroContractIdsToSave : []
+    ) as unknown as Prisma.InputJsonValue;
     const viewCcJson = (shouldSyncViewCc ? viewCcIdsToSave : []) as unknown as Prisma.InputJsonValue;
     const espelhoCcJson = (
       shouldSyncEspelhoCc ? espelhoCcIdsToSavePos : []
@@ -1517,6 +1598,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
           : {}),
         fdApprovalContractIds: fdContractsJson,
         fuelApprovalContractIds: fuelContractsJson,
+        empreiteiroApprovalContractIds: empreiteiroContractsJson,
         dpRequestViewCostCenterIds: viewCcJson,
         espelhoNfApprovalCostCenterIds: espelhoCcJson,
         contractModuleFlags: moduleFlagsJson,
@@ -1534,6 +1616,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
           : {}),
         ...(shouldSyncFdContracts ? { fdApprovalContractIds: fdContractsJson } : {}),
         ...(shouldSyncFuelContracts ? { fuelApprovalContractIds: fuelContractsJson } : {}),
+        ...(shouldSyncEmpreiteiroContracts ? { empreiteiroApprovalContractIds: empreiteiroContractsJson } : {}),
         ...(shouldSyncViewCc ? { dpRequestViewCostCenterIds: viewCcJson } : {}),
         ...(shouldSyncEspelhoCc ? { espelhoNfApprovalCostCenterIds: espelhoCcJson } : {}),
         ...(shouldSyncContracts ? { contractModuleFlags: moduleFlagsJson } : {}),

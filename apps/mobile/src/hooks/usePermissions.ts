@@ -12,6 +12,7 @@ type PermissionsMeData = {
   dpApprovalContractIds?: string[];
   fdApprovalContractIds?: string[];
   fuelApprovalContractIds?: string[];
+  empreiteiroApprovalContractIds?: string[];
 };
 
 /** Igual ao web (`@sistema-ponto/permission-modules`). */
@@ -79,6 +80,7 @@ export function usePermissions() {
   const dpApprovalContractIds = data?.dpApprovalContractIds ?? [];
   const fdApprovalContractIds = data?.fdApprovalContractIds ?? [];
   const fuelApprovalContractIds = data?.fuelApprovalContractIds ?? [];
+  const empreiteiroApprovalContractIds = data?.empreiteiroApprovalContractIds ?? [];
 
   const ready = moduleReady(isFetched, isPending);
 
@@ -139,7 +141,11 @@ export function usePermissions() {
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
   /** Medições de entrega e aditivos: só o gestor do centro de custo (a API filtra a fila) e o administrador. */
-  const canApproveEmpreiteiroDaily = isElevated || dpApprovalContractIds.length > 0;
+  const canApproveEmpreiteiroDaily =
+    isElevated ||
+    dpApprovalContractIds.length > 0 ||
+    (can(pathToModuleKey('/ponto/controle/aprovar-medicoes-empreita')) &&
+      empreiteiroApprovalContractIds.length > 0);
 
   const canSeeAprovacoes =
     canAccessDpApproverPages ||
