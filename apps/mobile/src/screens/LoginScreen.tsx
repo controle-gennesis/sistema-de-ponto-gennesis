@@ -310,13 +310,15 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   };
 
   useEffect(() => {
-    if (isAuthenticated || !introDone || !showBiometric || bioPrompted.current) return;
+    // Pede o Face ID assim que a tela fica ativa, por cima da animação de entrada — antes
+    // esperava a intro terminar + 700ms (~2s a mais).
+    if (isAuthenticated || !active || !showBiometric || bioPrompted.current) return;
     const t = setTimeout(() => {
       if (isAuthenticated || bioPrompted.current || bioInFlight.current) return;
       void handleBiometricLogin();
-    }, 700);
+    }, 250);
     return () => clearTimeout(t);
-  }, [introDone, showBiometric, isAuthenticated]);
+  }, [active, showBiometric, isAuthenticated]);
 
   const handleLogin = async () => {
     const trimmedIdentifier = identifier.trim();
@@ -604,7 +606,7 @@ const getStyles = (bottomInset: number, isDark: boolean) => {
     buttonOff: isDark ? 'rgba(206,55,54,0.5)' : '#e5e7eb',
     buttonTextOff: isDark ? 'rgba(255,255,255,0.75)' : '#9ca3af',
     accentText: isDark ? '#f87171' : BRAND,
-    bioBg: isDark ? 'rgba(248,113,113,0.12)' : 'rgba(206,55,54,0.07)',
+    bioBg: isDark ? '#111827' : '#ffffff',
     modalCard: isDark ? '#1f2937' : '#ffffff',
     modalTitle: isDark ? '#f9fafb' : '#111111',
     modalBody: isDark ? '#d1d5db' : '#52525b',

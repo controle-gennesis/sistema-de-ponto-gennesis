@@ -210,6 +210,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!cap.available) {
       throw new Error(`Cadastre ${cap.label} neste aparelho para entrar.`);
     }
+    // Lê as credenciais do cofre enquanto o Face ID é confirmado (só são usadas depois do sucesso).
+    const credsPromise = getStoredCredentials();
     await authenticateWithBiometrics(`Entre com ${cap.label}`);
 
     if (await hydrateUserFromStorage()) {
@@ -217,7 +219,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
 
-    const creds = await getStoredCredentials();
+    const creds = await credsPromise;
     if (!creds) {
       throw new Error('Entre com e-mail/CPF e senha no primeiro acesso.');
     }

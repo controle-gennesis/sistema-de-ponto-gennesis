@@ -58,7 +58,7 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const queryClient = new QueryClient();
 
-const MIN_SPLASH_MS = 1600;
+const MIN_SPLASH_MS = 900;
 
 function AppNavigator() {
   const { isAuthenticated, loading } = useAuth();
