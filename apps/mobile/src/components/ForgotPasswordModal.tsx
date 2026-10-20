@@ -329,6 +329,7 @@ export default function ForgotPasswordModal({
               subtitle:
                 'Não encontramos um e-mail cadastrado para essa conta. O suporte consegue alterar sua senha.',
             };
+  const HeaderIcon = header.Icon;
   const inputStyle = (key: 'id' | 'pwd' | 'confirm') => [
     styles.input,
     focused === key && styles.inputFocused,
@@ -375,6 +376,9 @@ export default function ForgotPasswordModal({
 
             <View style={styles.content}>
               <View style={styles.hero}>
+                <View style={styles.heroIcon}>
+                  <HeaderIcon size={26} color={C.accent} strokeWidth={2.1} />
+                </View>
                 <Text style={styles.title}>{header.title}</Text>
                 <Text style={styles.subtitle}>{header.subtitle}</Text>
               </View>
@@ -591,6 +595,15 @@ const getStyles = (C: {
     roundBtnSpacer: { width: 34, height: 34 },
     content: { paddingBottom: 6 },
     hero: { alignItems: 'center', marginBottom: 22 },
+    heroIcon: {
+      width: 58,
+      height: 58,
+      borderRadius: 18,
+      backgroundColor: C.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+    },
     title: { fontSize: 22, fontWeight: '700', color: C.title, letterSpacing: -0.3 },
     subtitle: {
       marginTop: 6,
