@@ -142,6 +142,7 @@ import {
   type OrcamentoExcelRow,
   type OrcamentoExcelSheetSpec,
 } from '@/lib/exportOrcamentoBrandedExcel';
+import { padraoOrcamentoDoContrato } from '@/lib/orcamentoPadroesContrato';
 import { EXPORT_COMPANY } from '@/lib/exportBrandingLogos';
 import {
   calcularDataFimOrcamento,
@@ -8919,7 +8920,18 @@ export function OrcamentoPageView({
 
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
-    setNovoOrcamentoMetaDraft({ ...metaNovoOrcamentoPadrao(), nomeOrcamento: '' });
+    // BDI e desconto padrão do contrato (ex.: SENAC, Ministério da Cultura), quando cadastrados.
+    const padraoContrato = padraoOrcamentoDoContrato(nomeContratoExport());
+    setNovoOrcamentoMetaDraft({
+      ...metaNovoOrcamentoPadrao(),
+      ...(padraoContrato
+        ? {
+            bdiPercentual: padraoContrato.bdiPercentual,
+            descontoPercentual: padraoContrato.descontoPercentual,
+          }
+        : {}),
+      nomeOrcamento: '',
+    });
     setNovoOrcamentoOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setNovoOrcamentoStep(1);
     setNovoOrcamentoMetaOpen(true);
@@ -14700,7 +14712,13 @@ export function OrcamentoPageView({
     }
 
     // Caixa compacta no canto direito: rótulo em L:M (ou rótulo + % em L e M) e valor em N.
-    const pushRodape = (rotulo: string, valor: number | '', formula?: string, pct?: number) => {
+    const pushRodape = (
+      rotulo: string,
+      valor: number | '',
+      formula?: string,
+      pct?: number,
+      destaqueTitulo?: boolean
+    ) => {
       const values = empty();
       values[11] = rotulo;
       if (pct != null) values[12] = pct;
@@ -14708,6 +14726,7 @@ export function OrcamentoPageView({
       rows.push({
         kind: 'rodape',
         values,
+        ...(destaqueTitulo ? { destaqueTitulo: true } : {}),
         ...(pct != null ? { formats: { 12: 'percent' as const } } : { merge: [11, 12] as [number, number] }),
         ...(formula && valor !== '' ? { formulas: { 13: formula } } : {}),
       });
@@ -14740,7 +14759,7 @@ export function OrcamentoPageView({
         : undefined,
       pctNumero(rf.bdiPct)
     );
-    pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi, `N{R${baseBdiIdx}}+N{R${bdiIdx}}`);
+    pushRodape('TOTAL GERAL', rf.totalComDescontoEBdi, `N{R${baseBdiIdx}}+N{R${bdiIdx}}`, undefined, true);
 
     const moedaBr = (v: number) =>
       arredondarMoeda2(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -14758,6 +14777,14 @@ export function OrcamentoPageView({
       ate: number,
       alinhamento?: 'left' | 'center'
     ): OrcamentoExcelCabecalhoCelula => ({ texto, de, ate, alinhamento });
+    /** Rótulo em negrito, fundo cinza claro, alinhado à direita (quadro do cabeçalho do orçamento). */
+    const rotD = (texto: string, de: number, ate: number): OrcamentoExcelCabecalhoCelula => ({
+      texto,
+      de,
+      ate,
+      estilo: 'rotuloClaro',
+      alinhamento: 'right',
+    });
     const pctTextoCab = (p: number) =>
       `${(p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
     const nomeOrc = (nomeOrcamentoSemCodigo || nomeOrcamentoAtivo || '').trim();
@@ -14778,6 +14805,10 @@ export function OrcamentoPageView({
       contratosLista.find((c) => c.costCenterId && String(c.costCenterId) === String(centroCustoId));
     const numeroContratoCab = String(contratoDoOrcamento?.number ?? '').trim();
     const exemptCab = orcafascioDadosExibicao?.exempt;
+    const padraoContratoCab = padraoOrcamentoDoContrato(
+      nomeContratoExport(),
+      (contratoDoOrcamento as { name?: string } | undefined)?.name
+    );
     const encargosTexto = exemptCab == null ? '' : exemptCab ? 'DESONERADO' : 'ONERADO';
 
     const revisaoTexto = `R${String(Math.max(0, Number(meta.revisaoCount) || 0)).padStart(2, '0')}`;
@@ -14796,84 +14827,81 @@ export function OrcamentoPageView({
       cabecalho: {
         logo: true,
         linhas: [
-          // Faixa do topo: logos à esquerda e nome da obra em destaque.
+          // Linha 1: respiro no topo.
+          [],
+          // Linhas 2–6: logo (A–B) + dados do orçamento (C–D); caixa «Bancos» à direita (G–N).
           [
-            { texto: '', de: 0, ate: 2 },
-            { texto: (nomeOrc || servicoCab).toUpperCase(), de: 3, ate: 15, estilo: 'destaque' },
+            { texto: '', de: 0, ate: 1, linhasAbaixo: 4, espacoLogo: true },
+            rotD('CONTRATADA', 2, 2),
+            val(EXPORT_COMPANY.toUpperCase() + '.', 3, 3),
           ],
-          // Colunas: rótulo 0–2 · valor 3–7 · rótulo direito 8–9 · valor direito 10–15.
-          // Campos sem dado no sistema (Endereço, Data Base) saem vazios para preencher no Excel.
+          [rotD('ENCARGOS SOCIAIS', 2, 2), val(encargosTexto, 3, 3)],
+          [rotD('BDI', 2, 2), val(pctTextoCab(rf.bdiPct), 3, 3)],
+          [rotD('DESCONTO', 2, 2), val(pctTextoCab(rf.descontoPct), 3, 3)],
+          [rotD('DATA BASE', 2, 2), val((padraoContratoCab?.dataBase ?? 'ATUAL').toUpperCase(), 3, 3)],
+          // Linha 7: respiro.
+          [],
+          // Linhas 8–14: identificação da OS (esquerda) e do local/status (direita).
+          // Campos sem dado no sistema (Unidade, Local, Setor, Solicitante, Descrição) saem vazios para preencher no Excel.
           [
-            rot('CONTRATADA', 0, 2),
-            val(EXPORT_COMPANY.toUpperCase() + '.', 3, 7),
-            rot('Nº CONTRATO', 8, 9),
-            val(numeroContratoCab, 10, 15),
-          ],
-          [
-            rot('ÓRGÃO', 0, 2),
-            val(nomeContratoExport().toUpperCase(), 3, 7),
-            rot('ENCARGOS SOCIAIS', 8, 9),
-            val(encargosTexto, 10, 15),
-          ],
-          [
-            rot('Nº DO ORÇAMENTO', 0, 2),
-            val(String(codigoOrcamentoAtivo ?? ''), 3, 7),
-            rot('BDI', 8, 9),
-            val(pctTextoCab(rf.bdiPct), 10, 15),
-          ],
-          [
-            rot('DATA', 0, 2),
-            val(dataOuVazio(meta.dataAbertura), 3, 7),
-            rot('DESCONTO', 8, 9),
-            val(pctTextoCab(rf.descontoPct), 10, 15),
+            rotD('ÓRGÃO', 0, 1),
+            val(
+              (nomeContratoExport() +
+                (padraoContratoCab?.numeroContrato ? ` - CONTRATO ${padraoContratoCab.numeroContrato}` : '')
+              ).toUpperCase(),
+              2,
+              3
+            ),
+            rotD('UNIDADE', 6, 7),
+            val('', 8, 13),
           ],
           [
-            rot('ENDEREÇO', 0, 2),
-            val('', 3, 7),
-            rot('DATA BASE', 8, 9),
-            val('', 10, 15),
+            rotD('Nº DA OS', 0, 1),
+            val(String(meta.osNumeroPasta ?? '').trim(), 2, 3),
+            rotD('LOCAL', 6, 7),
+            val('', 8, 13),
           ],
           [
-            rot('SERVIÇO', 0, 2),
-            val(servicoCab.toUpperCase(), 3, 7),
-            rot('PRAZO ESTIMADO', 8, 9),
-            val(prazoDias ? `${prazoDias} dias` : '', 10, 15),
-          ],
-          // Dados da OS e do orçamento. Campos sem dado no sistema saem vazios para preencher no Excel.
-          [
-            rot('Nº DA OS', 0, 2),
-            val(String(meta.osNumeroPasta ?? '').trim(), 3, 7),
-            rot('UNIDADE', 8, 9),
-            val('', 10, 15),
+            rotD('SERVIÇO', 0, 1),
+            val(servicoCab.toUpperCase(), 2, 3),
+            rotD('SETOR', 6, 7),
+            val('', 8, 13),
           ],
           [
-            rot('RESPONSÁVEL PELO ORÇAMENTO', 0, 2),
-            val(String(meta.responsavelOrcamento ?? '').trim().toUpperCase(), 3, 7),
-            rot('LOCAL', 8, 9),
-            val('', 10, 15),
+            rotD('REVISÃO', 0, 1),
+            val(revisaoTexto, 2, 3),
+            rotD('STATUS', 6, 7),
+            val(statusTexto.toUpperCase(), 8, 13),
           ],
           [
-            rot('ORÇAMENTO REALIZADO POR', 0, 2),
-            val(String(meta.orcamentoRealizadoPor ?? '').trim().toUpperCase(), 3, 7),
-            rot('SETOR', 8, 9),
-            val('', 10, 15),
+            rotD('RESPONSÁVEL PELO ORÇAMENTO', 0, 1),
+            val(String(meta.responsavelOrcamento ?? '').trim().toUpperCase(), 2, 3),
+            rotD('PRAZO ESTIMADO', 6, 7),
+            val(prazoDias ? `${prazoDias} dias`.toUpperCase() : '', 8, 13),
           ],
           [
-            rot('REVISÃO', 0, 2),
-            val(revisaoTexto, 3, 7),
-            rot('STATUS', 8, 9),
-            val(statusTexto.toUpperCase(), 10, 15),
+            rotD('ORÇAMENTO REALIZADO POR', 0, 1),
+            val(String(meta.orcamentoRealizadoPor ?? '').trim().toUpperCase(), 2, 3),
+            rotD('DATA', 6, 7),
+            val(dataOuVazio(meta.dataAbertura), 8, 13),
           ],
           [
-            rot('SOLICITANTE', 0, 2),
-            val('', 3, 7),
-            rot('DESCRIÇÃO', 8, 9),
-            val('', 10, 15),
+            rotD('SOLICITANTE', 0, 1),
+            val('', 2, 3),
+            rotD('DESCRIÇÃO', 6, 7),
+            val('', 8, 13),
           ],
-          [rot('OBS. ENCARGOS', 0, 2), val(textoEncargos, 3, 15)],
+          // Linha 15: respiro. Linha 16: barra do orçamento.
+          [],
           [{ texto: 'ORÇAMENTO', de: 0, ate: 15, estilo: 'barra' }],
         ],
-        alturas: [54, 20, 20, 20, 20, 20, 32, 20, 20, 20, 20, 20, 24, 22],
+        alturas: [14, 26, 26, 26, 26, 26, 8, 24, 24, 30, 24, 30, 30, 24, 8, 22],
+        molduras: [
+          { linhaDe: 2, linhaAte: 6, colDe: 0, colAte: 3 },
+          { linhaDe: 2, linhaAte: 6, colDe: 6, colAte: 13 },
+          { linhaDe: 8, linhaAte: 14, colDe: 0, colAte: 3 },
+          { linhaDe: 8, linhaAte: 14, colDe: 6, colAte: 13 },
+        ],
       },
       autoFilter: false,
       caixaLateral: (() => {
@@ -14895,13 +14923,14 @@ export function OrcamentoPageView({
                 return Array.from(vistos.values());
               })();
         const texto = textoBancosReferencia(bancos);
-        return texto ? { titulo: 'Bancos', texto, colDe: 17, colAte: 21, linhaDe: 2, linhasTexto: 6 } : undefined;
+        // Caixa dentro da largura da tabela (G–N), nas linhas 2–6, ao lado do bloco da contratada.
+        return texto ? { titulo: 'Bancos', texto, colDe: 6, colAte: 13, linhaDe: 2, linhasTexto: 4 } : undefined;
       })(),
       columns: [
-        { header: 'ITEM', width: 10, align: 'center' },
-        { header: 'CÓDIGO', width: 12, align: 'center' },
-        { header: 'BANCO', width: 10, align: 'center' },
-        { header: 'DESCRIÇÃO', width: 52 },
+        { header: 'ITEM', width: 15, align: 'center', larguraFixa: true },
+        { header: 'CÓDIGO', width: 15, align: 'center', larguraFixa: true },
+        { header: 'BANCO', width: 17, align: 'center', larguraFixa: true },
+        { header: 'DESCRIÇÃO', width: 59, larguraFixa: true },
         { header: 'UNIDADE', width: 10, align: 'center' },
         { header: 'QUANTIDADE', width: 12, format: 'qty' },
         { header: 'MÃO DE OBRA', width: 16, format: 'currency' },
@@ -15660,6 +15689,7 @@ export function OrcamentoPageView({
       title: 'Memória de cálculo',
       cabecalho: {
         logo: true,
+        logoVariante: 'nome',
         linhas: [
           [{ texto: '', de: 0, ate: 10 }],
           [{ texto: 'MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS', de: 0, ate: 10, estilo: 'barra' }],

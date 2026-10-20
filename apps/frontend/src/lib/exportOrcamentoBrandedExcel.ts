@@ -15,6 +15,8 @@ const SUBTITLE_FG = 'FF1F2937';
 const TOTAL_BG = 'FFF9FAFB';
 const SECTION_BG = 'FFF3F4F6';
 const RODAPE_ROTULO_BG = 'FFD9D9D9';
+/** Rótulos do quadro de identificação do orçamento (cinza claro). */
+const ROTULO_CLARO_BG = 'FFF2F2F2';
 const SERVICO_BARRA_BG = 'FF000000';
 const GREEN_BG = 'FFDCFCE7';
 const GREEN_FG = 'FF166534';
@@ -22,6 +24,15 @@ const AMBER_BG = 'FFFEF3C7';
 const AMBER_FG = 'FF92400E';
 const RED_BG = 'FFFEE2E2';
 const RED_FG = 'FF991B1B';
+
+/** Logos do cabeçalho: `orcamento` (public/logo-orcamento.jpg, 212×185) e `nome` (public/logonome.jpg, 879×284). */
+const LOGOS_CABECALHO = {
+  orcamento: { url: '/logo-orcamento.jpg', largura: 212, altura: 185 },
+  nome: { url: '/logonome.jpg', largura: 879, altura: 284 },
+} as const;
+
+/** A linha da legenda tem fonte fixa (Calibri 9, itálico), independente da fonte escolhida na aparência. */
+const FONTE_LEGENDA = 'Calibri';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -32,6 +43,8 @@ export type OrcamentoExcelColumn = {
   width?: number;
   align?: 'left' | 'center' | 'right';
   format?: OrcamentoExcelColFormat;
+  /** Não ajusta a largura ao maior texto da coluna. */
+  larguraFixa?: boolean;
 };
 
 export type OrcamentoExcelRowKind =
@@ -66,6 +79,8 @@ export type OrcamentoExcelRow = {
   merge?: [number, number];
   /** Mescla para baixo: coluna 0-based → quantas linhas a célula ocupa (inclui a atual). */
   rowSpan?: Record<number, number>;
+  /** Rodapé: rótulo e valor na cor do título dos serviços (ex.: TOTAL GERAL). */
+  destaqueTitulo?: boolean;
   /** Cor por célula, por cima do tipo da linha. `item` usa a cor do item; `plain` fica branco. */
   tones?: Record<number, 'item' | 'plain' | 'label'>;
 };
@@ -77,9 +92,13 @@ export type OrcamentoExcelCabecalhoCelula = {
   ate: number;
   /** Rótulo: fundo cinza, negrito e centralizado. Sem isso, é valor (fundo branco). */
   rotulo?: boolean;
-  alinhamento?: 'left' | 'center';
-  /** `barra` = faixa preta com texto branco; `destaque` = valor maior, em negrito. */
-  estilo?: 'barra' | 'destaque' | 'legenda';
+  alinhamento?: 'left' | 'center' | 'right';
+  /** `barra` = faixa preta com texto branco; `destaque` = valor maior, em negrito; `rotuloClaro` = rótulo em negrito, fundo cinza claro. */
+  estilo?: 'barra' | 'destaque' | 'legenda' | 'rotuloClaro';
+  /** Mescla para baixo: quantas linhas a mais a célula ocupa (0 = só a atual). */
+  linhasAbaixo?: number;
+  /** Reserva a célula para a logo (sem isso, a logo usa a 1ª célula da 1ª linha). */
+  espacoLogo?: boolean;
 };
 
 /** Quadro de rótulo/valor acima do cabeçalho das colunas: cada item de `linhas` é uma linha da planilha. */
@@ -89,6 +108,10 @@ export type OrcamentoExcelCabecalho = {
   alturas?: number[];
   /** Coloca a logo da Gennesis no canto superior esquerdo (sobre as células vazias da 1ª linha). */
   logo?: boolean;
+  /** Qual logo usar (padrão `orcamento`). A Memória de cálculo usa `nome`. */
+  logoVariante?: keyof typeof LOGOS_CABECALHO;
+  /** Contornos em borda média ao redor de blocos: linhas 1-based e colunas 0-based (inclusive). */
+  molduras?: Array<{ linhaDe: number; linhaAte: number; colDe: number; colAte: number }>;
 };
 
 /** Caixa de texto fora da tabela, à direita (ex.: bancos de composições usados no orçamento). */
@@ -272,7 +295,19 @@ async function fillWorkbook(
     const offsetCabecalho = cabecalho ? cabecalho.linhas.length + 1 : 0;
     const linhaHeaderColunas = offsetCabecalho + 1;
     const sheet = workbook.addWorksheet(spec.name.slice(0, 31), {
-      views: showHeader && !cabecalho ? [{ state: 'frozen', ySplit: 1 }] : [{}],
+      // Abre em «Visualização de Quebra de Página» (fora da área de impressão fica cinza), em 70%, sem linhas de grade (fundo branco).
+      views: [
+        showHeader && !cabecalho
+          ? {
+              state: 'frozen',
+              ySplit: 1,
+              style: 'pageBreakPreview',
+              zoomScale: 70,
+              zoomScaleNormal: 70,
+              showGridLines: false,
+            }
+          : { style: 'pageBreakPreview', zoomScale: 70, zoomScaleNormal: 70, showGridLines: false },
+      ],
       properties: { defaultRowHeight: 30 },
       pageSetup: {
         orientation: 'landscape',
@@ -295,21 +330,26 @@ async function fillWorkbook(
         for (const celula of celulas) {
           const de = celula.de + 1;
           const ate = Math.min(celula.ate, colCount - 1) + 1;
-          for (let c = de; c <= ate; c++) {
-            const cell = sheet.getCell(linha, c);
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: {
-                argb:
-                  celula.estilo === 'barra'
-                    ? SERVICO_BARRA_BG
-                    : celula.rotulo
-                      ? RODAPE_ROTULO_BG
-                      : WHITE,
-              },
-            };
-            applyThinBorder(cell);
+          const extra = Math.max(0, celula.linhasAbaixo ?? 0);
+          for (let r = linha; r <= linha + extra; r++) {
+            for (let c = de; c <= ate; c++) {
+              const cell = sheet.getCell(r, c);
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: {
+                  argb:
+                    celula.estilo === 'barra'
+                      ? SERVICO_BARRA_BG
+                      : celula.rotulo
+                        ? RODAPE_ROTULO_BG
+                        : celula.estilo === 'rotuloClaro'
+                          ? ROTULO_CLARO_BG
+                          : WHITE,
+                },
+              };
+              applyThinBorder(cell);
+            }
           }
           const cell = sheet.getCell(linha, de);
           cell.value = celula.texto;
@@ -319,14 +359,21 @@ async function fillWorkbook(
               : celula.estilo === 'destaque'
                 ? { name: fontName, size: 14, bold: true, color: { argb: TITLE_TEXT } }
                 : celula.estilo === 'legenda'
-                  ? { name: fontName, size: 9, italic: true, color: { argb: TITLE_TEXT } }
-                : { name: fontName, size: 10, bold: Boolean(celula.rotulo), color: { argb: TITLE_TEXT } };
+                  ? { name: FONTE_LEGENDA, size: 9, italic: true, color: { argb: TITLE_TEXT } }
+                : {
+                    name: fontName,
+                    size: 10,
+                    bold: Boolean(celula.rotulo) || celula.estilo === 'rotuloClaro',
+                    color: { argb: TITLE_TEXT },
+                  };
           cell.alignment = {
             vertical: 'middle',
-            horizontal: celula.alinhamento ?? (celula.rotulo || celula.estilo ? 'center' : 'left'),
+            horizontal:
+              celula.alinhamento ??
+              (celula.rotulo || (celula.estilo && celula.estilo !== 'rotuloClaro') ? 'center' : 'left'),
             wrapText: true,
           };
-          if (ate > de) sheet.mergeCells(linha, de, linha, ate);
+          if (ate > de || extra > 0) sheet.mergeCells(linha, de, linha + extra, ate);
         }
       });
       sheet.getRow(cabecalho.linhas.length + 1).height = 10;
@@ -405,9 +452,16 @@ async function fillWorkbook(
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: ehRotulo ? RODAPE_ROTULO_BG : WHITE },
+            fgColor: {
+              argb: rowSpec.destaqueTitulo ? tituloBg : ehRotulo ? RODAPE_ROTULO_BG : WHITE,
+            },
           };
-          cell.font = { name: fontName, size: 10, bold: true, color: { argb: TITLE_TEXT } };
+          cell.font = {
+            name: fontName,
+            size: 10,
+            bold: true,
+            color: { argb: rowSpec.destaqueTitulo ? tituloFg : TITLE_TEXT },
+          };
           cell.alignment = {
             vertical: 'middle',
             horizontal: ehRotulo ? 'center' : 'right',
@@ -493,7 +547,7 @@ async function fillWorkbook(
     for (const [de, col, ate] of mesclasVerticais) sheet.mergeCells(de, col, ate, col);
 
     spec.columns.forEach((col, i) => {
-      if (!colunaEhDescricao(col.header)) return;
+      if (!colunaEhDescricao(col.header) || col.larguraFixa) return;
       let maior = String(col.header || '').length;
       for (const rowSpec of spec.rows) {
         const valor = rowSpec.values[i];
@@ -506,8 +560,9 @@ async function fillWorkbook(
 
     if (cabecalho?.logo) {
       try {
-        // Logo Gennesis com o nome (public/logonome.jpg, 879×284), centralizada na 1ª célula do cabeçalho.
-        const resp = await fetch('/logonome.jpg');
+        // Logo do orçamento (public/logo-orcamento.jpg), centralizada na área reservada do cabeçalho.
+        const logoDef = LOGOS_CABECALHO[cabecalho.logoVariante ?? 'orcamento'];
+        const resp = await fetch(logoDef.url);
         if (resp.ok) {
           const bytes = new Uint8Array(await resp.arrayBuffer());
           let bin = '';
@@ -515,16 +570,28 @@ async function fillWorkbook(
             bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
           }
           const imageId = workbook.addImage({ base64: btoa(bin), extension: 'jpeg' });
-          const primeira = cabecalho.linhas[0]?.[0];
+          // Área da logo: célula marcada com `espacoLogo` (pode ocupar várias linhas) ou a 1ª da 1ª linha.
+          let linhaLogo = 0;
+          let primeira = cabecalho.linhas[0]?.[0];
+          cabecalho.linhas.forEach((celulas, i) => {
+            const marcada = celulas.find((c) => c.espacoLogo);
+            if (marcada) {
+              linhaLogo = i;
+              primeira = marcada;
+            }
+          });
           const de = primeira?.de ?? 0;
           const ate = Math.min(primeira?.ate ?? 2, colCount - 1);
           const colPx = (c: number) => Math.round((sheet.getColumn(c + 1).width ?? 8.43) * 7 + 5);
           let larguraPx = 0;
           for (let c = de; c <= ate; c++) larguraPx += colPx(c);
-          const alturaPx = ((cabecalho.alturas?.[0] ?? 20) * 96) / 72;
+          const alturaLinhaPx = (i: number) => (((cabecalho.alturas?.[i] ?? 20) as number) * 96) / 72;
+          const nLinhas = 1 + Math.max(0, primeira?.linhasAbaixo ?? 0);
+          let alturaPx = 0;
+          for (let i = 0; i < nLinhas; i++) alturaPx += alturaLinhaPx(linhaLogo + i);
           const h = Math.max(20, Math.round(alturaPx - 10));
-          const w = Math.min(Math.round(h * (879 / 284)), Math.max(40, larguraPx - 10));
-          const hFinal = Math.round(w * (284 / 879));
+          const w = Math.min(Math.round(h * (logoDef.largura / logoDef.altura)), Math.max(40, larguraPx - 10));
+          const hFinal = Math.round(w * (logoDef.altura / logoDef.largura));
           // Fração de coluna: deslocamento em px dentro da coluna onde a logo começa.
           let restante = (larguraPx - w) / 2;
           let col = de;
@@ -532,11 +599,25 @@ async function fillWorkbook(
             restante -= colPx(col);
             col += 1;
           }
+          // Idem na vertical: linha e fração de linha onde a logo começa.
+          let restanteV = (alturaPx - hFinal) / 2;
+          let linhaIdx = linhaLogo;
+          while (linhaIdx < linhaLogo + nLinhas - 1 && restanteV >= alturaLinhaPx(linhaIdx)) {
+            restanteV -= alturaLinhaPx(linhaIdx);
+            linhaIdx += 1;
+          }
+          // Posição nativa (EMU = px × 9525): a conversão de fração de coluna/linha do ExcelJS
+          // ignora a largura real da coluna e deixava a logo deslocada para a esquerda.
           sheet.addImage(imageId, {
-            tl: { col: col + restante / colPx(col), row: (alturaPx - hFinal) / 2 / alturaPx },
+            tl: {
+              nativeCol: col,
+              nativeColOff: Math.round(restante * 9525),
+              nativeRow: linhaIdx,
+              nativeRowOff: Math.round(restanteV * 9525),
+            },
             ext: { width: w, height: hFinal },
             editAs: 'absolute',
-          });
+          } as unknown as ExcelJS.ImageRange);
         }
       } catch {
         /* sem logo: o cabeçalho continua válido */
@@ -550,14 +631,17 @@ async function fillWorkbook(
       const l2 = l1 + (cx.linhasTexto ?? 6) - 1;
       const c0 = cx.colDe + 1;
       const c1 = cx.colAte + 1;
-      for (let c = c0; c <= c1; c++) sheet.getColumn(c).width = cx.larguraColuna ?? 22;
+      // Só ajusta a largura das colunas fora da tabela (caixa dentro da tabela respeita as colunas).
+      for (let c = c0; c <= c1; c++) {
+        if (c > colCount) sheet.getColumn(c).width = cx.larguraColuna ?? 22;
+      }
       for (let r = l0; r <= l2; r++) {
         for (let c = c0; c <= c1; c++) {
           const cell = sheet.getCell(r, c);
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: r === l0 ? RODAPE_ROTULO_BG : WHITE },
+            fgColor: { argb: r === l0 ? ROTULO_CLARO_BG : WHITE },
           };
           applyThinBorder(cell);
         }
@@ -574,6 +658,28 @@ async function fillWorkbook(
       corpo.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       const ultimaLinhaTabela = offsetCabecalho + (showHeader ? 1 : 0) + spec.rows.length;
       sheet.pageSetup.printArea = `A1:${sheet.getColumn(colCount).letter}${Math.max(ultimaLinhaTabela, l2)}`;
+    }
+
+    if (!spec.caixaLateral) {
+      // Área de impressão = só a tabela; o resto da planilha aparece cinza na quebra de página.
+      const ultimaLinha = offsetCabecalho + (showHeader ? 1 : 0) + spec.rows.length;
+      sheet.pageSetup.printArea = `A1:${sheet.getColumn(colCount).letter}${Math.max(1, ultimaLinha)}`;
+    }
+
+    // Contornos médios ao redor dos blocos do cabeçalho (aplicados por último, sobre as bordas finas).
+    for (const m of cabecalho?.molduras ?? []) {
+      const medio = { style: 'medium' as const, color: { argb: BORDER } };
+      for (let r = m.linhaDe; r <= m.linhaAte; r++) {
+        for (let c = m.colDe + 1; c <= m.colAte + 1; c++) {
+          const cell = sheet.getCell(r, c);
+          const b = { ...(cell.border ?? {}) };
+          if (r === m.linhaDe) b.top = medio;
+          if (r === m.linhaAte) b.bottom = medio;
+          if (c === m.colDe + 1) b.left = medio;
+          if (c === m.colAte + 1) b.right = medio;
+          cell.border = b;
+        }
+      }
     }
 
     if (spec.autoFilter !== false && spec.rows.length) {
