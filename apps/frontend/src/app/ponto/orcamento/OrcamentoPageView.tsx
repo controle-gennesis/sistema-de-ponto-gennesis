@@ -15708,6 +15708,7 @@ export function OrcamentoPageView({
       subtitle: 'Quantitativos por dimensão (C, L, H) com fórmulas de área, volume e subtotal',
       autoFilter: false,
       showHeader: false,
+      semZebra: true,
       aparencia: aparenciaMemorial,
       columns: [
         { header: 'ITEM', width: 12, align: 'center' },

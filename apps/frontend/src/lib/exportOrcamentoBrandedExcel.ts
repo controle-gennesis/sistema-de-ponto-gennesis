@@ -145,6 +145,8 @@ export type OrcamentoExcelSheetSpec = {
   caixaLateral?: OrcamentoExcelCaixaLateral;
   /** Tamanho da fonte (pt) das linhas de item e do cabeçalho das colunas. */
   tamanhos?: { item?: number; header?: number };
+  /** Linhas de item todas brancas, sem alternar com cinza claro. */
+  semZebra?: boolean;
 };
 
 export type OrcamentoExcelAparencia = {
@@ -506,7 +508,7 @@ async function fillWorkbook(
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: itemStripe % 2 === 0 ? ROW_ALT : WHITE },
+            fgColor: { argb: !spec.semZebra && itemStripe % 2 === 0 ? ROW_ALT : WHITE },
           };
           if (c === colCount - 1 || spec.columns[c]?.header.toLowerCase() === 'status') {
             const tone = statusTone(String(rowSpec.values[c] ?? ''));
