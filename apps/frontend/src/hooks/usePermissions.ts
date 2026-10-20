@@ -421,10 +421,10 @@ export function usePermissions() {
   const canGestaoOsCadastros =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    can(pk('/ponto/sistema-gestao-os/locais')) ||
-    can(pk('/ponto/sistema-gestao-os/equipamentos')) ||
-    can(pk('/ponto/sistema-gestao-os/tipos-servico')) ||
-    can(pk('/ponto/sistema-gestao-os/equipes'));
+    canAccessModule(pk('/ponto/sistema-gestao-os/locais')) ||
+    canAccessModule(pk('/ponto/sistema-gestao-os/equipamentos')) ||
+    canAccessModule(pk('/ponto/sistema-gestao-os/tipos-servico')) ||
+    canAccessModule(pk('/ponto/sistema-gestao-os/equipes'));
 
   /** Aprovação de RMs: gestor por contrato ou permissão legada Controle. */
   const canApproveMaterialRequests =
@@ -819,9 +819,9 @@ export function useRoutePermission(route: string) {
     '/ponto/banco-horas': isAdministrator || permissions.canManageBankHours,
     '/ponto/folha-pagamento': isAdministrator || permissions.canAccessPayroll,
     '/relatorios/alocacao': isAdministrator || permissions.canAccessPayroll,
-    '/ponto/centros-custo': isAdministrator || can(pk('/ponto/centros-custo')),
-    '/ponto/locais-estoque': isAdministrator || can(pk('/ponto/locais-estoque')),
-    '/ponto/materiais-construcao': isAdministrator || can(pk('/ponto/materiais-construcao')),
+    '/ponto/centros-custo': isAdministrator || canAccessModule(pk('/ponto/centros-custo')),
+    '/ponto/locais-estoque': isAdministrator || canAccessModule(pk('/ponto/locais-estoque')),
+    '/ponto/materiais-construcao': isAdministrator || canAccessModule(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': canAccessOsRoutePage,
     '/ponto/meus-chamados': isAdministrator || can(pk('/ponto/meus-chamados')),
     /** Área reservada da localidade — mesmo público de Meus Chamados, escopo vem do backend. */
@@ -830,25 +830,25 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/meus-chamados')) ||
       can(pk('/ponto/sistema-gestao-os')) ||
       can(pk('/ponto/sistema-gestao-os/relatorios')) ||
-      can(pk('/ponto/sistema-gestao-os/locais')) ||
-      can(pk('/ponto/sistema-gestao-os/equipes')),
+      canAccessModule(pk('/ponto/sistema-gestao-os/locais')) ||
+      canAccessModule(pk('/ponto/sistema-gestao-os/equipes')),
     '/ponto/sistema-gestao-os': isAdministrator || can(pk('/ponto/sistema-gestao-os')),
     '/ponto/sistema-gestao-os/planos':
       isAdministrator || can(pk('/ponto/sistema-gestao-os/planos')),
     '/ponto/sistema-gestao-os/relatorios':
       isAdministrator || can(pk('/ponto/sistema-gestao-os/relatorios')),
     '/ponto/sistema-gestao-os/locais':
-      isAdministrator || can(pk('/ponto/sistema-gestao-os/locais')),
+      isAdministrator || canAccessModule(pk('/ponto/sistema-gestao-os/locais')),
     '/ponto/sistema-gestao-os/equipamentos':
-      isAdministrator || can(pk('/ponto/sistema-gestao-os/equipamentos')),
+      isAdministrator || canAccessModule(pk('/ponto/sistema-gestao-os/equipamentos')),
     '/ponto/sistema-gestao-os/tipos-servico':
-      isAdministrator || can(pk('/ponto/sistema-gestao-os/tipos-servico')),
+      isAdministrator || canAccessModule(pk('/ponto/sistema-gestao-os/tipos-servico')),
     '/ponto/sistema-gestao-os/equipes':
-      isAdministrator || can(pk('/ponto/sistema-gestao-os/equipes')),
+      isAdministrator || canAccessModule(pk('/ponto/sistema-gestao-os/equipes')),
     /** Cursos publicados ficam abertos a todo funcionário autenticado. */
     '/ponto/treinamentos': !isLinkedEmpreiteiro,
     '/ponto/treinamentos/administracao':
-      isAdministrator || can(pk('/ponto/treinamentos/administracao')),
+      isAdministrator || canAccessModule(pk('/ponto/treinamentos/administracao')),
     /** Parâmetros globais do ponto (cerca virtual) — apenas administradores. */
     '/ponto/configuracoes-ponto': isAdministrator,
     '/ponto/permissoes': true,
@@ -880,13 +880,13 @@ export function useRoutePermission(route: string) {
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
     '/ponto/prestadores-servico':
-      isAdministrator || can(pk('/ponto/espelho-nf/prestadores-servico')),
+      isAdministrator || canAccessModule(pk('/ponto/espelho-nf/prestadores-servico')),
     '/ponto/tomadores-servico':
-      isAdministrator || can(pk('/ponto/espelho-nf/tomadores-servico')),
+      isAdministrator || canAccessModule(pk('/ponto/espelho-nf/tomadores-servico')),
     '/ponto/contas-bancarias':
-      isAdministrator || can(pk('/ponto/espelho-nf/contas-bancarias')),
+      isAdministrator || canAccessModule(pk('/ponto/espelho-nf/contas-bancarias')),
     '/ponto/codigos-tributarios':
-      isAdministrator || can(pk('/ponto/espelho-nf/codigos-tributarios')),
+      isAdministrator || canAccessModule(pk('/ponto/espelho-nf/codigos-tributarios')),
     '/ponto/licitacoes': canAccessLicitacoesPage,
     '/ponto/licitacoes-pncp': canAccessLicitacoesPage,
     '/ponto/responsaveis-tecnicos': isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
@@ -912,18 +912,18 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/solicitacoes-reserva-veiculos')),
     '/ponto/solicitacoes-ferramentas':
       isAdministrator || can(pk('/ponto/solicitacoes-ferramentas')),
-    '/ponto/fornecedores': isAdministrator || can(pk('/ponto/fornecedores')),
-    '/ponto/veiculos': isAdministrator || can(pk('/ponto/veiculos')),
+    '/ponto/fornecedores': isAdministrator || canAccessModule(pk('/ponto/fornecedores')),
+    '/ponto/veiculos': isAdministrator || canAccessModule(pk('/ponto/veiculos')),
     '/ponto/regioes-postos-combustivel':
       isAdministrator || canAccessModule(pk('/ponto/regioes-postos-combustivel')),
     '/ponto/reserva-veiculos': isAdministrator || can(pk('/ponto/reserva-veiculos')),
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
-    '/ponto/condicoes-pagamento': isAdministrator || can(pk('/ponto/condicoes-pagamento')),
-    '/ponto/obras': isAdministrator || can(pk('/ponto/obras')),
+    '/ponto/condicoes-pagamento': isAdministrator || canAccessModule(pk('/ponto/condicoes-pagamento')),
+    '/ponto/obras': isAdministrator || canAccessModule(pk('/ponto/obras')),
     '/ponto/empreiteiros': isAdministrator || can(pk('/ponto/empreiteiros')),
-    '/ponto/natureza-orcamentaria': isAdministrator || can(pk('/ponto/natureza-orcamentaria')),
-    '/ponto/formularios': isAdministrator || can(pk('/ponto/formularios')),
-    '/ponto/noticias': isAdministrator || can(pk('/ponto/noticias')),
+    '/ponto/natureza-orcamentaria': isAdministrator || canAccessModule(pk('/ponto/natureza-orcamentaria')),
+    '/ponto/formularios': isAdministrator || canAccessModule(pk('/ponto/formularios')),
+    '/ponto/noticias': isAdministrator || canAccessModule(pk('/ponto/noticias')),
     '/ponto/juridico/processos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos/dashboard':
       isAdministrator || can(pk('/ponto/juridico/processos-ativos')),

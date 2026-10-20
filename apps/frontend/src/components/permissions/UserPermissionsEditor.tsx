@@ -1582,13 +1582,12 @@ export function UserPermissionsEditor({
       next.add(moduleKey);
       return next;
     });
-    // Relatórios de Contrato: Ver sozinho = só visualizar. Editar/Criar/Excluir à parte.
-    if (moduleKey === RELATORIOS_CONTRATO_MODULE_KEY) {
-      setCadastroCrudByModule((prev) => ({
-        ...prev,
-        [moduleKey]: new Set<ContractAction>(['ver']),
-      }));
-    }
+    // Ver sozinho = só visualizar (grava a ação `ver`). Sem ela, «só acesso» é tratado como
+    // legado e libera Criar/Editar/Excluir. Editar/Criar/Excluir ficam à parte.
+    setCadastroCrudByModule((prev) => ({
+      ...prev,
+      [moduleKey]: new Set<ContractAction>(['ver']),
+    }));
   };
 
   const toggleContract = (contractId: string) => {

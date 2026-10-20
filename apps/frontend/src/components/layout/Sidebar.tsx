@@ -736,8 +736,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     can(pk('/ponto/meus-chamados')) ||
     can(pk('/ponto/sistema-gestao-os')) ||
     can(pk('/ponto/sistema-gestao-os/relatorios')) ||
-    can(pk('/ponto/sistema-gestao-os/locais')) ||
-    can(pk('/ponto/sistema-gestao-os/equipes'));
+    canAccessModule(pk('/ponto/sistema-gestao-os/locais')) ||
+    canAccessModule(pk('/ponto/sistema-gestao-os/equipes'));
 
   // Menu items agrupados por categoria
   const getMenuItems = () => {
@@ -1405,7 +1405,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Prédios, setores, salas e ativos com QR',
             permission:
               isAdministrator ||
-              can(pk('/ponto/sistema-gestao-os/locais')),
+              canAccessModule(pk('/ponto/sistema-gestao-os/locais')),
             section: 'Central de Chamados'
           },
           {
@@ -1415,7 +1415,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Grupos, subgrupos e equipamentos',
             permission:
               isAdministrator ||
-              can(pk('/ponto/sistema-gestao-os/equipamentos')),
+              canAccessModule(pk('/ponto/sistema-gestao-os/equipamentos')),
             section: 'Central de Chamados'
           },
           {
@@ -1425,7 +1425,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Categorias de serviço para chamados e OS',
             permission:
               isAdministrator ||
-              can(pk('/ponto/sistema-gestao-os/tipos-servico')),
+              canAccessModule(pk('/ponto/sistema-gestao-os/tipos-servico')),
             section: 'Central de Chamados'
           },
           {
@@ -1435,7 +1435,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Equipes, integrantes e localidades atendidas',
             permission:
               isAdministrator ||
-              can(pk('/ponto/sistema-gestao-os/equipes')),
+              canAccessModule(pk('/ponto/sistema-gestao-os/equipes')),
             section: 'Central de Chamados'
           },
           {
@@ -1445,7 +1445,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Cursos, videoaulas e questionários',
             permission:
               isAdministrator ||
-              can(pk('/ponto/treinamentos/administracao')),
+              canAccessModule(pk('/ponto/treinamentos/administracao')),
             section: 'Central de Chamados'
           },
           {
@@ -1453,7 +1453,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/fornecedores',
             icon: Building2,
             description: 'Cadastro de fornecedores',
-            permission: isAdministrator || can(pk('/ponto/fornecedores')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/fornecedores')),
             section: 'Compras'
           },
           {
@@ -1461,7 +1461,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/materiais-construcao',
             icon: Package,
             description: 'Gerenciar cadastro de materiais e serviços',
-            permission: isAdministrator || can(pk('/ponto/materiais-construcao')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/materiais-construcao')),
             section: 'Compras'
           },
           {
@@ -1469,7 +1469,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/condicoes-pagamento',
             icon: CreditCard,
             description: 'Condições para ordens de compra',
-            permission: isAdministrator || can(pk('/ponto/condicoes-pagamento')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/condicoes-pagamento')),
             section: 'Compras'
           },
           {
@@ -1477,7 +1477,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/obras',
             icon: DraftingCompass,
             description: 'Cadastro de obras para Fichas de Demanda',
-            permission: isAdministrator || can(pk('/ponto/obras')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/obras')),
             section: 'Engenharia'
           },
           {
@@ -1485,7 +1485,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/veiculos',
             icon: Car,
             description: 'Cadastro de veículos da frota',
-            permission: isAdministrator || can(pk('/ponto/veiculos')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/veiculos')),
             section: 'Frota'
           },
           {
@@ -1502,7 +1502,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/centros-custo',
             icon: Building2,
             description: 'Gerenciar centros de custo',
-            permission: isAdministrator || can(pk('/ponto/centros-custo')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/centros-custo')),
             section: 'Financeiro'
           },
           {
@@ -1510,7 +1510,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/locais-estoque',
             icon: Warehouse,
             description: 'Cadastro de locais de estoque (TOTVS)',
-            permission: isAdministrator || can(pk('/ponto/locais-estoque')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/locais-estoque')),
             section: 'Financeiro'
           },
           {
@@ -1518,7 +1518,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/natureza-orcamentaria',
             icon: BookPlus,
             description: 'Cadastrar naturezas orçamentárias',
-            permission: isAdministrator || can(pk('/ponto/natureza-orcamentaria')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/natureza-orcamentaria')),
             section: 'Financeiro'
           },
           {
@@ -1528,7 +1528,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Cadastro de prestadores para espelho de nota fiscal',
             permission:
               isAdministrator ||
-              can(pk('/ponto/espelho-nf/prestadores-servico')),
+              canAccessModule(pk('/ponto/espelho-nf/prestadores-servico')),
             section: 'Nota Fiscal'
           },
           {
@@ -1538,7 +1538,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Cadastro de tomadores para espelho de nota fiscal',
             permission:
               isAdministrator ||
-              can(pk('/ponto/espelho-nf/tomadores-servico')),
+              canAccessModule(pk('/ponto/espelho-nf/tomadores-servico')),
             section: 'Nota Fiscal'
           },
           {
@@ -1548,7 +1548,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Contas usadas em tomadores e no espelho de nota fiscal',
             permission:
               isAdministrator ||
-              can(pk('/ponto/espelho-nf/contas-bancarias')),
+              canAccessModule(pk('/ponto/espelho-nf/contas-bancarias')),
             section: 'Nota Fiscal'
           },
           {
@@ -1558,7 +1558,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Regras por município para espelho de nota fiscal',
             permission:
               isAdministrator ||
-              can(pk('/ponto/espelho-nf/codigos-tributarios')),
+              canAccessModule(pk('/ponto/espelho-nf/codigos-tributarios')),
             section: 'Nota Fiscal'
           },
           {
@@ -1566,7 +1566,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/formularios',
             icon: ClipboardList,
             description: 'Criar e editar estrutura de formulários',
-            permission: isAdministrator || can(pk('/ponto/formularios')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/formularios')),
             section: 'Geral'
           },
           {
@@ -1574,7 +1574,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/noticias',
             icon: Newspaper,
             description: 'Comunicados agendados exibidos no primeiro acesso',
-            permission: isAdministrator || can(pk('/ponto/noticias')),
+            permission: isAdministrator || canAccessModule(pk('/ponto/noticias')),
             section: 'Geral'
           }
         ]
