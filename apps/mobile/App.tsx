@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { navigationRef } from './src/navigation/navigationRef';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -118,7 +119,7 @@ function AppNavigator() {
     return (
       <ThemeBackground>
         <View style={{ flex: 1 }}>
-          <NavigationContainer theme={navigationTheme}>
+          <NavigationContainer ref={navigationRef} theme={navigationTheme}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               <Stack.Screen name="Main" component={BottomTabNavigator} />
             </Stack.Navigator>
@@ -144,7 +145,7 @@ function AppNavigator() {
 
   const shell = (
     <View style={{ flex: 1, backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG }}>
-      <NavigationContainer theme={navigationTheme}>
+      <NavigationContainer ref={navigationRef} theme={navigationTheme}>
         {isAuthenticated ? (
           <>
             <Stack.Navigator

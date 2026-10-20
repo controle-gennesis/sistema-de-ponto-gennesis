@@ -1,3 +1,4 @@
+import { requestResetCode, resetPasswordWithCode } from '../services/PasswordResetCodeService';
 import express from 'express';
 import multer from 'multer';
 import {
@@ -18,6 +19,33 @@ const uploadAvatar = multer({
 // Rotas públicas
 router.post('/login', authController.login);
 router.post('/forgot-password', authController.forgotPassword);
+// Redefinição por código de 6 dígitos enviado por e-mail. Cobertas pelos mesmos limitadores de
+// '/forgot-password' e '/reset-password' (prefixo).
+router.post('/forgot-password/code', async (req, res, next) => {
+  try {
+    const result = await requestResetCode(req.body?.identifier);
+    return res.json({
+      success: true,
+      data: result,
+      message: result.sent
+        ? `Enviamos um código para ${result.maskedEmail}.`
+        : 'Se houver uma conta com e-mail cadastrado, enviaremos o código em instantes.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+router.post('/reset-password/code', async (req, res, next) => {
+  try {
+    await resetPasswordWithCode(req.body?.identifier, req.body?.code, req.body?.newPassword);
+    return res.json({
+      success: true,
+      message: 'Senha redefinida com sucesso. Faça login com a nova senha.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 router.get('/reset-password/validate', authController.validateResetToken);
 router.post('/reset-password', authController.resetPassword);
 // Aceita access token válido ou expirado dentro da janela de graça

@@ -14,6 +14,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { fetchMyDpRequests, STATUS_LABELS as DP_STATUS_LABELS } from '../services/dpRequests';
 import { fetchMyWorkOrders } from '../services/gestaoOs';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
+import { hasRegisteredPushToken, registerPushTokenWithServer } from './pushRegistration';
+import { navigationRef } from '../navigation/navigationRef';
 import api from '../services/api';
 import {
   ActivityKind,
@@ -174,7 +176,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       }
       if (fresh.length === 0) return;
 
-      void presentSystemNotifications(fresh);
+      // Com push do servidor ativo, o aviso do sistema já chega por lá (evita duplicar).
+      void hasRegisteredPushToken().then((hasPush) => {
+        if (!hasPush) void presentSystemNotifications(fresh);
+      });
 
       setNotifications((curr) => {
         const ids = new Set(fresh.map((f) => f.id));
@@ -337,8 +342,31 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    return addNotificationOpenListener(openSheet);
+    // Tocar num push abre direto a aba do assunto; sem dado, abre a lista de notificações.
+    return addNotificationOpenListener((data) => {
+      const route =
+        data?.kind === 'fuel'
+          ? 'Combustivel'
+          : data?.kind === 'reservation'
+            ? 'Reservas'
+            : data?.kind === 'dp'
+              ? 'DpRequests'
+              : data?.kind === 'workorder'
+                ? 'GestaoOs'
+                : null;
+      if (route && navigationRef.isReady()) {
+        navigationRef.navigate('Main', { screen: route });
+        return;
+      }
+      openSheet();
+    });
   }, [openSheet]);
+
+  // Push com o app fechado: registra este aparelho na conta logada.
+  useEffect(() => {
+    if (!isAuthenticated || Platform.OS === 'web') return;
+    void registerPushTokenWithServer();
+  }, [isAuthenticated, user?.id]);
 
   const unreadCount = useMemo(
     () => notifications.reduce((acc, n) => acc + (n.read ? 0 : 1), 0),

@@ -5777,3 +5777,30 @@ model FluigDocumentFileMeta {
 
   @@map("fluig_document_file_meta")
 }
+
+/// Token de push (Expo) de um aparelho do usuário — avisos de mudança de status com o app fechado.
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("push_tokens")
+}
+
+/// Código de 6 dígitos (WhatsApp) para redefinir a senha pelo telefone. Só o hash é guardado.
+model PasswordResetCode {
+  id        String   @id @default(cuid())
+  userId    String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_codes")
+}

@@ -22,7 +22,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { Eye, EyeOff, UserRound, Lock, MessageCircle, X, Check, ScanFace } from 'lucide-react-native';
+import { Eye, EyeOff, UserRound, Lock, Check, ScanFace } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuth, LAST_FIRST_NAME_KEY } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -30,6 +30,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeLoginIdentifierInput } from '../lib/cpf';
 import { SPLASH_BG, SPLASH_LOGO_SIZE } from '../components/AuthBrandSplash';
 import AuthGradientBackground from '../components/AuthGradientBackground';
+import ForgotPasswordModal from '../components/ForgotPasswordModal';
 
 const SUPPORT_WHATSAPP = '5561981622021';
 const SUPPORT_URL = `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(
@@ -90,6 +91,10 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
+  const showHelpRefSync = (value: boolean) => {
+    showHelpRef.current = value;
+    setShowHelp(value);
+  };
   const [focusedField, setFocusedField] = useState<'identifier' | 'password' | null>(null);
   const [error, setError] = useState('');
   const [introDone, setIntroDone] = useState(false);
@@ -112,6 +117,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   const sheetTopAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const showHelpRef = useRef(false);
 
   useEffect(() => {
     void refreshBiometric();
@@ -134,6 +140,8 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
     };
 
     const onShow = Keyboard.addListener(showEvt, (e) => {
+      // Teclado aberto pela tela "Esqueceu a senha?": o formulário daqui não deve subir junto.
+      if (showHelpRef.current) return;
       const kb = e.endCoordinates.height;
       // Expande o sheet pra cima, mantendo o formulário acima do teclado.
       const nextTop = Math.max(
@@ -512,7 +520,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
                 </View>
                 <Text style={styles.rememberText}>Lembrar-me</Text>
               </Pressable>
-              <Pressable onPress={() => setShowHelp(true)} hitSlop={8}>
+              <Pressable onPress={() => showHelpRefSync(true)} hitSlop={8}>
                 <Text style={styles.forgot}>Esqueceu a senha?</Text>
               </Pressable>
             </View>
@@ -558,37 +566,21 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
         </View>
       </Animated.View>
 
-      <Modal
+      <ForgotPasswordModal
         visible={showHelp}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowHelp(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowHelp(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Esqueceu a senha?</Text>
-              <Pressable onPress={() => setShowHelp(false)} hitSlop={10}>
-                <X size={20} color={isDark ? '#d1d5db' : '#52525b'} strokeWidth={2} />
-              </Pressable>
-            </View>
-            <Text style={styles.modalBody}>
-              A recuperação automática está desativada. Solicite a alteração pelo WhatsApp.
-            </Text>
-            <TouchableOpacity
-              style={styles.whatsappBtn}
-              activeOpacity={0.9}
-              onPress={() => {
-                void Linking.openURL(SUPPORT_URL);
-                setShowHelp(false);
-              }}
-            >
-              <MessageCircle size={18} color="#fff" strokeWidth={2} />
-              <Text style={styles.whatsappText}>Solicitar via WhatsApp</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        onClose={() => showHelpRefSync(false)}
+        isDark={isDark}
+        initialIdentifier={identifier}
+        onContactSupport={() => {
+          void Linking.openURL(SUPPORT_URL);
+          showHelpRefSync(false);
+        }}
+        onDone={(id) => {
+          setIdentifier(id);
+          setPassword('');
+          setError('');
+        }}
+      />
     </View>
   );
 }
@@ -607,9 +599,6 @@ const getStyles = (bottomInset: number, isDark: boolean) => {
     buttonTextOff: isDark ? 'rgba(255,255,255,0.75)' : '#9ca3af',
     accentText: isDark ? '#f87171' : BRAND,
     bioBg: isDark ? '#111827' : '#ffffff',
-    modalCard: isDark ? '#1f2937' : '#ffffff',
-    modalTitle: isDark ? '#f9fafb' : '#111111',
-    modalBody: isDark ? '#d1d5db' : '#52525b',
   };
   return StyleSheet.create({
     root: {
@@ -807,48 +796,6 @@ const getStyles = (bottomInset: number, isDark: boolean) => {
       textAlign: 'center',
       fontSize: 12,
       color: '#9ca3af',
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      justifyContent: 'center',
-      paddingHorizontal: 24,
-    },
-    modalCard: {
-      backgroundColor: C.modalCard,
-      borderRadius: 18,
-      padding: 22,
-    },
-    modalHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 10,
-    },
-    modalTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: C.modalTitle,
-    },
-    modalBody: {
-      fontSize: 14,
-      lineHeight: 21,
-      color: C.modalBody,
-      marginBottom: 20,
-    },
-    whatsappBtn: {
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#16a34a',
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-    },
-    whatsappText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '600',
     },
   });
 };

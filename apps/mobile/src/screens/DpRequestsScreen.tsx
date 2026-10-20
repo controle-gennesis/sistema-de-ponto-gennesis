@@ -39,6 +39,13 @@ import { PersonPickerListRow, PersonSelectField } from '../components/PersonPick
 import { formatCpfDisplay } from '../lib/cpf';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import OfflineBanner from '../components/OfflineBanner';
+import {
+  isNetworkError,
+  listCacheKey,
+  readListCache,
+  writeListCache,
+} from '../lib/offlineListCache';
 import { onFabBarPress } from '../navigation/fabBarEvents';
 import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import { formatDpRequestDetails } from '../lib/formatDpRequestDetails';
@@ -449,10 +456,41 @@ export default function DpRequestsScreen() {
     setFilterOpen(false);
   };
 
+  type DpList = Awaited<ReturnType<typeof fetchMyDpRequests>>;
+  const [offline, setOffline] = useState(false);
+  const dpCacheKey = listCacheKey('dp', user?.id);
   const listQuery = useQuery({
     queryKey: ['dp-my-requests'],
-    queryFn: () => fetchMyDpRequests('all'),
+    queryFn: async () => {
+      try {
+        const fresh = await fetchMyDpRequests('all');
+        writeListCache(dpCacheKey, fresh);
+        setOffline(false);
+        return fresh;
+      } catch (e) {
+        if (!isNetworkError(e)) throw e;
+        // Sem sinal: devolve a última lista em vez de erro.
+        const cached = await readListCache<DpList>(dpCacheKey);
+        setOffline(true);
+        if (cached) return cached;
+        throw e;
+      }
+    },
+    networkMode: 'always',
   });
+
+  // Abre já com a última lista salva (antes mesmo da primeira resposta da rede).
+  useEffect(() => {
+    let alive = true;
+    void readListCache<DpList>(dpCacheKey).then((cached) => {
+      if (alive && cached && !queryClient.getQueryData(['dp-my-requests'])) {
+        queryClient.setQueryData(['dp-my-requests'], cached);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [dpCacheKey, queryClient]);
 
   const costCentersQuery = useQuery({
     queryKey: ['dp-eligible-cost-centers'],
@@ -972,7 +1010,10 @@ export default function DpRequestsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {isTabScreen ? (
-          <Text style={styles.pageTitle}>Solicitações Internas</Text>
+          <>
+            <OfflineBanner visible={offline} />
+            <Text style={styles.pageTitle}>Solicitações Internas</Text>
+          </>
         ) : null}
         <Text style={styles.pageSubtitle}>
           Crie e acompanhe pedidos ao DP e Administração

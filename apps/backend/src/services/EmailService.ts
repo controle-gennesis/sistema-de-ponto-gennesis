@@ -264,6 +264,40 @@ class EmailService {
       html,
     });
   }
+
+  /** Código de 6 dígitos para redefinir a senha (digitado no app). */
+  async sendPasswordResetCodeEmail(email: string, name: string, code: string): Promise<void> {
+    const subject = `Seu código de recuperação de senha - ${APP_NAME}`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Código de recuperação</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h1 style="color: #dc2626; margin-top: 0;">Recuperação de senha</h1>
+          <p>Olá, <strong>${name}</strong>!</p>
+          <p>Use o código abaixo no aplicativo para redefinir a senha da sua conta no ${APP_NAME}:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <span style="background-color: #fff; border: 2px solid #dc2626; color: #111827; padding: 14px 28px; border-radius: 10px; display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 8px;">${code}</span>
+          </div>
+          <p><strong>Este código expira em 10 minutos.</strong></p>
+          <p>Se você não solicitou a recuperação de senha, ignore este e-mail. Sua senha permanecerá inalterada e ninguém terá acesso à conta sem este código.</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="font-size: 12px; color: #6b7280; margin: 0;">
+            Este é um e-mail automático, por favor não responda.<br>
+            ${APP_NAME} — Gennesis Engenharia
+          </p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await this.sendEmail({ to: email, subject, html });
+  }
 }
 
 export const emailService = new EmailService();

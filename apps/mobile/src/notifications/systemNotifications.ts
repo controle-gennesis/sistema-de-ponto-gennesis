@@ -30,7 +30,13 @@ type NotificationsModule = {
   requestPermissionsAsync: () => Promise<{ status: string }>;
   scheduleNotificationAsync: (opts: Record<string, unknown>) => Promise<unknown>;
   setBadgeCountAsync: (count: number) => Promise<unknown>;
-  addNotificationResponseReceivedListener: (listener: () => void) => { remove: () => void };
+  addNotificationResponseReceivedListener: (
+    listener: (response: { notification: { request: { content: { data?: Record<string, unknown> } } } }) => void,
+  ) => { remove: () => void };
+  getExpoPushTokenAsync: (opts: { projectId: string }) => Promise<{ data: string }>;
+  getLastNotificationResponseAsync?: () => Promise<{
+    notification: { request: { content: { data?: Record<string, unknown> } } };
+  } | null>;
 };
 
 let Notifications: NotificationsModule | null = null;
@@ -151,15 +157,39 @@ export async function syncAppIconBadge(count: number) {
   }
 }
 
+/**
+ * Token de push (Expo) deste aparelho, ou null (web, Expo Go, sem permissão, simulador).
+ * No Expo Go o push remoto não é suportado — só funciona em build de desenvolvimento/produção.
+ */
+export async function getPushToken(): Promise<string | null> {
+  if (Platform.OS === 'web' || notificationsUnsupported || isExpoGo()) return null;
+  const mod = getNotifications();
+  if (!mod) return null;
+  try {
+    const ok = await ensureSystemNotificationPermissions();
+    if (!ok) return null;
+    const projectId =
+      (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ||
+      (Constants as unknown as { easConfig?: { projectId?: string } }).easConfig?.projectId;
+    if (!projectId) return null;
+    const res = await mod.getExpoPushTokenAsync({ projectId });
+    return res?.data || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Abre o sheet ao tocar numa notificação do sistema. No-op no Expo Go Android. */
-export function addNotificationOpenListener(onOpen: () => void): () => void {
+export function addNotificationOpenListener(
+  onOpen: (data?: Record<string, unknown>) => void,
+): () => void {
   if (Platform.OS === 'web' || notificationsUnsupported) return () => undefined;
   const mod = getNotifications();
   if (!mod) return () => undefined;
   try {
     ensureHandler(mod);
-    const sub = mod.addNotificationResponseReceivedListener(() => {
-      onOpen();
+    const sub = mod.addNotificationResponseReceivedListener((response) => {
+      onOpen(response?.notification?.request?.content?.data);
     });
     return () => sub.remove();
   } catch {

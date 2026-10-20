@@ -37,6 +37,13 @@ import {
 } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import OfflineBanner from '../components/OfflineBanner';
+import {
+  isNetworkError,
+  listCacheKey,
+  readListCache,
+  writeListCache,
+} from '../lib/offlineListCache';
 import api from '../services/api';
 import { onFabBarPress } from '../navigation/fabBarEvents';
 import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
@@ -361,27 +368,53 @@ export default function VehicleReservationsScreen() {
     setPicker(null);
   };
 
+  const [offline, setOffline] = useState(false);
+  const cacheKey = listCacheKey('reservations', user?.id);
+  const hasRowsRef = useRef(false);
+  hasRowsRef.current = rows.length > 0;
+
   const loadList = useCallback(async () => {
     try {
       const res = await api.get('/api/vehicle-reservations/mine?limit=100&page=1');
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao carregar');
-      setRows((data?.data || []) as VehicleReservation[]);
+      const list = (data?.data || []) as VehicleReservation[];
+      setRows(list);
+      writeListCache(cacheKey, list);
+      setOffline(false);
     } catch (e: any) {
-      showAppToast({
-        type: 'error',
-        text1: 'Erro',
-        text2: e?.message || 'Não foi possível carregar reservas',
-      });
+      if (isNetworkError(e)) {
+        // Sem sinal: mantém (ou restaura) a última lista em vez de mostrar erro/tela vazia.
+        const cached = hasRowsRef.current ? null : await readListCache<VehicleReservation[]>(cacheKey);
+        if (cached) setRows(cached);
+        setOffline(true);
+      } else {
+        showAppToast({
+          type: 'error',
+          text1: 'Erro',
+          text2: e?.message || 'Não foi possível carregar reservas',
+        });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [cacheKey]);
 
+  // Mostra a última lista na hora (se houver) e atualiza em seguida.
   useEffect(() => {
+    let alive = true;
+    void readListCache<VehicleReservation[]>(cacheKey).then((cached) => {
+      if (alive && cached && !hasRowsRef.current) {
+        setRows(cached);
+        setLoading(false);
+      }
+    });
     void loadList();
-  }, [loadList]);
+    return () => {
+      alive = false;
+    };
+  }, [cacheKey, loadList]);
 
   const loadFormOptions = useCallback(async () => {
     setLoadingOptions(true);
@@ -823,6 +856,7 @@ export default function VehicleReservationsScreen() {
           />
         }
       >
+        <OfflineBanner visible={offline} />
         <Text style={styles.pageTitle}>Frota</Text>
         <Text style={styles.pageSubtitle}>
           Reserve veículos e acompanhe o status

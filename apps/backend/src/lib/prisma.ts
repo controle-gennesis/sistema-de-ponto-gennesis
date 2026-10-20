@@ -79,6 +79,11 @@ function withAuditExtension(base: PrismaClient): PrismaClient {
             before = await loadRecordBeforeWrite(model, args.where);
           }
           const result = await query(args);
+          // Mudança de status de solicitação/reserva/DP/chamado → push pro dono (segundo plano).
+          // Import tardio: o serviço usa este mesmo client.
+          void import('../services/PushNotificationService')
+            .then((m) => m.maybeNotifyStatusChange(model, args, result))
+            .catch(() => undefined);
           // Garante número/nome mesmo se o update vier só com { status } (ex.: OC em transaction).
           if (
             isApproval &&

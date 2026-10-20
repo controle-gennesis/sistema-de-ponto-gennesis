@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearListCache } from '../lib/offlineListCache';
+import { unregisterPushTokenFromServer } from '../notifications/pushRegistration';
 import { User } from '../types';
 import { buildApiUrl } from '../config/api';
 import { setUnauthorizedHandler } from '../services/api';
@@ -242,6 +244,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
+      // Antes de apagar a sessão: este aparelho para de receber push da conta que está saindo.
+      await unregisterPushTokenFromServer();
       const token = await storage.getItem('token');
       if (token) {
         await fetch(buildApiUrl('/api/auth/logout'), {
@@ -255,6 +259,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await storage.removeItem('token');
       await storage.removeItem('user');
       await storage.removeItem('rememberMe');
+      // Listas em cache são de quem saiu: não podem aparecer pra próxima pessoa.
+      await clearListCache();
       setUser(null);
     }
   };
