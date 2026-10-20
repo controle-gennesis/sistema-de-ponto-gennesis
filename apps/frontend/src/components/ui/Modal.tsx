@@ -78,6 +78,8 @@ export interface ModalProps {
   headerClassName?: string;
   /** Classes extras no painel do modal (ex.: altura fixa na aba de comentários). */
   panelClassName?: string;
+  /** Rodapé fixo (botões): fica fora da área de rolagem e aparece sempre. */
+  footer?: React.ReactNode;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -98,6 +100,7 @@ export const Modal: React.FC<ModalProps> = ({
   contentClassName,
   headerClassName,
   panelClassName,
+  footer,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const { present, visible } = useOpenTransition(isOpen, MODAL_ANIM_MS);
@@ -256,6 +259,11 @@ export const Modal: React.FC<ModalProps> = ({
               {children}
             </div>
           </div>
+          {footer ? (
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
+              {footer}
+            </div>
+          ) : null}
         </div>
       </div>
 

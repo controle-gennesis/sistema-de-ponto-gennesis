@@ -4632,16 +4632,18 @@ export default function ContractDetailPage() {
 
               <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:gap-4">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-2 sm:gap-x-2">
-                  <FilterStatCard
-                    variant="flat"
-                    size="sm"
-                    className="shrink-0"
-                    icon={Scale}
-                    label="Saldo pendente contratual"
-                    count={formatCurrency(Math.max(0, pendenteParaFaturarTodosAnos ?? 0))}
-                    iconBg="bg-gray-100 dark:bg-gray-700/60"
-                    iconColor="text-gray-600 dark:text-gray-300"
-                  />
+                  {canSeeContratoResumoFinanceiro ? (
+                    <FilterStatCard
+                      variant="flat"
+                      size="sm"
+                      className="shrink-0"
+                      icon={Scale}
+                      label="Saldo pendente contratual"
+                      count={formatCurrency(Math.max(0, pendenteParaFaturarTodosAnos ?? 0))}
+                      iconBg="bg-gray-100 dark:bg-gray-700/60"
+                      iconColor="text-gray-600 dark:text-gray-300"
+                    />
+                  ) : null}
                   {canSeeContratoResumoFinanceiro ? (
                     <>
                       <span
@@ -4678,7 +4680,7 @@ export default function ContractDetailPage() {
                       />
                     </>
                   ) : null}
-                  {headerAlerta ? (
+                  {canSeeContratoResumoFinanceiro && headerAlerta ? (
                     <>
                       <span
                         className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"

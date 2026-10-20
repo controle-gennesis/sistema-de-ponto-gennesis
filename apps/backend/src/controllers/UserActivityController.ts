@@ -99,13 +99,15 @@ export class UserActivityController {
   async heartbeat(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      // Admin navegando como outra pessoa não conta como presença dela.
+      if (req.user.impersonating) return res.json({ success: true, skipped: true });
       await prisma.user.update({
         where: { id: req.user.id },
         data: { lastSeenAt: new Date() }
       });
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 
@@ -113,6 +115,8 @@ export class UserActivityController {
   async recordPageView(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      // Admin navegando como outra pessoa não gera rastreio (páginas, último acesso) para ela.
+      if (req.user.impersonating) return res.json({ success: true, skipped: true });
 
       const path = normalizePath(req.body?.path);
       if (!path) throw createError('Path inválido', 400);
@@ -147,9 +151,9 @@ export class UserActivityController {
         }
       });
 
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 

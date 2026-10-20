@@ -3,13 +3,14 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, Paperclip, Search } from 'lucide-react';
+import { Download, Eye, FileSpreadsheet, FileText, Paperclip, Search, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 import { ListPagination } from '@/components/ui/ListPagination';
 import {
   CadastroListEmpty,
@@ -19,8 +20,9 @@ import {
 } from '@/components/ui/CadastroListSummary';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import {
-  DetailInfoActions,
   DetailInfoSection,
   type DetailInfoField,
 } from '@/components/ui/DetailInfoLayout';
@@ -255,6 +257,8 @@ export default function EspelhosAprovadosPage() {
 
   const range = getCadastroListRange(page, PAGE_SIZE, filtered.length);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const { rowActionMenu, rowForActionMenu, toggleRowActionMenu, closeRowActionMenu, isRowMenuOpen } =
+    useRowActionMenu(filtered);
 
   const handleExportPdf = (mirror: ApprovedMirror) => {
     exportEspelhoNfPdf(
@@ -332,7 +336,7 @@ export default function EspelhosAprovadosPage() {
     <PageStack>
       <ListPageHeader
         title="Espelhos de NF"
-        description="Espelhos aprovados: anexe a nota fiscal para finalizar."
+        description="Acompanhe e gerencie os espelhos de nota fiscal."
       />
 
       <Card className="w-full">
@@ -406,7 +410,6 @@ export default function EspelhosAprovadosPage() {
                         ['center', 'Vencimento'],
                         ['center', 'Aprovado em'],
                         ['center', 'Status'],
-                        ['right', 'Ação'],
                       ].map(([align, label]) => (
                         <th
                           key={label}
@@ -415,6 +418,7 @@ export default function EspelhosAprovadosPage() {
                           {label}
                         </th>
                       ))}
+                      <th className="w-14 min-w-[3.5rem] px-2 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3 sm:py-4">Ação</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -458,38 +462,11 @@ export default function EspelhosAprovadosPage() {
                               {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
                             </span>
                           </td>
-                          <td
-                            className="px-3 py-3 text-right sm:px-6"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="flex items-center justify-end gap-2">
-                              {m.status === 'APPROVED' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => openNfModal(m)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                                >
-                                  <Paperclip className="h-3.5 w-3.5" aria-hidden />
-                                  Anexar NF
-                                </button>
-                              ) : m.nfAttachment ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadAttachment(m.nfAttachment!)}
-                                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                                >
-                                  Baixar NF
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => handleExportPdf(m)}
-                                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                              >
-                                Exportar PDF
-                              </button>
-                            </div>
-                          </td>
+                          <RowActionMenuCell
+                            isOpen={isRowMenuOpen(m.id)}
+                            onToggle={(e) => toggleRowActionMenu(m.id, e.currentTarget)}
+                            align="center"
+                          />
                         </tr>
                       );
                     })}
@@ -497,6 +474,43 @@ export default function EspelhosAprovadosPage() {
                 </table>
               </div>
               <ListPagination currentPage={page} totalPages={range.totalPages} onPageChange={setPage} />
+              {rowActionMenu && rowForActionMenu ? (
+                <RowActionMenuPortal
+                  menu={rowActionMenu}
+                  onClose={closeRowActionMenu}
+                  hideDefaultActions
+                  extraItems={[
+                    {
+                      label: 'Ver detalhes',
+                      icon: <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />,
+                      onClick: () => setDetail(rowForActionMenu),
+                    },
+                    ...(rowForActionMenu.status === 'APPROVED'
+                      ? [
+                          {
+                            label: 'Anexar NF',
+                            icon: <Paperclip className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />,
+                            onClick: () => openNfModal(rowForActionMenu),
+                          },
+                        ]
+                      : []),
+                    ...(rowForActionMenu.status === 'FINALIZED' && rowForActionMenu.nfAttachment
+                      ? [
+                          {
+                            label: 'Baixar NF',
+                            icon: <Download className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />,
+                            onClick: () => handleDownloadAttachment(rowForActionMenu.nfAttachment!),
+                          },
+                        ]
+                      : []),
+                    {
+                      label: 'Exportar PDF',
+                      icon: <FileSpreadsheet className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />,
+                      onClick: () => handleExportPdf(rowForActionMenu),
+                    },
+                  ]}
+                />
+              ) : null}
             </>
           )}
         </CardContent>
@@ -507,6 +521,28 @@ export default function EspelhosAprovadosPage() {
         onClose={() => setDetail(null)}
         title="Detalhes do espelho"
         size="lg"
+        footer={
+          detail ? (
+            <>
+              {detail.status === 'APPROVED' ? (
+                <button
+                  type="button"
+                  onClick={() => openNfModal(detail)}
+                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Anexar NF
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => handleExportPdf(detail)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Exportar PDF
+              </button>
+            </>
+          ) : null
+        }
       >
         {detail ? (
           <div className="space-y-6">
@@ -614,24 +650,6 @@ export default function EspelhosAprovadosPage() {
                 </div>
               </DetailInfoSection>
             ) : null}
-            <DetailInfoActions>
-              {detail.status === 'APPROVED' ? (
-                <button
-                  type="button"
-                  onClick={() => openNfModal(detail)}
-                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                >
-                  Anexar NF
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => handleExportPdf(detail)}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-              >
-                Exportar PDF
-              </button>
-            </DetailInfoActions>
           </div>
         ) : null}
       </Modal>
@@ -655,18 +673,39 @@ export default function EspelhosAprovadosPage() {
             <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Nota fiscal (PDF ou imagem) *
             </label>
-            <input
-              type="file"
-              accept=".pdf,image/*"
-              disabled={nfSaving}
-              onChange={(e) => setNfFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50 dark:text-gray-300 dark:file:border-gray-600 dark:file:bg-gray-800 dark:file:text-gray-200"
-            />
             {nfFile ? (
-              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {nfFile.name} ({humanFileSize(nfFile.size)})
-              </p>
-            ) : null}
+              <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800/60">
+                <div className="rounded-md bg-red-100 p-2 dark:bg-red-900/30">
+                  <FileText className="h-4 w-4 text-red-600 dark:text-red-400" aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {nfFile.name}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {humanFileSize(nfFile.size)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNfFile(null)}
+                  disabled={nfSaving}
+                  className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                  title="Remover arquivo"
+                  aria-label="Remover arquivo"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <FileDropZone
+                label="Adicionar nota fiscal"
+                hint="Clique ou arraste PDF ou imagem (até 10 MB)"
+                accept=".pdf,image/*"
+                disabled={nfSaving}
+                onFiles={(files) => setNfFile(files[0] ?? null)}
+              />
+            )}
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
