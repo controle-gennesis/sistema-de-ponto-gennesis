@@ -161,6 +161,7 @@ import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
 import { realtimeChangeNotifier } from './middleware/realtimeChangeNotifier';
 import pushTokensRoutes from './routes/pushTokens';
+import appVersionRoutes from './routes/appVersion';
 
 ensureNfeSecretsFromEnv();
 logNfeRuntimeStatus();
@@ -417,6 +418,9 @@ app.use('/uploads', express.static(backendUploadsRoot));
 app.use('/uploads', persistentUploadsS3Fallback());
 
 // Health check
+// Versão mínima/mais recente do app mobile (pública; configurada por variáveis de ambiente)
+app.use('/api/app-version', appVersionRoutes);
+
 app.get('/health', (req, res) => {
   console.log('🔍 Health check solicitado');
   res.status(200).json({

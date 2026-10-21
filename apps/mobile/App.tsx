@@ -26,6 +26,7 @@ import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
 import GestaoOsUnplannedScreen from './src/screens/GestaoOsUnplannedScreen';
 import FieldAssistantScreen from './src/screens/FieldAssistantScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
+import AppUpdateGate from './src/components/AppUpdateGate';
 import ThemeBackground from './src/components/ThemeBackground';
 
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
@@ -251,6 +252,7 @@ export default function App() {
                   <AppNavigator />
                   <StatusBarComponent />
                   <AppToastHost />
+                  <AppUpdateGate />
                   <RootOverlayToastHost />
                 </ChromeVisibilityProvider>
               </NotificationsProvider>
