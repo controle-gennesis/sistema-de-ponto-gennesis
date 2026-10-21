@@ -369,8 +369,8 @@ export default function AprovacaoFdsPage() {
             description="Cadastre e acompanhe as fichas de demanda."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-5">
-            {CARD_ORDER.filter((card) => card !== 'ALL').map((card) => {
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-6">
+            {CARD_ORDER.map((card) => {
               const style = CARD_STYLE[card];
               return (
                 <FilterStatCard
