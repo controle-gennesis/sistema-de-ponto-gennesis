@@ -12,6 +12,7 @@ export type DemandSheetPurchaseStatus =
   | 'FULLY_FULFILLED_BY_STOCK'
   | 'PARTIALLY_FULFILLED_BY_STOCK'
   | 'PURCHASE_REQUEST'
+  | 'QUOTATION'
   | 'SUPPLIES'
   | 'FINISHED'
   | 'CANCELLED';
@@ -22,7 +23,8 @@ export const FD_PURCHASE_STATUS_OPTIONS: {
   label: string;
 }[] = [
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'PURCHASE_REQUEST', label: 'Em Cotação' },
+  { value: 'PURCHASE_REQUEST', label: 'Suprimentos' },
+  { value: 'QUOTATION', label: 'Em Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ];
@@ -33,7 +35,8 @@ export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string
   WAREHOUSE_GO: 'Almoxarifado',
   FULLY_FULFILLED_BY_STOCK: 'Atendida totalmente pelo estoque',
   PARTIALLY_FULFILLED_BY_STOCK: 'Atendida parcialmente pelo estoque',
-  PURCHASE_REQUEST: 'Em Cotação',
+  PURCHASE_REQUEST: 'Suprimentos',
+  QUOTATION: 'Em Cotação',
   SUPPLIES: 'Suprimentos',
   FINISHED: 'Finalizado',
   CANCELLED: 'Cancelado',
@@ -52,6 +55,8 @@ export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | n
     case 'PURCHASE_REQUEST':
     case 'SUPPLIES':
       return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+    case 'QUOTATION':
+      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
     case 'FULLY_FULFILLED_BY_STOCK':
     case 'PARTIALLY_FULFILLED_BY_STOCK':
       return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300';
@@ -73,6 +78,8 @@ export interface FdAnexo {
   url?: string;
   kind?: string;
   sourcePath?: string;
+  /** ID da ordem de compra a que o anexo pertence (Em Cotação aceita várias). */
+  ocRef?: string;
 }
 
 export function fdAnexoKindLabel(kind?: string): string {

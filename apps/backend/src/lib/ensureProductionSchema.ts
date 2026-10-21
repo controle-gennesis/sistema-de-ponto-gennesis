@@ -521,6 +521,10 @@ async function ensureDemandSheetPurchaseCancelled(prisma: PrismaClient): Promise
     `);
   }
 
+  await prisma.$executeRawUnsafe(
+    `ALTER TYPE "DemandSheetPurchaseStatus" ADD VALUE IF NOT EXISTS 'QUOTATION'`
+  );
+
   if (!(await columnExists(prisma, 'demand_sheet_approvals', 'purchaseCancellationNote'))) {
     console.warn('[Schema] Coluna purchaseCancellationNote em demand_sheet_approvals ausente — adicionando.');
     await prisma.$executeRawUnsafe(`

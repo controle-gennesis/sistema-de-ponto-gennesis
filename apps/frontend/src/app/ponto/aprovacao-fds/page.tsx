@@ -56,7 +56,7 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
 
-type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
+type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'SUPPLIES' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
 /** Aguardando Aprovação = aguardando o gestor. Em Fila/Em Cotação/Finalizadas = status de compras da ficha já aprovada. */
 function matchesCard(r: FichaDemandaApprovalRecord, card: CardFilter): boolean {
@@ -67,8 +67,13 @@ function matchesCard(r: FichaDemandaApprovalRecord, card: CardFilter): boolean {
       return r.status === 'WAITING_MANAGER';
     case 'PENDING':
       return r.status === 'APPROVED' && !r.purchaseStatus;
+    case 'SUPPLIES':
+      return (
+        r.status === 'APPROVED' &&
+        (r.purchaseStatus === 'PURCHASE_REQUEST' || r.purchaseStatus === 'SUPPLIES')
+      );
     case 'QUOTATION':
-      return r.status === 'APPROVED' && r.purchaseStatus === 'PURCHASE_REQUEST';
+      return r.status === 'APPROVED' && r.purchaseStatus === 'QUOTATION';
     case 'FINISHED':
       return r.purchaseStatus === 'FINISHED';
     case 'CANCELLED':
@@ -88,7 +93,7 @@ const CARD_STYLE: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   IN_APPROVAL: {
-    label: 'Aguardando Aprovação',
+    label: 'Em Aprovação',
     subtitle: 'Fichas aguardando a aprovação do gestor',
     Icon: FileCheck2,
     iconBg: 'bg-violet-100 dark:bg-violet-900/30',
@@ -101,12 +106,19 @@ const CARD_STYLE: Record<
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
-  QUOTATION: {
-    label: 'Em Cotação',
-    subtitle: 'Fichas com a solicitação de compra em cotação',
+  SUPPLIES: {
+    label: 'Suprimentos',
+    subtitle: 'Fichas com a solicitação de compra em Suprimentos',
     Icon: Timer,
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  QUOTATION: {
+    label: 'Em Cotação',
+    subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
+    Icon: Timer,
+    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
+    iconColor: 'text-indigo-600 dark:text-indigo-400',
   },
   FINISHED: {
     label: 'Finalizadas',
@@ -128,6 +140,7 @@ const CARD_ORDER: CardFilter[] = [
   'ALL',
   'IN_APPROVAL',
   'PENDING',
+  'SUPPLIES',
   'QUOTATION',
   'FINISHED',
   'CANCELLED',
@@ -364,7 +377,7 @@ export default function AprovacaoFdsPage() {
             description="Cadastre e acompanhe as fichas de demanda."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-6">
             {CARD_ORDER.filter((card) => card !== 'ALL').map((card) => {
               const style = CARD_STYLE[card];
               return (

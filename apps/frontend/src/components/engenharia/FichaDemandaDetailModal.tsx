@@ -117,6 +117,7 @@ export function FichaDemandaDetailModal({
   const [scNumero, setScNumero] = useState('');
   const [scId, setScId] = useState('');
   const [ocId, setOcId] = useState('');
+  const [novaOcRef, setNovaOcRef] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelNote, setCancelNote] = useState('');
 
@@ -148,16 +149,19 @@ export function FichaDemandaDetailModal({
       anexoId,
       file,
       kind,
+      ocRef,
     }: {
       anexoId?: string;
       file: File;
       kind?: string;
+      ocRef?: string;
     }) => {
       if (!record?.id) throw new Error('Ficha inválida');
       const form = new FormData();
       form.append('file', file);
       if (anexoId) form.append('anexoId', anexoId);
       if (kind) form.append('kind', kind);
+      if (ocRef) form.append('ocRef', ocRef);
       const res = await api.post(`/demand-sheet-approvals/${record.id}/anexos`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
@@ -169,6 +173,7 @@ export function FichaDemandaDetailModal({
     },
     onSuccess: async (updated) => {
       toast.success('Anexo vinculado');
+      setNovaOcRef('');
       if (updated) onRecordUpdated?.(updated);
       await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
@@ -191,7 +196,8 @@ export function FichaDemandaDetailModal({
       const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-refs`, {
         scNumero,
         scId,
-        ocId,
+        // Em Cotação cada OC leva o próprio ID (no anexo); o ID único da ficha não muda.
+        ocId: record.purchaseStatus === 'QUOTATION' ? record.ocId || '' : ocId,
       });
       return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
     },
@@ -209,6 +215,36 @@ export function FichaDemandaDetailModal({
             (err as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
       toast.error(msg || 'Não foi possível salvar os dados de compra.');
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async (purchaseStatus: 'QUOTATION' | 'FINISHED') => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-status`, {
+        purchaseStatus,
+      });
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onSuccess: async (updated, purchaseStatus) => {
+      toast.success(
+        purchaseStatus === 'FINISHED'
+          ? 'Ficha finalizada.'
+          : isFinished
+            ? 'Ficha voltou para Em Cotação.'
+            : 'Ficha enviada para Em Cotação.'
+      );
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+      await queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      toast.error(msg || 'Não foi possível alterar o status da ficha.');
     },
   });
 
@@ -243,7 +279,7 @@ export function FichaDemandaDetailModal({
 
   if (!record) return null;
 
-  // Status automático: Pendente → (SC preenchida) Cotação → (ID da OC + anexo da OC) Finalizado.
+  // Fluxo: Em Fila → (SC preenchida) Suprimentos → manual: Em Cotação (mais OCs) ou Finalizada.
   const isCancelled = record.purchaseStatus === 'CANCELLED';
   const isFinished = record.purchaseStatus === 'FINISHED';
   const canCancel = !isCancelled && !isFinished;
@@ -252,9 +288,15 @@ export function FichaDemandaDetailModal({
   // Etapas: sem status → SC; Cotação → ID da OC + anexo da OC; demais (Finalizado, Cancelado, antigos) → tudo.
   const stage: 'sc' | 'oc' | 'all' = !record.purchaseStatus
     ? 'sc'
-    : record.purchaseStatus === 'PURCHASE_REQUEST'
+    : record.purchaseStatus === 'PURCHASE_REQUEST' ||
+        record.purchaseStatus === 'SUPPLIES' ||
+        record.purchaseStatus === 'QUOTATION'
       ? 'oc'
       : 'all';
+  const isQuotation = record.purchaseStatus === 'QUOTATION';
+  const isSupplies =
+    record.purchaseStatus === 'PURCHASE_REQUEST' || record.purchaseStatus === 'SUPPLIES';
+  const temOcAnexada = ordensCompra.some((a) => !!a.url);
   const ordemCompraCards =
     ordensCompra.length === 0 ? null : (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -268,7 +310,7 @@ export function FichaDemandaDetailModal({
                 originalName: anexo.name || 'Arquivo',
                 fileUrl: anexo.url,
               }}
-              extra="Ordem de compra"
+              extra={anexo.ocRef ? `OC ${anexo.ocRef}` : 'Ordem de compra'}
               uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
               onUpload={
                 allowPendingUpload && isPending && ordemCompraEditavel
@@ -284,22 +326,37 @@ export function FichaDemandaDetailModal({
       </div>
     );
   const ordemCompraDropZone =
-    allowAddOrdemCompra && ordemCompraEditavel ? (
+    allowAddOrdemCompra &&
+    ordemCompraEditavel &&
+    // Suprimentos aceita só 1 OC; Em Cotação aceita várias (cada uma com o seu ID).
+    !(isSupplies && temOcAnexada) ? (
       <FileDropZone
-        label="Adicionar ordem de compra"
-        hint="Clique ou arraste imagem/PDF"
+        label={isQuotation ? 'Adicionar ordem de compra' : 'Anexar ordem de compra'}
+        hint={
+          isQuotation && !novaOcRef.trim()
+            ? 'Informe o ID da OC acima antes de anexar'
+            : 'Clique ou arraste imagem/PDF'
+        }
         uploading={uploadingAnexoId === 'oc'}
-        disabled={uploadMutation.isPending && uploadingAnexoId !== 'oc'}
+        disabled={
+          (uploadMutation.isPending && uploadingAnexoId !== 'oc') ||
+          (isQuotation && !novaOcRef.trim())
+        }
         onFiles={(files) => {
           const file = files[0];
-          if (file) uploadMutation.mutate({ file, kind: 'oc' });
+          if (!file) return;
+          uploadMutation.mutate({
+            file,
+            kind: 'oc',
+            ocRef: isQuotation ? novaOcRef.trim() : ocId.trim() || undefined,
+          });
         }}
       />
     ) : null;
   const refsChanged =
     scNumero !== (record.scNumero || '') ||
     scId !== (record.scId || '') ||
-    ocId !== (record.ocId || '');
+    (!isQuotation && ocId !== (record.ocId || ''));
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalhes da Ficha de Demanda" size="xl">
@@ -360,6 +417,22 @@ export function FichaDemandaDetailModal({
         </dl>
 
         {/* Finalizada ou cancelada: não edita mais; os dados ficam na lista acima e a OC no bloco de consulta. */}
+        {allowAddOrdemCompra && isFinished ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 dark:border-gray-700">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Ficha finalizada. Precisa de mais ordens de compra?
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => statusMutation.mutate('QUOTATION')}
+              disabled={statusMutation.isPending}
+            >
+              {statusMutation.isPending ? 'Voltando...' : 'Voltar para Em Cotação'}
+            </Button>
+          </div>
+        ) : null}
+
         {allowAddOrdemCompra && canCancel ? (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
@@ -413,11 +486,17 @@ export function FichaDemandaDetailModal({
                       ID da OC
                     </span>
                     <input
-                      value={ocId}
-                      onChange={(e) => setOcId(e.target.value)}
+                      value={isQuotation ? novaOcRef : ocId}
+                      onChange={(e) =>
+                        isQuotation ? setNovaOcRef(e.target.value) : setOcId(e.target.value)
+                      }
                       disabled={isCancelled}
                       className={FORM_FIELD_INPUT_CLS}
-                      placeholder="Digite o ID da ordem de compra"
+                      placeholder={
+                        isQuotation
+                          ? 'ID da OC a anexar agora (uma por vez)'
+                          : 'Digite o ID da ordem de compra'
+                      }
                     />
                   </label>
                 ) : null}
@@ -438,21 +517,44 @@ export function FichaDemandaDetailModal({
                       type="button"
                       variant="outline"
                       onClick={() => setCancelOpen(true)}
-                      disabled={refsMutation.isPending}
+                      disabled={refsMutation.isPending || statusMutation.isPending}
                     >
                       Cancelar
                     </Button>
                   ) : null}
                 </div>
-                {!isCancelled ? (
-                  <Button
-                    type="button"
-                    onClick={() => refsMutation.mutate()}
-                    disabled={refsMutation.isPending || !refsChanged}
-                  >
-                    {refsMutation.isPending ? 'Salvando...' : 'Salvar'}
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {isSupplies ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => statusMutation.mutate('QUOTATION')}
+                      disabled={statusMutation.isPending || refsMutation.isPending}
+                    >
+                      Enviar para Em Cotação
+                    </Button>
+                  ) : null}
+                  {isSupplies || isQuotation ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => statusMutation.mutate('FINISHED')}
+                      disabled={statusMutation.isPending || refsMutation.isPending || !temOcAnexada}
+                      title={temOcAnexada ? undefined : 'Anexe uma ordem de compra para finalizar'}
+                    >
+                      Finalizar
+                    </Button>
+                  ) : null}
+                  {!isCancelled ? (
+                    <Button
+                      type="button"
+                      onClick={() => refsMutation.mutate()}
+                      disabled={refsMutation.isPending || !refsChanged}
+                    >
+                      {refsMutation.isPending ? 'Salvando...' : 'Salvar'}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>

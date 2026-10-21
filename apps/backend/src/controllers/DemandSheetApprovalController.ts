@@ -113,6 +113,7 @@ const PURCHASE_STATUS_VALUES = [
   'FULLY_FULFILLED_BY_STOCK',
   'PARTIALLY_FULFILLED_BY_STOCK',
   'PURCHASE_REQUEST',
+  'QUOTATION',
   'SUPPLIES',
   'FINISHED',
   'CANCELLED',
@@ -282,9 +283,8 @@ function hasOrdemCompraAnexo(anexos: unknown): boolean {
 
 /**
  * Status de compras automático:
- * Pendente (sem status) + Nº e ID da SC preenchidos → Cotação;
- * Cotação + ID da OC preenchido + anexo da OC → Finalizado.
- * Cancelado, Finalizado e os status antigos não mudam sozinhos.
+ * Pendente (sem status) + Nº e ID da SC preenchidos → Suprimentos (PURCHASE_REQUEST).
+ * Daí em diante é manual: de Suprimentos vai para Em Cotação (mais OCs) ou Finalizada.
  */
 async function advancePurchaseStatusAutomatically<
   T extends {
@@ -300,9 +300,6 @@ async function advancePurchaseStatusAutomatically<
   if (row.status !== 'APPROVED') return row;
   let next: DemandSheetPurchaseStatus | null = row.purchaseStatus;
   if (!next && row.scNumero?.trim() && row.scId?.trim()) next = 'PURCHASE_REQUEST';
-  if (next === 'PURCHASE_REQUEST' && row.ocId?.trim() && hasOrdemCompraAnexo(row.anexos)) {
-    next = 'FINISHED';
-  }
   if (next === row.purchaseStatus) return row;
   const updated = await prisma.demandSheetApproval.update({
     where: { id: row.id },
@@ -861,11 +858,27 @@ export class DemandSheetApprovalController {
         throw createError('Somente fichas aprovadas pelo gestor podem receber status de compras', 400);
       }
 
-      if (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED') {
+      const body = purchaseStatusSchema.parse(req.body);
+      // Finalizada pode voltar para Em Cotação (reabrir); qualquer outra mudança é bloqueada.
+      const reopening = row.purchaseStatus === 'FINISHED' && body.purchaseStatus === 'QUOTATION';
+      if (!reopening && (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED')) {
         throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
       }
-
-      const body = purchaseStatusSchema.parse(req.body);
+      if (
+        body.purchaseStatus === 'QUOTATION' &&
+        row.purchaseStatus !== 'PURCHASE_REQUEST' &&
+        !reopening
+      ) {
+        throw createError('Só é possível enviar para Em Cotação a partir de Suprimentos.', 400);
+      }
+      if (body.purchaseStatus === 'FINISHED') {
+        if (row.purchaseStatus !== 'PURCHASE_REQUEST' && row.purchaseStatus !== 'QUOTATION') {
+          throw createError('Só é possível finalizar a partir de Suprimentos ou Em Cotação.', 400);
+        }
+        if (!hasOrdemCompraAnexo(row.anexos)) {
+          throw createError('Anexe ao menos uma ordem de compra antes de finalizar.', 400);
+        }
+      }
       const cancellationNote = String(body.purchaseCancellationNote ?? '').trim();
       if (body.purchaseStatus === 'CANCELLED' && !cancellationNote) {
         throw createError('Informe a observação do cancelamento.', 400);
@@ -1116,6 +1129,21 @@ export class DemandSheetApprovalController {
 
       const anexoId = String((req.body as { anexoId?: unknown })?.anexoId ?? '').trim();
       const requestedKind = String((req.body as { kind?: unknown })?.kind ?? '').trim();
+      const ocRef = String((req.body as { ocRef?: unknown })?.ocRef ?? '').trim();
+      if (requestedKind === 'oc' && existing.purchaseStatus !== 'QUOTATION') {
+        // Em Suprimentos cabe só 1 ordem de compra; várias só em Em Cotação.
+        const already = Array.isArray(existing.anexos)
+          ? (existing.anexos as { kind?: string; url?: string }[]).some(
+              (a) => a?.kind === 'oc' && a?.url,
+            )
+          : false;
+        if (already) {
+          throw createError(
+            'Em Suprimentos só é possível 1 ordem de compra. Envie para Em Cotação para adicionar mais.',
+            400,
+          );
+        }
+      }
       if (
         requestedKind === 'oc' &&
         (existing.purchaseStatus === 'FINISHED' || existing.purchaseStatus === 'CANCELLED')
@@ -1140,6 +1168,7 @@ export class DemandSheetApprovalController {
         url?: string;
         kind?: string;
         sourcePath?: string;
+        ocRef?: string;
       };
       const list: AnexoRow[] = Array.isArray(existing.anexos)
         ? (existing.anexos as AnexoRow[]).map((a) => ({ ...a }))
@@ -1189,6 +1218,7 @@ export class DemandSheetApprovalController {
           name: saved.originalName || originalName,
           url: saved.url,
           kind: requestedKind || 'outro',
+          ...(requestedKind === 'oc' && ocRef ? { ocRef } : {}),
         });
       }
 
