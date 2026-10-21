@@ -2815,6 +2815,7 @@ model ConstructionMaterial {
 
   stockMovements  StockMovement[]
   stockShortfalls StockShortfall[]
+  kanbanCardMaterials KanbanCardMaterial[]
 
   @@index([code])
   @@index([name])
@@ -3515,10 +3516,27 @@ model KanbanCard {
   checklistItems KanbanChecklistItem[]
   comments       KanbanCardComment[]
   attachments    KanbanCardAttachment[]
+  materials      KanbanCardMaterial[]
 
   @@index([columnId])
   @@index([assigneeUserId])
   @@map("kanban_cards")
+}
+
+/// Materiais do cadastro (Materiais e Serviços) vinculados a um card do Kanban.
+model KanbanCardMaterial {
+  id         String   @id @default(cuid())
+  cardId     String
+  materialId String
+  quantity   Decimal  @default(1) @db.Decimal(14, 3)
+  createdAt  DateTime @default(now())
+
+  card    KanbanCard           @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  material ConstructionMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, materialId])
+  @@index([materialId])
+  @@map("kanban_card_materials")
 }
 
 enum PlannerAgendaSharePermission {

@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
+import { KanbanCardMaterialsViewModal } from '@/components/kanban/KanbanCardMaterialsViewModal';
 import { KanbanCardLabelsPanel } from '@/components/kanban/KanbanCardLabelsPopover';
 import { KanbanLabelColorMapInline } from '@/components/kanban/KanbanLabelColorPicker';
 import { KanbanCreateBoardModal } from '@/components/kanban/KanbanCreateBoardModal';
@@ -64,6 +65,7 @@ import {
   remapLabelsInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
+  fetchKanbanCardMaterials,
   isOptimisticKanbanCardId,
   kanbanCardQueryKey,
   exportKanbanBoardTrello,
@@ -102,6 +104,7 @@ import {
   Filter,
   Calendar,
   MessageSquare,
+  Package,
   Paperclip,
   BarChart2,
   ListChecks,
@@ -568,16 +571,52 @@ function PriorityIndicator({
 }
 
 function CardActivityCounts({ card }: { card: KanbanCard }) {
+  const [materialsOpen, setMaterialsOpen] = useState(false);
+  const { data: materials } = useQuery({
+    queryKey: ['kanban-card-materials', card.id],
+    queryFn: () => fetchKanbanCardMaterials(card.id),
+    enabled: materialsOpen,
+    staleTime: 30_000,
+  });
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2.5 text-xs text-gray-500 dark:text-gray-400">
       <span className="inline-flex shrink-0 items-center gap-1 font-medium text-gray-600 dark:text-gray-300">
         <Paperclip className="h-3.5 w-3.5" />
         {card.attachments}
       </span>
+      {(card.materials ?? 0) > 0 ? (
+        <button
+          type="button"
+          title="Ver materiais"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMaterialsOpen(true);
+          }}
+          className="inline-flex shrink-0 items-center gap-1 rounded font-medium text-gray-600 hover:text-red-600 dark:text-gray-300 dark:hover:text-red-400"
+        >
+          <Package className="h-3.5 w-3.5" />
+          {card.materials}
+        </button>
+      ) : null}
       <span className="inline-flex shrink-0 items-center gap-1 font-medium text-gray-600 dark:text-gray-300">
         <MessageSquare className="h-3.5 w-3.5" />
         {card.comments}
       </span>
+      {materialsOpen ? (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <KanbanCardMaterialsViewModal
+            isOpen
+            onClose={() => setMaterialsOpen(false)}
+            materials={materials ?? []}
+            cardTitle={card.title}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -958,6 +997,7 @@ function kanbanCardBoardSnapshot(card: KanbanCard): string {
     card.totalTasks,
     card.comments,
     card.attachments,
+    card.materials ?? 0,
     card.endDate ?? '',
     card.startDate ?? '',
     card.completedAt ?? '',

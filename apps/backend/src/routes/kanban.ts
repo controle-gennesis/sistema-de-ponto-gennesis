@@ -50,6 +50,16 @@ router.patch('/cards/:id', (req, res, next) => controller.updateCard(req, res, n
 router.post('/cards/:id/duplicate', (req, res, next) => controller.duplicateCard(req, res, next));
 router.delete('/cards/:id', (req, res, next) => controller.deleteCard(req, res, next));
 
+router.get('/cards/:cardId/materials', (req, res, next) =>
+  controller.listCardMaterials(req, res, next),
+);
+router.post('/cards/:cardId/materials', (req, res, next) =>
+  controller.addCardMaterials(req, res, next),
+);
+router.delete('/cards/:cardId/materials/:materialId', (req, res, next) =>
+  controller.removeCardMaterial(req, res, next),
+);
+
 router.post('/cards/:cardId/checklist-items', (req, res, next) =>
   controller.createChecklistItem(req, res, next),
 );

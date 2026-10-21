@@ -1278,11 +1278,78 @@ export class KanbanService {
     const access = await this.resolveBoardAccessForUser(userId, board, ownKey);
     if (!access.canRead) throw new Error(KANBAN_FORBIDDEN);
 
-    return formatBoardResponse(board, {
+    const formattedBoard = formatBoardResponse(board, {
       canWrite: access.canWrite,
       isOwner: access.isOwner,
       canManageShares: board.isCustom && access.isOwner,
     });
+    const counts = await this.countMaterialsByCard(
+      formattedBoard.columns.flatMap((c) => c.cards.map((card) => card.id)),
+    );
+    return {
+      ...formattedBoard,
+      columns: formattedBoard.columns.map((col) => ({
+        ...col,
+        cards: col.cards.map((card) => ({ ...card, materials: counts.get(card.id) ?? 0 })),
+      })),
+    };
+  }
+
+  private async countMaterialsByCard(cardIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (cardIds.length === 0) return map;
+    const rows = await prisma.$queryRaw<Array<{ cardId: string; total: number }>>`
+      SELECT "cardId", COUNT(*)::int AS total
+      FROM kanban_card_materials
+      WHERE "cardId" IN (${Prisma.join(cardIds)})
+      GROUP BY "cardId"`;
+    for (const r of rows) map.set(r.cardId, Number(r.total));
+    return map;
+  }
+
+  async listCardMaterials(userId: string, cardId: string) {
+    await this.assertCardAccess(userId, cardId, 'read');
+    return prisma.$queryRaw<
+      Array<{
+        id: string;
+        materialId: string;
+        name: string;
+        unit: string;
+        code: string | null;
+        productType: string | null;
+        quantity: number;
+      }>
+    >`
+      SELECT km.id, km."materialId", km.quantity::float8 AS quantity, m.name, m.unit, m.code, m."productType"
+      FROM kanban_card_materials km
+      JOIN construction_materials m ON m.id = km."materialId"
+      WHERE km."cardId" = ${cardId}
+      ORDER BY km."createdAt" ASC, m.name ASC`;
+  }
+
+  /** Adiciona materiais ao card; se já existir, atualiza a quantidade. */
+  async addCardMaterials(
+    userId: string,
+    cardId: string,
+    items: Array<{ materialId: string; quantity?: number }>,
+  ) {
+    await this.assertCardAccess(userId, cardId);
+    for (const item of items) {
+      if (!item || typeof item.materialId !== 'string' || !item.materialId) continue;
+      const q = Number(item.quantity);
+      const quantity = Number.isFinite(q) && q > 0 ? Math.min(q, 99999999999) : 1;
+      await prisma.$executeRaw`
+        INSERT INTO kanban_card_materials (id, "cardId", "materialId", quantity)
+        SELECT ${randomUUID()}, ${cardId}, m.id, ${quantity} FROM construction_materials m WHERE m.id = ${item.materialId}
+        ON CONFLICT ("cardId", "materialId") DO UPDATE SET quantity = EXCLUDED.quantity`;
+    }
+    return this.listCardMaterials(userId, cardId);
+  }
+
+  async removeCardMaterial(userId: string, cardId: string, materialId: string) {
+    await this.assertCardAccess(userId, cardId);
+    await prisma.$executeRaw`
+      DELETE FROM kanban_card_materials WHERE "cardId" = ${cardId} AND "materialId" = ${materialId}`;
   }
 
   async listArchivedCards(userId: string, departmentKeyParam?: string) {
@@ -2215,8 +2282,10 @@ export class KanbanService {
     if (!card) throw new Error('Card não encontrado');
 
     const base = formatCard(card);
+    const materialsCount = (await this.countMaterialsByCard([id])).get(id) ?? 0;
     return {
       ...base,
+      materials: materialsCount,
       columnId: card.columnId,
       columnTitle: card.column.title,
       columnColor: card.column.color,

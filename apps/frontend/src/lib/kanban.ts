@@ -36,6 +36,8 @@ export interface KanbanCard {
   checklistItems?: KanbanChecklistItem[];
   labels: KanbanCardLabel[];
   attachments: number;
+  /** Quantidade de materiais vinculados (cadastro Materiais e Serviços). */
+  materials?: number;
   comments: number;
   createdAt: string;
   completedAt?: string | null;
@@ -740,6 +742,33 @@ export async function moveKanbanCard(
 export async function fetchKanbanCardCost(cardId: string): Promise<KanbanCardCost> {
   const res = await api.get(`/kanban/cards/${cardId}/cost`);
   return res.data.data as KanbanCardCost;
+}
+
+export interface KanbanCardMaterial {
+  id: string;
+  materialId: string;
+  name: string;
+  unit: string;
+  code: string | null;
+  productType: string | null;
+  quantity: number;
+}
+
+export async function fetchKanbanCardMaterials(cardId: string): Promise<KanbanCardMaterial[]> {
+  const res = await api.get(`/kanban/cards/${cardId}/materials`);
+  return res.data.data as KanbanCardMaterial[];
+}
+
+export async function addKanbanCardMaterials(
+  cardId: string,
+  materials: Array<{ materialId: string; quantity: number }>,
+): Promise<KanbanCardMaterial[]> {
+  const res = await api.post(`/kanban/cards/${cardId}/materials`, { materials });
+  return res.data.data as KanbanCardMaterial[];
+}
+
+export async function removeKanbanCardMaterial(cardId: string, materialId: string) {
+  await api.delete(`/kanban/cards/${cardId}/materials/${materialId}`);
 }
 
 export async function deleteKanbanCard(id: string) {

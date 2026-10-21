@@ -44,7 +44,8 @@ export async function fetchAllConstructionMaterials(params?: {
 /** Busca paginada no servidor (até `limit` itens) — use em dropdowns com pesquisa assíncrona. */
 export async function searchConstructionMaterials(
   search: string,
-  limit = 50
+  limit = 50,
+  options?: { onlyTotvs?: boolean }
 ): Promise<ConstructionMaterialListItem[]> {
   const term = search.trim();
   if (term.length < 2) return [];
@@ -55,6 +56,7 @@ export async function searchConstructionMaterials(
       limit,
       search: term,
       isActive: 'true',
+      source: options?.onlyTotvs ? 'totvs' : undefined,
     },
   });
 

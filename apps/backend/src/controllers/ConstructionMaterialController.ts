@@ -285,7 +285,11 @@ export class ConstructionMaterialController {
     }
   }
 
-  private async buildMaterialsWhereSql(search?: string, isActive?: string): Promise<Prisma.Sql> {
+  private async buildMaterialsWhereSql(
+    search?: string,
+    isActive?: string,
+    source?: string,
+  ): Promise<Prisma.Sql> {
     const parts: Prisma.Sql[] = [Prisma.sql`TRUE`];
 
     if (search) {
@@ -308,6 +312,11 @@ export class ConstructionMaterialController {
 
     if (isActive !== undefined) {
       parts.push(Prisma.sql`cm."isActive" = ${isActive === 'true'}`);
+    }
+
+    // source=totvs: só materiais importados/sincronizados do TOTVS (exclui cadastros manuais)
+    if (source === 'totvs') {
+      parts.push(Prisma.sql`cm."totvsIdPrd" IS NOT NULL`);
     }
 
     return Prisma.join(parts, ' AND ');
@@ -494,13 +503,17 @@ export class ConstructionMaterialController {
 
   async getAllMaterials(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive, page = 1, limit = 20, sortBy, sortDir } = req.query;
+      const { search, isActive, page = 1, limit = 20, sortBy, sortDir, source } = req.query;
 
       const limitNum = Math.min(Number(limit), 100);
       const skip = (Number(page) - 1) * limitNum;
       const searchTerm = search ? String(search) : undefined;
       const activeFilter = isActive !== undefined ? String(isActive) : undefined;
-      const whereSql = await this.buildMaterialsWhereSql(searchTerm, activeFilter);
+      const whereSql = await this.buildMaterialsWhereSql(
+        searchTerm,
+        activeFilter,
+        source ? String(source) : undefined,
+      );
 
       const sortByKey = String(sortBy || '').trim();
       const sortDirKey = String(sortDir || '').trim().toLowerCase();

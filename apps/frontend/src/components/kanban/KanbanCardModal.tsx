@@ -9,6 +9,8 @@ import {
   Plus,
   Tag,
   Clock,
+  Maximize2,
+  Package,
   Paperclip,
   Pencil,
   ChevronLeft,
@@ -35,6 +37,8 @@ import {
   type KanbanBoardCardChecklistPatch,
   boardCardToDetailPlaceholder,
   fetchKanbanCard,
+  fetchKanbanCardMaterials,
+  type KanbanCardMaterial,
   isOptimisticKanbanCardId,
   isOptimisticKanbanChecklistItemId,
   kanbanCardQueryKey,
@@ -55,6 +59,8 @@ import {
   type KanbanChecklistItem,
 } from '@/lib/kanban';
 import { KanbanCardCostModal } from './KanbanCardCostModal';
+import { KanbanCardMaterialsModal } from './KanbanCardMaterialsModal';
+import { KanbanCardMaterialsViewModal } from './KanbanCardMaterialsViewModal';
 import {
   kanbanLabel,
   kanbanInput,
@@ -292,6 +298,8 @@ export function KanbanCardModal({
   );
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
+  const [showMaterialsModal, setShowMaterialsModal] = useState(false);
+  const [showMaterialsView, setShowMaterialsView] = useState(false);
 
   const [newTask, setNewTask] = useState('');
   const [commentText, setCommentText] = useState('');
@@ -380,6 +388,8 @@ export function KanbanCardModal({
     setOpenMenu(null);
     setShowAttachmentsModal(false);
     setShowCostModal(false);
+    setShowMaterialsModal(false);
+    setShowMaterialsView(false);
     setIsEditingDescription(false);
     labelsMutationInFlight.current = 0;
     metaSaveGenRef.current = 0;
@@ -1304,6 +1314,23 @@ export function KanbanCardModal({
   const hasDates = !!(startDate || endDate);
   const showCostButton =
     isDetail && !!cardId && !isOptimisticKanbanCardId(cardId) && canViewKanbanValues;
+  const materialsEnabled = isDetail && !!cardId && !isOptimisticKanbanCardId(cardId);
+  const { data: cardMaterialsData } = useQuery({
+    queryKey: ['kanban-card-materials', cardId],
+    queryFn: () => fetchKanbanCardMaterials(cardId!),
+    enabled: materialsEnabled,
+    staleTime: 30_000,
+  });
+  const cardMaterials = cardMaterialsData ?? [];
+  const handleMaterialsSaved = (materials: KanbanCardMaterial[]) => {
+    queryClient.setQueryData(['kanban-card-materials', cardId], materials);
+    if (card) {
+      onBoardCardSync?.(
+        { ...kanbanDetailToBoardCard(card), materials: materials.length },
+        card.columnId ?? columnId,
+      );
+    }
+  };
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
@@ -1312,6 +1339,7 @@ export function KanbanCardModal({
     [card],
   );
   const showChecklistPanel = checklistEnabled && isDetail;
+  const hasMaterialsPanel = materialsEnabled && cardMaterials.length > 0;
   const draftTotal = draftTasks.length;
   const draftCompleted = draftTasks.filter((t) => t.isDone).length;
   const progress = isCreate
@@ -1329,7 +1357,7 @@ export function KanbanCardModal({
   const taskTotal = isCreate ? draftTotal : (card?.totalTasks ?? 0);
 
   useLayoutEffect(() => {
-    if (!isDetail || showChecklistPanel) {
+    if (!isDetail || showChecklistPanel || hasMaterialsPanel) {
       setCommentsPanelHeight(undefined);
       return;
     }
@@ -1366,6 +1394,7 @@ export function KanbanCardModal({
   }, [
     isDetail,
     showChecklistPanel,
+    hasMaterialsPanel,
     isLoading,
     card?.id,
     card?.commentsList.length,
@@ -1550,6 +1579,27 @@ export function KanbanCardModal({
         />
       )}
 
+      {materialsEnabled ? (
+        <KanbanCardMaterialsViewModal
+          isOpen={showMaterialsView}
+          elevated
+          onClose={() => setShowMaterialsView(false)}
+          materials={cardMaterials}
+          cardTitle={card?.title}
+        />
+      ) : null}
+
+      {materialsEnabled ? (
+        <KanbanCardMaterialsModal
+          isOpen={showMaterialsModal}
+          elevated
+          onClose={() => setShowMaterialsModal(false)}
+          cardId={cardId!}
+          selected={cardMaterials}
+          onSaved={handleMaterialsSaved}
+        />
+      ) : null}
+
       {showCostButton ? (
         <KanbanCardCostModal
           isOpen={showCostModal}
@@ -1630,7 +1680,7 @@ export function KanbanCardModal({
           className={clsx(
             'flex flex-1 min-h-0 flex-col overflow-hidden',
             isDetail &&
-              (showChecklistPanel
+              (showChecklistPanel || hasMaterialsPanel
                 ? 'lg:flex-row lg:min-h-0 lg:items-stretch'
                 : 'lg:flex-row lg:min-h-0 lg:items-start'),
             isCreate && 'gap-0',
@@ -1710,6 +1760,16 @@ export function KanbanCardModal({
                 >
                   Anexos
                 </KanbanCardActionButton>
+                {materialsEnabled ? (
+                  <KanbanCardActionButton
+                    icon={<Package className="w-4 h-4" />}
+                    active={cardMaterials.length > 0}
+                    onClick={() => setShowMaterialsModal(true)}
+                    className="shrink-0"
+                  >
+                    Materiais
+                  </KanbanCardActionButton>
+                ) : null}
                 {showCostButton ? (
                   <KanbanCardActionButton
                     active={showCostModal}
@@ -1866,11 +1926,8 @@ export function KanbanCardModal({
                     onChange={setDescription}
                     disabled={saving}
                     placeholder="Detalhes, links, observações..."
-                    className="min-h-[7.5rem] text-sm leading-relaxed"
+                    toolbar
                   />
-                  <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                    Ctrl+B negrito · Ctrl+I itálico · Ctrl+U sublinhado · - + espaço para lista
-                  </p>
                   {isDetail && isEditingDescription ? (
                     <div className="flex items-center justify-end gap-2 mt-2">
                       <Button
@@ -1910,6 +1967,59 @@ export function KanbanCardModal({
                   onUpdated={syncDetailFromApi}
                   onAddClick={() => setShowAttachmentsModal(true)}
                 />
+              </div>
+            ) : null}
+
+            {materialsEnabled && cardMaterials.length > 0 ? (
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 p-4 flex flex-col gap-3 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-red-600" />
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Materiais
+                    </h4>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {cardMaterials.length}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMaterialsView(true)}
+                    title="Abrir"
+                    aria-label="Abrir lista de materiais"
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+                      <tr>
+                        <th className="px-3 py-2 text-center font-medium">Código</th>
+                        <th className="px-3 py-2 text-left font-medium">Nome</th>
+                        <th className="px-3 py-2 text-center font-medium">Un.</th>
+                        <th className="px-3 py-2 text-center font-medium">Qtd.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {cardMaterials.map((m) => (
+                        <tr key={m.id}>
+                          <td className="whitespace-nowrap px-3 py-2 text-center text-gray-600 dark:text-gray-300">
+                            {m.code || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{m.name}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center text-gray-600 dark:text-gray-300">
+                            {m.unit}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center font-medium text-gray-900 dark:text-gray-100">
+                            {Number(m.quantity ?? 1).toLocaleString('pt-BR')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : null}
 

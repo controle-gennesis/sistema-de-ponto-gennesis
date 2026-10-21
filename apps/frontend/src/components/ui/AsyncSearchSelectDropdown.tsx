@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Search, X } from 'lucide-react';
+import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import {
   SINGLE_SELECT_LIST_MAX,
   SINGLE_SELECT_PANEL_CLS,
@@ -47,6 +48,11 @@ export type AsyncSearchSelectDropdownProps<T> = {
   queryKeyPrefix: string;
   /** Mantém o painel aberto após escolher (para ir selecionando vários). */
   stayOpenOnSelect?: boolean;
+  /** Mostra um checkbox em cada opção (seleção múltipla com `selectedIds`). */
+  showCheckbox?: boolean;
+  /** Opções exibidas quando a busca ainda está vazia (ex.: recentes). */
+  defaultOptions?: T[];
+  defaultOptionsLabel?: string;
   /** IDs já escolhidos — mostra check e permite marcar/desmarcar na lista. */
   selectedIds?: string[];
 };
@@ -106,6 +112,9 @@ export function AsyncSearchSelectDropdown<T>({
   queryKeyPrefix,
   stayOpenOnSelect = false,
   selectedIds,
+  showCheckbox = false,
+  defaultOptions,
+  defaultOptionsLabel,
 }: AsyncSearchSelectDropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -213,9 +222,49 @@ export function AsyncSearchSelectDropdown<T>({
 
   const optionClassName = singleSelectOptionClassName;
 
+  const renderOptionList = (list: T[]) => (
+      <div className="space-y-0.5">
+        {list.map((option) => {
+          const id = getOptionId(option);
+          const active = selectedIds ? selectedIds.includes(id) : id === value;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="option"
+              aria-selected={active}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pickOption(option)}
+              className={`group ${optionClassName(active)}${renderOption && !showCheckbox ? ' !items-start' : ''}`}
+            >
+              {showCheckbox ? (
+                <CheckboxIndicator checked={active} />
+              ) : null}
+              <span className={`min-w-0 flex-1 ${renderOption ? '' : 'truncate'}`}>
+                {renderOption ? renderOption(option) : getOptionLabel(option)}
+              </span>
+              {active && !showCheckbox ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
+            </button>
+          );
+        })}
+      </div>
+  );
+
   const listContent = (() => {
     const q = search.trim();
     if (q.length < minSearchLength) {
+      if (defaultOptions && defaultOptions.length > 0) {
+        return (
+          <div>
+            {defaultOptionsLabel ? (
+              <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {defaultOptionsLabel}
+              </p>
+            ) : null}
+            {renderOptionList(defaultOptions)}
+          </div>
+        );
+      }
       return (
         <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           Digite ao menos {minSearchLength} caracteres para buscar.
@@ -239,30 +288,7 @@ export function AsyncSearchSelectDropdown<T>({
         </p>
       );
     }
-    return (
-      <div className="space-y-0.5">
-        {results.map((option) => {
-          const id = getOptionId(option);
-          const active = selectedIds ? selectedIds.includes(id) : id === value;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="option"
-              aria-selected={active}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => pickOption(option)}
-              className={`${optionClassName(active)}${renderOption ? ' !items-start' : ''}`}
-            >
-              <span className={`min-w-0 flex-1 ${renderOption ? '' : 'truncate'}`}>
-                {renderOption ? renderOption(option) : getOptionLabel(option)}
-              </span>
-              {active ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
-            </button>
-          );
-        })}
-      </div>
-    );
+    return renderOptionList(results);
   })();
 
   const panelClassName = SINGLE_SELECT_PANEL_CLS;

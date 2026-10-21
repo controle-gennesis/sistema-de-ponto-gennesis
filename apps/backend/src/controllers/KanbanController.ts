@@ -607,6 +607,43 @@ export class KanbanController {
     }
   }
 
+  async listCardMaterials(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const data = await kanbanService.listCardMaterials(userId, req.params.cardId);
+      res.json({ success: true, data });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async addCardMaterials(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { materials } = req.body;
+      if (!Array.isArray(materials) || materials.length === 0) {
+        return next(createError('Informe ao menos um material', 400));
+      }
+      const data = await kanbanService.addCardMaterials(userId, req.params.cardId, materials);
+      res.status(201).json({ success: true, data });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async removeCardMaterial(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      await kanbanService.removeCardMaterial(userId, req.params.cardId, req.params.materialId);
+      res.json({ success: true });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
   async createChecklistItem(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);
