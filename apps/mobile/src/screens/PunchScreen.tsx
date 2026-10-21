@@ -1276,7 +1276,12 @@ export default function PunchScreen() {
         ) : null}
 
         <View style={styles.box}>
-          <View style={styles.confirmHeader}>
+          <FormFieldLabel
+            label={bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência do rosto'}
+            required
+            style={styles.boxTitle}
+          />
+          <View style={[styles.locationRow, { marginBottom: 14 }]}>
             <View style={styles.homeIcon}>
               {bothAllowed ? (
                 <Camera size={20} color={colors.primary} strokeWidth={2.2} />
@@ -1287,12 +1292,7 @@ export default function PunchScreen() {
               )}
             </View>
             <View style={{ flex: 1 }}>
-              <FormFieldLabel
-                label={bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência do rosto'}
-                required
-                style={styles.confirmTitle}
-              />
-              <Text style={styles.confirmHint}>
+              <Text style={styles.locationText}>
                 {faceDone
                   ? 'Rosto confirmado. Pode registrar o ponto.'
                   : qrDone
