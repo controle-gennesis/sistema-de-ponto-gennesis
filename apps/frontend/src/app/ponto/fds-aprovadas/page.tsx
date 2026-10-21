@@ -73,7 +73,7 @@ const LIST_HEADER_BY_FILTER: Record<
   },
   SUPPLIES: {
     title: 'Suprimentos',
-    subtitle: 'Fichas com a solicitação de compra em Suprimentos (1 ordem de compra)',
+    subtitle: 'Fichas com a solicitação de compra em Suprimentos',
     Icon: Timer,
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
