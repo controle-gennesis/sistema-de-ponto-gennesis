@@ -1,3 +1,4 @@
+import CreateListButton from '../components/CreateListButton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -335,6 +336,7 @@ export default function GestaoOsListScreen() {
           />
           {statusFilter !== 'all' ? <View style={styles.filterDot} /> : null}
         </TouchableOpacity>
+        <CreateListButton tab="GestaoOs" />
       </View>
 
       <View style={styles.listHeader}>

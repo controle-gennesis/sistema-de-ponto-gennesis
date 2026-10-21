@@ -1,3 +1,4 @@
+import CreateListButton from '../components/CreateListButton';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -1070,6 +1071,7 @@ export default function DpRequestsScreen() {
             />
             {statusFilter !== 'all' ? <View style={styles.filterDot} /> : null}
           </TouchableOpacity>
+          <CreateListButton tab="DpRequests" />
         </View>
 
         <View style={styles.listHeader}>

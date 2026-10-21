@@ -5,7 +5,6 @@ import { createNativeBottomTabNavigator } from '@react-navigation/bottom-tabs/un
 import { House, Fuel, CarFront, Inbox, Wrench, type LucideIcon } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '../components/AppHeader';
-import CreateActionFab from '../components/CreateActionFab';
 import DraggablePunchFab from '../components/DraggablePunchFab';
 
 import HomeScreen from '../screens/HomeScreen';
@@ -306,7 +305,6 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
 export default function BottomTabNavigator() {
   const { canSeePonto } = usePermissions();
   const [activeTab, setActiveTab] = useState('Home');
-  const showCreateFab = FAB_TABS.has(activeTab);
   const { unreadByKind, markKindRead } = useNotifications();
 
   // Abrir a aba (ou receber atualização com ela aberta) apaga a bolinha dela.
@@ -323,7 +321,6 @@ export default function BottomTabNavigator() {
       ) : (
         <AndroidLucideTabs onTabChange={setActiveTab} />
       )}
-      {showCreateFab ? <CreateActionFab tab={activeTab as FabBarTabName} /> : null}
       {canSeePonto ? <DraggablePunchFab /> : null}
     </View>
   );

@@ -1,3 +1,4 @@
+import CreateListButton from '../components/CreateListButton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -1104,6 +1105,7 @@ export default function FuelRequestsScreen() {
             />
             {statusFilter !== 'all' ? <View style={styles.filterDot} /> : null}
           </TouchableOpacity>
+          <CreateListButton tab="Combustivel" />
         </View>
 
         <View style={styles.listHeader}>
