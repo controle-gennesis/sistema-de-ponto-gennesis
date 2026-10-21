@@ -134,11 +134,13 @@ export default function NotificationsSheet() {
               </View>
               <Text style={styles.title}>Notificações</Text>
               <Text style={styles.subtitle}>
-                {unread > 0
-                  ? unread === 1
-                    ? '1 notificação nova'
-                    : `${unread} notificações novas`
-                  : 'Acompanhe as atualizações das suas solicitações.'}
+                {notifications.length === 0
+                  ? 'Tudo em dia! Quando o status de uma solicitação mudar, aparece aqui.'
+                  : unread > 0
+                    ? unread === 1
+                      ? '1 notificação nova'
+                      : `${unread} notificações novas`
+                    : 'Acompanhe as atualizações das suas solicitações.'}
               </Text>
             </View>
 
@@ -150,22 +152,6 @@ export default function NotificationsSheet() {
               notifications.length === 0 ? styles.emptyWrap : styles.listContent
             }
             showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <View
-                  style={[
-                    styles.emptyIcon,
-                    { backgroundColor: C.cardBg },
-                  ]}
-                >
-                  <Bell size={22} color={C.body} strokeWidth={2} />
-                </View>
-                <Text style={[styles.emptyTitle, { color: C.title }]}>Tudo em dia</Text>
-                <Text style={[styles.emptyText, { color: C.body }]}>
-                  Quando o status de combustível ou reserva mudar, aparece aqui.
-                </Text>
-              </View>
-            }
             renderItem={({ item }) => {
               const isNew = !item.read;
               const subtitle = activitySubtitle(item);
@@ -280,7 +266,7 @@ const getStyles = (C: {
     },
     list: { flexGrow: 0 },
     listContent: { gap: 10, paddingBottom: 6 },
-    emptyWrap: { flexGrow: 1, justifyContent: 'center', paddingVertical: 28 },
+    emptyWrap: { paddingBottom: 4 },
     empty: { alignItems: 'center', paddingHorizontal: 28 },
     emptyIcon: {
       width: 52,

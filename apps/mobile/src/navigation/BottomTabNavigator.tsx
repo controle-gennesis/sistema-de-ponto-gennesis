@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Platform, Pressable, Text } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, Platform, Pressable, Text, PanResponder } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeBottomTabNavigator } from '@react-navigation/bottom-tabs/unstable';
 import { House, Fuel, CarFront, Inbox, Wrench, type LucideIcon } from 'lucide-react-native';
@@ -302,6 +302,43 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
   );
 }
 
+/**
+ * Faixa na borda esquerda: arrastar dela pra direita abre o menu, em qualquer aba.
+ * Só assume o gesto quando ele é claramente horizontal (→); toques e rolagem passam normalmente
+ * pro conteúdo fora da faixa.
+ */
+function EdgeMenuSwipe() {
+  const chrome = useChromeVisibility();
+  const insets = useSafeAreaInsets();
+  const openMenu = chrome?.openMenu;
+  const top = chrome?.headerHeight ?? 100;
+
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) =>
+          g.dx > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.25,
+        onMoveShouldSetPanResponderCapture: (_, g) =>
+          g.dx > 20 && Math.abs(g.dx) > Math.abs(g.dy) * 1.35,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_, g) => {
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
+        },
+        onPanResponderTerminate: (_, g) => {
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
+        },
+      }),
+    [openMenu],
+  );
+
+  return (
+    <View
+      style={[styles.edgeSwipe, { top, bottom: getTabBarHeight(insets.bottom) }]}
+      {...pan.panHandlers}
+    />
+  );
+}
+
 export default function BottomTabNavigator() {
   const { canSeePonto } = usePermissions();
   const [activeTab, setActiveTab] = useState('Home');
@@ -321,6 +358,7 @@ export default function BottomTabNavigator() {
       ) : (
         <AndroidLucideTabs onTabChange={setActiveTab} />
       )}
+      <EdgeMenuSwipe />
       {canSeePonto ? <DraggablePunchFab /> : null}
     </View>
   );
@@ -328,4 +366,5 @@ export default function BottomTabNavigator() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
+  edgeSwipe: { position: 'absolute', left: 0, width: 28, zIndex: 12 },
 });
