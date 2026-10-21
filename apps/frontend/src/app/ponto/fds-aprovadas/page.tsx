@@ -51,7 +51,7 @@ const ROW_ACTION_MENU_WIDTH_PX = 224;
 type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
 
 /** Cards de resumo: cada um agrupa status de compras. */
-type StatCardFilter = 'ALL' | 'PENDING' | 'SUPPLIES' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
+type StatCardFilter = 'ALL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
 const LIST_HEADER_BY_FILTER: Record<
   StatCardFilter,
@@ -70,13 +70,6 @@ const LIST_HEADER_BY_FILTER: Record<
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
-  },
-  SUPPLIES: {
-    title: 'Suprimentos',
-    subtitle: 'Fichas com a solicitação de compra em Suprimentos',
-    Icon: Timer,
-    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
-    iconColor: 'text-blue-600 dark:text-blue-400',
   },
   QUOTATION: {
     title: 'Cotação',
@@ -106,8 +99,7 @@ function matchesStatCard(status: DemandSheetPurchaseStatus | null | undefined, c
   if (card === 'PENDING') return !status;
   if (card === 'FINISHED') return status === 'FINISHED';
   if (card === 'CANCELLED') return status === 'CANCELLED';
-  if (card === 'QUOTATION') return status === 'QUOTATION';
-  return status === 'PURCHASE_REQUEST' || status === 'SUPPLIES';
+  return status === 'QUOTATION' || status === 'PURCHASE_REQUEST' || status === 'SUPPLIES';
 }
 
 /** Filtro por status exato; "Almoxarifado" junta os registros antigos de DF e GO. */
@@ -125,7 +117,6 @@ const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
   { value: 'NONE', label: 'Fila' },
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'PURCHASE_REQUEST', label: 'Suprimentos' },
   { value: 'QUOTATION', label: 'Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
@@ -176,7 +167,6 @@ export default function FdsAprovadasPage() {
     () => ({
       ALL: allRecords.length,
       PENDING: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'PENDING')).length,
-      SUPPLIES: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'SUPPLIES')).length,
       QUOTATION: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'QUOTATION')).length,
       FINISHED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'FINISHED')).length,
       CANCELLED: allRecords.filter((r) => matchesStatCard(r.purchaseStatus, 'CANCELLED')).length,
@@ -263,12 +253,11 @@ export default function FdsAprovadasPage() {
             description="Consulte e acompanhe as fichas de demanda aprovadas."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-5">
             {(
               [
                 { filter: 'ALL', label: 'Todas' },
                 { filter: 'PENDING', label: 'Fila' },
-                { filter: 'SUPPLIES', label: 'Suprimentos' },
                 { filter: 'QUOTATION', label: 'Cotação' },
                 { filter: 'FINISHED', label: 'Finalizadas' },
                 { filter: 'CANCELLED', label: 'Canceladas' },

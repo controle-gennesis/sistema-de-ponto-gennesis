@@ -246,8 +246,8 @@ function mapPurchaseStatus(raw: unknown): DemandSheetPurchaseStatus | null {
   if (!v) return null;
   if (v.includes('CANCEL')) return 'CANCELLED';
   if (v.includes('FINALIZ')) return 'FINISHED';
-  if (v.includes('SOLICIT')) return 'PURCHASE_REQUEST';
-  if (v.includes('SUPRIMENT')) return 'SUPPLIES';
+  if (v.includes('SOLICIT')) return 'QUOTATION';
+  if (v.includes('SUPRIMENT')) return 'QUOTATION';
   if (v.includes('TOTALMENTE') && v.includes('ESTOQUE')) return 'FULLY_FULFILLED_BY_STOCK';
   if (v.includes('PARCIAL') && v.includes('ESTOQUE')) return 'PARTIALLY_FULFILLED_BY_STOCK';
   if (v.includes('ALMOX') && v.includes('DF')) return 'WAREHOUSE_DF';

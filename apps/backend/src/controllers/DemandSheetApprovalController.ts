@@ -124,6 +124,7 @@ const anexoSchema = z.object({
   name: z.string().min(1),
   url: z.string().optional(),
   kind: z.string().optional(),
+  descricao: z.string().max(120).optional(),
   centroCustoId: z.string().optional(),
   orcamentoId: z.string().optional(),
 });
@@ -283,8 +284,8 @@ function hasOrdemCompraAnexo(anexos: unknown): boolean {
 
 /**
  * Status de compras automático:
- * Pendente (sem status) + Nº e ID da SC preenchidos → Suprimentos (PURCHASE_REQUEST).
- * Daí em diante é manual: de Suprimentos vai para Cotação (mais OCs) ou Finalizada.
+ * Pendente (sem status) + Nº e ID da SC preenchidos → Cotação (várias OCs).
+ * Daí em diante é manual: Finalizada (e dela dá pra voltar pra Cotação).
  */
 async function advancePurchaseStatusAutomatically<
   T extends {
@@ -299,7 +300,7 @@ async function advancePurchaseStatusAutomatically<
 >(row: T, userId: string): Promise<T> {
   if (row.status !== 'APPROVED') return row;
   let next: DemandSheetPurchaseStatus | null = row.purchaseStatus;
-  if (!next && row.scNumero?.trim() && row.scId?.trim()) next = 'PURCHASE_REQUEST';
+  if (!next && row.scNumero?.trim() && row.scId?.trim()) next = 'QUOTATION';
   if (next === row.purchaseStatus) return row;
   const updated = await prisma.demandSheetApproval.update({
     where: { id: row.id },
@@ -864,16 +865,9 @@ export class DemandSheetApprovalController {
       if (!reopening && (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED')) {
         throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
       }
-      if (
-        body.purchaseStatus === 'QUOTATION' &&
-        row.purchaseStatus !== 'PURCHASE_REQUEST' &&
-        !reopening
-      ) {
-        throw createError('Só é possível enviar para Cotação a partir de Suprimentos.', 400);
-      }
       if (body.purchaseStatus === 'FINISHED') {
         if (row.purchaseStatus !== 'PURCHASE_REQUEST' && row.purchaseStatus !== 'QUOTATION') {
-          throw createError('Só é possível finalizar a partir de Suprimentos ou Cotação.', 400);
+          throw createError('Só é possível finalizar a partir da Cotação.', 400);
         }
         if (!hasOrdemCompraAnexo(row.anexos)) {
           throw createError('Anexe ao menos uma ordem de compra antes de finalizar.', 400);
@@ -1088,6 +1082,54 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Remove um anexo (OC, ficha de demanda extra ou outro) enquanto a ficha está em andamento. */
+  async removeAnexo(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const canAccess = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!canAccess) throw createError('Sem permissão para remover anexos', 403);
+
+      const id = String(req.params.id || '').trim();
+      const anexoId = String(req.params.anexoId || '').trim();
+      if (!id || !anexoId) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({
+        where: { id },
+        select: { id: true, status: true, anexos: true, purchaseStatus: true },
+      });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (row.status !== 'APPROVED') {
+        throw createError('Somente fichas aprovadas permitem remover anexos nesta etapa', 400);
+      }
+      if (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED') {
+        throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
+      }
+
+      type AnexoRow = { id?: string; kind?: string };
+      const list: AnexoRow[] = Array.isArray(row.anexos) ? (row.anexos as AnexoRow[]) : [];
+      const target = list.find((a) => a?.id === anexoId);
+      if (!target) throw createError('Anexo não encontrado', 404);
+      if (target.kind === 'orcamento') {
+        throw createError('O orçamento não pode ser removido.', 400);
+      }
+
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: {
+          anexos: list.filter((a) => a !== target) as unknown as Prisma.InputJsonValue,
+        },
+        include: includeDefault,
+      });
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao remover anexo' });
+    }
+  }
+
   /** Vincula arquivo a um anexo pendente (da planilha) ou adiciona um anexo novo. */
   async uploadAnexo(req: AuthRequest, res: Response) {
     try {
@@ -1130,26 +1172,7 @@ export class DemandSheetApprovalController {
       const anexoId = String((req.body as { anexoId?: unknown })?.anexoId ?? '').trim();
       const requestedKind = String((req.body as { kind?: unknown })?.kind ?? '').trim();
       const ocRef = String((req.body as { ocRef?: unknown })?.ocRef ?? '').trim();
-      if (requestedKind === 'oc' && existing.purchaseStatus !== 'QUOTATION') {
-        // Em Suprimentos cabe só 1 ordem de compra; várias só em Cotação.
-        const already = Array.isArray(existing.anexos)
-          ? (existing.anexos as { kind?: string; url?: string }[]).some(
-              (a) => a?.kind === 'oc' && a?.url,
-            )
-          : false;
-        if (already) {
-          throw createError(
-            'Em Suprimentos só é possível 1 ordem de compra. Envie para Cotação para adicionar mais.',
-            400,
-          );
-        }
-      }
-      if (
-        requestedKind === 'oc' &&
-        (existing.purchaseStatus === 'FINISHED' || existing.purchaseStatus === 'CANCELLED')
-      ) {
-        throw createError('Ficha finalizada ou cancelada não pode mais receber ordem de compra.', 400);
-      }
+      const descricao = String((req.body as { descricao?: unknown })?.descricao ?? '').trim().slice(0, 120);
       const originalName =
         fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
 
@@ -1169,6 +1192,7 @@ export class DemandSheetApprovalController {
         kind?: string;
         sourcePath?: string;
         ocRef?: string;
+        descricao?: string;
       };
       const list: AnexoRow[] = Array.isArray(existing.anexos)
         ? (existing.anexos as AnexoRow[]).map((a) => ({ ...a }))
@@ -1219,6 +1243,7 @@ export class DemandSheetApprovalController {
           url: saved.url,
           kind: requestedKind || 'outro',
           ...(requestedKind === 'oc' && ocRef ? { ocRef } : {}),
+          ...(descricao ? { descricao } : {}),
         });
       }
 

@@ -23,7 +23,6 @@ export const FD_PURCHASE_STATUS_OPTIONS: {
   label: string;
 }[] = [
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'PURCHASE_REQUEST', label: 'Suprimentos' },
   { value: 'QUOTATION', label: 'Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
@@ -35,9 +34,9 @@ export const FD_PURCHASE_STATUS_LABELS: Record<DemandSheetPurchaseStatus, string
   WAREHOUSE_GO: 'Almoxarifado',
   FULLY_FULFILLED_BY_STOCK: 'Atendida totalmente pelo estoque',
   PARTIALLY_FULFILLED_BY_STOCK: 'Atendida parcialmente pelo estoque',
-  PURCHASE_REQUEST: 'Suprimentos',
+  PURCHASE_REQUEST: 'Cotação',
   QUOTATION: 'Cotação',
-  SUPPLIES: 'Suprimentos',
+  SUPPLIES: 'Cotação',
   FINISHED: 'Finalizado',
   CANCELLED: 'Cancelado',
 };
@@ -54,7 +53,6 @@ export function fdPurchaseStatusBadgeClass(status: DemandSheetPurchaseStatus | n
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
     case 'PURCHASE_REQUEST':
     case 'SUPPLIES':
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
     case 'QUOTATION':
       return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
     case 'FULLY_FULFILLED_BY_STOCK':
@@ -80,6 +78,8 @@ export interface FdAnexo {
   sourcePath?: string;
   /** ID da ordem de compra a que o anexo pertence (Cotação aceita várias). */
   ocRef?: string;
+  /** Texto livre dizendo o que é o anexo (Demais anexos). */
+  descricao?: string;
 }
 
 export function fdAnexoKindLabel(kind?: string): string {

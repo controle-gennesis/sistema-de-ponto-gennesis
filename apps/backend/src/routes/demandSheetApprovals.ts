@@ -168,6 +168,11 @@ router.patch(
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseRefs.bind(controller)
 );
+router.delete(
+  '/:id/anexos/:anexoId',
+  requireModuleAccess(fdsAprovadasModule),
+  controller.removeAnexo.bind(controller)
+);
 router.patch(
   '/:id/ficha-demanda-pct',
   requireModuleAccess(fdsAprovadasModule),

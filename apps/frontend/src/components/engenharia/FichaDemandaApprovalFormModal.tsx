@@ -108,6 +108,7 @@ function SubSection({
   uploading,
   disabled,
   onFiles,
+  onAdd,
   children,
 }: {
   title: string;
@@ -115,8 +116,30 @@ function SubSection({
   uploading?: boolean;
   disabled?: boolean;
   onFiles: (files: File[]) => void;
+  /** Quando informado, o campo pontilhado dá lugar a um botão + no título que chama isso. */
+  onAdd?: () => void;
   children: React.ReactNode;
 }) {
+  if (onAdd) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 pb-2 dark:border-gray-700">
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h4>
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={disabled}
+            title={addLabel}
+            aria-label={addLabel}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 disabled:opacity-60 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
       <SectionTitle>{title}</SectionTitle>
@@ -254,6 +277,10 @@ export function FichaDemandaApprovalFormModal({
   const [showCreateObra, setShowCreateObra] = useState(false);
   const [novaObraNome, setNovaObraNome] = useState('');
   const [uploadingAnexo, setUploadingAnexo] = useState(false);
+  // Demais anexos: o arquivo escolhido espera a descrição ("o que é") antes de entrar na lista.
+  const [outroFile, setOutroFile] = useState<File | null>(null);
+  const [outroDescricao, setOutroDescricao] = useState('');
+  const [outroModalOpen, setOutroModalOpen] = useState(false);
 
   const closeForm = useCallback(() => {
     onClose();
@@ -405,7 +432,7 @@ export function FichaDemandaApprovalFormModal({
     onSave(form);
   };
 
-  const handleAnexoFile = async (file: File | null, kind: FdAnexoKind) => {
+  const handleAnexoFile = async (file: File | null, kind: FdAnexoKind, descricao?: string) => {
     if (!file || uploadingAnexo || isSaving) return;
     setUploadingAnexo(true);
     try {
@@ -423,6 +450,7 @@ export function FichaDemandaApprovalFormModal({
         name: uploaded?.originalName || file.name,
         url,
         kind,
+        ...(descricao ? { descricao } : {}),
       };
       setForm((prev) => ({
         ...prev,
@@ -669,9 +697,11 @@ export function FichaDemandaApprovalFormModal({
               addLabel="Adicionar anexo"
               uploading={uploadingAnexo}
               disabled={isSaving}
-              onFiles={(files) => {
-                const file = files[0];
-                if (file) void handleAnexoFile(file, 'outro');
+              onFiles={() => undefined}
+              onAdd={() => {
+                setOutroDescricao('');
+                setOutroFile(null);
+                setOutroModalOpen(true);
               }}
             >
               {anexosDemais(form.anexos).length > 0 ? (
@@ -683,7 +713,14 @@ export function FichaDemandaApprovalFormModal({
                     >
                       <span className="flex min-w-0 items-center gap-2 truncate text-gray-800 dark:text-gray-200">
                         <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
-                        {anexo.name}
+                        {anexo.descricao ? (
+                          <span className="min-w-0 truncate">
+                            <span className="font-medium">{anexo.descricao}</span>
+                            <span className="text-gray-500 dark:text-gray-400"> · {anexo.name}</span>
+                          </span>
+                        ) : (
+                          anexo.name
+                        )}
                       </span>
                       <button
                         type="button"
@@ -740,6 +777,83 @@ export function FichaDemandaApprovalFormModal({
     <>
       {modalContent}
       {confirmUi}
+      {outroModalOpen ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            aria-hidden
+            onClick={() => {
+              if (!uploadingAnexo) setOutroModalOpen(false);
+            }}
+          />
+          <div className="relative z-[2201] w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-gray-800">
+            <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Adicionar anexo
+            </h4>
+            <div className="mt-4 space-y-4">
+              <div>
+                <FieldLabel required>O que é este anexo?</FieldLabel>
+                <input
+                  type="text"
+                  value={outroDescricao}
+                  onChange={(e) => setOutroDescricao(e.target.value)}
+                  maxLength={120}
+                  placeholder="Ex.: Orçamento, Proposta, Comprovante..."
+                  className={fieldClass}
+                  autoFocus
+                  disabled={uploadingAnexo}
+                />
+              </div>
+              <div>
+                <FieldLabel required>Arquivo</FieldLabel>
+                <FileDropZone
+                  label={outroFile ? outroFile.name : 'Anexar arquivo'}
+                  hint={
+                    outroFile
+                      ? 'Clique ou arraste para trocar o arquivo'
+                      : 'Clique ou arraste imagem/PDF'
+                  }
+                  disabled={uploadingAnexo}
+                  onFiles={(files) => {
+                    if (files[0]) setOutroFile(files[0]);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOutroModalOpen(false)}
+                disabled={uploadingAnexo}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-800 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!outroFile || !outroDescricao.trim() || uploadingAnexo}
+                onClick={async () => {
+                  if (!outroFile || !outroDescricao.trim()) return;
+                  await handleAnexoFile(outroFile, 'outro', outroDescricao.trim());
+                  setOutroModalOpen(false);
+                  setOutroFile(null);
+                  setOutroDescricao('');
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {uploadingAnexo ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Adicionando...
+                  </>
+                ) : (
+                  'Adicionar'
+                )}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      ) : null}
       {showCreateObra ? (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center p-4">
           <div

@@ -2,7 +2,22 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Eye, FileText, Loader2, Trash2, Upload, X } from 'lucide-react';
+import {
+  Download,
+  Eye,
+  File as FileIcon,
+  FileArchive,
+  FileSpreadsheet,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Presentation,
+  Trash2,
+  Upload,
+  Video,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 import toast from 'react-hot-toast';
 import { downloadUploadFile } from '@/lib/downloadUploadFile';
@@ -33,6 +48,26 @@ function fileExtLabel(name: string): string {
   return ext && ext.length <= 5 ? ext : 'ARQ';
 }
 
+/** Ícone colorido por tipo de arquivo (estilo Drive): PDF/imagem vermelho, planilha verde, doc azul… */
+function fileTypeIcon(file: FilePreviewCardFile): { Icon: LucideIcon; color: string } {
+  const name = (file.originalName || '').toLowerCase();
+  const mime = (file.mimeType || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+  if (mime.includes('pdf') || ext === 'pdf') return { Icon: FileText, color: 'text-red-500' };
+  if (mime.startsWith('image/') || /^(png|jpe?g|webp|gif|bmp|svg|heic)$/.test(ext))
+    return { Icon: ImageIcon, color: 'text-red-500' };
+  if (/^(xlsx?|xlsm|csv|ods)$/.test(ext) || mime.includes('spreadsheet') || mime.includes('excel'))
+    return { Icon: FileSpreadsheet, color: 'text-green-600' };
+  if (/^(docx?|odt|rtf|txt)$/.test(ext) || mime.includes('word'))
+    return { Icon: FileText, color: 'text-blue-500' };
+  if (/^(pptx?|odp)$/.test(ext) || mime.includes('presentation'))
+    return { Icon: Presentation, color: 'text-orange-500' };
+  if (mime.startsWith('video/') || /^(mp4|mov|avi|mkv|webm)$/.test(ext))
+    return { Icon: Video, color: 'text-purple-500' };
+  if (/^(zip|rar|7z|tar|gz)$/.test(ext)) return { Icon: FileArchive, color: 'text-amber-600' };
+  return { Icon: FileIcon, color: 'text-gray-400 dark:text-gray-500' };
+}
+
 const cardActionBtnCls =
   'inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white shadow-sm backdrop-blur-sm hover:bg-black/75';
 
@@ -42,6 +77,8 @@ type PreviewKind = 'image' | 'pdf' | 'other';
 type Props = {
   file: FilePreviewCardFile;
   extra?: string;
+  /** Texto da linha principal do card (o nome do arquivo continua sendo `file.originalName`). */
+  displayName?: string;
   /** Quando informado, exibe botão de lixeira no card. */
   onRemove?: () => void;
   removing?: boolean;
@@ -53,6 +90,7 @@ type Props = {
 export function FilePreviewCard({
   file,
   extra,
+  displayName,
   onRemove,
   removing,
   onUpload,
@@ -238,7 +276,10 @@ export function FilePreviewCard({
               ) : !href && onUpload ? (
                 <Upload className="h-8 w-8 text-amber-600 dark:text-amber-400" />
               ) : (
-                <FileText className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+                (() => {
+                  const { Icon, color } = fileTypeIcon(file);
+                  return <Icon className={`h-8 w-8 ${color}`} />;
+                })()
               )}
               <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                 {fileExtLabel(file.originalName)}
@@ -247,12 +288,12 @@ export function FilePreviewCard({
           )}
         </button>
 
-        <div className="space-y-1 px-2 py-1.5">
+        <div className="space-y-0.5 px-2 py-1.5">
           <p
             className="truncate text-xs font-medium text-gray-700 dark:text-gray-300"
-            title={file.originalName}
+            title={displayName ?? file.originalName}
           >
-            {file.originalName}
+            {displayName ?? file.originalName}
           </p>
           {extra ? <p className="truncate text-[11px] text-gray-500">{extra}</p> : null}
           {!href ? (
@@ -270,15 +311,18 @@ export function FilePreviewCard({
           <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
             {href ? (
               <>
-                <button
-                  type="button"
-                  onClick={openPreview}
-                  title="Ver"
-                  aria-label={`Ver ${file.originalName}`}
-                  className={cardActionBtnCls}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                </button>
+                {/* Só imagem e PDF têm o que ver; planilhas e outros só baixam. */}
+                {image || pdf ? (
+                  <button
+                    type="button"
+                    onClick={openPreview}
+                    title="Ver"
+                    aria-label={`Ver ${file.originalName}`}
+                    className={cardActionBtnCls}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={(e) => {
