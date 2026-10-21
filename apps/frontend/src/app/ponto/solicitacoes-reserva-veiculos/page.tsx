@@ -22,6 +22,7 @@ import {
   VehicleInspectionLaudoField,
   isBlankInspectionLaudo
 } from '@/components/ui/VehicleInspectionLaudoField';
+import { VehicleReturnPhotoField, isBlankVehiclePhoto } from '@/components/ui/VehicleReturnPhotoField';
 import api from '@/lib/api';
 import { formatPlacaDisplay } from '@/lib/brazilianVehiclePlate';
 import {
@@ -271,6 +272,9 @@ export default function SolicitacoesReservaVeiculosPage() {
   const [vistoriaAt, setVistoriaAt] = useState(defaultReturnDatetimeLocalValue());
   const [vistoriaLaudo, setVistoriaLaudo] = useState('');
   const [vistoriaLaudoFileName, setVistoriaLaudoFileName] = useState('');
+  const [baixaAt, setBaixaAt] = useState(defaultReturnDatetimeLocalValue());
+  const [baixaFoto, setBaixaFoto] = useState('');
+  const [baixaObservacao, setBaixaObservacao] = useState('');
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -388,6 +392,29 @@ export default function SolicitacoesReservaVeiculosPage() {
     },
     onError: (err: { response?: { data?: { message?: string; error?: string } } }) => {
       toast.error(err.response?.data?.message || err.response?.data?.error || 'Erro ao registrar vistoria');
+    }
+  });
+
+  /** Baixa feita por quem tem acesso a esta fila, em nome do solicitante (a reserva segue para a vistoria). */
+  const baixaMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.put(`/vehicle-reservations/${id}/submit-return`, {
+        devolucaoAt: baixaAt,
+        baixaFoto,
+        baixaObservacao: baixaObservacao.trim() || undefined
+      });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success('Baixa registrada! Aguardando vistoria.');
+      setSelected(null);
+      setBaixaAt(defaultReturnDatetimeLocalValue());
+      setBaixaFoto('');
+      setBaixaObservacao('');
+      refreshReservationQueries((data?.data as VehicleReservation | undefined) ?? null);
+    },
+    onError: (err: { response?: { data?: { message?: string; error?: string } } }) => {
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Erro ao registrar baixa');
     }
   });
 
@@ -534,6 +561,11 @@ export default function SolicitacoesReservaVeiculosPage() {
       setVistoriaAt(defaultReturnDatetimeLocalValue());
       setVistoriaLaudo('');
       setVistoriaLaudoFileName('');
+    }
+    if (selected?.status === 'APPROVED') {
+      setBaixaAt(defaultReturnDatetimeLocalValue());
+      setBaixaFoto('');
+      setBaixaObservacao('');
     }
     if (selected?.status === 'PENDING_SUPPLIES') {
       setApproveVehicleId('');
@@ -1055,6 +1087,56 @@ export default function SolicitacoesReservaVeiculosPage() {
                       {selectedReservation.vistoriaLaudoFileName || 'Abrir laudo de vistoria'}
                     </a>
                   ) : null}
+                </div>
+              ) : null}
+
+              {selectedReservation.status === 'APPROVED' ? (
+                <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Dar baixa</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Registra a devolução do veículo no lugar do solicitante. Depois a reserva segue para a vistoria.
+                  </p>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Data e hora da devolução *
+                    </label>
+                    <DateTimePickerField
+                      value={baixaAt}
+                      onChange={setBaixaAt}
+                      placeholder="dd/mm/aaaa hh:mm"
+                      aria-label="Data e hora da devolução"
+                      disabled={baixaMutation.isPending}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Foto do veículo *
+                    </label>
+                    <VehicleReturnPhotoField
+                      value={baixaFoto}
+                      onChange={setBaixaFoto}
+                      disabled={baixaMutation.isPending}
+                    />
+                  </div>
+                  <Input
+                    label="Observação (opcional)"
+                    value={baixaObservacao}
+                    onChange={(e) => setBaixaObservacao(e.target.value)}
+                    placeholder="Opcional"
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!baixaAt) return toast.error('Informe a data e hora da devolução');
+                        if (isBlankVehiclePhoto(baixaFoto)) return toast.error('Fotografe o veículo');
+                        baixaMutation.mutate(selectedReservation.id);
+                      }}
+                      disabled={baixaMutation.isPending}
+                    >
+                      {baixaMutation.isPending ? 'Salvando...' : 'Salvar baixa'}
+                    </Button>
+                  </div>
                 </div>
               ) : null}
 

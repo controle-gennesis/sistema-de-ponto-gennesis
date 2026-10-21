@@ -76,7 +76,7 @@ function userIsReservationDriver(
   return userName.length > 0 && userName === motorista;
 }
 
-/** Quem pode dar baixa: admin, quem solicitou (criou/nome bate com solicitante) ou o motorista da reserva. */
+/** Quem pode dar baixa: admin, quem tem acesso à fila do Suprimentos (checado no controller), quem solicitou (criou/nome bate com solicitante) ou o motorista da reserva. */
 function userCanSubmitReturn(
   reservation: { createdById: string | null; solicitante: string; motorista: string },
   user: { id: string; name?: string; isAdmin?: boolean }
@@ -423,7 +423,12 @@ export class VehicleReservationController {
       if (existing.status !== VehicleReservationStatus.APPROVED) {
         throw createError('Somente reservas aprovadas podem receber baixa', 400);
       }
+      const canManageAsSupplies = await userHasVehicleReservationSuppliesAccess(
+        req.user.id,
+        req.user.isAdmin
+      );
       if (
+        !canManageAsSupplies &&
         !userCanSubmitReturn(existing, {
           id: req.user.id,
           name: (
