@@ -196,7 +196,7 @@ export function FichaDemandaDetailModal({
       const res = await api.patch(`/demand-sheet-approvals/${record.id}/purchase-refs`, {
         scNumero,
         scId,
-        // Em Cotação cada OC leva o próprio ID (no anexo); o ID único da ficha não muda.
+        // Cotação cada OC leva o próprio ID (no anexo); o ID único da ficha não muda.
         ocId: record.purchaseStatus === 'QUOTATION' ? record.ocId || '' : ocId,
       });
       return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
@@ -231,8 +231,8 @@ export function FichaDemandaDetailModal({
         purchaseStatus === 'FINISHED'
           ? 'Ficha finalizada.'
           : isFinished
-            ? 'Ficha voltou para Em Cotação.'
-            : 'Ficha enviada para Em Cotação.'
+            ? 'Ficha voltou para Cotação.'
+            : 'Ficha enviada para Cotação.'
       );
       if (updated) onRecordUpdated?.(updated);
       await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
@@ -279,7 +279,7 @@ export function FichaDemandaDetailModal({
 
   if (!record) return null;
 
-  // Fluxo: Em Fila → (SC preenchida) Suprimentos → manual: Em Cotação (mais OCs) ou Finalizada.
+  // Fluxo: Fila → (SC preenchida) Suprimentos → manual: Cotação (mais OCs) ou Finalizada.
   const isCancelled = record.purchaseStatus === 'CANCELLED';
   const isFinished = record.purchaseStatus === 'FINISHED';
   const canCancel = !isCancelled && !isFinished;
@@ -328,7 +328,7 @@ export function FichaDemandaDetailModal({
   const ordemCompraDropZone =
     allowAddOrdemCompra &&
     ordemCompraEditavel &&
-    // Suprimentos aceita só 1 OC; Em Cotação aceita várias (cada uma com o seu ID).
+    // Suprimentos aceita só 1 OC; Cotação aceita várias (cada uma com o seu ID).
     !(isSupplies && temOcAnexada) ? (
       <FileDropZone
         label={isQuotation ? 'Adicionar ordem de compra' : 'Anexar ordem de compra'}
@@ -428,7 +428,7 @@ export function FichaDemandaDetailModal({
               onClick={() => statusMutation.mutate('QUOTATION')}
               disabled={statusMutation.isPending}
             >
-              {statusMutation.isPending ? 'Voltando...' : 'Voltar para Em Cotação'}
+              {statusMutation.isPending ? 'Voltando...' : 'Voltar para Cotação'}
             </Button>
           </div>
         ) : null}
@@ -531,7 +531,7 @@ export function FichaDemandaDetailModal({
                       onClick={() => statusMutation.mutate('QUOTATION')}
                       disabled={statusMutation.isPending || refsMutation.isPending}
                     >
-                      Enviar para Em Cotação
+                      Enviar para Cotação
                     </Button>
                   ) : null}
                   {isSupplies || isQuotation ? (

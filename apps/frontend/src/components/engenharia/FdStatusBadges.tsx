@@ -17,7 +17,7 @@ const AGUARDANDO_SC_CLASS = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 da
 
 /**
  * Um único status, no mesmo vocabulário dos cards da lista:
- * Aguardando Aprovação → (aprovada) Em Fila → Em Cotação → Finalizado.
+ * Aguardando Aprovação → (aprovada) Fila → Cotação → Finalizado.
  * "Aprovada" sozinho não aparece: depois de aprovada, a ficha mostra o status de compras.
  */
 export function FdStatusBadges({ record }: { record: FichaDemandaApprovalRecord }) {
@@ -27,7 +27,7 @@ export function FdStatusBadges({ record }: { record: FichaDemandaApprovalRecord 
 
   if (record.status === 'APPROVED') {
     if (!record.purchaseStatus) {
-      return <span className={`${badgeBase} ${AGUARDANDO_SC_CLASS}`}>Em Fila</span>;
+      return <span className={`${badgeBase} ${AGUARDANDO_SC_CLASS}`}>Fila</span>;
     }
     return (
       <span

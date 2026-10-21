@@ -284,7 +284,7 @@ function hasOrdemCompraAnexo(anexos: unknown): boolean {
 /**
  * Status de compras automático:
  * Pendente (sem status) + Nº e ID da SC preenchidos → Suprimentos (PURCHASE_REQUEST).
- * Daí em diante é manual: de Suprimentos vai para Em Cotação (mais OCs) ou Finalizada.
+ * Daí em diante é manual: de Suprimentos vai para Cotação (mais OCs) ou Finalizada.
  */
 async function advancePurchaseStatusAutomatically<
   T extends {
@@ -859,7 +859,7 @@ export class DemandSheetApprovalController {
       }
 
       const body = purchaseStatusSchema.parse(req.body);
-      // Finalizada pode voltar para Em Cotação (reabrir); qualquer outra mudança é bloqueada.
+      // Finalizada pode voltar para Cotação (reabrir); qualquer outra mudança é bloqueada.
       const reopening = row.purchaseStatus === 'FINISHED' && body.purchaseStatus === 'QUOTATION';
       if (!reopening && (row.purchaseStatus === 'FINISHED' || row.purchaseStatus === 'CANCELLED')) {
         throw createError('Ficha finalizada ou cancelada não pode mais ser alterada.', 400);
@@ -869,11 +869,11 @@ export class DemandSheetApprovalController {
         row.purchaseStatus !== 'PURCHASE_REQUEST' &&
         !reopening
       ) {
-        throw createError('Só é possível enviar para Em Cotação a partir de Suprimentos.', 400);
+        throw createError('Só é possível enviar para Cotação a partir de Suprimentos.', 400);
       }
       if (body.purchaseStatus === 'FINISHED') {
         if (row.purchaseStatus !== 'PURCHASE_REQUEST' && row.purchaseStatus !== 'QUOTATION') {
-          throw createError('Só é possível finalizar a partir de Suprimentos ou Em Cotação.', 400);
+          throw createError('Só é possível finalizar a partir de Suprimentos ou Cotação.', 400);
         }
         if (!hasOrdemCompraAnexo(row.anexos)) {
           throw createError('Anexe ao menos uma ordem de compra antes de finalizar.', 400);
@@ -1131,7 +1131,7 @@ export class DemandSheetApprovalController {
       const requestedKind = String((req.body as { kind?: unknown })?.kind ?? '').trim();
       const ocRef = String((req.body as { ocRef?: unknown })?.ocRef ?? '').trim();
       if (requestedKind === 'oc' && existing.purchaseStatus !== 'QUOTATION') {
-        // Em Suprimentos cabe só 1 ordem de compra; várias só em Em Cotação.
+        // Em Suprimentos cabe só 1 ordem de compra; várias só em Cotação.
         const already = Array.isArray(existing.anexos)
           ? (existing.anexos as { kind?: string; url?: string }[]).some(
               (a) => a?.kind === 'oc' && a?.url,
@@ -1139,7 +1139,7 @@ export class DemandSheetApprovalController {
           : false;
         if (already) {
           throw createError(
-            'Em Suprimentos só é possível 1 ordem de compra. Envie para Em Cotação para adicionar mais.',
+            'Em Suprimentos só é possível 1 ordem de compra. Envie para Cotação para adicionar mais.',
             400,
           );
         }

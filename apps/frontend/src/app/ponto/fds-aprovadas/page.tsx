@@ -65,7 +65,7 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   PENDING: {
-    title: 'Em Fila',
+    title: 'Fila',
     subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
@@ -79,7 +79,7 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   QUOTATION: {
-    title: 'Em Cotação',
+    title: 'Cotação',
     subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
     Icon: Timer,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
@@ -123,10 +123,10 @@ function matchesPurchaseStatus(
 
 const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
-  { value: 'NONE', label: 'Em Fila' },
+  { value: 'NONE', label: 'Fila' },
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
   { value: 'PURCHASE_REQUEST', label: 'Suprimentos' },
-  { value: 'QUOTATION', label: 'Em Cotação' },
+  { value: 'QUOTATION', label: 'Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ]);
@@ -267,9 +267,9 @@ export default function FdsAprovadasPage() {
             {(
               [
                 { filter: 'ALL', label: 'Todas' },
-                { filter: 'PENDING', label: 'Em Fila' },
+                { filter: 'PENDING', label: 'Fila' },
                 { filter: 'SUPPLIES', label: 'Suprimentos' },
-                { filter: 'QUOTATION', label: 'Em Cotação' },
+                { filter: 'QUOTATION', label: 'Cotação' },
                 { filter: 'FINISHED', label: 'Finalizadas' },
                 { filter: 'CANCELLED', label: 'Canceladas' },
               ] as const

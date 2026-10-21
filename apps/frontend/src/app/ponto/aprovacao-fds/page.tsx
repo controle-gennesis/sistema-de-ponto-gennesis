@@ -58,7 +58,7 @@ const ROW_ACTION_MENU_WIDTH_PX = 224;
 
 type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'SUPPLIES' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
-/** Aguardando Aprovação = aguardando o gestor. Em Fila/Em Cotação/Finalizadas = status de compras da ficha já aprovada. */
+/** Aguardando Aprovação = aguardando o gestor. Fila/Cotação/Finalizadas = status de compras da ficha já aprovada. */
 function matchesCard(r: FichaDemandaApprovalRecord, card: CardFilter): boolean {
   switch (card) {
     case 'ALL':
@@ -93,14 +93,14 @@ const CARD_STYLE: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   IN_APPROVAL: {
-    label: 'Em Aprovação',
+    label: 'Aprovação',
     subtitle: 'Fichas aguardando a aprovação do gestor',
     Icon: FileCheck2,
     iconBg: 'bg-violet-100 dark:bg-violet-900/30',
     iconColor: 'text-violet-600 dark:text-violet-400',
   },
   PENDING: {
-    label: 'Em Fila',
+    label: 'Fila',
     subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
@@ -114,7 +114,7 @@ const CARD_STYLE: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   QUOTATION: {
-    label: 'Em Cotação',
+    label: 'Cotação',
     subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
     Icon: Timer,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
