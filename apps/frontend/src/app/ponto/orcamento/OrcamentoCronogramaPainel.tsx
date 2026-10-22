@@ -6,7 +6,8 @@ import {
   Calendar,
   CalendarRange,
   Download,
-  Loader2
+  Loader2,
+  Palette
 } from 'lucide-react';
 import { estimarPrazosCronograma, gerarSubServicosCronograma } from './orcamentoCronogramaApi';
 import toast from 'react-hot-toast';
@@ -94,6 +95,22 @@ type Props = {
   onExport?: () => void;
   /** Tela cheia: a grade rola por dentro e as ações ficam na barra de baixo. */
   telaFixa?: boolean;
+  /** Aparência editável (Características do orçamento → Cronograma); sem isto vale o visual padrão. */
+  estilosAparencia?: {
+    servico?: React.CSSProperties;
+    subtitulo?: React.CSSProperties;
+    /** Cor das composições nas linhas ímpares. */
+    composicao?: React.CSSProperties;
+    /** Segunda cor das listras (composições pares). */
+    composicaoAlt?: React.CSSProperties;
+    classeCustom: string;
+    fonte?: string;
+    /** Bordas visíveis entre linhas e colunas. */
+    linhasGrade?: boolean;
+    /** Esconde as linhas de título dos serviços que têm composições. */
+    ocultarServicos?: boolean;
+  };
+  onEditarAparencia?: () => void;
 };
 
 const thCls =
@@ -246,7 +263,8 @@ function CelulasEtapaCronograma({
   readOnly,
   ariaPrefix,
   onPatch,
-  modo
+  modo,
+  corStatusPropria = true
 }: {
   resolvido: CronogramaItemData;
   status: ReturnType<typeof calcularStatusCronograma>;
@@ -254,6 +272,8 @@ function CelulasEtapaCronograma({
   ariaPrefix: string;
   onPatch: (patch: Partial<CronogramaItemData>) => void;
   modo: 'plan' | 'real';
+  /** false: o status herda a cor da linha (ex.: serviço em fundo vermelho com letra branca). */
+  corStatusPropria?: boolean;
 }) {
   const observacao = resolvido.observacao?.trim() || '';
   const inicio = modo === 'real' ? resolvido.dataInicioReal : resolvido.dataInicio;
@@ -313,6 +333,7 @@ function CelulasEtapaCronograma({
       </td>
       <td className={`${tdCls} w-[7rem] text-center`}>
         <span
+          data-cor-propria={corStatusPropria ? true : undefined}
           className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
           title={observacao || undefined}
         >
@@ -366,6 +387,8 @@ function CelulaLinhaTimeline({
   const desvio = linha ? calcularDesvioTimeline(linha.dados) : null;
   const mostrarBarraPlan = modo === 'plan' && Boolean(barPlan && barPlan.widthPx > 0);
   const mostrarBarraReal = modo === 'real' && Boolean(barReal && barReal.widthPx > 0);
+  /** Na aba Real, o planejado aparece como referência: faixa fina sob a barra real (ou barra tracejada se ainda não há real). */
+  const mostrarPlanejadoNoReal = modo === 'real' && Boolean(barPlan && barPlan.widthPx > 0);
   const iniValor = modo === 'real' ? iniReal : iniPlan;
   const fimValor = modo === 'real' ? fimReal : fimPlan;
   const qtdOrcada = linha?.quantidade ?? 0;
@@ -458,6 +481,17 @@ function CelulaLinhaTimeline({
             <div className="h-full rounded-sm border border-dashed border-gray-400/70 bg-gray-400/[0.06] dark:border-gray-500/60 dark:bg-gray-500/10" />
           </button>
         ) : null}
+        {mostrarPlanejadoNoReal && barPlan && linha ? (
+          <div
+            className={`pointer-events-none absolute z-[1] rounded-sm border border-dashed border-gray-500/70 dark:border-gray-400/60 ${
+              mostrarBarraReal
+                ? 'bottom-1 h-[6px] bg-gray-400/35 dark:bg-gray-500/35'
+                : 'top-1 bottom-1 bg-gray-400/[0.06] dark:bg-gray-500/10'
+            }`}
+            style={{ left: barPlan.leftPx, width: barPlan.widthPx }}
+            title={`Planejado: ${formatDataBr(linha.dados.dataInicio)} → ${formatDataBr(linha.dados.dataFim)}`}
+          />
+        ) : null}
         {mostrarBarraReal && barReal && linha ? (
           <button
             type="button"
@@ -467,7 +501,7 @@ function CelulaLinhaTimeline({
               linha.editavel
                 ? 'cursor-pointer hover:brightness-110 dark:hover:brightness-125'
                 : 'pointer-events-none'
-            } top-1 bottom-1`}
+            } top-1 ${mostrarPlanejadoNoReal ? 'bottom-3' : 'bottom-1'}`}
             style={{ left: barReal.leftPx, width: barReal.widthPx }}
             title={`Real: ${formatDataBr(linha.dados.dataInicioReal)} → ${formatDataBr(linha.dados.dataFimReal)} · ${pct}%${
               desvio?.temDesvio ? ` · desvio fim: ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? '—'}` : ''
@@ -535,7 +569,9 @@ export function OrcamentoCronogramaPainel({
   dataFimObra = '',
   onDataFimObraChange,
   onExport,
-  telaFixa = false
+  telaFixa = false,
+  estilosAparencia,
+  onEditarAparencia
 }: Props) {
   const [timelineZoom, setTimelineZoom] = useState<CronogramaTimelineZoom>('obra');
   const [timelinePanOffset, setTimelinePanOffset] = useState(0);
@@ -939,6 +975,17 @@ export function OrcamentoCronogramaPainel({
           <Download className="h-4 w-4 shrink-0" aria-hidden />
         </button>
       ) : null}
+      {onEditarAparencia ? (
+        <button
+          type="button"
+          onClick={onEditarAparencia}
+          className={iconBtnCls}
+          title="Editar cores do cronograma"
+          aria-label="Editar cores do cronograma"
+        >
+          <Palette className="h-4 w-4 shrink-0" aria-hidden />
+        </button>
+      ) : null}
       {abaCronograma !== 'graficos' ? (
       <TimelineZoomControls
             zoom={timelineZoom}
@@ -1048,12 +1095,17 @@ export function OrcamentoCronogramaPainel({
           >
             <div className="relative w-max">
             <table
-              className={`table-fixed border-separate border-spacing-0 ${gradeTableCls}`}
-              style={
-                timelineLayout
+              className={`table-fixed border-separate border-spacing-0 ${gradeTableCls} ${
+                estilosAparencia?.linhasGrade
+                  ? '[&_tbody_td]:border-b [&_tbody_td]:border-b-gray-300 [&_tbody_td]:border-l-gray-300 dark:[&_tbody_td]:border-b-gray-600 dark:[&_tbody_td]:border-l-gray-600'
+                  : ''
+              }`}
+              style={{
+                ...(timelineLayout
                   ? { width: `calc(${COLUNAS_FIXAS_REM}rem + ${timelineLayout.largura}px)` }
-                  : { width: '100%' }
-              }
+                  : { width: '100%' }),
+                fontFamily: estilosAparencia?.fonte,
+              }}
             >
               <colgroup>
                 <col className="w-[6.5rem]" />
@@ -1147,22 +1199,45 @@ export function OrcamentoCronogramaPainel({
                   const usaHierarquia = cronogramaUsaHierarquiaSubtitulos(linha);
                   const subtitulosVisiveis = listarSubtitulosVisiveisCronograma(linha);
                   const servicoComFilhas = comps.length > 0;
+                  const ocultarTituloServico = estilosAparencia?.ocultarServicos === true && servicoComFilhas;
                   const itemServico = String(servicoIdx + 1);
-                  let seqComposicao = 0;
-                  const proximoItemComposicao = () => {
-                    seqComposicao += 1;
-                    return `${itemServico}.${seqComposicao}`;
+                  /** Linhas de composição alternam duas cores (listras) para facilitar a leitura. */
+                  let seqListra = 0;
+                  // Numeração igual à do orçamento: serviço (1) › subtítulo (1.1) › composição (1.1.1).
+                  // Sem subtítulos, as composições ficam direto sob o serviço (1.1, 1.2...).
+                  const blocosLinha = linha.subtitulos ?? [];
+                  const seqPorBloco = new Map<string, number>();
+                  const proximoRotulo = (blocoKey: string) => {
+                    const n = (seqPorBloco.get(blocoKey) ?? 0) + 1;
+                    seqPorBloco.set(blocoKey, n);
+                    const idx = blocosLinha.findIndex((b) => b.blocoKey === blocoKey);
+                    return idx >= 0 ? `${itemServico}.${idx + 1}.${n}` : `${itemServico}.${n}`;
                   };
 
                   const linhaServico = (
                     <tr
                       key={linha.servicoKey}
-                      className={`bg-white dark:bg-gray-900/80 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                      className={`${
+                        estilosAparencia?.servico
+                          ? estilosAparencia.classeCustom
+                          : 'bg-sky-100 dark:bg-sky-950/60'
+                      } border-b border-sky-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
+                      style={estilosAparencia?.servico}
                     >
-                      <td className={`${tdItemColCls} ${stickyItemTdCls} bg-white !text-sm font-semibold text-gray-900 dark:bg-gray-900 dark:text-gray-100`}>
+                      <td
+                        style={estilosAparencia?.servico}
+                        className={`${tdItemColCls} ${stickyItemTdCls} ${
+                          estilosAparencia?.servico ? '' : 'bg-sky-100 dark:bg-sky-950'
+                        } !text-sm font-semibold text-gray-900 dark:text-gray-100`}
+                      >
                         {itemServico}
                       </td>
-                      <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-white text-left pl-4 dark:bg-gray-900`}>
+                      <td
+                        style={estilosAparencia?.servico}
+                        className={`${tdServicoColCls} ${stickyServicoTdCls} ${
+                          estilosAparencia?.servico ? '' : 'bg-sky-100 dark:bg-sky-950'
+                        } text-left pl-4`}
+                      >
                         <div className="flex h-full min-h-0 min-w-0 items-center gap-1">
                           <span
                             className="block min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100"
@@ -1182,6 +1257,7 @@ export function OrcamentoCronogramaPainel({
                         readOnly={servicoComFilhas}
                         ariaPrefix={linha.servicoNome}
                         modo={modoFolha}
+                        corStatusPropria={!estilosAparencia?.servico}
                         onPatch={(patch) => patchServico(linha.servicoKey, patch)}
                       />
                       {renderTimeline(linha.servicoKey)}
@@ -1196,13 +1272,31 @@ export function OrcamentoCronogramaPainel({
                   ) => {
                     const dados = resolverDadosCronogramaComposicao(cronograma, blocoKey, comp);
                     const compStatus = calcularStatusCronograma(dados);
+                    const listraClara = seqListra % 2 === 0;
+                    seqListra += 1;
+                    const estiloListra = estilosAparencia
+                      ? listraClara
+                        ? estilosAparencia.composicao
+                        : estilosAparencia.composicaoAlt
+                      : undefined;
+                    const bgListraTr = estiloListra
+                      ? estilosAparencia!.classeCustom
+                      : listraClara
+                        ? 'bg-white dark:bg-gray-900/80'
+                        : 'bg-slate-100 dark:bg-gray-800/70';
+                    const bgListraTd = estiloListra
+                      ? ''
+                      : listraClara
+                        ? 'bg-white dark:bg-gray-900'
+                        : 'bg-slate-100 dark:bg-gray-800';
                     return (
                       <tr
                         key={`${linha.servicoKey}-${blocoKey}-${comp.chave}`}
-                        className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200/60 dark:border-gray-700/80"
+                        className={`${bgListraTr} border-b border-gray-200/60 dark:border-gray-700/80`}
+                        style={estiloListra}
                       >
-                        <td className={`${tdItemColCls} ${stickyItemTdCls} bg-gray-50 dark:bg-gray-800`}>{rotuloItem}</td>
-                        <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-gray-50 text-left dark:bg-gray-800 ${paddingServicoColCls(indentLevel)}`}>
+                        <td style={estiloListra} className={`${tdItemColCls} ${stickyItemTdCls} ${bgListraTd}`}>{rotuloItem}</td>
+                        <td style={estiloListra} className={`${tdServicoColCls} ${stickyServicoTdCls} ${bgListraTd} text-left ${paddingServicoColCls(indentLevel)}`}>
                           <ComposicaoResumoNomeCell nome={comp.descricao} />
                         </td>
                         <CelulasQtdCusto
@@ -1226,19 +1320,19 @@ export function OrcamentoCronogramaPainel({
                   if (!usaHierarquia) {
                     if (comps.length === 0) return [linhaServico];
                     return [
-                      linhaServico,
+                      ...(ocultarTituloServico ? [] : [linhaServico]),
                       ...comps.map(({ blocoKey, comp }) =>
-                        renderComposicao(blocoKey, comp, 1, proximoItemComposicao())
+                        renderComposicao(blocoKey, comp, 1, proximoRotulo(blocoKey))
                       )
                     ];
                   }
 
-                  const rows: React.ReactElement[] = [linhaServico];
+                  const rows: React.ReactElement[] = ocultarTituloServico ? [] : [linhaServico];
                   const visiveis = new Set(subtitulosVisiveis.map((st) => st.blocoKey));
                   for (const item of comps) {
                     if (!visiveis.has(item.blocoKey)) {
                       rows.push(
-                        renderComposicao(item.blocoKey, item.comp, 1, proximoItemComposicao())
+                        renderComposicao(item.blocoKey, item.comp, 1, proximoRotulo(item.blocoKey))
                       );
                     }
                   }
@@ -1252,10 +1346,28 @@ export function OrcamentoCronogramaPainel({
                     rows.push(
                       <tr
                         key={`${st.blocoKey}::cabecalho`}
-                        className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
+                        className={`border-b border-gray-200/90 dark:border-gray-800 ${
+                          estilosAparencia?.subtitulo ? estilosAparencia.classeCustom : 'bg-slate-200/90 dark:bg-gray-900'
+                        }`}
+                        style={estilosAparencia?.subtitulo}
                       >
-                        <td className={`${tdItemColCls} ${stickyItemTdCls} bg-slate-200 text-xs font-semibold text-gray-800 dark:bg-gray-900 dark:text-gray-200`} />
-                        <td className={`${tdServicoColCls} ${stickyServicoTdCls} bg-slate-200 text-left pl-6 dark:bg-gray-900`}>
+                        <td
+                          style={estilosAparencia?.subtitulo}
+                          className={`${tdItemColCls} ${stickyItemTdCls} ${
+                            estilosAparencia?.subtitulo ? '' : 'bg-slate-200 dark:bg-gray-900'
+                          } text-xs font-semibold text-gray-800 dark:text-gray-200`}
+                        >
+                          {(() => {
+                            const idxSub = blocosLinha.findIndex((b) => b.blocoKey === st.blocoKey);
+                            return idxSub >= 0 ? `${itemServico}.${idxSub + 1}` : '';
+                          })()}
+                        </td>
+                        <td
+                          style={estilosAparencia?.subtitulo}
+                          className={`${tdServicoColCls} ${stickyServicoTdCls} ${
+                            estilosAparencia?.subtitulo ? '' : 'bg-slate-200 dark:bg-gray-900'
+                          } text-left pl-6`}
+                        >
                           <span
                             className="block min-w-0 whitespace-normal break-words text-xs font-semibold uppercase leading-snug tracking-wide text-gray-800 dark:text-gray-200"
                             title={st.subtituloNome}
@@ -1280,7 +1392,7 @@ export function OrcamentoCronogramaPainel({
                     );
                     st.composicoes.forEach((comp) => {
                       rows.push(
-                        renderComposicao(st.blocoKey, comp, 2, proximoItemComposicao())
+                        renderComposicao(st.blocoKey, comp, 2, proximoRotulo(st.blocoKey))
                       );
                     });
                   });

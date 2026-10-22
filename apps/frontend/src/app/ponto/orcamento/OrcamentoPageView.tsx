@@ -3420,13 +3420,14 @@ type OrcamentoMeta = {
   historicoMovimentos?: OrcamentoMovimento[];
 };
 
-export type AparenciaAbaOrcamento = 'montagem' | 'memorial' | 'analitico' | 'fichaDemanda';
+export type AparenciaAbaOrcamento = 'montagem' | 'memorial' | 'analitico' | 'fichaDemanda' | 'cronograma';
 
 export type AparenciaAbasOrcamento = {
   montagem?: AparenciaOrcamento;
   memorial?: AparenciaOrcamento;
   analitico?: AparenciaOrcamento;
   fichaDemanda?: AparenciaOrcamento;
+  cronograma?: AparenciaOrcamento;
 };
 
 export type AparenciaOrcamento = {
@@ -3447,6 +3448,14 @@ export type AparenciaOrcamento = {
   headerTexto: string;
   /** CSS font-family; vazio = fonte padrão do sistema. */
   fonte: string;
+  /** Cronograma: segunda cor das composições (intercalação das linhas). */
+  composicaoFundoAlt?: string;
+  /** Cronograma: letra da composição intercalada. */
+  composicaoTextoAlt?: string;
+  /** Cronograma: mostra as linhas da grade (bordas entre linhas e colunas). */
+  linhasGrade?: boolean;
+  /** Cronograma: esconde as linhas de título dos serviços (ficam só as composições). */
+  ocultarTitulos?: boolean;
 };
 
 const APARENCIA_ORCAMENTO_PADRAO: AparenciaOrcamento = {
@@ -3465,6 +3474,21 @@ const APARENCIA_ORCAMENTO_PADRAO: AparenciaOrcamento = {
   headerTexto: '#4b5563',
   fonte: ''
 };
+
+/** Padrão da aba Cronograma: título igual ao do orçamento (vermelho) e composições listradas (slate-100). */
+const APARENCIA_CRONOGRAMA_PADRAO: AparenciaOrcamento = {
+  ...APARENCIA_ORCAMENTO_PADRAO,
+  subtituloFundo: '#e2e8f0',
+  subtituloTexto: '#1f2937',
+  composicaoFundo: '#ffffff',
+  composicaoTexto: '#111827',
+  composicaoFundoAlt: '#f1f5f9',
+  composicaoTextoAlt: '#111827',
+};
+
+function aparenciaPadraoDaAba(aba: AparenciaAbaOrcamento): AparenciaOrcamento {
+  return aba === 'cronograma' ? APARENCIA_CRONOGRAMA_PADRAO : APARENCIA_ORCAMENTO_PADRAO;
+}
 
 const FONTES_ORCAMENTO: Array<{ value: string; label: string }> = [
   { value: '', label: 'Padrão do sistema' },
@@ -3503,7 +3527,15 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
   const headerFundo = corHexOrcamento(o.headerFundo);
   const headerTexto = corHexOrcamento(o.headerTexto);
   const fonte = typeof o.fonte === 'string' ? o.fonte : '';
+  const composicaoFundoAlt = corHexOrcamento(o.composicaoFundoAlt);
+  const composicaoTextoAlt = corHexOrcamento(o.composicaoTextoAlt);
+  const linhasGrade = o.linhasGrade === true ? true : undefined;
+  const ocultarTitulos = o.ocultarTitulos === true ? true : undefined;
   if (
+    !composicaoFundoAlt &&
+    !composicaoTextoAlt &&
+    !linhasGrade &&
+    !ocultarTitulos &&
     !tituloFundo &&
     !tituloTexto &&
     !subtituloFundo &&
@@ -3529,23 +3561,32 @@ function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
     composicaoTexto: composicaoTexto ?? APARENCIA_ORCAMENTO_PADRAO.composicaoTexto,
     headerFundo: headerFundo ?? APARENCIA_ORCAMENTO_PADRAO.headerFundo,
     headerTexto: headerTexto ?? APARENCIA_ORCAMENTO_PADRAO.headerTexto,
-    fonte
+    fonte,
+    ...(composicaoFundoAlt ? { composicaoFundoAlt } : {}),
+    ...(composicaoTextoAlt ? { composicaoTextoAlt } : {}),
+    ...(linhasGrade ? { linhasGrade } : {}),
+    ...(ocultarTitulos ? { ocultarTitulos } : {}),
   };
 }
 
-function aparenciaOrcamentoEhPadrao(a: AparenciaOrcamento): boolean {
+function aparenciaOrcamentoEhPadrao(a: AparenciaOrcamento, aba: AparenciaAbaOrcamento = 'montagem'): boolean {
   const eq = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
+  const p = aparenciaPadraoDaAba(aba);
   return (
-    eq(a.tituloFundo, APARENCIA_ORCAMENTO_PADRAO.tituloFundo) &&
-    eq(a.tituloTexto, APARENCIA_ORCAMENTO_PADRAO.tituloTexto) &&
-    eq(a.subtituloFundo, APARENCIA_ORCAMENTO_PADRAO.subtituloFundo) &&
-    eq(a.subtituloTexto, APARENCIA_ORCAMENTO_PADRAO.subtituloTexto) &&
-    eq(a.itemFundo, APARENCIA_ORCAMENTO_PADRAO.itemFundo) &&
-    eq(a.itemTexto, APARENCIA_ORCAMENTO_PADRAO.itemTexto) &&
-    eq(a.composicaoFundo, APARENCIA_ORCAMENTO_PADRAO.composicaoFundo) &&
-    eq(a.composicaoTexto, APARENCIA_ORCAMENTO_PADRAO.composicaoTexto) &&
-    eq(a.headerFundo, APARENCIA_ORCAMENTO_PADRAO.headerFundo) &&
-    eq(a.headerTexto, APARENCIA_ORCAMENTO_PADRAO.headerTexto) &&
+    eq(a.tituloFundo, p.tituloFundo) &&
+    eq(a.tituloTexto, p.tituloTexto) &&
+    eq(a.subtituloFundo, p.subtituloFundo) &&
+    eq(a.subtituloTexto, p.subtituloTexto) &&
+    eq(a.itemFundo, p.itemFundo) &&
+    eq(a.itemTexto, p.itemTexto) &&
+    eq(a.composicaoFundo, p.composicaoFundo) &&
+    eq(a.composicaoTexto, p.composicaoTexto) &&
+    eq(a.headerFundo, p.headerFundo) &&
+    eq(a.headerTexto, p.headerTexto) &&
+    eq(a.composicaoFundoAlt ?? p.composicaoFundoAlt ?? '', p.composicaoFundoAlt ?? '') &&
+    eq(a.composicaoTextoAlt ?? p.composicaoTextoAlt ?? '', p.composicaoTextoAlt ?? '') &&
+    !a.linhasGrade &&
+    !a.ocultarTitulos &&
     !a.fonte.trim()
   );
 }
@@ -3557,8 +3598,9 @@ function parseAparenciaAbasOrcamento(raw: unknown): AparenciaAbasOrcamento | und
   const memorial = parseAparenciaOrcamento(o.memorial);
   const analitico = parseAparenciaOrcamento(o.analitico);
   const fichaDemanda = parseAparenciaOrcamento(o.fichaDemanda);
-  if (!montagem && !memorial && !analitico && !fichaDemanda) return undefined;
-  return { montagem, memorial, analitico, fichaDemanda };
+  const cronograma = parseAparenciaOrcamento(o.cronograma);
+  if (!montagem && !memorial && !analitico && !fichaDemanda && !cronograma) return undefined;
+  return { montagem, memorial, analitico, fichaDemanda, cronograma };
 }
 
 function aparenciaDaAba(
@@ -3573,6 +3615,8 @@ function aparenciaDaAba(
 ): AparenciaOrcamento | undefined {
   const porAba = meta?.aparenciaAbas?.[aba];
   if (porAba) return porAba;
+  // O cronograma tem visual próprio: não herda a aparência global (legado) do orçamento.
+  if (aba === 'cronograma') return undefined;
   return meta?.aparencia;
 }
 
@@ -3580,6 +3624,7 @@ function abaAparenciaFromViewTab(tab: string): AparenciaAbaOrcamento {
   if (tab === 'memorial') return 'memorial';
   if (tab === 'analitico') return 'analitico';
   if (tab === 'planilhaAnalitica') return 'fichaDemanda';
+  if (tab === 'cronograma') return 'cronograma';
   return 'montagem';
 }
 
@@ -3587,13 +3632,13 @@ function normalizeAparenciaAbasForSave(
   abas: AparenciaAbasOrcamento
 ): AparenciaAbasOrcamento | undefined {
   const out: AparenciaAbasOrcamento = {};
-  for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda'] as const) {
+  for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda', 'cronograma'] as const) {
     const raw = abas[k];
     if (!raw) continue;
     const a = aparenciaCamposDaAba(k, raw);
-    if (!aparenciaOrcamentoEhPadrao(a)) out[k] = a;
+    if (!aparenciaOrcamentoEhPadrao(a, k)) out[k] = a;
   }
-  return out.montagem || out.memorial || out.analitico || out.fichaDemanda ? out : undefined;
+  return out.montagem || out.memorial || out.analitico || out.fichaDemanda || out.cronograma ? out : undefined;
 }
 
 const APARENCIA_ABA_OPCOES: Array<{ value: AparenciaAbaOrcamento; label: string }> = [
@@ -3601,16 +3646,17 @@ const APARENCIA_ABA_OPCOES: Array<{ value: AparenciaAbaOrcamento; label: string 
   { value: 'memorial', label: 'Memória de cálculo' },
   { value: 'analitico', label: 'Analítico' },
   { value: 'fichaDemanda', label: 'Ficha de demanda' },
+  { value: 'cronograma', label: 'Cronograma' },
 ];
 
 /** Linha de composição com fundo/letra custom: Analítico e Ficha de demanda. */
 function abaAparenciaTemComposicao(aba: AparenciaAbaOrcamento): boolean {
-  return aba === 'analitico' || aba === 'fichaDemanda';
+  return aba === 'analitico' || aba === 'fichaDemanda' || aba === 'cronograma';
 }
 
 /** Subtítulo custom só nas abas Orçamento / Analítico / Ficha (não na Memória). */
 function abaAparenciaTemSubtitulo(aba: AparenciaAbaOrcamento): boolean {
-  return aba !== 'memorial';
+  return aba !== 'memorial' && aba !== 'cronograma';
 }
 
 /** Badge do item só na Memória de cálculo. */
@@ -3665,11 +3711,16 @@ function draftAparenciaAbasFromMeta(meta: {
     ...APARENCIA_ORCAMENTO_PADRAO,
     ...(aparenciaDaAba(meta, 'fichaDemanda') ?? {}),
   };
+  const cronograma = {
+    ...APARENCIA_CRONOGRAMA_PADRAO,
+    ...(aparenciaDaAba(meta, 'cronograma') ?? {}),
+  };
   return {
     montagem: aparenciaCamposDaAba('montagem', montagem),
     memorial: aparenciaCamposDaAba('memorial', memorial),
     analitico: aparenciaCamposDaAba('analitico', analitico),
     fichaDemanda: aparenciaCamposDaAba('fichaDemanda', fichaDemanda),
+    cronograma: aparenciaCamposDaAba('cronograma', cronograma),
   };
 }
 
@@ -18558,6 +18609,33 @@ export function OrcamentoPageView({
                       }
                       onExport={exportarCronogramaExcel}
                       telaFixa={cronogramaOnly}
+                      estilosAparencia={(() => {
+                        const ap = aparenciaDaAba(meta, 'cronograma') ?? APARENCIA_CRONOGRAMA_PADRAO;
+                        return {
+                          servico: estiloLinhaTituloOrc(ap, isDark),
+                          subtitulo: estiloLinhaSubtituloOrc(ap, isDark),
+                          composicao: estiloLinhaComposicaoOrc(ap, isDark),
+                          composicaoAlt: estiloLinhaComposicaoOrc(
+                            {
+                              ...ap,
+                              composicaoFundo:
+                                ap.composicaoFundoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoFundoAlt!,
+                              composicaoTexto:
+                                ap.composicaoTextoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoTextoAlt!,
+                            },
+                            isDark
+                          ),
+                          classeCustom: ORC_LINHA_COR_CUSTOM_CLS,
+                          fonte: ap.fonte || undefined,
+                          linhasGrade: ap.linhasGrade === true,
+                          ocultarServicos: ap.ocultarTitulos === true,
+                        };
+                      })()}
+                      onEditarAparencia={() => {
+                        setAparenciaDraftAbas(draftAparenciaAbasFromMeta(meta));
+                        setAbaAparenciaAtiva('cronograma');
+                        setModalAparenciaAberto(true);
+                      }}
                     />
                     </div>
                   )}
@@ -20563,14 +20641,17 @@ export function OrcamentoPageView({
           <div className="absolute inset-0 bg-black/50" onClick={() => setModalAparenciaAberto(false)} />
           <div className="relative mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
             <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Características do orçamento
+              {abaAparenciaAtiva === 'cronograma' ? 'Cores do cronograma' : 'Características do orçamento'}
             </h3>
             <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-              Cores e fonte valem só para a aba selecionada abaixo.
+              {abaAparenciaAtiva === 'cronograma'
+                ? 'Cores e fonte do cronograma.'
+                : 'Cores e fonte valem só para a aba selecionada abaixo.'}
               {isDark ? ' No tema escuro, as faixas são suavizadas automaticamente.' : ''}
             </p>
+            {abaAparenciaAtiva !== 'cronograma' && (
             <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900/60 sm:grid-cols-4">
-              {APARENCIA_ABA_OPCOES.map((opt) => {
+              {APARENCIA_ABA_OPCOES.filter((opt) => opt.value !== 'cronograma').map((opt) => {
                 const ativa = abaAparenciaAtiva === opt.value;
                 return (
                   <button
@@ -20588,6 +20669,7 @@ export function OrcamentoPageView({
                 );
               })}
             </div>
+            )}
             <div className="mb-5 overflow-hidden rounded-md border border-gray-200 text-xs dark:border-gray-700">
               {abaAparenciaTemItem(abaAparenciaAtiva) ? (
                 <>
@@ -20659,6 +20741,26 @@ export function OrcamentoPageView({
                       }}
                     >
                       Composição
+                    </div>
+                  )}
+                  {abaAparenciaAtiva === 'cronograma' && (
+                    <div
+                      className="px-3 py-2 font-semibold uppercase tracking-wide"
+                      style={{
+                        ...estiloLinhaComposicaoOrc(
+                          {
+                            ...aparenciaDraft,
+                            composicaoFundo:
+                              aparenciaDraft.composicaoFundoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoFundoAlt!,
+                            composicaoTexto:
+                              aparenciaDraft.composicaoTextoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoTextoAlt!,
+                          },
+                          isDark
+                        ),
+                        fontFamily: aparenciaDraft.fonte || undefined
+                      }}
+                    >
+                      Composição (intercalada)
                     </div>
                   )}
                 </>
@@ -20746,11 +20848,41 @@ export function OrcamentoPageView({
                         value={aparenciaDraft.composicaoTexto}
                         onChange={(composicaoTexto) => patchAparenciaDraft({ composicaoTexto })}
                       />
+                      {abaAparenciaAtiva === 'cronograma' && (
+                        <CampoCorOrcamento
+                          label="Fundo da intercalação"
+                          value={aparenciaDraft.composicaoFundoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoFundoAlt!}
+                          onChange={(composicaoFundoAlt) => patchAparenciaDraft({ composicaoFundoAlt })}
+                        />
+                      )}
+                      {abaAparenciaAtiva === 'cronograma' && (
+                        <CampoCorOrcamento
+                          label="Letra da intercalação"
+                          value={aparenciaDraft.composicaoTextoAlt ?? APARENCIA_CRONOGRAMA_PADRAO.composicaoTextoAlt!}
+                          onChange={(composicaoTextoAlt) => patchAparenciaDraft({ composicaoTextoAlt })}
+                        />
+                      )}
                     </>
                   )}
                 </>
               )}
             </div>
+            {abaAparenciaAtiva === 'cronograma' && (
+              <Checkbox
+                className="mt-4"
+                checked={aparenciaDraft.linhasGrade === true}
+                onChange={(linhasGrade) => patchAparenciaDraft({ linhasGrade })}
+                label="Mostrar linhas da grade"
+              />
+            )}
+            {abaAparenciaAtiva === 'cronograma' && (
+              <Checkbox
+                className="mt-3"
+                checked={aparenciaDraft.ocultarTitulos === true}
+                onChange={(ocultarTitulos) => patchAparenciaDraft({ ocultarTitulos })}
+                label="Esconder os títulos dos serviços"
+              />
+            )}
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 Fonte do orçamento
@@ -20776,7 +20908,7 @@ export function OrcamentoPageView({
                 onClick={() =>
                   setAparenciaDraftAbas((prev) => ({
                     ...prev,
-                    [abaAparenciaAtiva]: { ...APARENCIA_ORCAMENTO_PADRAO },
+                    [abaAparenciaAtiva]: { ...aparenciaPadraoDaAba(abaAparenciaAtiva) },
                   }))
                 }
                 className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -20795,11 +20927,11 @@ export function OrcamentoPageView({
                   type="button"
                   onClick={() => {
                     const nextAbas: AparenciaAbasOrcamento = {};
-                    for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda'] as const) {
+                    for (const k of ['montagem', 'memorial', 'analitico', 'fichaDemanda', 'cronograma'] as const) {
                       const parsed = parseAparenciaOrcamento(
                         aparenciaCamposDaAba(k, aparenciaDraftAbas[k])
                       );
-                      if (parsed && !aparenciaOrcamentoEhPadrao(parsed)) nextAbas[k] = parsed;
+                      if (parsed && !aparenciaOrcamentoEhPadrao(parsed, k)) nextAbas[k] = parsed;
                     }
                     setMeta((m) => ({
                       ...m,

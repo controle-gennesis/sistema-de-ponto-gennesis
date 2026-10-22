@@ -382,7 +382,7 @@ export default function CronogramasPage() {
                               {formatCadastroListId(o.codigo || null)}
                             </td>
                             <td className="max-w-0 px-3 py-3 sm:px-6">
-                              <ListRowNavigableLabel className="block truncate font-medium">
+                              <ListRowNavigableLabel className="block whitespace-normal break-words font-medium">
                                 {o.nome}
                               </ListRowNavigableLabel>
                             </td>
