@@ -1192,7 +1192,10 @@ export function OrcamentoCronogramaPainel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                {linhas.flatMap((linha, servicoIdx) => {
+                {(() => {
+                /** Intercalação contínua entre todos os serviços (não recomeça a cada serviço). */
+                let seqListra = 0;
+                return linhas.flatMap((linha, servicoIdx) => {
                   const comps = listarComposicoesCronogramaLinha(linha);
                   const resolvido = resolverDadosCronogramaServicoParaLinha(cronograma, linha);
                   const status = calcularStatusCronograma(resolvido);
@@ -1201,8 +1204,6 @@ export function OrcamentoCronogramaPainel({
                   const servicoComFilhas = comps.length > 0;
                   const ocultarTituloServico = estilosAparencia?.ocultarServicos === true && servicoComFilhas;
                   const itemServico = String(servicoIdx + 1);
-                  /** Linhas de composição alternam duas cores (listras) para facilitar a leitura. */
-                  let seqListra = 0;
                   // Numeração igual à do orçamento: serviço (1) › subtítulo (1.1) › composição (1.1.1).
                   // Sem subtítulos, as composições ficam direto sob o serviço (1.1, 1.2...).
                   const blocosLinha = linha.subtitulos ?? [];
@@ -1398,7 +1399,8 @@ export function OrcamentoCronogramaPainel({
                   });
 
                   return rows;
-                })}
+                });
+                })()}
               </tbody>
             </table>
             {hojeMarcador && timelineLayout ? (
