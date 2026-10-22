@@ -152,8 +152,7 @@ export function KanbanCardAttachmentsInline({
     }
     setDownloadingId(item.id);
     try {
-      const response = await api.get('/chats/direct/attachments/download', {
-        params: { url: item.fileUrl, fileName: item.fileName ?? 'arquivo' },
+      const response = await api.get(`/kanban/attachments/${item.id}/download`, {
         responseType: 'blob',
         timeout: 60000,
       });

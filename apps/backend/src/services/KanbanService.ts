@@ -2530,6 +2530,17 @@ export class KanbanService {
     return this.getCardById(requesterId, cardId);
   }
 
+  /** Dados do anexo para download, depois de conferir se o usuário pode ler o quadro do card. */
+  async getAttachmentForDownload(requesterId: string, attachmentId: string) {
+    const att = await prisma.kanbanCardAttachment.findUnique({
+      where: { id: attachmentId },
+      select: { cardId: true, fileUrl: true, fileKey: true, fileName: true },
+    });
+    if (!att) throw new Error('Anexo não encontrado');
+    await this.assertCardAccess(requesterId, att.cardId, 'read');
+    return att;
+  }
+
   async deleteAttachment(requesterId: string, attachmentId: string) {
     const att = await prisma.kanbanCardAttachment.findUnique({ where: { id: attachmentId } });
     if (!att) throw new Error('Anexo não encontrado');

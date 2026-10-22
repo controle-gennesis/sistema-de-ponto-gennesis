@@ -243,8 +243,7 @@ export function KanbanAttachmentsModal({
     }
     setDownloadingId(attachmentId);
     try {
-      const response = await api.get('/chats/direct/attachments/download', {
-        params: { url: fileUrl, fileName },
+      const response = await api.get(`/kanban/attachments/${attachmentId}/download`, {
         responseType: 'blob',
         timeout: 60000,
       });

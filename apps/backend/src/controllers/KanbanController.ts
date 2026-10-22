@@ -3,6 +3,7 @@ import multer from 'multer';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { KanbanService, KANBAN_FORBIDDEN } from '../services/KanbanService';
+import { readFuelStoredPhoto } from '../lib/fuelPhotoStorage';
 
 const kanbanService = new KanbanService();
 
@@ -719,6 +720,32 @@ export class KanbanController {
       if (msg === 'Comentário não encontrado' || (error as { code?: string })?.code === 'P2025') {
         return next(createError('Comentário não encontrado', 404));
       }
+      handleKanbanError(error, next);
+    }
+  }
+
+  /** Baixa o anexo de um card (proxy autenticado: o arquivo fica em S3 privado). */
+  async downloadAttachment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const att = await kanbanService.getAttachmentForDownload(userId, req.params.id);
+      const stored = await readFuelStoredPhoto({
+        fileUrl: att.fileUrl,
+        fileKey: att.fileKey,
+        fileName: att.fileName,
+      });
+      if (!stored) return next(createError('Não foi possível baixar o anexo', 404));
+      const safeName = String(att.fileName || 'anexo').replace(/[\\/:*?"<>|\r\n]+/g, '_');
+      res.setHeader('Content-Type', stored.contentType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+      );
+      res.status(200).send(stored.buffer);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Anexo não encontrado') return next(createError(msg, 404));
       handleKanbanError(error, next);
     }
   }

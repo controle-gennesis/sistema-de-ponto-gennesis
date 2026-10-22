@@ -83,6 +83,7 @@ router.post(
 router.post('/cards/:cardId/attachments/link', (req, res, next) =>
   controller.addLinkAttachment(req, res, next),
 );
+router.get('/attachments/:id/download', (req, res, next) => controller.downloadAttachment(req, res, next));
 router.delete('/attachments/:id', (req, res, next) => controller.deleteAttachment(req, res, next));
 
 export default router;
