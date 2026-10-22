@@ -354,17 +354,18 @@ async function fillWorkbook(
             }
           }
           const cell = sheet.getCell(linha, de);
-          cell.value = celula.texto;
+          // Cabeçalhos: tudo em maiúsculas e fonte 12 (a legenda é nota, fica como está).
+          cell.value = celula.estilo === 'legenda' ? celula.texto : String(celula.texto ?? '').toUpperCase();
           cell.font =
             celula.estilo === 'barra'
-              ? { name: fontName, size: 11, bold: true, color: { argb: WHITE } }
+              ? { name: fontName, size: 12, bold: true, color: { argb: WHITE } }
               : celula.estilo === 'destaque'
-                ? { name: fontName, size: 14, bold: true, color: { argb: TITLE_TEXT } }
+                ? { name: fontName, size: 12, bold: true, color: { argb: TITLE_TEXT } }
                 : celula.estilo === 'legenda'
                   ? { name: FONTE_LEGENDA, size: 9, italic: true, color: { argb: TITLE_TEXT } }
                 : {
                     name: fontName,
-                    size: 10,
+                    size: 12,
                     bold: Boolean(celula.rotulo) || celula.estilo === 'rotuloClaro',
                     color: { argb: TITLE_TEXT },
                   };
@@ -386,8 +387,8 @@ async function fillWorkbook(
       headerRow.height = 30;
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
-        cell.value = col.header;
-        cell.font = { name: fontName, size: tamHeader, bold: true, color: { argb: headerFg } };
+        cell.value = String(col.header ?? '').toUpperCase();
+        cell.font = { name: fontName, size: 12, bold: true, color: { argb: headerFg } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
         cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true, shrinkToFit: false };
         applyThinBorder(cell);
@@ -651,12 +652,12 @@ async function fillWorkbook(
       sheet.mergeCells(l0, c0, l0, c1);
       sheet.mergeCells(l1, c0, l2, c1);
       const titulo = sheet.getCell(l0, c0);
-      titulo.value = cx.titulo;
-      titulo.font = { name: fontName, size: 11, bold: true, color: { argb: TITLE_TEXT } };
+      titulo.value = String(cx.titulo ?? '').toUpperCase();
+      titulo.font = { name: fontName, size: 12, bold: true, color: { argb: TITLE_TEXT } };
       titulo.alignment = { vertical: 'middle', horizontal: 'center' };
       const corpo = sheet.getCell(l1, c0);
-      corpo.value = cx.texto;
-      corpo.font = { name: fontName, size: 9, bold: true, color: { argb: TITLE_TEXT } };
+      corpo.value = String(cx.texto ?? '').toUpperCase();
+      corpo.font = { name: fontName, size: 12, bold: true, color: { argb: TITLE_TEXT } };
       corpo.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       const ultimaLinhaTabela = offsetCabecalho + (showHeader ? 1 : 0) + spec.rows.length;
       sheet.pageSetup.printArea = `A1:${sheet.getColumn(colCount).letter}${Math.max(ultimaLinhaTabela, l2)}`;

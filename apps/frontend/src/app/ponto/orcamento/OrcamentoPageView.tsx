@@ -3673,7 +3673,8 @@ function draftAparenciaAbasFromMeta(meta: {
   };
 }
 
-const ORC_LINHA_COR_CUSTOM_CLS = '[&_*]:!text-inherit [&>td]:bg-inherit [&>th]:bg-inherit';
+// Os números coloridos de fórmula (data-fx-formula) ficam fora do «text-inherit», senão perdem a cor nas linhas com aparência própria.
+const ORC_LINHA_COR_CUSTOM_CLS = '[&_*:not([data-fx-formula]):not([data-cor-propria])]:!text-inherit [&>td]:bg-inherit [&>th]:bg-inherit';
 
 /** Mistura a cor da aparência com o fundo escuro da UI (evita faixas neon no dark). */
 function corFundoAparenciaOrcDark(
@@ -4169,17 +4170,18 @@ function tipoFichaDemandaLabel(tipo: string | undefined): string {
   return tipo === 'MAT' ? 'MA' : tipo;
 }
 
+/** Fundo com `!`: as linhas com aparência própria forçam `bg-inherit` nas células (as classes precisam estar escritas por extenso para o Tailwind gerar). */
 /** Formatação condicional col. Levantamento (%): faixas amarelo e vermelho com o mesmo padrão (claro: 50 + 900; escuro: 500/15 + 200). */
 function classeLevantamentoCondicional(lev: number): string {
   if (!Number.isFinite(lev)) return '';
   if (lev < 50) {
-    return 'bg-green-50 text-green-950 dark:bg-green-950/35 dark:text-green-100';
+    return '!bg-green-50 text-green-950 dark:!bg-green-950/35 dark:text-green-100';
   }
   if (lev >= 50 && lev < 80.99) {
-    return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
+    return 'font-medium !bg-yellow-50 text-yellow-900 dark:!bg-yellow-500/15 dark:text-yellow-200';
   }
   if (lev >= 80.99) {
-    return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
+    return 'font-medium !bg-red-50 text-red-900 dark:!bg-red-500/15 dark:text-red-200';
   }
   return '';
 }
@@ -4188,13 +4190,13 @@ function classeLevantamentoCondicional(lev: number): string {
 function classeValorTotalCondicional(valorPct: number): string {
   if (!Number.isFinite(valorPct)) return '';
   if (valorPct >= 0 && valorPct <= 49) {
-    return 'bg-green-50 text-green-950 dark:bg-green-950/35 dark:text-green-100';
+    return '!bg-green-50 text-green-950 dark:!bg-green-950/35 dark:text-green-100';
   }
   if (valorPct >= 50 && valorPct <= 60) {
-    return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
+    return 'font-medium !bg-yellow-50 text-yellow-900 dark:!bg-yellow-500/15 dark:text-yellow-200';
   }
   if (valorPct >= 61) {
-    return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
+    return 'font-medium !bg-red-50 text-red-900 dark:!bg-red-500/15 dark:text-red-200';
   }
   return '';
 }
@@ -6809,7 +6811,7 @@ const PLANILHA_ANALITICA_TOOLTIP = {
   theadPctPu:
     'Composição: Σ(qtd×vl real) ÷ Σ(qtd×vl orçamento) × 100. Insumo: (vl compra real ÷ vl orçamento) × 100.',
   theadPctFat:
-    'Composição: (preço compra real total ÷ valor total orçamento) × 100. Insumo: (preço compra real ÷ valor total orçamento) × 100.',
+    'Composição: média ponderada (valor compra real ÷ valor unitário orçamento) × 100. Insumo: (valor unitário real ÷ valor unitário orçamento) × 100.',
   theadPctCvp:
     'Composição: (preço compra real ÷ faturamento da composição) × 100. Insumo: (preço compra real ÷ faturamento da composição pai) × 100.'
 } as const;
@@ -7027,6 +7029,81 @@ function OrcListaAnimacaoGrupo({
 
   return <>{aplicarClasse(children)}</>;
 }
+
+/** Número no formato da fórmula exibida (pt-BR, mínimo 2 casas). */
+function fmtNumFormulaFicha(n: number, maxDecimais = 2): string {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: maxDecimais });
+}
+
+/**
+ * Célula calculada somente leitura: com duplo clique mostra a fórmula (números coloridos, como na aba Orçamento).
+ * Fecha ao clicar fora ou com Esc. `fontes` = quantos números iniciais vêm de outras células (o resto fica neutro).
+ */
+/** `cells`: chave `linha|coluna` → índice da cor (mesmo índice do número na fórmula). */
+type FdFormulaDestaque = { cells: Record<string, number> };
+
+const FormulaDuploClique = memo(function FormulaDuploClique({
+  formula,
+  fontes,
+  rowKey,
+  destaque,
+  onDestaque,
+  children,
+}: {
+  formula?: string | null;
+  fontes: number;
+  /** Linha e colunas de origem a destacar (índice = cor do número na fórmula). */
+  rowKey?: string;
+  destaque?: Record<string, number>;
+  onDestaque?: (d: FdFormulaDestaque | null) => void;
+  children: React.ReactNode;
+}) {
+  const [aberta, setAberta] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const onDestaqueRef = useRef(onDestaque);
+  onDestaqueRef.current = onDestaque;
+  useEffect(() => {
+    if (!aberta) return;
+    return () => onDestaqueRef.current?.(null);
+  }, [aberta]);
+  if (!formula) return <>{children}</>;
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      title="Clique duas vezes para ver a fórmula"
+      className="w-full outline-none"
+      onDoubleClick={() => {
+        setAberta(true);
+        if (rowKey && destaque) {
+          // Coluna sem «|» = mesma linha da célula; «linha|coluna» aponta para outra linha (ex.: composição pai).
+          const cells: Record<string, number> = {};
+          for (const [col, cor] of Object.entries(destaque)) {
+            cells[col.includes('|') ? col : `${rowKey}|${col}`] = cor;
+          }
+          onDestaque?.({ cells });
+        }
+        requestAnimationFrame(() => ref.current?.focus());
+      }}
+      onBlur={() => setAberta(false)}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setAberta(false);
+      }}
+    >
+      {aberta ? (
+        <div className="flex w-full items-center justify-end whitespace-pre text-sm tabular-nums">
+          {segmentarFormulaOrc(formula, fontes).map((parte, i) => (
+            <span key={i} data-fx-formula className={parte.classe}>
+              {parte.texto}
+            </span>
+          ))}
+        </div>
+      ) : (
+        children
+      )}
+    </div>
+  );
+});
 
 /** Colunas em R$: símbolo à esquerda e valor numérico à direita na mesma célula. */
 const MoedaCelula = memo(function MoedaCelula({
@@ -7283,7 +7360,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
           className={`pointer-events-none absolute inset-0 flex items-center justify-end overflow-hidden whitespace-pre ${overlayClassName ?? ''}`}
         >
           {colorirFormula(local).map((parte, i) => (
-            <span key={i} className={parte.classe}>
+            <span key={i} data-fx-formula className={parte.classe}>
               {parte.texto}
             </span>
           ))}
@@ -7776,6 +7853,21 @@ export function OrcamentoPageView({
     });
   }, []);
   const [editarDadosOpen, setEditarDadosOpen] = useState(false);
+  /** Ficha de demanda: células de origem destacadas enquanto uma fórmula está aberta (duplo clique). */
+  const [fdFormulaDestaque, setFdFormulaDestaque] = useState<FdFormulaDestaque | null>(null);
+  /** Célula de origem pintada: texto escuro/claro conforme o tema (as linhas com aparência própria forçam `!text-inherit`). */
+  const refTextoFd = (rowKey: string, col: string) => (el: HTMLElement | null) => {
+    if (!el) return;
+    if (fdFormulaDestaque?.cells[`${rowKey}|${col}`] !== undefined) {
+      el.style.setProperty('color', isDark ? '#f3f4f6' : '#111827', 'important');
+    } else {
+      el.style.removeProperty('color');
+    }
+  };
+  const classeDestaqueFd = (rowKey: string, col: string): string => {
+    const i = fdFormulaDestaque?.cells[`${rowKey}|${col}`];
+    return i === undefined ? '' : (PALETA_FORMULA[i % PALETA_FORMULA.length]?.celula ?? '');
+  };
   const [editarDadosDraft, setEditarDadosDraft] = useState<
     OrcamentoMeta & { nomeOrcamento: string }
   >({
@@ -9337,10 +9429,7 @@ export function OrcamentoPageView({
       toast.error('Esta revisão está somente leitura.');
       return;
     }
-    if (orcamentoFechado) {
-      toast.error('Orçamento finalizado. Reabra para editar.');
-      return;
-    }
+    // Dados do orçamento continuam editáveis mesmo com o orçamento finalizado.
     let osCodigo = meta.osCodigo || '';
     let numeroPasta = meta.numeroPasta || '';
     if (!osCodigo.trim() && !numeroPasta.trim() && meta.osNumeroPasta) {
@@ -12811,7 +12900,7 @@ export function OrcamentoPageView({
     const faturamentoMonetarioPorComposicao = new Map<string, number>();
     for (const row of linhasAnaliticoFicha) {
       if (row.kind === 'composicao') {
-        const q = Number(row.quant);
+        const q = Number(row.quantidadeReal);
         const v = Number(row.valorUnit);
         if (Number.isFinite(q) && Number.isFinite(v)) {
           faturamentoMonetarioPorComposicao.set(row.key, q * v);
@@ -15485,7 +15574,7 @@ export function OrcamentoPageView({
             vlUnitCompraRealAgreg !== null ? roundTo(vlUnitCompraRealAgreg, 2) : '',
             sumQtdCompraComVlReal > 0 ? roundTo(sumCustoReal, 2) : '',
             pe?.levantamentoPct,
-            pe?.faturamentoPct,
+            pe?.precoUnitarioRelPct,
             pe?.pctCustoValorPago,
             '',
           ],
@@ -15540,7 +15629,7 @@ export function OrcamentoPageView({
           vReal !== undefined && Number.isFinite(vReal) ? roundTo(vReal, 2) : '',
           custoCompraR !== null ? roundTo(custoCompraR, 2) : '',
           pi?.levantamentoPct,
-          pi?.faturamentoPct,
+          pi?.precoUnitarioRelPct,
           pi?.pctCustoValorPago,
           fichaDemandaObservacoes[l.key] ?? '',
         ],
@@ -15567,7 +15656,7 @@ export function OrcamentoPageView({
         { header: 'Valor unit. compra real', width: 18, format: 'currency' },
         { header: 'Custo compra real', width: 16, format: 'currency' },
         { header: '% Qtd. solicitada', width: 14, format: 'percent' },
-        { header: '% Valor total', width: 12, format: 'percent' },
+        { header: '% Valor unitário', width: 12, format: 'percent' },
         { header: '% Custo / valor pago', width: 16, format: 'percent' },
         { header: 'Observação', width: 28 },
       ],
@@ -16061,6 +16150,11 @@ export function OrcamentoPageView({
       toast.success(
         `Revisão ${formatOrcamentoRevisao(versaoNova)} criada, com cronograma novo. ${formatOrcamentoRevisao(versaoNumero)} ficou congelada.`
       );
+      // A nova revisão já está no cache (gravada acima) e tem a mesma árvore de serviços; nesse caso o carregamento
+      // não reaplica a sessão. Sem isto a tela ficava com o meta antigo (finalizado/travado, revisão anterior) e o
+      // autosave gravava esse meta velho por cima da revisão nova.
+      setMeta(nextMeta);
+      setCronograma(nextSessao.cronograma ?? cronogramaVazio());
       setOrcamentoViewTab('montagem');
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
@@ -17000,35 +17094,13 @@ export function OrcamentoPageView({
                           </h3>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          {!versaoCongelada && orcamentoFechado ? (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmReabrirOrcamento(true)}
-                              disabled={reabrindoOrcamento}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/50"
-                              title="Reabrir o orçamento para edição"
-                            >
-                              {reabrindoOrcamento ? (
-                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
-                              ) : (
-                                <Unlock className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                              )}
-                              Reabrir orçamento
-                            </button>
-                          ) : null}
                           <button
                             type="button"
                             onClick={abrirEdicaoDados}
-                            disabled={versaoCongelada || orcamentoFechado}
+                            disabled={versaoCongelada}
                             className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:pointer-events-none disabled:opacity-40"
                             aria-label="Editar dados"
-                            title={
-                              versaoCongelada
-                                ? 'Versão congelada — somente leitura'
-                                : orcamentoFechado
-                                  ? 'Orçamento finalizado. Reabra para editar.'
-                                  : 'Editar dados'
-                            }
+                            title={versaoCongelada ? 'Versão congelada — somente leitura' : 'Editar dados'}
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -17060,11 +17132,6 @@ export function OrcamentoPageView({
                           })()}
                         </div>
                       ) : null}
-                    {orcamentoFechado && !versaoCongelada ? (
-                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
-                        Orçamento finalizado. Reabra para editar. Ao finalizar de novo, o valor da OS é atualizado.
-                      </div>
-                    ) : null}
                     </div>
 
                     <div className="px-4 sm:px-5 py-5 space-y-8">
@@ -17460,7 +17527,7 @@ export function OrcamentoPageView({
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadPctFat}
                                   className={GRADE_TH_STICKY}
                                 >
-                                  % Valor total
+                                  % Valor unitário
                                 </GradeMoedaTh>
                                 <GradeMoedaTh
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadPctCvp}
@@ -17612,7 +17679,7 @@ export function OrcamentoPageView({
                                     temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
                                   const pctRow = pctFichaDemandaPorKey.get(l.key);
                                   const pctLev = pctRow?.levantamentoPct;
-                                  const pctFat = pctRow?.faturamentoPct;
+                                  const pctFat = pctRow?.precoUnitarioRelPct;
                                   const pctCvp = pctRow?.pctCustoValorPago;
                                   const custoEstCompCalc = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
                                   const levantamentoCondComp =
@@ -17688,31 +17755,58 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.quantidadeComp}
-                                        className={`px-3 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
+                                        ref={refTextoFd(l.key, 'qtd')}
+                                        className={`${classeDestaqueFd(l.key, 'qtd')} px-3 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcComp}
-                                        className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
+                                        ref={refTextoFd(l.key, 'vorc')}
+                                        className={`${classeDestaqueFd(l.key, 'vorc')} ${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         <MoedaCelula valor={l.valorUnit} />
                                       </td>
                                       <td
-                                        className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700`}
+                                        ref={refTextoFd(l.key, 'custo')}
+                                        className={`${classeDestaqueFd(l.key, 'custo')} ${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700`}
                                       >
-                                        <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
+                                        <FormulaDuploClique
+                                          formula={`=${fmtNumFormulaFicha(l.quantidadeReal, 4)}*${fmtNumFormulaFicha(l.valorUnit)}`}
+                                          fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ qtd: 0, vorc: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
+                                        </FormulaDuploClique>
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstComp}
                                         className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
                                       >
-                                        <MoedaCelula valor={l.valorUnit * PLANILHA_FATOR_CUSTO_ESTIMADO} />
+                                        <FormulaDuploClique
+                                          formula={`=${fmtNumFormulaFicha(l.valorUnit)}*${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%`}
+                                          fontes={1}
+                                          rowKey={l.key}
+                                          destaque={{ vorc: 0 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <MoedaCelula valor={l.valorUnit * PLANILHA_FATOR_CUSTO_ESTIMADO} />
+                                        </FormulaDuploClique>
                                       </td>
                                       <td
                                         className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
                                       >
-                                        <MoedaCelula valor={custoEstCompCalc} />
+                                        <FormulaDuploClique
+                                          formula={`=${fmtNumFormulaFicha(l.total)}*${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%`}
+                                          fontes={1}
+                                          rowKey={l.key}
+                                          destaque={{ custo: 0 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <MoedaCelula valor={custoEstCompCalc} />
+                                        </FormulaDuploClique>
                                       </td>
                                       {mostrarColunasCompraFichaDemanda ? (
                                         <>
@@ -17727,13 +17821,15 @@ export function OrcamentoPageView({
                                         {vlUnitCompraRealAgreg !== null ? <MoedaCelula valor={vlUnitCompraRealAgreg} /> : null}
                                       </td>
                                       <td
-                                        className={`px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
+                                        ref={refTextoFd(l.key, 'cr')}
+                                        className={`${classeDestaqueFd(l.key, 'cr')} px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         {sumQtdCompraComVlReal > 0 ? (
                                           <MoedaCelula valor={sumCustoReal} />
                                         ) : null}
                                       </td>
                                       <td
+                                        data-cor-propria
                                         className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           levantamentoCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
@@ -17745,6 +17841,7 @@ export function OrcamentoPageView({
                                             )}
                                       </td>
                                       <td
+                                        data-cor-propria
                                         className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           valorTotalCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
@@ -17759,7 +17856,19 @@ export function OrcamentoPageView({
                                         className="px-3 py-2.5 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {pctCvp !== undefined && Number.isFinite(pctCvp) ? (
-                                          <span>{`${pctCvp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                          <FormulaDuploClique
+                                            formula={
+                                              sumQtdCompraComVlReal > 0 && l.quantidadeReal * l.valorUnit !== 0
+                                                ? `=(${fmtNumFormulaFicha(sumCustoReal)}/${fmtNumFormulaFicha(l.quantidadeReal * l.valorUnit)})*100`
+                                                : null
+                                            }
+                                            fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ cr: 0, custo: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                          >
+                                            <span>{`${pctCvp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                          </FormulaDuploClique>
                                         ) : (
                                           <span className="text-gray-500 dark:text-gray-400">—</span>
                                         )}
@@ -17788,7 +17897,7 @@ export function OrcamentoPageView({
                                     : null;
                                 const pctInsumo = pctFichaDemandaPorKey.get(l.key);
                                 const pctLevIn = pctInsumo?.levantamentoPct;
-                                const pctFatIn = pctInsumo?.faturamentoPct;
+                                const pctFatIn = pctInsumo?.precoUnitarioRelPct;
                                 const pctCvpIn = pctInsumo?.pctCustoValorPago;
                                 const composicaoPaiParaPct = analiticoComposicaoPorKey.get(l.parentKey);
                                 const faturamentoComposicaoPai = composicaoPaiParaPct
@@ -18002,7 +18111,8 @@ export function OrcamentoPageView({
                                         </td>
                                         <td
                                           title={PLANILHA_ANALITICA_TOOLTIP.quantidadeInsumo}
-                                          className="w-[1%] p-0 border-l border-gray-200 dark:border-gray-700"
+                                          ref={refTextoFd(l.key, 'qtd')}
+                                          className={`w-[1%] p-0 border-l border-gray-200 dark:border-gray-700 ${classeDestaqueFd(l.key, 'qtd')}`}
                                         >
                                           <input
                                             type="text"
@@ -18031,7 +18141,8 @@ export function OrcamentoPageView({
                                         </td>
                                         <td
                                           title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcInsumo}
-                                          className={`p-0 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
+                                          ref={refTextoFd(l.key, 'vorc')}
+                                          className={`${classeDestaqueFd(l.key, 'vorc')} p-0 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                         >
                                           <div className={`${moedaGradeFieldWrapperCls} min-w-0`}>
                                             <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
@@ -18074,39 +18185,67 @@ export function OrcamentoPageView({
                                         </td>
                                         <td
                                           title={PLANILHA_ANALITICA_TOOLTIP.quantidadeInsumo}
-                                          className={`px-3 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
+                                          ref={refTextoFd(l.key, 'qtd')}
+                                          className={`${classeDestaqueFd(l.key, 'qtd')} px-3 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                         >
                                           {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                                         </td>
                                         <td
                                           title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcInsumo}
-                                          className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
+                                          ref={refTextoFd(l.key, 'vorc')}
+                                          className={`${classeDestaqueFd(l.key, 'vorc')} ${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                         >
                                           <MoedaCelula valor={l.valorUnit} />
                                         </td>
                                       </>
                                     )}
                                     <td
-                                      className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
+                                      ref={refTextoFd(l.key, 'custo')}
+                                      className={`${classeDestaqueFd(l.key, 'custo')} ${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <MoedaCelula valor={l.total} />
+                                      <FormulaDuploClique
+                                        formula={`=${fmtNumFormulaFicha(l.quantidadeReal, 4)}*${fmtNumFormulaFicha(l.valorUnit)}`}
+                                        fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ qtd: 0, vorc: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                      >
+                                        <MoedaCelula valor={l.total} />
+                                      </FormulaDuploClique>
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstInsumo}
                                       className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <MoedaCelula valor={valorUnitEstimado} />
+                                      <FormulaDuploClique
+                                        formula={`=${fmtNumFormulaFicha(vOrc)}*${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%`}
+                                        fontes={1}
+                                          rowKey={l.key}
+                                          destaque={{ vorc: 0 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                      >
+                                        <MoedaCelula valor={valorUnitEstimado} />
+                                      </FormulaDuploClique>
                                     </td>
                                     <td
                                       className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <MoedaCelula valor={custoEst} />
+                                      <FormulaDuploClique
+                                        formula={`=${fmtNumFormulaFicha(l.total)}*${PLANILHA_FATOR_CUSTO_ESTIMADO * 100}%`}
+                                        fontes={1}
+                                          rowKey={l.key}
+                                          destaque={{ custo: 0 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                      >
+                                        <MoedaCelula valor={custoEst} />
+                                      </FormulaDuploClique>
                                     </td>
                                     {mostrarColunasCompraFichaDemanda ? (
                                       <>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
-                                      className={`p-0 border-l border-gray-200 dark:border-gray-700`}
+                                      ref={refTextoFd(l.key, 'qc')}
+                                      className={`${classeDestaqueFd(l.key, 'qc')} p-0 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       <FdCampoLocal
                                         draftKey={`fd-qtd:${l.key}`}
@@ -18120,7 +18259,6 @@ export function OrcamentoPageView({
                                         }
                                         onCommit={(raw) => commitPlanilhaQtdCompra(l.key, raw)}
                                         commitOnChange
-                                        placeholder="0"
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
                                         inputMode="decimal"
                                         className={`${inputGradeCls} text-center tabular-nums`}
@@ -18128,7 +18266,8 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                      className={`p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
+                                      ref={refTextoFd(l.key, 'vr')}
+                                      className={`${classeDestaqueFd(l.key, 'vr')} p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                     >
                                       <div className={moedaGradeFieldWrapperCls}>
                                         <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
@@ -18147,7 +18286,6 @@ export function OrcamentoPageView({
                                           onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
                                           commitOnChange
                                           mask={currencyDigitsToFormatted}
-                                          placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
                                           inputMode="numeric"
                                           className={`${inputGradeMoedaCls} text-right`}
@@ -18155,10 +18293,19 @@ export function OrcamentoPageView({
                                       </div>
                                     </td>
                                     <td
-                                      className={`px-3 py-2.5 text-sm text-center tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
+                                      ref={refTextoFd(l.key, 'cr')}
+                                      className={`${classeDestaqueFd(l.key, 'cr')} px-3 py-2.5 text-sm text-center tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       {custoCompraR !== null ? (
-                                        <MoedaCelula valor={custoCompraR} />
+                                        <FormulaDuploClique
+                                          formula={`=${fmtNumFormulaFicha(qC as number, 4)}*${fmtNumFormulaFicha(vReal as number)}`}
+                                          fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ qc: 0, vr: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <MoedaCelula valor={custoCompraR} />
+                                        </FormulaDuploClique>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
@@ -18170,7 +18317,19 @@ export function OrcamentoPageView({
                                       }`}
                                     >
                                       {pctLevIn !== undefined && Number.isFinite(pctLevIn) ? (
-                                        <span>{`${pctLevIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        <FormulaDuploClique
+                                          formula={
+                                            qC !== undefined && Number.isFinite(qC)
+                                              ? `=(${fmtNumFormulaFicha(qC, 4)}/${fmtNumFormulaFicha(l.quantidadeReal, 4)})*100`
+                                              : null
+                                          }
+                                          fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ qc: 0, qtd: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <span>{`${pctLevIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </FormulaDuploClique>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
@@ -18181,7 +18340,19 @@ export function OrcamentoPageView({
                                       }`}
                                     >
                                       {pctFatIn !== undefined && Number.isFinite(pctFatIn) ? (
-                                        <span>{`${pctFatIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        <FormulaDuploClique
+                                          formula={
+                                            vReal !== undefined && Number.isFinite(vReal) && vOrc !== 0
+                                              ? `=(${fmtNumFormulaFicha(vReal)}/${fmtNumFormulaFicha(vOrc)})*100`
+                                              : null
+                                          }
+                                          fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ vr: 0, vorc: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <span>{`${pctFatIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </FormulaDuploClique>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
@@ -18190,7 +18361,19 @@ export function OrcamentoPageView({
                                       className="px-3 py-2.5 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       {pctCvpIn !== undefined && Number.isFinite(pctCvpIn) ? (
-                                        <span>{`${pctCvpIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        <FormulaDuploClique
+                                          formula={
+                                            custoCompraR !== null && faturamentoComposicaoPai !== 0
+                                              ? `=(${fmtNumFormulaFicha(custoCompraR)}/${fmtNumFormulaFicha(faturamentoComposicaoPai)})*100`
+                                              : null
+                                          }
+                                          fontes={2}
+                                          rowKey={l.key}
+                                          destaque={{ cr: 0, [`${l.parentKey}|custo`]: 1 }}
+                                          onDestaque={setFdFormulaDestaque}
+                                        >
+                                          <span>{`${pctCvpIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
+                                        </FormulaDuploClique>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
