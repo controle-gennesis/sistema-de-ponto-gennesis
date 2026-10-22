@@ -707,6 +707,12 @@ export async function buildOrcamentoBrandedWorkbook(
   return buffer as ArrayBuffer;
 }
 
+/** Nome do arquivo sem o prefixo «Orcamento - » / «Orçamento - » (o nome começa pelo código do orçamento). */
+function nomeArquivoSemPrefixoOrcamento(filename: string): string {
+  const semPrefixo = filename.replace(/^Or[cç]amento\s*-\s*/i, '').trim();
+  return semPrefixo && !/^\.\w+$/.test(semPrefixo) ? semPrefixo : filename;
+}
+
 export async function downloadOrcamentoBrandedExcel(
   sheets: OrcamentoExcelSheetSpec[],
   filename: string,
@@ -717,7 +723,7 @@ export async function downloadOrcamentoBrandedExcel(
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = nomeArquivoSemPrefixoOrcamento(filename);
   document.body.appendChild(a);
   a.click();
   a.remove();
