@@ -160,6 +160,9 @@ function formatBdiPct(value: number | undefined): string {
   return `${value.toFixed(2).replace('.', ',')}%`;
 }
 
+/** Botão «Novo Orçamento» da lista: escondido por enquanto (orçamentos entram pela importação). */
+const MOSTRAR_BOTAO_NOVO_ORCAMENTO = false;
+
 export default function OrcamentosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -533,12 +536,14 @@ export default function OrcamentosPage() {
                     type="button"
                     onClick={abrirFluxoImportar}
                     disabled={isLoadingList || contractsComOrcamento.length === 0}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600"
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 active:bg-red-200/80 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 dark:active:bg-red-900/55"
                     title="Importar orçamento"
                     aria-label="Importar orçamento"
                   >
-                    <Upload className="h-4 w-4" aria-hidden />
+                    <Upload className="h-4 w-4 shrink-0" aria-hidden />
+                    Importar Orçamento
                   </button>
+                  {MOSTRAR_BOTAO_NOVO_ORCAMENTO && (
                   <button
                     type="button"
                     onClick={abrirFluxoNovoOrcamento}
@@ -548,6 +553,7 @@ export default function OrcamentosPage() {
                     <Plus className="h-4 w-4 shrink-0" aria-hidden />
                     Novo Orçamento
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>

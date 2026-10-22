@@ -124,6 +124,14 @@ async function ensureContractDefaultBdiDiscount(prisma: PrismaClient): Promise<v
   `);
 }
 
+async function ensureContractDefaultReajustes(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'contracts', 'defaultReajustes')) return;
+  console.warn('[Schema] Coluna contracts.defaultReajustes ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "defaultReajustes" JSONB;
+  `);
+}
+
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
 
@@ -3234,6 +3242,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureContractBillingImportWithoutOsPleito(prisma);
     await ensureContractOrcafascioClientId(prisma);
     await ensureContractDefaultBdiDiscount(prisma);
+    await ensureContractDefaultReajustes(prisma);
     await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensureMaterialRequestColumns(prisma);

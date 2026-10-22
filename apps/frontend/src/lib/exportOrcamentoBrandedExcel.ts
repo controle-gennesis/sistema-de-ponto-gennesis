@@ -592,8 +592,10 @@ async function fillWorkbook(
           const nLinhas = 1 + Math.max(0, primeira?.linhasAbaixo ?? 0);
           let alturaPx = 0;
           for (let i = 0; i < nLinhas; i++) alturaPx += alturaLinhaPx(linhaLogo + i);
-          const h = Math.max(20, Math.round(alturaPx - 10));
-          const w = Math.min(Math.round(h * (logoDef.largura / logoDef.altura)), Math.max(40, larguraPx - 10));
+          // Folga de 14px em cada lado: a logo (fundo branco) não pode encostar nem cobrir as bordas do quadro.
+          const folga = 28;
+          const h = Math.max(20, Math.round(alturaPx - folga));
+          const w = Math.min(Math.round(h * (logoDef.largura / logoDef.altura)), Math.max(40, larguraPx - folga));
           const hFinal = Math.round(w * (logoDef.altura / logoDef.largura));
           // Fração de coluna: deslocamento em px dentro da coluna onde a logo começa.
           let restante = (larguraPx - w) / 2;

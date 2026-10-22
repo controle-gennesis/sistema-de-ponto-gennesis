@@ -41,6 +41,27 @@ function parsePercentInput(raw: unknown): number | null {
   return Math.round(n * 100) / 100;
 }
 
+/** Reajustes padrão do contrato: lista de { nome, percentual }; undefined = campo não enviado. */
+function parseReajustesInput(raw: unknown): Array<{ nome: string; percentual: string }> | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return [];
+  if (!Array.isArray(raw)) throw createError('Reajustes inválidos', 400);
+  const out: Array<{ nome: string; percentual: string }> = [];
+  raw.forEach((item, idx) => {
+    const nome = String((item as { nome?: unknown })?.nome ?? '').trim();
+    const percentual = String((item as { percentual?: unknown })?.percentual ?? '').trim();
+    if (!nome && !percentual) return;
+    if (percentual) {
+      const n = Number(percentual.replace(',', '.'));
+      if (!Number.isFinite(n) || n < 0 || n > 1000) {
+        throw createError(`Percentual inválido no reajuste ${idx + 1}`, 400);
+      }
+    }
+    out.push({ nome: nome || `${out.length + 1}º reajuste`, percentual });
+  });
+  return out;
+}
+
 function parseOrcafascioClientId(raw: unknown): string | null {
   const value = String(raw ?? '').trim();
   if (!value) return null;
@@ -323,6 +344,7 @@ export class ContractController {
         orcafascioClientId,
         defaultBdiPercent,
         defaultDiscountPercent,
+        defaultReajustes,
       } = req.body;
 
       if (!name?.trim()) {
@@ -384,6 +406,9 @@ export class ContractController {
               resolveOrcafascioClientIdForContractName(name),
             defaultBdiPercent: parsePercentInput(defaultBdiPercent),
             defaultDiscountPercent: parsePercentInput(defaultDiscountPercent),
+            ...(parseReajustesInput(defaultReajustes) !== undefined
+              ? { defaultReajustes: parseReajustesInput(defaultReajustes) }
+              : {}),
           },
           include: {
             costCenter: {
@@ -448,6 +473,7 @@ export class ContractController {
         orcafascioClientId,
         defaultBdiPercent,
         defaultDiscountPercent,
+        defaultReajustes,
       } = req.body;
 
       const existing = await prisma.contract.findUnique({
@@ -497,6 +523,9 @@ export class ContractController {
       }
       if (defaultDiscountPercent !== undefined) {
         updateData.defaultDiscountPercent = parsePercentInput(defaultDiscountPercent);
+      }
+      if (defaultReajustes !== undefined) {
+        updateData.defaultReajustes = parseReajustesInput(defaultReajustes);
       }
 
       if (updateData.endDate && updateData.startDate && updateData.endDate < updateData.startDate) {

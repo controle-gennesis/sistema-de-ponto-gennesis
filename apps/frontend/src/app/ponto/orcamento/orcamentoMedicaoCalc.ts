@@ -680,7 +680,30 @@ export function formulaMemoriaParaExcel(
     }
     return null;
   }
-  return out ? out : null;
+  return out && formulaExcelSintaxeValida(out) ? out : null;
+}
+
+/**
+ * Checagem mínima da fórmula já traduzida: o Excel recusa a pasta de trabalho inteira («problema em um conteúdo»)
+ * quando uma célula traz fórmula inválida, como `1.98I9` (falta operador entre número e referência).
+ * Nesses casos o chamador mantém o valor fixo da célula.
+ */
+function formulaExcelSintaxeValida(f: string): boolean {
+  // Nomes de função (SUM(, LOG10(…) saem da análise para não confundir dígito + «(».
+  const semFuncoes = f.replace(/[A-Z][A-Z0-9.]*\(/g, '(');
+  let nivel = 0;
+  for (const ch of semFuncoes) {
+    if (ch === '(') nivel += 1;
+    else if (ch === ')') nivel -= 1;
+    if (nivel < 0) return false;
+  }
+  if (nivel !== 0) return false;
+  // Número, referência ou «)» colados em letra/«(» ou número, e operador solto no começo/fim.
+  const comRefs = semFuncoes.replace(/[A-Za-z]\{(?:r|R\d+)\}/g, '#');
+  if (/[\d})#](?=[A-Za-z(#])/.test(comRefs)) return false;
+  if (/[})#](?=\d)/.test(comRefs)) return false;
+  if (/^[*/^<>=,]|[+\-*/^<>=,]$/.test(semFuncoes)) return false;
+  return true;
 }
 
 export type AjudaFuncaoFormula = {

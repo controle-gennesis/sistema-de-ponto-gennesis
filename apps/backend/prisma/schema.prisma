@@ -1454,6 +1454,8 @@ model Contract {
   defaultBdiPercent Decimal? @db.Decimal(7, 2)
   /// Desconto padrão (%) aplicado aos orçamentos do contrato.
   defaultDiscountPercent Decimal? @db.Decimal(7, 2)
+  /// Reajustes padrão dos orçamentos do contrato: [{ nome, percentual }].
+  defaultReajustes Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

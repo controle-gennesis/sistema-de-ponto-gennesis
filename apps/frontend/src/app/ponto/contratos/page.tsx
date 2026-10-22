@@ -70,6 +70,7 @@ interface Contract {
   orcafascioClientId?: string | null;
   defaultBdiPercent?: number | string | null;
   defaultDiscountPercent?: number | string | null;
+  defaultReajustes?: Array<{ nome: string; percentual: string }> | null;
 }
 
 type ContractPermissionUser = {
@@ -275,6 +276,7 @@ export default function ContratosPage() {
     orcafascioClientId: '',
     defaultBdiPercent: '',
     defaultDiscountPercent: '',
+    reajustes: [] as Array<{ nome: string; percentual: string }>,
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [permissionsContract, setPermissionsContract] = useState<Contract | null>(null);
@@ -453,6 +455,7 @@ export default function ContratosPage() {
       orcafascioClientId: '',
       defaultBdiPercent: '',
       defaultDiscountPercent: '',
+      reajustes: [],
     });
     setEditingContract(null);
   };
@@ -477,6 +480,12 @@ export default function ContratosPage() {
         '',
       defaultBdiPercent: formatPercentInput(contract.defaultBdiPercent),
       defaultDiscountPercent: formatPercentInput(contract.defaultDiscountPercent),
+      reajustes: Array.isArray(contract.defaultReajustes)
+        ? contract.defaultReajustes.map((r) => ({
+            nome: String(r?.nome ?? ''),
+            percentual: String(r?.percentual ?? ''),
+          }))
+        : [],
     });
     setShowForm(true);
   };
@@ -532,6 +541,14 @@ export default function ContratosPage() {
       return;
     }
 
+    const reajustesPadrao = formData.reajustes
+      .map((r) => ({ nome: r.nome.trim(), percentual: r.percentual.trim() }))
+      .filter((r) => r.nome || r.percentual);
+    if (reajustesPadrao.some((r) => r.percentual && Number.isNaN(parsePercentField(r.percentual)))) {
+      toast.error('Os reajustes devem ter percentuais válidos (ex.: 5,5).');
+      return;
+    }
+
     const payload = {
       name: formData.name.trim(),
       number: formData.number.trim(),
@@ -543,6 +560,7 @@ export default function ContratosPage() {
       orcafascioClientId,
       defaultBdiPercent: bdiPadrao,
       defaultDiscountPercent: descontoPadrao,
+      defaultReajustes: reajustesPadrao,
     };
 
     if (editingContract) {
@@ -1353,6 +1371,75 @@ function ContractFormModal({
               <p className="md:col-span-2 -mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Usados automaticamente nos orçamentos deste contrato.
               </p>
+              <div className="md:col-span-2">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Reajustes padrão (%)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        reajustes: [
+                          ...formData.reajustes,
+                          { nome: `${formData.reajustes.length + 1}º reajuste`, percentual: '' },
+                        ],
+                      })
+                    }
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                  >
+                    + Adicionar reajuste
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {formData.reajustes.map((r: { nome: string; percentual: string }, idx: number) => (
+                    <div key={`reajuste-${idx}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_9rem_auto]">
+                      <input
+                        type="text"
+                        value={r.nome}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
+                              i === idx ? { ...rr, nome: e.target.value } : rr
+                            ),
+                          })
+                        }
+                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder={`${idx + 1}º reajuste`}
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={r.percentual}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
+                              i === idx ? { ...rr, percentual: e.target.value } : rr
+                            ),
+                          })
+                        }
+                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="%"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            reajustes: formData.reajustes.filter((_: unknown, i: number) => i !== idx),
+                          })
+                        }
+                        className="rounded-lg border border-red-300 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50/60 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Valor mais Aditivos *

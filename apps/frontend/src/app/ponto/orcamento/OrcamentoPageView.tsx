@@ -7541,6 +7541,20 @@ function montarNomeArquivoOrcamento(opts: {
   return `${base}.${opts.ext}`;
 }
 
+/** Primeira linha de dados da aba «Memória de cálculo» no Excel (cabeçalho de 3 linhas + respiro). */
+const MEMORIA_PRIMEIRA_LINHA_DADOS = 5;
+
+/** Campos de «Editar dados» que também são preenchidos na importação do Orçafascio. */
+const ORCAFASCIO_META_EXTRA_VAZIO = {
+  prazoExecucaoDias: '',
+  responsavelOrcamento: '',
+  unidade: '',
+  localObra: '',
+  setor: '',
+  solicitante: '',
+  descricaoDetalhada: '',
+};
+
 export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null,
@@ -7690,6 +7704,7 @@ export function OrcamentoPageView({
   const [orcafascioModalSoloOrcamentos, setOrcafascioModalSoloOrcamentos] = useState(false);
   const [orcafascioImportSelectValue, setOrcafascioImportSelectValue] = useState('');
   /** BDI e desconto opcionais no modal de importação. Vazio usa o valor do Orçafascio. */
+  const [orcafascioMetaExtra, setOrcafascioMetaExtra] = useState(() => ({ ...ORCAFASCIO_META_EXTRA_VAZIO }));
   const [orcafascioImportBdi, setOrcafascioImportBdi] = useState('');
   const [orcafascioImportDesconto, setOrcafascioImportDesconto] = useState('');
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
@@ -8189,6 +8204,7 @@ export function OrcamentoPageView({
   };
 
   const resetOrcafascioOsDraft = () => {
+    setOrcafascioMetaExtra({ ...ORCAFASCIO_META_EXTRA_VAZIO });
     setOrcafascioOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setOrcafascioOsCodigo('');
     setOrcafascioNumeroPasta('');
@@ -9080,7 +9096,11 @@ export function OrcamentoPageView({
   };
 
   /** BDI e desconto padrão do contrato (cadastro do contrato; senão, a tabela fixa por nome de contrato). */
-  const padraoBdiDescontoDoContrato = (): { bdiPercentual: string; descontoPercentual: string } | null => {
+  const padraoBdiDescontoDoContrato = (contratoIdForcado?: string): {
+    bdiPercentual: string;
+    descontoPercentual: string;
+    reajustes: Array<{ nome: string; percentual: string }> | null;
+  } | null => {
     const raw = contractsListData?.data ?? contractsListData;
     const lista = Array.isArray(raw)
       ? (raw as Array<{
@@ -9088,9 +9108,11 @@ export function OrcamentoPageView({
           costCenterId?: string;
           defaultBdiPercent?: number | string | null;
           defaultDiscountPercent?: number | string | null;
+          defaultReajustes?: Array<{ nome?: string; percentual?: string }> | null;
         }>)
       : [];
     const contrato =
+      (contratoIdForcado ? lista.find((c) => c.id && c.id === contratoIdForcado) : undefined) ??
       lista.find((c) => c.id && c.id === (meta.linkedContractId || '').trim()) ??
       lista.find((c) => c.id && c.id === (embeddedContractId || '').trim()) ??
       lista.find((c) => c.costCenterId && String(c.costCenterId) === String(centroCustoId));
@@ -9104,15 +9126,46 @@ export function OrcamentoPageView({
     const fixo = padraoOrcamentoDoContrato(nomeContratoExport());
     const bdiPercentual = bdi ?? fixo?.bdiPercentual;
     const descontoPercentual = desconto ?? fixo?.descontoPercentual;
-    if (bdiPercentual == null && descontoPercentual == null) return null;
+    const reajustes =
+      Array.isArray(contrato?.defaultReajustes) && contrato.defaultReajustes.length > 0
+        ? contrato.defaultReajustes.map((r, idx) => ({
+            nome: String(r?.nome ?? '').trim() || `${idx + 1}º reajuste`,
+            percentual: String(r?.percentual ?? '').trim(),
+          }))
+        : null;
+    if (bdiPercentual == null && descontoPercentual == null && !reajustes) return null;
     return {
       bdiPercentual: bdiPercentual ?? '',
       descontoPercentual: descontoPercentual ?? '',
+      reajustes,
     };
   };
 
   /** Com padrão do contrato, BDI e desconto vêm de lá e não podem ser alterados no orçamento. */
-  const bdiDescontoBloqueado = () => padraoBdiDescontoDoContrato() !== null;
+  const bdiDescontoBloqueado = () => {
+    const p = padraoBdiDescontoDoContrato();
+    return !!p && (p.bdiPercentual !== '' || p.descontoPercentual !== '');
+  };
+  /** Reajustes definidos no contrato: aparecem no orçamento somente leitura. */
+  const reajustesBloqueados = () => (padraoBdiDescontoDoContrato()?.reajustes?.length ?? 0) > 0;
+
+  /** Data de criação do orçamento (dd/mm/aaaa): criação no Orçafascio, senão 1º movimento do histórico, senão data de abertura. */
+  const dataCriacaoOrcamentoBr = (): string => {
+    const candidatos = [
+      orcafascioDadosExibicao?.createdAt,
+      meta.historicoMovimentos?.[0]?.em,
+      meta.dataAbertura,
+    ];
+    for (const raw of candidatos) {
+      const v = String(raw ?? '').trim();
+      if (!v) continue;
+      const d = new Date(v);
+      if (!Number.isNaN(d.getTime())) return d.toLocaleDateString('pt-BR');
+      const f = formatDataBr(v);
+      if (f && f !== '—') return f;
+    }
+    return '—';
+  };
 
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
@@ -9125,6 +9178,7 @@ export function OrcamentoPageView({
             ...(padraoContrato.descontoPercentual
               ? { descontoPercentual: padraoContrato.descontoPercentual }
               : {}),
+            ...(padraoContrato.reajustes ? { reajustes: padraoContrato.reajustes } : {}),
           }
         : {}),
       nomeOrcamento: '',
@@ -9493,6 +9547,7 @@ export function OrcamentoPageView({
       ...meta,
       ...(padraoContrato?.bdiPercentual ? { bdiPercentual: padraoContrato.bdiPercentual } : {}),
       ...(padraoContrato?.descontoPercentual ? { descontoPercentual: padraoContrato.descontoPercentual } : {}),
+      ...(padraoContrato?.reajustes ? { reajustes: padraoContrato.reajustes } : {}),
       // Orçamentos importados antes traziam o prefixo automático «Importado do Orçafascio · » na descrição.
       descricao: (meta.descricao || '').replace(/^\s*Importado do Or[çc]afascio\s*(?:·\s*)?/i, ''),
       osCodigo,
@@ -10732,14 +10787,24 @@ export function OrcamentoPageView({
 
       const base = sessaoVazia();
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
+      // BDI, desconto e reajustes do contrato têm prioridade; sem padrão, vale o digitado no modal.
+      const padraoImp = padraoBdiDescontoDoContrato(
+        (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+      );
       const bdiPercentual = percentualInformadoOuFallback(
-        orcafascioImportBdi,
+        padraoImp?.bdiPercentual || orcafascioImportBdi,
         finApi.bdiPercentual
       );
       const descontoPercentual = percentualInformadoOuFallback(
-        orcafascioImportDesconto,
+        padraoImp?.descontoPercentual || orcafascioImportDesconto,
         finApi.descontoPercentual
       );
+      const reajustesImportacao = (padraoImp?.reajustes ?? [])
+        .map((r, idx) => ({
+          nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
+          percentual: (r.percentual || '').trim(),
+        }))
+        .filter((r) => r.percentual);
       const osNumeroPasta = composeOsNumeroPasta(osCodigo, numeroPasta);
       const descricaoServicoOs =
         orcafascioOsDraft.descricaoServicoOs.trim() || nomeOrigem || nomeLista;
@@ -10755,7 +10820,14 @@ export function OrcamentoPageView({
         // BDI e desconto: o que foi digitado no modal; vazio usa o sintético do Orçafascio.
         descontoPercentual,
         bdiPercentual,
-        reajustes: [],
+        reajustes: reajustesImportacao,
+        prazoExecucaoDias: orcafascioMetaExtra.prazoExecucaoDias.trim(),
+        responsavelOrcamento: orcafascioMetaExtra.responsavelOrcamento.trim(),
+        unidade: orcafascioMetaExtra.unidade.trim(),
+        localObra: orcafascioMetaExtra.localObra.trim(),
+        setor: orcafascioMetaExtra.setor.trim(),
+        solicitante: orcafascioMetaExtra.solicitante.trim(),
+        descricaoDetalhada: orcafascioMetaExtra.descricaoDetalhada.trim(),
         importadoPlanilha: true,
         usarMemoriaCalculo,
         modoArredondamento,
@@ -14723,7 +14795,13 @@ export function OrcamentoPageView({
     );
   };
 
-  const montarSheetOrcamentoDetalhado = (): OrcamentoExcelSheetSpec | null => {
+  /**
+   * `vincularMemoria`: na exportação completa a quantidade de cada item puxa o TOTAL da aba «Memória de cálculo»
+   * (busca pelo número do item), mostrando de onde o valor vem.
+   */
+  const montarSheetOrcamentoDetalhado = (
+    opts: { vincularMemoria?: boolean } = {}
+  ): OrcamentoExcelSheetSpec | null => {
     if (subtitulosAdicionados.length === 0 && itensCalculados.length === 0) {
       return null;
     }
@@ -14837,6 +14915,18 @@ export function OrcamentoPageView({
         const qtd = roundTo(row.quantidade, 8);
         const r2 = (n: number) => Math.round(n * 100) / 100;
         const formulas: Record<number, string> = {};
+        if (opts.vincularMemoria) {
+          // PROCV pelo número do item na aba da memória; o TOTAL fica na própria linha do item (coluna K).
+          const idxItem = itensCalculados.findIndex((x) => x.key === row.key);
+          const rotuloMemoria = (
+            rotuloItemComposicaoPorKey.get(row.key) ?? String(idxItem + 1)
+          ).trim();
+          // Referência direta ao TOTAL do item na aba Memória (coluna K); a memória precisa ser montada antes.
+          const idxMemoria = memoriaTotaisRef.current.get(rotuloMemoria);
+          if (idxMemoria != null) {
+            formulas[5] = `'Memória de cálculo'!K${MEMORIA_PRIMEIRA_LINHA_DADOS + idxMemoria}`;
+          }
+        }
         const puSemCalc = mo + mat;
         if (bate(puSemCalc, puSem)) formulas[8] = `G{r}+H{r}`;
         if (bate(puSem * fatorBdi, puCom)) formulas[9] = `I{r}*${fatorBdiTxt}`;
@@ -15096,7 +15186,7 @@ export function OrcamentoPageView({
             rotD('ORÇAMENTO REALIZADO POR', 0, 1),
             val(String(meta.orcamentoRealizadoPor ?? '').trim().toUpperCase(), 2, 3),
             rotD('DATA', 6, 7),
-            val(dataOuVazio(meta.dataAbertura), 8, 13),
+            val(dataCriacaoOrcamentoBr() === '—' ? '' : dataCriacaoOrcamentoBr(), 8, 13),
           ],
           [
             rotD('SOLICITANTE', 0, 1),
@@ -15730,6 +15820,9 @@ export function OrcamentoPageView({
     toast.success('Planilha analítica exportada com sucesso.');
   };
 
+  /** Linha (0-based em `rows`) do TOTAL de cada item na aba Memória, para o Orçamento apontar direto para a célula. */
+  const memoriaTotaisRef = useRef<Map<string, number>>(new Map());
+
   const montarSheetMemoriaCalculo = (): OrcamentoExcelSheetSpec | null => {
     if (itensCalculados.length === 0) return null;
 
@@ -15887,6 +15980,8 @@ export function OrcamentoPageView({
       }
     });
 
+    memoriaTotaisRef.current = new Map(totalPorRotulo);
+
     for (const p of pendentesMemoria) {
       const formula = formulaMemoriaParaExcel(p.raw, letrasMemoria, (rot, lin, campo) => {
         const idx = lin === 'T' ? totalPorRotulo.get(rot) : linhaPorRef.get(`${rot}|${lin}`);
@@ -15943,9 +16038,10 @@ export function OrcamentoPageView({
 
   /** Pacote: Orçamento + Memória de cálculo + Analítico no mesmo .xlsx (a Ficha de demanda tem exportação própria). */
   const exportarOrcamentoCompleto = async () => {
+    const sheetMemoria = montarSheetMemoriaCalculo();
     const sheets = [
-      montarSheetOrcamentoDetalhado(),
-      montarSheetMemoriaCalculo(),
+      montarSheetOrcamentoDetalhado({ vincularMemoria: true }),
+      sheetMemoria,
       montarSheetOrcamentoAnalitico(),
     ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
     if (!sheets.length) {
@@ -16260,9 +16356,10 @@ export function OrcamentoPageView({
         });
       };
 
+      const sheetMemoriaOrc = montarSheetMemoriaCalculo();
       const sheetsOrc = [
-        montarSheetOrcamentoDetalhado(),
-        montarSheetMemoriaCalculo(),
+        montarSheetOrcamentoDetalhado({ vincularMemoria: true }),
+        sheetMemoriaOrc,
         montarSheetOrcamentoAnalitico(),
       ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
       if (sheetsOrc.length) {
@@ -17215,6 +17312,18 @@ export function OrcamentoPageView({
                           <DadosCampo label="Orçamento realizado por">
                             {meta.orcamentoRealizadoPor || '—'}
                           </DadosCampo>
+                          <DadosCampo label="Responsável pelo orçamento">
+                            {meta.responsavelOrcamento || '—'}
+                          </DadosCampo>
+                          <DadosCampo label="Unidade">{meta.unidade || '—'}</DadosCampo>
+                          <DadosCampo label="Local">{meta.localObra || '—'}</DadosCampo>
+                          <DadosCampo label="Setor">{meta.setor || '—'}</DadosCampo>
+                          <DadosCampo label="Solicitante">{meta.solicitante || '—'}</DadosCampo>
+                          {meta.descricaoDetalhada ? (
+                            <DadosCampo label="Descrição detalhada" wide>
+                              {meta.descricaoDetalhada}
+                            </DadosCampo>
+                          ) : null}
                           {orcafascioDadosExibicao?.description ? (
                             <DadosCampo label="Descrição" wide>
                               {orcafascioDadosExibicao.description}
@@ -17228,6 +17337,9 @@ export function OrcamentoPageView({
                           Prazos
                         </p>
                         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                          <DadosCampo label="Prazo estimado">
+                            {meta.prazoExecucaoDias?.trim() ? `${meta.prazoExecucaoDias.trim()} dias` : '—'}
+                          </DadosCampo>
                           <DadosCampo label="Data de início">{formatDataBr(meta.dataAbertura)}</DadosCampo>
                           <DadosCampo label="Data de fim">
                             {formatDataBr(
@@ -21131,6 +21243,99 @@ export function OrcamentoPageView({
                     disabled={isImportandoOrcamento}
                   />
                 </div>
+                {(() => {
+                  const extra = orcafascioMetaExtra;
+                  const patch = (p: Partial<typeof extra>) => setOrcafascioMetaExtra((e) => ({ ...e, ...p }));
+                  const padraoImp = padraoBdiDescontoDoContrato(
+                    (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                  );
+                  const reajustesDoContrato = padraoImp?.reajustes ?? null;
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Prazo estimado (dias)
+                          </label>
+                          <input
+                            value={extra.prazoExecucaoDias}
+                            onChange={(e) => patch({ prazoExecucaoDias: e.target.value })}
+                            className={FORM_FIELD_INPUT_CLS}
+                            placeholder="Ex: 30"
+                            inputMode="numeric"
+                            disabled={isImportandoOrcamento}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Responsável pelo orçamento
+                          </label>
+                          <SingleSelectSearchDropdown
+                            value={extra.responsavelOrcamento}
+                            onChange={(responsavelOrcamento) => patch({ responsavelOrcamento })}
+                            options={employeeSelectOptions}
+                            allowEmpty
+                            disabled={loadingEmployeeOptions || isImportandoOrcamento}
+                            placeholder={loadingEmployeeOptions ? 'Carregando funcionários...' : 'Selecione o responsável'}
+                            searchPlaceholder="Pesquisar..."
+                            emptyOptionsMessage="Nenhum funcionário encontrado"
+                            noFocusRing
+                          />
+                        </div>
+                        {(
+                          [
+                            ['unidade', 'Unidade', 'Ex: Unidade Taguatinga'],
+                            ['localObra', 'Local', 'Ex: 3º andar, sala 303'],
+                            ['setor', 'Setor', 'Ex: Manutenção predial'],
+                            ['solicitante', 'Solicitante', 'Nome de quem solicitou'],
+                          ] as const
+                        ).map(([campo, rotulo, placeholder]) => (
+                          <div key={campo}>
+                            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              {rotulo}
+                            </label>
+                            <input
+                              value={extra[campo]}
+                              onChange={(e) => patch({ [campo]: e.target.value })}
+                              className={FORM_FIELD_INPUT_CLS}
+                              placeholder={placeholder}
+                              disabled={isImportandoOrcamento}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Descrição detalhada
+                        </label>
+                        <input
+                          value={extra.descricaoDetalhada}
+                          onChange={(e) => patch({ descricaoDetalhada: e.target.value })}
+                          className={FORM_FIELD_INPUT_CLS}
+                          placeholder="Descreva o escopo do serviço para o cabeçalho do Excel"
+                          disabled={isImportandoOrcamento}
+                        />
+                      </div>
+                      {reajustesDoContrato && reajustesDoContrato.length > 0 ? (
+                        <div>
+                          <div className="mb-1 flex items-center justify-between">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Reajustes (%)
+                            </label>
+                          </div>
+                          <div className="space-y-2">
+                            {reajustesDoContrato.map((r, idx) => (
+                              <div key={`imp-reajuste-${idx}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
+                                <input value={r.nome} disabled readOnly className={`${FORM_FIELD_INPUT_CLS} disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400`} />
+                                <input value={r.percentual} disabled readOnly className={`${FORM_FIELD_INPUT_CLS} disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400`} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 {orcafascioOsDraft.isAditivo === true ? (
                   <div className="space-y-1">
                     <Checkbox
@@ -21152,12 +21357,24 @@ export function OrcamentoPageView({
                       BDI (%)
                     </label>
                     <input
-                      value={orcafascioImportBdi}
+                      value={
+                        padraoBdiDescontoDoContrato(
+                          (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                        )?.bdiPercentual || orcafascioImportBdi
+                      }
                       onChange={(e) => setOrcafascioImportBdi(e.target.value)}
                       className={FORM_FIELD_INPUT_CLS}
                       placeholder="Ex: 28,35"
                       inputMode="decimal"
-                      disabled={isImportandoOrcamento}
+                      disabled={
+                        isImportandoOrcamento ||
+                        Boolean(
+                          padraoBdiDescontoDoContrato(
+                            (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                          )?.bdiPercentual
+                        )
+                      }
+                      title="Definido no cadastro do contrato, quando existir"
                     />
                   </div>
                   <div>
@@ -21165,12 +21382,24 @@ export function OrcamentoPageView({
                       Desconto (%)
                     </label>
                     <input
-                      value={orcafascioImportDesconto}
+                      value={
+                        padraoBdiDescontoDoContrato(
+                          (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                        )?.descontoPercentual || orcafascioImportDesconto
+                      }
                       onChange={(e) => setOrcafascioImportDesconto(e.target.value)}
                       className={FORM_FIELD_INPUT_CLS}
                       placeholder="Ex: 25,01"
                       inputMode="decimal"
-                      disabled={isImportandoOrcamento}
+                      disabled={
+                        isImportandoOrcamento ||
+                        Boolean(
+                          padraoBdiDescontoDoContrato(
+                            (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                          )?.descontoPercentual
+                        )
+                      }
+                      title="Definido no cadastro do contrato, quando existir"
                     />
                   </div>
                 </div>
@@ -21917,23 +22146,13 @@ export function OrcamentoPageView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de início</label>
-              <DatePickerField
-                value={editarDadosDraft.dataAbertura}
-                onChange={(dataAbertura) => setEditarDadosDraft((p) => ({ ...p, dataAbertura }))}
-                placeholder="dd/mm/aaaa"
-                noFocusRing
-                aria-label="Data de início"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de fim</label>
-              <DatePickerField
-                value={editarDadosDraft.dataEnvio}
-                onChange={(dataEnvio) => setEditarDadosDraft((p) => ({ ...p, dataEnvio }))}
-                placeholder="dd/mm/aaaa"
-                noFocusRing
-                aria-label="Data de fim"
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de criação</label>
+              <input
+                disabled
+                value={dataCriacaoOrcamentoBr()}
+                readOnly
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-sm text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                aria-label="Data de criação"
               />
             </div>
             <div className="sm:col-span-2">
@@ -21972,26 +22191,19 @@ export function OrcamentoPageView({
                 title={bdiDescontoBloqueado() ? 'Definido no cadastro do contrato' : undefined}
               />
             </div>
+            {(editarDadosDraft.reajustes ?? []).length > 0 && (
             <div className="sm:col-span-2">
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reajustes (%)</label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setEditarDadosDraft((p) => ({
-                      ...p,
-                      reajustes: [...(p.reajustes ?? []), { nome: `${(p.reajustes?.length ?? 0) + 1}º reajuste`, percentual: '' }]
-                    }))
-                  }
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  + Adicionar reajuste
-                </button>
               </div>
               <div className="space-y-2">
                 {(editarDadosDraft.reajustes ?? []).map((r, idx) => (
-                  <div key={`edit-reajuste-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1fr_11rem_auto] gap-2">
+                  <div
+                    key={`edit-reajuste-${idx}`}
+                    className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]"
+                  >
                     <input
+                      disabled
                       value={r.nome}
                       onChange={(e) =>
                         setEditarDadosDraft((p) => ({
@@ -21999,10 +22211,11 @@ export function OrcamentoPageView({
                           reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, nome: e.target.value } : rr))
                         }))
                       }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                       placeholder={`Reajuste ${idx + 1}`}
                     />
                     <input
+                      disabled
                       value={r.percentual}
                       onChange={(e) =>
                         setEditarDadosDraft((p) => ({
@@ -22010,25 +22223,14 @@ export function OrcamentoPageView({
                           reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, percentual: e.target.value } : rr))
                         }))
                       }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                       placeholder="%"
                     />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEditarDadosDraft((p) => ({
-                          ...p,
-                          reajustes: (p.reajustes ?? []).filter((_, i) => i !== idx)
-                        }))
-                      }
-                      className="px-3 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-300 hover:bg-red-50/60 dark:hover:bg-red-950/30 text-xs font-medium"
-                    >
-                      Remover
-                    </button>
                   </div>
                 ))}
               </div>
             </div>
+            )}
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição</label>
               <input
@@ -22057,7 +22259,7 @@ export function OrcamentoPageView({
             ))}
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Descrição detalhada (exportação)
+                Descrição detalhada
               </label>
               <input
                 value={editarDadosDraft.descricaoDetalhada ?? ''}
@@ -22308,67 +22510,21 @@ export function OrcamentoPageView({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200/80 bg-white/90 px-4 py-4 dark:border-gray-700 dark:bg-gray-800/60">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reajustes (%)</label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setNovoOrcamentoMetaDraft((p) => ({
-                        ...p,
-                        reajustes: [...(p.reajustes ?? []), { nome: `${(p.reajustes?.length ?? 0) + 1}º reajuste`, percentual: '' }]
-                      }))
-                    }
-                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/60"
-                    disabled={isCreatingOrcamento}
-                  >
-                    + Adicionar reajuste
-                  </button>
+              {(novoOrcamentoMetaDraft.reajustes ?? []).length > 0 && (
+                <div className="rounded-2xl border border-gray-200/80 bg-white/90 px-4 py-4 dark:border-gray-700 dark:bg-gray-800/60">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reajustes (%)</label>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {(novoOrcamentoMetaDraft.reajustes ?? []).map((r, idx) => (
+                      <div key={`new-reajuste-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1fr_11rem] gap-2">
+                        <input value={r.nome} disabled readOnly className={`${FORM_FIELD_INPUT_CLS} disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400`} />
+                        <input value={r.percentual} disabled readOnly className={`${FORM_FIELD_INPUT_CLS} disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400`} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-3 space-y-2">
-                  {(novoOrcamentoMetaDraft.reajustes ?? []).map((r, idx) => (
-                    <div key={`new-reajuste-${idx}`} className="grid grid-cols-1 sm:grid-cols-[1fr_11rem_auto] gap-2">
-                      <input
-                        value={r.nome}
-                        onChange={(e) =>
-                          setNovoOrcamentoMetaDraft((p) => ({
-                            ...p,
-                            reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, nome: e.target.value } : rr))
-                          }))
-                        }
-                        className={FORM_FIELD_INPUT_CLS}
-                        placeholder={`Reajuste ${idx + 1}`}
-                        disabled={isCreatingOrcamento}
-                      />
-                      <input
-                        value={r.percentual}
-                        onChange={(e) =>
-                          setNovoOrcamentoMetaDraft((p) => ({
-                            ...p,
-                            reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, percentual: e.target.value } : rr))
-                          }))
-                        }
-                        className={FORM_FIELD_INPUT_CLS}
-                        placeholder="%"
-                        disabled={isCreatingOrcamento}
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setNovoOrcamentoMetaDraft((p) => ({
-                            ...p,
-                            reajustes: (p.reajustes ?? []).filter((_, i) => i !== idx)
-                          }))
-                        }
-                        className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30"
-                        disabled={isCreatingOrcamento}
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
           )}
 
