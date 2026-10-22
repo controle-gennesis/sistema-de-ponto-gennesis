@@ -151,6 +151,23 @@ export function KanbanLabelColorMapInline({
     [onChange],
   );
 
+  // Campo de código (#RRGGBB): acompanha o mapa e aceita digitação/colagem.
+  const [hexDraft, setHexDraft] = useState(previewHex);
+  const [hexFocused, setHexFocused] = useState(false);
+  useEffect(() => {
+    if (!hexFocused) setHexDraft(previewHex);
+  }, [previewHex, hexFocused]);
+
+  const handleHexInput = (raw: string) => {
+    const digits = raw.replace(/[^0-9a-fA-F]/g, '').slice(0, 6).toUpperCase();
+    setHexDraft(`#${digits}`);
+    if (digits.length === 3 || digits.length === 6) {
+      const hex = expandShortLabelHex(`#${digits}`);
+      const rgb = hexToRgb(hex);
+      if (rgb) applyHsv(rgbToHsv(rgb.r, rgb.g, rgb.b));
+    }
+  };
+
   const bindPlane = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
@@ -246,6 +263,30 @@ export function KanbanLabelColorMapInline({
             left: `${(hsv.h / 360) * 100}%`,
             backgroundColor: hueCss(hsv.h),
           }}
+        />
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 dark:border-gray-600 dark:bg-gray-800">
+        <span
+          className="h-5 w-5 shrink-0 rounded-full border border-black/10 dark:border-white/20"
+          style={{ backgroundColor: previewHex }}
+          aria-hidden
+        />
+        <input
+          type="text"
+          value={hexDraft}
+          onChange={(e) => handleHexInput(e.target.value)}
+          onFocus={(e) => {
+            setHexFocused(true);
+            e.currentTarget.select();
+          }}
+          onBlur={() => setHexFocused(false)}
+          maxLength={7}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Código da cor (hexadecimal)"
+          placeholder="#RRGGBB"
+          className="w-full bg-transparent text-sm font-medium uppercase tracking-wide text-gray-900 placeholder:text-gray-400 focus:outline-none dark:text-gray-100"
         />
       </div>
     </div>

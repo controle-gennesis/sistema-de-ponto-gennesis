@@ -125,6 +125,20 @@ export async function readFuelStoredPhoto(params: {
     if (local) {
       return { buffer: local.buffer, contentType: local.contentType, fileName };
     }
+    // Arquivos gravados por savePersistentUpload: URL `/uploads/{chave}` e a mesma chave no S3
+    // (privado). Sem isso, anexos de Tasks/outros módulos não baixavam em produção.
+    let uploadsKey = '';
+    try {
+      uploadsKey = decodeURIComponent(uploadsPath.replace(/^\/uploads\//, ''));
+    } catch {
+      uploadsKey = '';
+    }
+    if (uploadsKey && !uploadsKey.includes('..')) {
+      const fromS3 = await metaWhatsApp.getObjectBuffer(uploadsKey);
+      if (fromS3) {
+        return { buffer: fromS3.buffer, contentType: fromS3.contentType, fileName };
+      }
+    }
   }
 
   const s3KeyFromUrl = url ? extractS3KeyFromUrl(url) : null;
