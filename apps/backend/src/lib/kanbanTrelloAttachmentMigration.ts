@@ -182,10 +182,27 @@ async function runJob(limit: number | null) {
   }
 }
 
+/** Em produção os arquivos precisam ir para o S3: o disco do servidor é apagado a cada deploy. */
+function storageIsSafeForMigration(): boolean {
+  if (process.env.NODE_ENV !== 'production') return true;
+  return (
+    (process.env.STORAGE_PROVIDER || '').toLowerCase() !== 'local' &&
+    !!process.env.AWS_ACCESS_KEY_ID &&
+    !!process.env.AWS_SECRET_ACCESS_KEY
+  );
+}
+
 export function startTrelloMigration(limit: number | null): { started: boolean; reason?: string } {
   if (state.running) return { started: false, reason: 'A cópia já está em andamento.' };
   if (!trelloCredentials()) {
     return { started: false, reason: 'Configure TRELLO_API_KEY e TRELLO_API_TOKEN no servidor.' };
+  }
+  if (!storageIsSafeForMigration()) {
+    return {
+      started: false,
+      reason:
+        'O armazenamento em produção não está no S3 (STORAGE_PROVIDER=local ou chaves da AWS ausentes). Copiar agora gravaria no disco do servidor, que é apagado a cada deploy.',
+    };
   }
   Object.assign(state, {
     running: true,
