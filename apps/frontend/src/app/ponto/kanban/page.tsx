@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
+import { KanbanTrelloMigrationModal } from '@/components/kanban/KanbanTrelloMigrationModal';
 import { KanbanCardMaterialsViewModal } from '@/components/kanban/KanbanCardMaterialsViewModal';
 import { KanbanCardLabelsPanel } from '@/components/kanban/KanbanCardLabelsPopover';
 import { KanbanLabelColorMapInline } from '@/components/kanban/KanbanLabelColorPicker';
@@ -2902,6 +2903,7 @@ function KanbanPage() {
   }>({ title: 'Etiquetas', showBack: false });
   const [exportingBoard, setExportingBoard] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [trelloMigrationOpen, setTrelloMigrationOpen] = useState(false);
   const [archivedModalOpen, setArchivedModalOpen] = useState(false);
   const [boardToolsOpen, setBoardToolsOpen] = useState(false);
   const boardToolsRef = useRef<HTMLDivElement>(null);
@@ -4305,6 +4307,20 @@ function KanbanPage() {
                           Importar
                         </button>
                         )}
+                        {isAdministrator && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setBoardToolsOpen(false);
+                            setTrelloMigrationOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                        >
+                          <Download className="h-4 w-4 shrink-0 text-gray-500" />
+                          Copiar anexos do Trello
+                        </button>
+                        )}
                         <button
                           type="button"
                           role="menuitem"
@@ -4738,6 +4754,13 @@ function KanbanPage() {
             )}
           </div>
         </Modal>
+      )}
+
+      {isAdministrator && (
+        <KanbanTrelloMigrationModal
+          isOpen={trelloMigrationOpen}
+          onClose={() => setTrelloMigrationOpen(false)}
+        />
       )}
 
       {labelSettingsOpen && board && (

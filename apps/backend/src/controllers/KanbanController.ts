@@ -5,6 +5,11 @@ import { AuthRequest } from '../middleware/auth';
 import { KanbanService, KANBAN_FORBIDDEN } from '../services/KanbanService';
 import { Readable } from 'stream';
 import { readFuelStoredPhoto } from '../lib/fuelPhotoStorage';
+import {
+  getTrelloMigrationStatus,
+  startTrelloMigration,
+  stopTrelloMigration,
+} from '../lib/kanbanTrelloAttachmentMigration';
 
 /** Anexo importado do Trello: o arquivo mora em trello.com e só baixa com a chave/token da API. */
 function isTrelloAttachmentUrl(url: string | null | undefined): boolean {
@@ -792,6 +797,36 @@ export class KanbanController {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Anexo não encontrado') return next(createError(msg, 404));
       handleKanbanError(error, next);
+    }
+  }
+
+  /** Administrador: situação da cópia dos anexos do Trello para o Conecta. */
+  async trelloMigrationStatus(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      res.json({ success: true, data: await getTrelloMigrationStatus() });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async trelloMigrationStart(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const raw = Number(req.body?.limit);
+      const limit = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
+      const result = startTrelloMigration(limit);
+      if (!result.started) return next(createError(result.reason || 'Não foi possível iniciar', 409));
+      res.json({ success: true, data: await getTrelloMigrationStatus() });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async trelloMigrationStop(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      stopTrelloMigration();
+      res.json({ success: true, data: await getTrelloMigrationStatus() });
+    } catch (error) {
+      next(error);
     }
   }
 

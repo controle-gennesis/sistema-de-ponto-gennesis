@@ -831,6 +831,40 @@ export function isKanbanLinkAttachment(mimeType: string): boolean {
  * endereço direto no navegador da pessoa. Arquivos do sistema (S3 privado ou /uploads) passam
  * pelo servidor.
  */
+export type TrelloAttachmentMigrationStatus = {
+  configured: boolean;
+  pending: number;
+  migrated: number;
+  job: {
+    running: boolean;
+    stopRequested: boolean;
+    startedAt: string | null;
+    finishedAt: string | null;
+    processed: number;
+    copied: number;
+    failed: number;
+    bytesCopied: number;
+    limit: number | null;
+    lastError: string | null;
+    failures: Array<{ attachmentId: string; fileName: string; reason: string }>;
+  };
+};
+
+export async function fetchTrelloAttachmentMigration(): Promise<TrelloAttachmentMigrationStatus> {
+  const res = await api.get('/kanban/admin/trello-attachments/status');
+  return res.data.data;
+}
+
+export async function startTrelloAttachmentMigration(limit?: number): Promise<TrelloAttachmentMigrationStatus> {
+  const res = await api.post('/kanban/admin/trello-attachments/start', limit ? { limit } : {});
+  return res.data.data;
+}
+
+export async function stopTrelloAttachmentMigration(): Promise<TrelloAttachmentMigrationStatus> {
+  const res = await api.post('/kanban/admin/trello-attachments/stop');
+  return res.data.data;
+}
+
 /** Arquivo do Trello: o servidor baixa com a chave da empresa (quem usa não precisa de login no Trello). */
 export function isTrelloAttachmentUrl(url: string | null | undefined): boolean {
   try {

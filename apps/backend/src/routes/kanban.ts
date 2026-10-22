@@ -83,6 +83,15 @@ router.post(
 router.post('/cards/:cardId/attachments/link', (req, res, next) =>
   controller.addLinkAttachment(req, res, next),
 );
+router.get('/admin/trello-attachments/status', requireAdministrator, (req, res, next) =>
+  controller.trelloMigrationStatus(req, res, next),
+);
+router.post('/admin/trello-attachments/start', requireAdministrator, (req, res, next) =>
+  controller.trelloMigrationStart(req, res, next),
+);
+router.post('/admin/trello-attachments/stop', requireAdministrator, (req, res, next) =>
+  controller.trelloMigrationStop(req, res, next),
+);
 router.get('/attachments/:id/download', (req, res, next) => controller.downloadAttachment(req, res, next));
 router.delete('/attachments/:id', (req, res, next) => controller.deleteAttachment(req, res, next));
 
