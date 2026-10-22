@@ -10,6 +10,8 @@ export interface CronogramaItemData {
   quantidadeExecutada?: number;
   /** Quantidade usada em cada dia do prazo (`aaaa-mm-dd`). */
   quantidadesPorDia?: Record<string, number>;
+  /** Fórmula digitada na quantidade do dia (`=10+5`); o valor calculado fica em `quantidadesPorDia`. */
+  formulasQuantidadePorDia?: Record<string, string>;
   observacao?: string;
 }
 
@@ -263,6 +265,16 @@ function normalizarQuantidadesPorDia(raw: unknown): Record<string, number> | und
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function normalizarFormulasQuantidadePorDia(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) continue;
+    if (typeof v === 'string' && v.trim().startsWith('=')) out[k] = v.trim();
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function normalizarMapaCronograma(map: Record<string, unknown>): Record<string, CronogramaItemData> {
   const out: Record<string, CronogramaItemData> = {};
   for (const [k, v] of Object.entries(map)) {
@@ -285,6 +297,9 @@ function normalizarMapaCronograma(map: Record<string, unknown>): Record<string, 
           : undefined,
       quantidadesPorDia: normalizarQuantidadesPorDia(
         (v as { quantidadesPorDia?: unknown }).quantidadesPorDia
+      ),
+      formulasQuantidadePorDia: normalizarFormulasQuantidadePorDia(
+        (v as { formulasQuantidadePorDia?: unknown }).formulasQuantidadePorDia
       ),
       observacao: typeof d.observacao === 'string' ? d.observacao : ''
     };
@@ -1018,6 +1033,7 @@ export function resolverDadosCronogramaComposicao(
     percentualExecutado: item.percentualExecutado ?? bloco.percentualExecutado ?? undefined,
     quantidadeExecutada: item.quantidadeExecutada,
     quantidadesPorDia: item.quantidadesPorDia,
+    formulasQuantidadePorDia: item.formulasQuantidadePorDia,
     observacao: item.observacao || bloco.observacao || ''
   };
 }

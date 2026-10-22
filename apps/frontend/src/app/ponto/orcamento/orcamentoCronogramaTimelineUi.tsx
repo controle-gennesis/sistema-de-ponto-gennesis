@@ -17,6 +17,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { Modal } from '@/components/ui/Modal';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { avaliarFormulaMedicao } from './orcamentoMedicaoCalc';
 
 export const TIMELINE_ROW_HEIGHT_PX = 40;
 
@@ -26,6 +27,11 @@ const editorInputCls = `${FORM_FIELD_INPUT_CLS} h-10 shadow-none`;
 const editorTextareaCls = `${FORM_FIELD_TEXTAREA_CLS} shadow-none`;
 
 function parseQuantidadeUsada(raw: string): number | null {
+  // Fórmula estilo Excel (=10+5, =ARRED(7/3;2)): mesmo avaliador da memória de cálculo.
+  if (raw.trim().startsWith('=')) {
+    const n = avaliarFormulaMedicao(raw);
+    return n != null && Number.isFinite(n) && n >= 0 ? n : null;
+  }
   const limpo = raw.trim().replace(/\s/g, '').replace(',', '.');
   if (!limpo) return null;
   const n = Number(limpo);
@@ -71,6 +77,7 @@ export function TimelineEtapaEditor({
   const custo = row.valorTotal ?? 0;
   const medeQuantidade = qtdOrcada > 0;
   const [textosDia, setTextosDia] = useState<Record<string, string>>({});
+  const formulasSalvas = row.dados.formulasQuantidadePorDia;
   const inicioPrazo = parseDataIso(datasReais ? row.dados.dataInicioReal : row.dados.dataInicio);
   const fimPrazo = parseDataIso(datasReais ? row.dados.dataFimReal : row.dados.dataFim);
   const mapaSalvo = row.dados.quantidadesPorDia;
@@ -94,6 +101,7 @@ export function TimelineEtapaEditor({
     setTextosDia((prev) => ({ ...prev, [iso]: raw }));
     if (raw.trim() !== '' && parseQuantidadeUsada(raw) == null) return;
     const mapa: Record<string, number> = { ...(mapaSalvo ?? {}) };
+    const formulas: Record<string, string> = { ...(formulasSalvas ?? {}) };
     if (!temMapa) {
       for (const fatia of legadoPorDia) {
         if (fatia.quantidade > 0) mapa[isoDiaCronograma(fatia.data)] = fatia.quantidade;
@@ -102,10 +110,13 @@ export function TimelineEtapaEditor({
     const n = raw.trim() === '' ? null : parseQuantidadeUsada(raw);
     if (n == null || n === 0) delete mapa[iso];
     else mapa[iso] = n;
+    if (raw.trim().startsWith('=') && n != null) formulas[iso] = raw.trim();
+    else delete formulas[iso];
     const soma = Object.values(mapa).reduce((acc, qtd) => acc + qtd, 0);
     const calc = soma > 0 ? usoDaComposicao(soma, qtdOrcada, custo) : null;
     onPatchDados(row, {
       quantidadesPorDia: Object.keys(mapa).length > 0 ? mapa : undefined,
+      formulasQuantidadePorDia: Object.keys(formulas).length > 0 ? formulas : undefined,
       quantidadeExecutada: soma > 0 ? soma : undefined,
       percentualExecutado: calc ? calc.percentual : undefined
     });
@@ -170,7 +181,20 @@ export function TimelineEtapaEditor({
                         inputMode="decimal"
                         value={texto}
                         onChange={(e) => aplicarQuantidadeDia(iso, e.target.value)}
-                        placeholder="0"
+                        onFocus={() => {
+                          const f = formulasSalvas?.[iso];
+                          if (f && !Object.prototype.hasOwnProperty.call(textosDia, iso)) {
+                            setTextosDia((prev) => ({ ...prev, [iso]: f }));
+                          }
+                        }}
+                        onBlur={() => {
+                          // Sai da edição: mostra o resultado (a fórmula continua salva); fórmula inválida volta ao último valor.
+                          setTextosDia((prev) => {
+                            const { [iso]: _descartado, ...resto } = prev;
+                            return resto;
+                          });
+                        }}
+                        placeholder="0 ou =10+5"
                         className={editorInputCls}
                         aria-label={`Quantidade em ${dia.data.toLocaleDateString('pt-BR')} — ${row.label}`}
                       />
