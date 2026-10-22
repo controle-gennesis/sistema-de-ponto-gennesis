@@ -1449,6 +1449,10 @@ model Contract {
   fuelQuotaParentContractId String?
   /// Cliente do Orçafascio (id do select de cliente). Usado para filtrar orçamentos na importação.
   orcafascioClientId String?
+  /// BDI padrão (%) aplicado aos orçamentos do contrato.
+  defaultBdiPercent Decimal? @db.Decimal(7, 2)
+  /// Desconto padrão (%) aplicado aos orçamentos do contrato.
+  defaultDiscountPercent Decimal? @db.Decimal(7, 2)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

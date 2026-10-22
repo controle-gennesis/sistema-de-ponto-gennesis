@@ -3349,6 +3349,12 @@ type OrcamentoMeta = {
   responsavelOrcamento: string;
   descricao: string;
   orcamentoRealizadoPor: string;
+  /** Campos do cabeçalho da exportação Excel (preenchidos manualmente em «Editar dados»). */
+  unidade?: string;
+  localObra?: string;
+  setor?: string;
+  solicitante?: string;
+  descricaoDetalhada?: string;
   descontoPercentual: string; // ex.: "25,01"
   bdiPercentual: string; // ex.: "28,35"
   reajustes: Array<{ nome: string; percentual: string }>; // percentual em %
@@ -4688,6 +4694,11 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
           descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
           orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+          unidade: typeof metaRaw.unidade === 'string' ? metaRaw.unidade : '',
+          localObra: typeof metaRaw.localObra === 'string' ? metaRaw.localObra : '',
+          setor: typeof metaRaw.setor === 'string' ? metaRaw.setor : '',
+          solicitante: typeof metaRaw.solicitante === 'string' ? metaRaw.solicitante : '',
+          descricaoDetalhada: typeof metaRaw.descricaoDetalhada === 'string' ? metaRaw.descricaoDetalhada : '',
           descontoPercentual:
             typeof metaRaw.descontoPercentual === 'string' ? metaRaw.descontoPercentual : '25,01',
           bdiPercentual: typeof metaRaw.bdiPercentual === 'string' ? metaRaw.bdiPercentual : '28,35',
@@ -5079,6 +5090,11 @@ function parseOrcamentoDetailRaw(d: {
         responsavelOrcamento: typeof metaRaw.responsavelOrcamento === 'string' ? metaRaw.responsavelOrcamento : '',
         descricao: typeof metaRaw.descricao === 'string' ? metaRaw.descricao : '',
         orcamentoRealizadoPor: typeof metaRaw.orcamentoRealizadoPor === 'string' ? metaRaw.orcamentoRealizadoPor : '',
+        unidade: typeof metaRaw.unidade === 'string' ? metaRaw.unidade : '',
+        localObra: typeof metaRaw.localObra === 'string' ? metaRaw.localObra : '',
+        setor: typeof metaRaw.setor === 'string' ? metaRaw.setor : '',
+        solicitante: typeof metaRaw.solicitante === 'string' ? metaRaw.solicitante : '',
+        descricaoDetalhada: typeof metaRaw.descricaoDetalhada === 'string' ? metaRaw.descricaoDetalhada : '',
         descontoPercentual:
           typeof metaRaw.descontoPercentual === 'string' ? metaRaw.descontoPercentual : '25,01',
         bdiPercentual: typeof metaRaw.bdiPercentual === 'string' ? metaRaw.bdiPercentual : '28,35',
@@ -7385,10 +7401,12 @@ function montarNomeArquivoOrcamento(opts: {
   codigo?: string;
   descricao?: string;
   ext: string;
+  /** Omite o prefixo do tipo («Orcamento - ») do nome do arquivo. */
+  semTipo?: boolean;
 }): string {
   const codigo = sanitizarTrechoArquivo(String(opts.codigo || '').replace(/\//g, '-'));
   const descricao = sanitizarTrechoArquivo(opts.descricao || '');
-  const partes = [opts.tipo];
+  const partes = opts.semTipo ? [] : [opts.tipo];
   if (codigo) partes.push(codigo);
   if (descricao && descricao.toLowerCase() !== opts.tipo.toLowerCase()) partes.push(descricao);
   const base = partes.join(' - ').slice(0, 120).trim() || opts.tipo;
@@ -8918,16 +8936,52 @@ export function OrcamentoPageView({
     }
   };
 
+  /** BDI e desconto padrão do contrato (cadastro do contrato; senão, a tabela fixa por nome de contrato). */
+  const padraoBdiDescontoDoContrato = (): { bdiPercentual: string; descontoPercentual: string } | null => {
+    const raw = contractsListData?.data ?? contractsListData;
+    const lista = Array.isArray(raw)
+      ? (raw as Array<{
+          id?: string;
+          costCenterId?: string;
+          defaultBdiPercent?: number | string | null;
+          defaultDiscountPercent?: number | string | null;
+        }>)
+      : [];
+    const contrato =
+      lista.find((c) => c.id && c.id === (meta.linkedContractId || '').trim()) ??
+      lista.find((c) => c.id && c.id === (embeddedContractId || '').trim()) ??
+      lista.find((c) => c.costCenterId && String(c.costCenterId) === String(centroCustoId));
+    const fmt = (v: number | string | null | undefined) => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? String(n).replace('.', ',') : null;
+    };
+    const bdi = fmt(contrato?.defaultBdiPercent);
+    const desconto = fmt(contrato?.defaultDiscountPercent);
+    const fixo = padraoOrcamentoDoContrato(nomeContratoExport());
+    const bdiPercentual = bdi ?? fixo?.bdiPercentual;
+    const descontoPercentual = desconto ?? fixo?.descontoPercentual;
+    if (bdiPercentual == null && descontoPercentual == null) return null;
+    return {
+      bdiPercentual: bdiPercentual ?? '',
+      descontoPercentual: descontoPercentual ?? '',
+    };
+  };
+
+  /** Com padrão do contrato, BDI e desconto vêm de lá e não podem ser alterados no orçamento. */
+  const bdiDescontoBloqueado = () => padraoBdiDescontoDoContrato() !== null;
+
   const criarNovoOrcamento = async () => {
     if (!centroCustoId) return;
-    // BDI e desconto padrão do contrato (ex.: SENAC, Ministério da Cultura), quando cadastrados.
-    const padraoContrato = padraoOrcamentoDoContrato(nomeContratoExport());
+    const padraoContrato = padraoBdiDescontoDoContrato();
     setNovoOrcamentoMetaDraft({
       ...metaNovoOrcamentoPadrao(),
       ...(padraoContrato
         ? {
-            bdiPercentual: padraoContrato.bdiPercentual,
-            descontoPercentual: padraoContrato.descontoPercentual,
+            ...(padraoContrato.bdiPercentual ? { bdiPercentual: padraoContrato.bdiPercentual } : {}),
+            ...(padraoContrato.descontoPercentual
+              ? { descontoPercentual: padraoContrato.descontoPercentual }
+              : {}),
           }
         : {}),
       nomeOrcamento: '',
@@ -9294,8 +9348,13 @@ export function OrcamentoPageView({
       osCodigo = split.osCodigo;
       numeroPasta = split.numeroPasta;
     }
+    const padraoContrato = padraoBdiDescontoDoContrato();
     setEditarDadosDraft({
       ...meta,
+      ...(padraoContrato?.bdiPercentual ? { bdiPercentual: padraoContrato.bdiPercentual } : {}),
+      ...(padraoContrato?.descontoPercentual ? { descontoPercentual: padraoContrato.descontoPercentual } : {}),
+      // Orçamentos importados antes traziam o prefixo automático «Importado do Orçafascio · » na descrição.
+      descricao: (meta.descricao || '').replace(/^\s*Importado do Or[çc]afascio\s*(?:·\s*)?/i, ''),
       osCodigo,
       numeroPasta,
       osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || meta.osNumeroPasta,
@@ -9330,6 +9389,11 @@ export function OrcamentoPageView({
       responsavelOrcamento: editarDadosDraft.responsavelOrcamento.trim(),
       descricao: editarDadosDraft.descricao.trim(),
       orcamentoRealizadoPor: editarDadosDraft.orcamentoRealizadoPor.trim(),
+      unidade: (editarDadosDraft.unidade ?? '').trim(),
+      localObra: (editarDadosDraft.localObra ?? '').trim(),
+      setor: (editarDadosDraft.setor ?? '').trim(),
+      solicitante: (editarDadosDraft.solicitante ?? '').trim(),
+      descricaoDetalhada: (editarDadosDraft.descricaoDetalhada ?? '').trim(),
       descontoPercentual: editarDadosDraft.descontoPercentual.trim(),
       bdiPercentual: editarDadosDraft.bdiPercentual.trim(),
       modoArredondamento: editarDadosDraft.modoArredondamento ?? 'arredondar',
@@ -10542,7 +10606,7 @@ export function OrcamentoPageView({
       let meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
-        descricao: `Importado do Orçafascio${codigoOrigem ? ` · ${codigoOrigem}` : ''}: ${nomeOrigem}.`,
+        descricao: `${codigoOrigem ? `${codigoOrigem}: ` : ''}${nomeOrigem}`,
         osCodigo,
         numeroPasta,
         osNumeroPasta,
@@ -14764,7 +14828,15 @@ export function OrcamentoPageView({
     const moedaBr = (v: number) =>
       arredondarMoeda2(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const dataOuVazio = (s: string) => (s?.trim() ? formatDataBr(s) : '');
-    const prazoDias = String(meta.prazoExecucaoDias ?? '').trim();
+    // Sem prazo informado, usa o intervalo entre a data de início e a data de fim.
+    const prazoDias = (() => {
+      const informado = String(meta.prazoExecucaoDias ?? '').trim();
+      if (informado) return informado;
+      const ini = Date.parse(`${meta.dataAbertura || ''}T00:00:00`);
+      const fim = Date.parse(`${meta.dataEnvio || ''}T00:00:00`);
+      if (Number.isNaN(ini) || Number.isNaN(fim) || fim < ini) return '';
+      return String(Math.round((fim - ini) / 86400000));
+    })();
     const rot = (texto: string, de: number, ate: number): OrcamentoExcelCabecalhoCelula => ({
       texto,
       de,
@@ -14854,19 +14926,19 @@ export function OrcamentoPageView({
               3
             ),
             rotD('UNIDADE', 6, 7),
-            val('', 8, 13),
+            val(String(meta.unidade ?? '').trim().toUpperCase(), 8, 13),
           ],
           [
             rotD('Nº DA OS', 0, 1),
             val(String(meta.osNumeroPasta ?? '').trim(), 2, 3),
             rotD('LOCAL', 6, 7),
-            val('', 8, 13),
+            val(String(meta.localObra ?? '').trim().toUpperCase(), 8, 13),
           ],
           [
             rotD('SERVIÇO', 0, 1),
             val(servicoCab.toUpperCase(), 2, 3),
             rotD('SETOR', 6, 7),
-            val('', 8, 13),
+            val(String(meta.setor ?? '').trim().toUpperCase(), 8, 13),
           ],
           [
             rotD('REVISÃO', 0, 1),
@@ -14888,9 +14960,9 @@ export function OrcamentoPageView({
           ],
           [
             rotD('SOLICITANTE', 0, 1),
-            val('', 2, 3),
+            val(String(meta.solicitante ?? '').trim().toUpperCase(), 2, 3),
             rotD('DESCRIÇÃO', 6, 7),
-            val('', 8, 13),
+            val(String(meta.descricaoDetalhada ?? '').trim().toUpperCase(), 8, 13),
           ],
           // Linha 15: respiro. Linha 16: barra do orçamento.
           [],
@@ -15236,6 +15308,7 @@ export function OrcamentoPageView({
   const nomeArquivoExportOrcamento = (tipo: string, ext: 'xlsx' | 'pdf') =>
     montarNomeArquivoOrcamento({
       tipo,
+      semTipo: /^orcamento/i.test(tipo),
       codigo: codigoOrcamentoAtivo,
       descricao: nomeOrcamentoSemCodigo || nomeContratoExport(),
       ext,
@@ -21519,11 +21592,12 @@ export function OrcamentoPageView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Prazo de execução (dias)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Prazo estimado (dias)</label>
               <input
                 value={editarDadosDraft.prazoExecucaoDias}
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, prazoExecucaoDias: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                placeholder="Ex: 30"
                 inputMode="numeric"
               />
             </div>
@@ -21561,21 +21635,15 @@ export function OrcamentoPageView({
                 noFocusRing
               />
             </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Orçamento realizado por</label>
-              <input
-                value={editarDadosDraft.orcamentoRealizadoPor}
-                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, orcamentoRealizadoPor: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Desconto (%)</label>
               <input
                 value={editarDadosDraft.descontoPercentual}
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, descontoPercentual: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                 placeholder="Ex: 25,01"
+                disabled={bdiDescontoBloqueado()}
+                title={bdiDescontoBloqueado() ? 'Definido no cadastro do contrato' : undefined}
               />
             </div>
             <div>
@@ -21583,8 +21651,10 @@ export function OrcamentoPageView({
               <input
                 value={editarDadosDraft.bdiPercentual}
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                 placeholder="Ex: 28,35"
+                disabled={bdiDescontoBloqueado()}
+                title={bdiDescontoBloqueado() ? 'Definido no cadastro do contrato' : undefined}
               />
             </div>
             <div className="sm:col-span-2">
@@ -21649,6 +21719,35 @@ export function OrcamentoPageView({
               <input
                 value={editarDadosDraft.descricao}
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, descricao: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+              />
+            </div>
+            {(
+              [
+                ['unidade', 'Unidade', 'Ex: Unidade Taguatinga'],
+                ['localObra', 'Local', 'Ex: 3º andar, sala 303'],
+                ['setor', 'Setor', 'Ex: Manutenção predial'],
+                ['solicitante', 'Solicitante', 'Nome de quem solicitou'],
+              ] as const
+            ).map(([campo, rotulo, placeholder]) => (
+              <div key={campo}>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{rotulo}</label>
+                <input
+                  value={editarDadosDraft[campo] ?? ''}
+                  onChange={(e) => setEditarDadosDraft((p) => ({ ...p, [campo]: e.target.value }))}
+                  placeholder={placeholder}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                />
+              </div>
+            ))}
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Descrição detalhada (exportação)
+              </label>
+              <input
+                value={editarDadosDraft.descricaoDetalhada ?? ''}
+                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, descricaoDetalhada: e.target.value }))}
+                placeholder="Descreva o escopo do serviço para o cabeçalho do Excel"
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
               />
             </div>
@@ -21813,7 +21912,7 @@ export function OrcamentoPageView({
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Prazo de execução (dias)</label>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Prazo estimado (dias)</label>
                 <input
                   value={novoOrcamentoMetaDraft.prazoExecucaoDias}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, prazoExecucaoDias: e.target.value }))}

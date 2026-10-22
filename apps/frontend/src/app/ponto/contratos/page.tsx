@@ -68,6 +68,8 @@ interface Contract {
   valuePlusAddenda: number;
   allowBillingImportWithoutOsPleito?: boolean;
   orcafascioClientId?: string | null;
+  defaultBdiPercent?: number | string | null;
+  defaultDiscountPercent?: number | string | null;
 }
 
 type ContractPermissionUser = {
@@ -223,6 +225,23 @@ function ContractAccessCheckbox({
   );
 }
 
+
+/** Percentual vindo da API (número ou "10.00") para o campo do formulário ("10", "28,35"). */
+function formatPercentInput(v: number | string | null | undefined): string {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '';
+  return String(n).replace('.', ',');
+}
+
+/** '' → null (sem padrão); inválido → NaN. */
+function parsePercentField(v: string): number | null {
+  const t = String(v ?? '').trim().replace(',', '.');
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
+}
+
 export default function ContratosPage() {
   const router = useRouter();
   const {
@@ -254,6 +273,8 @@ export default function ContratosPage() {
     valuePlusAddenda: '',
     allowBillingImportWithoutOsPleito: false,
     orcafascioClientId: '',
+    defaultBdiPercent: '',
+    defaultDiscountPercent: '',
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [permissionsContract, setPermissionsContract] = useState<Contract | null>(null);
@@ -430,6 +451,8 @@ export default function ContratosPage() {
       valuePlusAddenda: '',
       allowBillingImportWithoutOsPleito: false,
       orcafascioClientId: '',
+      defaultBdiPercent: '',
+      defaultDiscountPercent: '',
     });
     setEditingContract(null);
   };
@@ -452,6 +475,8 @@ export default function ContratosPage() {
         contract.orcafascioClientId?.trim() ||
         resolveOrcafascioClientIdForContractName(contract.name) ||
         '',
+      defaultBdiPercent: formatPercentInput(contract.defaultBdiPercent),
+      defaultDiscountPercent: formatPercentInput(contract.defaultDiscountPercent),
     });
     setShowForm(true);
   };
@@ -500,6 +525,13 @@ export default function ContratosPage() {
       return;
     }
 
+    const bdiPadrao = parsePercentField(formData.defaultBdiPercent);
+    const descontoPadrao = parsePercentField(formData.defaultDiscountPercent);
+    if (Number.isNaN(bdiPadrao) || Number.isNaN(descontoPadrao)) {
+      toast.error('BDI e desconto padrão devem ser percentuais válidos (ex.: 28,35).');
+      return;
+    }
+
     const payload = {
       name: formData.name.trim(),
       number: formData.number.trim(),
@@ -509,6 +541,8 @@ export default function ContratosPage() {
       valuePlusAddenda: parsedValue,
       allowBillingImportWithoutOsPleito: Boolean(formData.allowBillingImportWithoutOsPleito),
       orcafascioClientId,
+      defaultBdiPercent: bdiPadrao,
+      defaultDiscountPercent: descontoPadrao,
     };
 
     if (editingContract) {
@@ -1290,6 +1324,35 @@ function ContractFormModal({
                   Clientes já conhecidos preenchem este código sozinhos. Para um cliente novo, cole o código do Orçafascio.
                 </p>
               </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  BDI padrão (%)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={formData.defaultBdiPercent}
+                  onChange={(e) => setFormData({ ...formData, defaultBdiPercent: e.target.value })}
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Ex: 28,35"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Desconto padrão (%)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={formData.defaultDiscountPercent}
+                  onChange={(e) => setFormData({ ...formData, defaultDiscountPercent: e.target.value })}
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Ex: 25,01"
+                />
+              </div>
+              <p className="md:col-span-2 -mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Usados automaticamente nos orçamentos deste contrato.
+              </p>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Valor mais Aditivos *

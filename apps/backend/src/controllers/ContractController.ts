@@ -29,6 +29,18 @@ import { resolveOrcafascioClientIdForContractName } from '../lib/orcafascioClien
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
 
+/** Percentual (0–100) vindo do formulário; vazio/ inválido = sem padrão (null). Aceita vírgula decimal. */
+function parsePercentInput(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return null;
+  const txt = String(raw).trim().replace(',', '.');
+  if (!txt) return null;
+  const n = Number(txt);
+  if (!Number.isFinite(n) || n < 0 || n > 1000) {
+    throw createError('Percentual inválido (BDI/desconto)', 400);
+  }
+  return Math.round(n * 100) / 100;
+}
+
 function parseOrcafascioClientId(raw: unknown): string | null {
   const value = String(raw ?? '').trim();
   if (!value) return null;
@@ -309,6 +321,8 @@ export class ContractController {
         valuePlusAddenda,
         allowBillingImportWithoutOsPleito,
         orcafascioClientId,
+        defaultBdiPercent,
+        defaultDiscountPercent,
       } = req.body;
 
       if (!name?.trim()) {
@@ -368,6 +382,8 @@ export class ContractController {
             orcafascioClientId:
               parseOrcafascioClientId(orcafascioClientId) ||
               resolveOrcafascioClientIdForContractName(name),
+            defaultBdiPercent: parsePercentInput(defaultBdiPercent),
+            defaultDiscountPercent: parsePercentInput(defaultDiscountPercent),
           },
           include: {
             costCenter: {
@@ -430,6 +446,8 @@ export class ContractController {
         valuePlusAddenda,
         allowBillingImportWithoutOsPleito,
         orcafascioClientId,
+        defaultBdiPercent,
+        defaultDiscountPercent,
       } = req.body;
 
       const existing = await prisma.contract.findUnique({
@@ -473,6 +491,12 @@ export class ContractController {
         const contractName = name !== undefined ? String(name).trim() : existing.name;
         updateData.orcafascioClientId =
           typed || resolveOrcafascioClientIdForContractName(contractName);
+      }
+      if (defaultBdiPercent !== undefined) {
+        updateData.defaultBdiPercent = parsePercentInput(defaultBdiPercent);
+      }
+      if (defaultDiscountPercent !== undefined) {
+        updateData.defaultDiscountPercent = parsePercentInput(defaultDiscountPercent);
       }
 
       if (updateData.endDate && updateData.startDate && updateData.endDate < updateData.startDate) {
