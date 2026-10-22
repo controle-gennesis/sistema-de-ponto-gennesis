@@ -691,6 +691,14 @@ export function KanbanCardModal({
     }
   }, [card, cardId, columnId, completeCheckDisabled, syncCardFromApi]);
 
+  const activityRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (activityRefreshTimerRef.current) clearTimeout(activityRefreshTimerRef.current);
+    },
+    [],
+  );
+
   const syncChecklistFromApi = useCallback(
     (detail: KanbanCardDetail) => {
       const local = cardId
@@ -705,10 +713,11 @@ export function KanbanCardModal({
         ) ?? [];
       const base: KanbanCardDetail = {
         ...detail,
-        // Respostas leves de checklist não trazem comentários/anexos — preserva o cache.
-        commentsList: detail.commentsList ?? local?.commentsList ?? [],
-        attachmentsList: detail.attachmentsList ?? local?.attachmentsList ?? [],
-        activitiesList: detail.activitiesList ?? local?.activitiesList ?? [],
+        // Respostas leves de checklist vêm com comentários/anexos VAZIOS (não são o dado real):
+        // o que já está na tela tem prioridade, senão os anexos somem ao marcar uma tarefa.
+        commentsList: local?.commentsList ?? detail.commentsList ?? [],
+        attachmentsList: local?.attachmentsList ?? detail.attachmentsList ?? [],
+        activitiesList: local?.activitiesList ?? detail.activitiesList ?? [],
       };
       const merged: KanbanCardDetail =
         pendingOptimistic.length === 0
@@ -729,6 +738,21 @@ export function KanbanCardModal({
             })();
       applyCardDetail(merged);
       patchBoardCard(merged);
+
+      // Atualiza só o histórico de atividades (a ação acabou de ser registrada no servidor),
+      // sem mexer no resto do card. Agrupa cliques seguidos num único pedido.
+      if (cardId) {
+        if (activityRefreshTimerRef.current) clearTimeout(activityRefreshTimerRef.current);
+        activityRefreshTimerRef.current = setTimeout(() => {
+          void fetchKanbanCard(cardId)
+            .then((full) => {
+              queryClient.setQueryData<KanbanCardDetail>(kanbanCardQueryKey(cardId), (old) =>
+                old ? { ...old, activitiesList: full.activitiesList ?? old.activitiesList } : old,
+              );
+            })
+            .catch(() => undefined);
+        }, 700);
+      }
     },
     [applyCardDetail, cardId, patchBoardCard, queryClient],
   );
