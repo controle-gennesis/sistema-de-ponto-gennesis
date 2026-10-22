@@ -14831,10 +14831,11 @@ export function OrcamentoPageView({
           [],
           // Linhas 2–6: logo (A–B) + dados do orçamento (C–D); caixa «Bancos» à direita (G–N).
           [
-            { texto: '', de: 0, ate: 1, linhasAbaixo: 4, espacoLogo: true },
+            { texto: '', de: 0, ate: 1, linhasAbaixo: 5, espacoLogo: true },
             rotD('CONTRATADA', 2, 2),
             val(EXPORT_COMPANY.toUpperCase() + '.', 3, 3),
           ],
+          [rotD('Nº DO CONTRATO', 2, 2), val(numeroContratoCab.toUpperCase(), 3, 3)],
           [rotD('ENCARGOS SOCIAIS', 2, 2), val(encargosTexto, 3, 3)],
           [rotD('BDI', 2, 2), val(pctTextoCab(rf.bdiPct), 3, 3)],
           [rotD('DESCONTO', 2, 2), val(pctTextoCab(rf.descontoPct), 3, 3)],
@@ -14895,12 +14896,12 @@ export function OrcamentoPageView({
           [],
           [{ texto: 'ORÇAMENTO', de: 0, ate: 15, estilo: 'barra' }],
         ],
-        alturas: [14, 26, 26, 26, 26, 26, 8, 24, 24, 30, 24, 30, 30, 24, 8, 22],
+        alturas: [14, 26, 26, 26, 26, 26, 26, 8, 24, 24, 30, 24, 30, 30, 24, 8, 22],
         molduras: [
-          { linhaDe: 2, linhaAte: 6, colDe: 0, colAte: 3 },
-          { linhaDe: 2, linhaAte: 6, colDe: 6, colAte: 13 },
-          { linhaDe: 8, linhaAte: 14, colDe: 0, colAte: 3 },
-          { linhaDe: 8, linhaAte: 14, colDe: 6, colAte: 13 },
+          { linhaDe: 2, linhaAte: 7, colDe: 0, colAte: 3 },
+          { linhaDe: 2, linhaAte: 7, colDe: 6, colAte: 13 },
+          { linhaDe: 9, linhaAte: 15, colDe: 0, colAte: 3 },
+          { linhaDe: 9, linhaAte: 15, colDe: 6, colAte: 13 },
         ],
       },
       autoFilter: false,
@@ -14924,7 +14925,7 @@ export function OrcamentoPageView({
               })();
         const texto = textoBancosReferencia(bancos);
         // Caixa dentro da largura da tabela (G–N), nas linhas 2–6, ao lado do bloco da contratada.
-        return texto ? { titulo: 'Bancos', texto, colDe: 6, colAte: 13, linhaDe: 2, linhasTexto: 4 } : undefined;
+        return texto ? { titulo: 'Bancos', texto, colDe: 6, colAte: 13, linhaDe: 2, linhasTexto: 5 } : undefined;
       })(),
       columns: [
         { header: 'ITEM', width: 15, align: 'center', larguraFixa: true },
