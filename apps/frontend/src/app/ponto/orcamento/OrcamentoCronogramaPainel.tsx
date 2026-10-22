@@ -195,7 +195,7 @@ function paddingServicoColCls(indentLevel: 0 | 1 | 2 = 0): string {
 
 function ComposicaoResumoNomeCell({ nome }: { nome: string }) {
   return (
-    <div className="min-w-0 whitespace-normal break-words text-left text-sm font-normal leading-snug text-gray-900 dark:text-gray-100">
+    <div className="min-w-0 whitespace-normal break-words text-left text-sm font-normal uppercase leading-snug text-gray-900 dark:text-gray-100">
       {nome}
     </div>
   );
