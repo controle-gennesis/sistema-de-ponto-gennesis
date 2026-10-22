@@ -108,6 +108,7 @@ model User {
   kanbanCardsAssigned                       KanbanCard[]                         @relation("KanbanCardAssignee")
   kanbanCardMemberships                     KanbanCardMember[]                   @relation("KanbanCardMemberUser")
   kanbanCardComments                        KanbanCardComment[]                  @relation("KanbanCardCommentAuthor")
+  kanbanCardActivities                      KanbanCardActivity[]                 @relation("KanbanCardActivityUser")
   kanbanCardAttachments                     KanbanCardAttachment[]               @relation("KanbanCardAttachmentUploader")
   kanbanChecklistAssigned                   KanbanChecklistItem[]                @relation("KanbanChecklistAssignee")
   plannerEvents                             PlannerEvent[]                       @relation("PlannerEventOwner")
@@ -3521,6 +3522,7 @@ model KanbanCard {
   comments       KanbanCardComment[]
   attachments    KanbanCardAttachment[]
   materials      KanbanCardMaterial[]
+  activities     KanbanCardActivity[]
 
   @@index([columnId])
   @@index([assigneeUserId])
@@ -3703,6 +3705,24 @@ model KanbanChecklistItem {
   @@index([cardId])
   @@index([assigneeUserId])
   @@map("kanban_checklist_items")
+}
+
+/// Histórico de ações no card (mover, concluir, arquivar, editar, anexos...), estilo Trello.
+model KanbanCardActivity {
+  id        String   @id @default(cuid())
+  cardId    String
+  userId    String?
+  /// MOVED, COMPLETED, REOPENED, ARCHIVED, RESTORED, TITLE_CHANGED, ...
+  type      String
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  card KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User?      @relation("KanbanCardActivityUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([cardId, createdAt])
+  @@index([userId])
+  @@map("kanban_card_activities")
 }
 
 model KanbanCardComment {

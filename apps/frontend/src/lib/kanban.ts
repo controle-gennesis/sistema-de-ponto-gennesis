@@ -201,9 +201,15 @@ export async function exportKanbanBoardTrello(departmentKey?: string): Promise<{
 }
 
 export type KanbanTrelloImportResult = {
-  columnsCreated: number;
-  cardsCreated: number;
+  columnsCreated?: number;
+  cardsCreated?: number;
   boardName: string;
+  /** Só no modo "acrescentar o que falta". */
+  cardsMatched?: number;
+  cardsAmbiguous?: number;
+  cardsUnmatched?: number;
+  commentsAdded?: number;
+  attachmentsAdded?: number;
 };
 
 /** Importa JSON estilo Trello no quadro atual. */
@@ -211,6 +217,8 @@ export async function importKanbanBoardTrello(options: {
   board: unknown;
   departmentKey?: string;
   replace?: boolean;
+  /** Só acrescenta comentários/anexos que faltam nos cards existentes (não apaga nada). */
+  appendMissing?: boolean;
   memberMap?: Record<string, string>;
 }): Promise<KanbanTrelloImportResult> {
   // Quadros grandes do Trello passam fácil de 30s (timeout padrão do axios).
@@ -221,6 +229,7 @@ export async function importKanbanBoardTrello(options: {
       board: options.board,
       departmentKey: options.departmentKey,
       replace: !!options.replace,
+      appendMissing: !!options.appendMissing,
       memberMap: options.memberMap,
     },
     { timeout: 10 * 60 * 1000 },
@@ -458,6 +467,7 @@ export function kanbanDetailToBoardCard(detail: KanbanCardDetail): KanbanCard {
     columnColor: _columnColor,
     commentsList: _commentsList,
     attachmentsList: _attachmentsList,
+    activitiesList: _activitiesList,
     updatedAt: _updatedAt,
     ...card
   } = detail;
@@ -837,6 +847,20 @@ export interface KanbanCardComment {
   };
 }
 
+/** Ação registrada no histórico do card (mover, concluir, arquivar, editar...). */
+export interface KanbanCardActivity {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    profilePhotoUrl: string | null;
+    avatarColor: string;
+  } | null;
+}
+
 export interface KanbanCardDetail extends KanbanCard {
   columnId: string;
   columnTitle: string;
@@ -845,6 +869,7 @@ export interface KanbanCardDetail extends KanbanCard {
   checklistItems: KanbanChecklistItem[];
   commentsList: KanbanCardComment[];
   attachmentsList: KanbanCardAttachment[];
+  activitiesList?: KanbanCardActivity[];
 }
 
 export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDetail {
@@ -852,6 +877,7 @@ export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDet
     ...data,
     commentsList: data.commentsList ?? [],
     attachmentsList: data.attachmentsList ?? [],
+    activitiesList: data.activitiesList ?? [],
     checklistItems: (data.checklistItems ?? []).map((item) => ({
       ...item,
       dueDate: item.dueDate ?? null,

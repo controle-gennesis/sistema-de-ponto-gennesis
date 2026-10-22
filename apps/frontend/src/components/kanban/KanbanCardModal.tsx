@@ -57,6 +57,7 @@ import {
   createKanbanComment,
   deleteKanbanComment,
   type KanbanChecklistItem,
+  type KanbanCardActivity,
 } from '@/lib/kanban';
 import { KanbanCardCostModal } from './KanbanCardCostModal';
 import { KanbanCardMaterialsModal } from './KanbanCardMaterialsModal';
@@ -156,11 +157,147 @@ type CardTimelineItem =
       id: string;
       createdAt: string;
       text: string;
-      icon: 'created' | 'attachment';
+      icon: ActivityIconKind;
+      /** Quem fez a ação (nome em destaque antes do texto). */
+      actor?: string;
+      actorUser?: {
+        id: string;
+        name: string;
+        profilePhotoUrl: string | null;
+        avatarColor: string;
+      } | null;
     };
+
+type ActivityIconKind =
+  | 'created'
+  | 'attachment'
+  | 'move'
+  | 'check'
+  | 'archive'
+  | 'edit'
+  | 'member'
+  | 'label'
+  | 'trash';
+
+const ACTIVITY_PRIORITY_LABEL: Record<string, string> = {
+  LOW: 'Baixa',
+  MEDIUM: 'Média',
+  HIGH: 'Alta',
+  CRITICAL: 'Crítica',
+};
+
+function activityDay(value: unknown): string {
+  const raw = typeof value === 'string' ? value : '';
+  const [y, m, d] = raw.slice(0, 10).split('-');
+  return y && m && d ? `${d}/${m}/${y}` : '';
+}
+
+/** Texto (sem o nome de quem fez) e ícone de cada tipo de atividade registrada no card. */
+function describeCardActivity(a: KanbanCardActivity): { text: string; icon: ActivityIconKind } {
+  const d = a.data ?? {};
+  const str = (key: string) => (typeof d[key] === 'string' ? (d[key] as string) : '');
+  const isSelf = !!a.user && str('userId') === a.user.id;
+  switch (a.type) {
+    case 'MOVED':
+      return {
+        text: `moveu este cartão de ${str('fromColumn') || '—'} para ${str('toColumn') || '—'}`,
+        icon: 'move',
+      };
+    case 'COMPLETED':
+      return { text: 'marcou este cartão como concluído', icon: 'check' };
+    case 'REOPENED':
+      return { text: 'reabriu este cartão', icon: 'check' };
+    case 'ARCHIVED':
+      return { text: 'arquivou este cartão', icon: 'archive' };
+    case 'RESTORED':
+      return { text: 'restaurou este cartão', icon: 'archive' };
+    case 'TITLE_CHANGED':
+      return {
+        text: `alterou o título de “${str('from')}” para “${str('to')}”`,
+        icon: 'edit',
+      };
+    case 'DESCRIPTION_CHANGED':
+      return { text: 'alterou a descrição deste cartão', icon: 'edit' };
+    case 'PRIORITY_CHANGED':
+      return {
+        text: `alterou a prioridade de ${ACTIVITY_PRIORITY_LABEL[str('from')] ?? str('from')} para ${
+          ACTIVITY_PRIORITY_LABEL[str('to')] ?? str('to')
+        }`,
+        icon: 'edit',
+      };
+    case 'DATES_CHANGED': {
+      const parts: string[] = [];
+      if ('startTo' in d) {
+        const v = activityDay(d.startTo);
+        parts.push(v ? `definiu a data de início para ${v}` : 'removeu a data de início');
+      }
+      if ('dueTo' in d) {
+        const v = activityDay(d.dueTo);
+        parts.push(v ? `definiu o prazo para ${v}` : 'removeu o prazo');
+      }
+      return { text: parts.join(' e ') || 'alterou as datas do cartão', icon: 'edit' };
+    }
+    case 'LABELS_CHANGED': {
+      const added = Array.isArray(d.added) ? (d.added as string[]) : [];
+      const removed = Array.isArray(d.removed) ? (d.removed as string[]) : [];
+      const parts: string[] = [];
+      if (added.length) parts.push(`adicionou ${added.length > 1 ? 'as etiquetas' : 'a etiqueta'} ${added.map((n) => `“${n}”`).join(', ')}`);
+      if (removed.length) parts.push(`removeu ${removed.length > 1 ? 'as etiquetas' : 'a etiqueta'} ${removed.map((n) => `“${n}”`).join(', ')}`);
+      return { text: parts.join(' e ') || 'alterou as etiquetas', icon: 'label' };
+    }
+    case 'MEMBER_ADDED':
+      return {
+        text: isSelf ? 'entrou neste cartão' : `adicionou ${str('name') || 'alguém'} a este cartão`,
+        icon: 'member',
+      };
+    case 'MEMBER_REMOVED':
+      return {
+        text: isSelf ? 'saiu deste cartão' : `removeu ${str('name') || 'alguém'} deste cartão`,
+        icon: 'member',
+      };
+    case 'CHECKLIST_ADDED':
+      return { text: `adicionou a tarefa “${str('title')}”`, icon: 'check' };
+    case 'CHECKLIST_DONE':
+      return {
+        text: d.isDone ? `concluiu a tarefa “${str('title')}”` : `reabriu a tarefa “${str('title')}”`,
+        icon: 'check',
+      };
+    case 'CHECKLIST_REMOVED':
+      return { text: `removeu a tarefa “${str('title')}”`, icon: 'trash' };
+    case 'ATTACHMENT_REMOVED':
+      return {
+        text: d.isLink ? `removeu o link “${str('fileName')}”` : `excluiu o anexo “${str('fileName')}”`,
+        icon: 'trash',
+      };
+    case 'MATERIALS_CHANGED': {
+      const names = Array.isArray(d.names) ? (d.names as string[]) : [];
+      return {
+        text: `adicionou ${names.length > 1 ? 'os materiais' : 'o material'} ${names.join(', ')}`,
+        icon: 'attachment',
+      };
+    }
+    case 'MATERIAL_REMOVED':
+      return { text: `removeu o material “${str('name')}”`, icon: 'trash' };
+    default:
+      return { text: 'fez uma alteração neste cartão', icon: 'edit' };
+  }
+}
 
 function buildCardTimeline(card: KanbanCardDetail): CardTimelineItem[] {
   const items: CardTimelineItem[] = [];
+
+  for (const activity of card.activitiesList ?? []) {
+    const { text, icon } = describeCardActivity(activity);
+    items.push({
+      kind: 'activity',
+      id: `activity-${activity.id}`,
+      createdAt: activity.createdAt,
+      text,
+      icon,
+      actor: activity.user?.name?.trim() || 'Alguém',
+      actorUser: activity.user,
+    });
+  }
 
   if (card.createdAt) {
     items.push({
@@ -571,6 +708,7 @@ export function KanbanCardModal({
         // Respostas leves de checklist não trazem comentários/anexos — preserva o cache.
         commentsList: detail.commentsList ?? local?.commentsList ?? [],
         attachmentsList: detail.attachmentsList ?? local?.attachmentsList ?? [],
+        activitiesList: detail.activitiesList ?? local?.activitiesList ?? [],
       };
       const merged: KanbanCardDetail =
         pendingOptimistic.length === 0
@@ -1334,6 +1472,7 @@ export function KanbanCardModal({
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
+  const [showActivityDetails, setShowActivityDetails] = useState(true);
   const timeline = useMemo(
     () => (card ? buildCardTimeline(card) : []),
     [card],
@@ -2212,9 +2351,18 @@ export function KanbanCardModal({
                 : undefined
             }
           >
-            <h4 className="mb-3 shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">
-              Comentários
-            </h4>
+            <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Comentários e atividade
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowActivityDetails((v) => !v)}
+                className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                {showActivityDetails ? 'Ocultar detalhes' : 'Mostrar detalhes'}
+              </button>
+            </div>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
@@ -2226,6 +2374,7 @@ export function KanbanCardModal({
                     <div className="space-y-4 pb-2">
                     {timeline.map((item) => {
                       if (item.kind === 'activity') {
+                        if (!showActivityDetails) return null;
                         const ActivityIcon =
                           item.icon === 'attachment' ? Paperclip : Sparkles;
                         return (
@@ -2233,11 +2382,27 @@ export function KanbanCardModal({
                             key={item.id}
                             className="flex items-start gap-2.5 rounded-lg px-1.5 py-1.5"
                           >
-                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                              <ActivityIcon className="h-3.5 w-3.5" />
-                            </span>
+                            {item.actorUser ? (
+                              <KanbanUserAvatar
+                                name={item.actorUser.name}
+                                profilePhotoUrl={item.actorUser.profilePhotoUrl}
+                                colorKey={item.actorUser.id}
+                                colorClass={item.actorUser.avatarColor}
+                                size="sm"
+                                className="!h-8 !w-8 shrink-0"
+                              />
+                            ) : (
+                              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                <ActivityIcon className="h-3.5 w-3.5" />
+                              </span>
+                            )}
                             <div className="min-w-0 flex-1 pt-1">
-                              <p className="text-sm leading-snug text-gray-600 dark:text-gray-300">
+                              <p className="text-sm leading-snug text-gray-600 break-words dark:text-gray-300">
+                                {item.actor ? (
+                                  <span className="font-semibold text-gray-900 dark:text-gray-100">
+                                    {item.actor}{' '}
+                                  </span>
+                                ) : null}
                                 {item.text}
                               </p>
                               <span className="mt-0.5 block text-[10px] leading-none text-gray-400">

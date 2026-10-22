@@ -26,6 +26,7 @@ import {
 import { prisma } from '../lib/prisma';
 import {
   boardToTrelloExport,
+  appendMissingTrelloData,
   importTrelloIntoBoard,
   loadBoardForTrelloTransfer,
   type TrelloExportBoard,
@@ -847,6 +848,167 @@ export class KanbanService {
     await this.assertBoardAccess(userId, card.column.board, mode);
   }
 
+  /**
+   * Registra uma ação no histórico do card (estilo Trello). Nunca derruba a ação principal.
+   * `coalesceMs`: se o mesmo usuário repetiu o mesmo tipo de ação nesse intervalo (ex.: edição
+   * de descrição salva várias vezes), atualiza o registro anterior em vez de criar outro.
+   */
+  private async logActivity(
+    cardId: string,
+    userId: string | null,
+    type: string,
+    data: Record<string, unknown> = {},
+    opts?: { coalesceMs?: number },
+  ) {
+    try {
+      if (opts?.coalesceMs && userId) {
+        const recent = await prisma.kanbanCardActivity.findFirst({
+          where: {
+            cardId,
+            userId,
+            type,
+            createdAt: { gte: new Date(Date.now() - opts.coalesceMs) },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, data: true },
+        });
+        if (recent) {
+          const previous = (recent.data ?? {}) as Record<string, unknown>;
+          // Mantém o valor original ("de") da primeira edição do grupo.
+          const merged = 'from' in previous && 'from' in data ? { ...data, from: previous.from } : data;
+          if ('from' in merged && 'to' in merged && merged.from === merged.to) {
+            // Voltou ao valor inicial: não houve alteração líquida.
+            await prisma.kanbanCardActivity.delete({ where: { id: recent.id } });
+            return;
+          }
+          await prisma.kanbanCardActivity.update({
+            where: { id: recent.id },
+            data: { data: merged as Prisma.InputJsonValue, createdAt: new Date() },
+          });
+          return;
+        }
+      }
+      await prisma.kanbanCardActivity.create({
+        data: { cardId, userId, type, data: data as Prisma.InputJsonValue },
+      });
+    } catch (error) {
+      console.warn('[Kanban] Falha ao registrar atividade do card', type, error);
+    }
+  }
+
+  /** Atividades derivadas de um PATCH do card (título, descrição, datas, prioridade, etiquetas, concluir, arquivar, mover). */
+  private async logCardUpdateActivities(
+    userId: string,
+    existing: {
+      id: string;
+      columnId: string;
+      title: string;
+      description: string;
+      priority: TaskPriority;
+      startDate: Date | null;
+      endDate: Date | null;
+      labels: Prisma.JsonValue;
+      completedAt: Date | null;
+      archivedAt: Date | null;
+      column: { title: string };
+    },
+    next: {
+      columnId: string;
+      title?: string;
+      description?: string;
+      priority?: string;
+      startDate?: Date | null;
+      endDate?: Date | null;
+      labels?: Prisma.InputJsonValue;
+      completedAt?: Date | null;
+      archivedAt?: Date | null;
+    },
+  ) {
+    const id = existing.id;
+    const moved = next.columnId !== existing.columnId;
+    if (moved) {
+      const target = await prisma.kanbanColumn.findUnique({
+        where: { id: next.columnId },
+        select: { title: true },
+      });
+      await this.logActivity(id, userId, 'MOVED', {
+        fromColumn: existing.column.title,
+        toColumn: target?.title ?? '',
+      });
+    }
+
+    if (next.title !== undefined && next.title.trim() !== existing.title) {
+      await this.logActivity(
+        id,
+        userId,
+        'TITLE_CHANGED',
+        { from: existing.title, to: next.title.trim() },
+        { coalesceMs: 5 * 60 * 1000 },
+      );
+    }
+    if (next.description !== undefined && next.description.trim() !== existing.description.trim()) {
+      await this.logActivity(id, userId, 'DESCRIPTION_CHANGED', {}, { coalesceMs: 5 * 60 * 1000 });
+    }
+    if (next.priority !== undefined) {
+      const to = priorityFromClient(next.priority);
+      if (to !== existing.priority) {
+        await this.logActivity(id, userId, 'PRIORITY_CHANGED', { from: existing.priority, to });
+      }
+    }
+
+    const dayOf = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
+    const startChanged = next.startDate !== undefined && dayOf(next.startDate) !== dayOf(existing.startDate);
+    const endChanged = next.endDate !== undefined && dayOf(next.endDate) !== dayOf(existing.endDate);
+    if (startChanged || endChanged) {
+      await this.logActivity(
+        id,
+        userId,
+        'DATES_CHANGED',
+        {
+          ...(startChanged ? { startFrom: dayOf(existing.startDate), startTo: dayOf(next.startDate) } : {}),
+          ...(endChanged ? { dueFrom: dayOf(existing.endDate), dueTo: dayOf(next.endDate) } : {}),
+        },
+        { coalesceMs: 2 * 60 * 1000 },
+      );
+    }
+
+    if (next.labels !== undefined) {
+      const labelKey = (l: unknown) => {
+        const row = (l ?? {}) as { color?: string; name?: string };
+        return { key: `${row.color ?? ''}|${row.name ?? ''}`, name: (row.name || '').trim() || (row.color ?? '') };
+      };
+      const before = new Map(
+        (Array.isArray(existing.labels) ? existing.labels : []).map((l) => {
+          const k = labelKey(l);
+          return [k.key, k.name] as const;
+        }),
+      );
+      const after = new Map(
+        (Array.isArray(next.labels) ? (next.labels as unknown[]) : []).map((l) => {
+          const k = labelKey(l);
+          return [k.key, k.name] as const;
+        }),
+      );
+      const added = [...after.entries()].filter(([k]) => !before.has(k)).map(([, n]) => n);
+      const removed = [...before.entries()].filter(([k]) => !after.has(k)).map(([, n]) => n);
+      if (added.length > 0 || removed.length > 0) {
+        await this.logActivity(id, userId, 'LABELS_CHANGED', { added, removed });
+      }
+    }
+
+    // Concluir/reabrir só quando não veio de mover para uma coluna de concluídos.
+    if (!moved && next.completedAt !== undefined) {
+      const was = !!existing.completedAt;
+      const now = !!next.completedAt;
+      if (was !== now) await this.logActivity(id, userId, now ? 'COMPLETED' : 'REOPENED');
+    }
+    if (next.archivedAt !== undefined) {
+      const was = !!existing.archivedAt;
+      const now = !!next.archivedAt;
+      if (was !== now) await this.logActivity(id, userId, now ? 'ARCHIVED' : 'RESTORED');
+    }
+  }
+
   async listBoardsForUser(userId: string) {
     const { key: ownKey, label: ownLabel } = await this.getUserDepartment(userId);
     const isAdmin = await userIsAdministrator(userId);
@@ -1334,6 +1496,17 @@ export class KanbanService {
     items: Array<{ materialId: string; quantity?: number }>,
   ) {
     await this.assertCardAccess(userId, cardId);
+    const materialIds = items
+      .map((item) => (item && typeof item.materialId === 'string' ? item.materialId : ''))
+      .filter(Boolean);
+    const addedNames = materialIds.length
+      ? (
+          await prisma.constructionMaterial.findMany({
+            where: { id: { in: materialIds } },
+            select: { name: true },
+          })
+        ).map((m) => m.name)
+      : [];
     for (const item of items) {
       if (!item || typeof item.materialId !== 'string' || !item.materialId) continue;
       const q = Number(item.quantity);
@@ -1343,13 +1516,23 @@ export class KanbanService {
         SELECT ${randomUUID()}, ${cardId}, m.id, ${quantity} FROM construction_materials m WHERE m.id = ${item.materialId}
         ON CONFLICT ("cardId", "materialId") DO UPDATE SET quantity = EXCLUDED.quantity`;
     }
+    if (addedNames.length > 0) {
+      await this.logActivity(cardId, userId, 'MATERIALS_CHANGED', { names: addedNames });
+    }
     return this.listCardMaterials(userId, cardId);
   }
 
   async removeCardMaterial(userId: string, cardId: string, materialId: string) {
     await this.assertCardAccess(userId, cardId);
-    await prisma.$executeRaw`
+    const material = await prisma.constructionMaterial.findUnique({
+      where: { id: materialId },
+      select: { name: true },
+    });
+    const removed = await prisma.$executeRaw`
       DELETE FROM kanban_card_materials WHERE "cardId" = ${cardId} AND "materialId" = ${materialId}`;
+    if (removed > 0) {
+      await this.logActivity(cardId, userId, 'MATERIAL_REMOVED', { name: material?.name ?? '' });
+    }
   }
 
   async listArchivedCards(userId: string, departmentKeyParam?: string) {
@@ -1843,6 +2026,19 @@ export class KanbanService {
         : {}),
     };
 
+    const logUpdate = () =>
+      this.logCardUpdateActivities(userId, existing, {
+        columnId: targetColumnId,
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        startDate: data.startDate !== undefined ? parseDateInput(data.startDate) : undefined,
+        endDate: data.endDate !== undefined ? parseDateInput(data.endDate) : undefined,
+        labels: data.labels !== undefined ? (labelsJson as Prisma.InputJsonValue) : undefined,
+        completedAt,
+        archivedAt,
+      });
+
     if (!hasOrderChange) {
       // Meta simples: include leve (o frontend tipa como KanbanCard do board).
       const card = await prisma.kanbanCard.update({
@@ -1850,6 +2046,7 @@ export class KanbanService {
         data: baseUpdateData,
         include: boardListCardInclude,
       });
+      await logUpdate();
       return formatCard(card);
     }
 
@@ -1877,6 +2074,7 @@ export class KanbanService {
       });
     });
 
+    await logUpdate();
     return formatCard(card);
   }
 
@@ -1897,6 +2095,7 @@ export class KanbanService {
         position: true,
         column: {
           select: {
+            title: true,
             board: { select: this.boardAccessSelect },
           },
         },
@@ -1953,6 +2152,17 @@ export class KanbanService {
         select: { id: true, columnId: true, position: true },
       });
     });
+
+    if (targetColumnId !== existing.columnId) {
+      const target = await prisma.kanbanColumn.findUnique({
+        where: { id: targetColumnId },
+        select: { title: true },
+      });
+      await this.logActivity(id, userId, 'MOVED', {
+        fromColumn: existing.column.title,
+        toColumn: target?.title ?? '',
+      });
+    }
 
     return updated;
   }
@@ -2230,12 +2440,19 @@ export class KanbanService {
       throw new Error('Usuário não encontrado');
     }
 
+    const alreadyMember = await prisma.kanbanCardMember.findUnique({
+      where: { cardId_userId: { cardId, userId } },
+      select: { id: true },
+    });
     await prisma.kanbanCardMember.upsert({
       where: { cardId_userId: { cardId, userId } },
       create: { cardId, userId },
       update: {},
     });
     await syncLegacyAssignee(cardId);
+    if (!alreadyMember) {
+      await this.logActivity(cardId, requesterId, 'MEMBER_ADDED', { userId, name: user.name });
+    }
     return this.getCardById(requesterId, cardId);
   }
 
@@ -2244,8 +2461,15 @@ export class KanbanService {
     const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
     if (!card) throw new Error('Card não encontrado');
 
-    await prisma.kanbanCardMember.deleteMany({ where: { cardId, userId } });
+    const memberUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    const removed = await prisma.kanbanCardMember.deleteMany({ where: { cardId, userId } });
     await syncLegacyAssignee(cardId);
+    if (removed.count > 0) {
+      await this.logActivity(cardId, requesterId, 'MEMBER_REMOVED', {
+        userId,
+        name: memberUser?.name ?? '',
+      });
+    }
     return this.getCardById(requesterId, cardId);
   }
 
@@ -2276,6 +2500,11 @@ export class KanbanService {
             uploader: { select: { id: true, name: true } },
           },
         },
+        activities: {
+          orderBy: { createdAt: 'desc' },
+          take: 300,
+          include: { user: { select: { id: true, name: true, profilePhotoUrl: true } } },
+        },
         _count: { select: { comments: true, attachments: true } },
       },
     });
@@ -2302,6 +2531,22 @@ export class KanbanService {
         },
       })),
       checklistItems: card.checklistItems.map((item) => formatChecklistItem(item)),
+      activitiesList: card.activities.map((a) => ({
+        id: a.id,
+        type: a.type,
+        data: (a.data && typeof a.data === 'object' && !Array.isArray(a.data)
+          ? a.data
+          : {}) as Record<string, unknown>,
+        createdAt: a.createdAt.toISOString(),
+        user: a.user
+          ? {
+              id: a.user.id,
+              name: a.user.name,
+              profilePhotoUrl: a.user.profilePhotoUrl,
+              avatarColor: avatarColorForKey(a.user.id),
+            }
+          : null,
+      })),
       commentsList: card.comments.map((c) => ({
         id: c.id,
         content: c.content,
@@ -2335,6 +2580,7 @@ export class KanbanService {
       where: { id: cardId },
       data: { checklistEnabled: true },
     });
+    await this.logActivity(cardId, userId, 'CHECKLIST_ADDED', { title: item.title });
     const card = await this.getCardChecklistSnapshot(cardId);
     return { item: formatChecklistItem(item), card };
   }
@@ -2380,7 +2626,7 @@ export class KanbanService {
   ) {
     const existing = await prisma.kanbanChecklistItem.findUnique({
       where: { id },
-      select: { cardId: true },
+      select: { cardId: true, isDone: true },
     });
     if (!existing) throw new Error('Tarefa não encontrada');
     await this.assertCardAccess(userId, existing.cardId);
@@ -2396,6 +2642,12 @@ export class KanbanService {
       include: { assignee: { select: memberUserSelect } },
     });
     await syncCardTaskCounts(item.cardId);
+    if (data.isDone !== undefined && data.isDone !== existing.isDone) {
+      await this.logActivity(item.cardId, userId, 'CHECKLIST_DONE', {
+        title: item.title,
+        isDone: data.isDone,
+      });
+    }
     const card = await this.getCardChecklistSnapshot(item.cardId);
     return { item: formatChecklistItem(item), card };
   }
@@ -2403,12 +2655,13 @@ export class KanbanService {
   async deleteChecklistItem(userId: string, id: string) {
     const item = await prisma.kanbanChecklistItem.findUnique({
       where: { id },
-      select: { cardId: true },
+      select: { cardId: true, title: true },
     });
     if (!item) return;
     await this.assertCardAccess(userId, item.cardId);
     await prisma.kanbanChecklistItem.delete({ where: { id } });
     await syncCardTaskCounts(item.cardId);
+    await this.logActivity(item.cardId, userId, 'CHECKLIST_REMOVED', { title: item.title });
   }
 
   async createComment(requesterId: string, cardId: string, content: string) {
@@ -2547,6 +2800,10 @@ export class KanbanService {
     await this.assertCardAccess(requesterId, att.cardId);
 
     await prisma.kanbanCardAttachment.delete({ where: { id: attachmentId } });
+    await this.logActivity(att.cardId, requesterId, 'ATTACHMENT_REMOVED', {
+      fileName: att.fileName,
+      isLink: att.mimeType === KanbanService.LINK_ATTACHMENT_MIME,
+    });
 
     const remaining = await prisma.kanbanCardAttachment.count({
       where: { cardId: att.cardId },
@@ -2594,6 +2851,8 @@ export class KanbanService {
     options: {
       departmentKey?: string;
       replace?: boolean;
+      /** Não apaga nem recria nada: só acrescenta comentários/anexos que faltam nos cards existentes. */
+      appendMissing?: boolean;
       memberMap?: Record<string, string>;
     } = {},
   ) {
@@ -2606,6 +2865,14 @@ export class KanbanService {
     });
     if (!boardMeta) throw new Error('Quadro não encontrado para este setor');
     await this.assertBoardAccess(userId, boardMeta, 'write');
+
+    if (options.appendMissing) {
+      return appendMissingTrelloData(data, {
+        boardId: formatted.id,
+        importAsUserId: userId,
+        memberMap: options.memberMap || {},
+      });
+    }
 
     return importTrelloIntoBoard(data, {
       boardId: formatted.id,

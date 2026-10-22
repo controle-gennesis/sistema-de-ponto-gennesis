@@ -609,6 +609,188 @@ function newCuidLike() {
   );
 }
 
+export type AppendMissingTrelloResult = {
+  boardName: string;
+  /** Cards do arquivo que casaram com exatamente um card do quadro (pelo título). */
+  cardsMatched: number;
+  /** Títulos repetidos no arquivo ou no quadro: não dá para saber qual é qual, ficam de fora. */
+  cardsAmbiguous: number;
+  /** Cards do arquivo que não existem no quadro. */
+  cardsUnmatched: number;
+  commentsAdded: number;
+  attachmentsAdded: number;
+};
+
+function normalizeCardTitleKey(title: string): string {
+  return title.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Remove o rodapé que a importação adiciona ("— Nome (importado)") para comparar o texto original. */
+function stripImportedFooter(content: string): string {
+  return content.replace(/\n\n— .+ \(importado\)$/s, '');
+}
+
+function commentDedupKey(createdAt: Date, text: string): string {
+  return `${createdAt.getTime()}|${text.trim().slice(0, 80)}`;
+}
+
+/**
+ * Modo "só acrescentar o que falta": não apaga nem recria nada. Casa cada card do arquivo com
+ * o card do quadro de mesmo título (só quando é único dos dois lados) e acrescenta os
+ * comentários e anexos que ainda não existem nele.
+ */
+export async function appendMissingTrelloData(
+  data: unknown,
+  options: { boardId: string; importAsUserId: string; memberMap?: Record<string, string> },
+): Promise<AppendMissingTrelloResult> {
+  const parsed = parseTrelloExport(data);
+  const { boardId, importAsUserId } = options;
+  const memberMap = resolveMemberMap(parsed.members, options.memberMap || {});
+
+  const mappedIds = Array.from(new Set(Object.values(memberMap)));
+  if (mappedIds.length) {
+    const existingUsers = await prisma.user.findMany({
+      where: { id: { in: mappedIds } },
+      select: { id: true },
+    });
+    const ok = new Set(existingUsers.map((u) => u.id));
+    for (const [trelloId, uid] of Object.entries(memberMap)) {
+      if (!ok.has(uid)) delete memberMap[trelloId];
+    }
+  }
+
+  const boardCards = await prisma.kanbanCard.findMany({
+    where: { column: { boardId } },
+    select: { id: true, title: true },
+  });
+  const conectaByKey = new Map<string, string[]>();
+  for (const card of boardCards) {
+    const key = normalizeCardTitleKey(card.title);
+    conectaByKey.set(key, [...(conectaByKey.get(key) ?? []), card.id]);
+  }
+
+  const trelloCards = parsed.lists.flatMap((list) => list.cards);
+  const trelloByKey = new Map<string, ParsedCard[]>();
+  for (const card of trelloCards) {
+    const key = normalizeCardTitleKey(card.title);
+    trelloByKey.set(key, [...(trelloByKey.get(key) ?? []), card]);
+  }
+
+  let cardsAmbiguous = 0;
+  let cardsUnmatched = 0;
+  const pairs: Array<{ cardId: string; trello: ParsedCard }> = [];
+  for (const [key, cards] of trelloByKey) {
+    const conecta = conectaByKey.get(key);
+    if (!conecta) {
+      cardsUnmatched += cards.length;
+    } else if (cards.length === 1 && conecta.length === 1) {
+      pairs.push({ cardId: conecta[0], trello: cards[0] });
+    } else {
+      cardsAmbiguous += cards.length;
+    }
+  }
+
+  const cardIds = pairs.map((p) => p.cardId);
+  const existingComments = cardIds.length
+    ? await prisma.kanbanCardComment.findMany({
+        where: { cardId: { in: cardIds } },
+        select: { cardId: true, content: true, createdAt: true },
+      })
+    : [];
+  const commentKeys = new Set(
+    existingComments.map(
+      (c) => `${c.cardId}|${commentDedupKey(c.createdAt, stripImportedFooter(c.content))}`,
+    ),
+  );
+  const existingAttachments = cardIds.length
+    ? await prisma.kanbanCardAttachment.findMany({
+        where: { cardId: { in: cardIds } },
+        select: { cardId: true, fileUrl: true },
+      })
+    : [];
+  const attachmentKeys = new Set(existingAttachments.map((a) => `${a.cardId}|${a.fileUrl}`));
+
+  const now = new Date();
+  const commentRows: Array<{
+    id: string;
+    cardId: string;
+    userId: string;
+    content: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
+  const attachmentRows: Array<{
+    id: string;
+    cardId: string;
+    userId: string;
+    fileName: string;
+    fileUrl: string;
+    fileSize: number;
+    mimeType: string;
+  }> = [];
+  const cardsWithNewAttachments = new Set<string>();
+
+  for (const { cardId, trello } of pairs) {
+    for (const c of trello.comments) {
+      const at = c.createdAt ? new Date(c.createdAt) : now;
+      const key = `${cardId}|${commentDedupKey(at, c.text || '(sem texto)')}`;
+      if (commentKeys.has(key)) continue;
+      commentKeys.add(key);
+      const authorId = (c.authorTrelloId && memberMap[c.authorTrelloId]) || importAsUserId;
+      const content = c.authorName ? `${c.text}\n\n— ${c.authorName} (importado)` : c.text;
+      commentRows.push({
+        id: newCuidLike(),
+        cardId,
+        userId: authorId,
+        content: (content || '(sem texto)').slice(0, 20000),
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+
+    for (const att of trello.attachments) {
+      if (!att.url || /^data:/i.test(att.url)) continue;
+      const fileUrl = att.url.slice(0, 4000);
+      const key = `${cardId}|${fileUrl}`;
+      if (attachmentKeys.has(key)) continue;
+      attachmentKeys.add(key);
+      cardsWithNewAttachments.add(cardId);
+      attachmentRows.push({
+        id: newCuidLike(),
+        cardId,
+        userId: importAsUserId,
+        fileName: (att.name || 'anexo').slice(0, 255),
+        fileUrl,
+        fileSize: 0,
+        mimeType: 'application/octet-stream',
+      });
+    }
+  }
+
+  const chunkSize = 250;
+  for (let i = 0; i < commentRows.length; i += chunkSize) {
+    await prisma.kanbanCardComment.createMany({ data: commentRows.slice(i, i + chunkSize) });
+  }
+  for (let i = 0; i < attachmentRows.length; i += chunkSize) {
+    await prisma.kanbanCardAttachment.createMany({ data: attachmentRows.slice(i, i + chunkSize) });
+  }
+  if (cardsWithNewAttachments.size > 0) {
+    await prisma.kanbanCard.updateMany({
+      where: { id: { in: Array.from(cardsWithNewAttachments) } },
+      data: { attachmentsEnabled: true },
+    });
+  }
+
+  return {
+    boardName: parsed.boardName,
+    cardsMatched: pairs.length,
+    cardsAmbiguous,
+    cardsUnmatched,
+    commentsAdded: commentRows.length,
+    attachmentsAdded: attachmentRows.length,
+  };
+}
+
 export type ImportTrelloOptions = {
   boardId: string;
   replace: boolean;

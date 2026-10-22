@@ -2909,6 +2909,7 @@ function KanbanPage() {
   const [importFileName, setImportFileName] = useState('');
   const [importPayload, setImportPayload] = useState<unknown>(null);
   const [importReplace, setImportReplace] = useState(true);
+  const [importAppendMissing, setImportAppendMissing] = useState(false);
   const [importingBoard, setImportingBoard] = useState(false);
   const [importProgress, setImportProgress] = useState<number | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -2992,7 +2993,7 @@ function KanbanPage() {
       toast.error('Selecione um arquivo JSON');
       return;
     }
-    if (importReplace) {
+    if (importReplace && !importAppendMissing) {
       const ok = window.confirm(
         'Isso vai APAGAR todas as colunas e cards deste quadro e substituir pelo arquivo. Continuar?',
       );
@@ -3014,13 +3015,25 @@ function KanbanPage() {
       const result = await importKanbanBoardTrello({
         board: importPayload,
         departmentKey: boardScopeKey || board?.departmentKey || undefined,
-        replace: importReplace,
+        replace: importReplace && !importAppendMissing,
+        appendMissing: importAppendMissing,
       });
       setImportProgress(100);
-      toast.success(
-        `Importado: ${result.columnsCreated} coluna(s), ${result.cardsCreated} card(s)`,
-        { id: 'kanban-trello-import' },
-      );
+      if (importAppendMissing) {
+        const skipped = (result.cardsAmbiguous ?? 0) + (result.cardsUnmatched ?? 0);
+        toast.success(
+          `Acrescentado: ${result.commentsAdded ?? 0} comentário(s) e ${result.attachmentsAdded ?? 0} anexo(s) em ${result.cardsMatched ?? 0} card(s).` +
+            (skipped > 0
+              ? ` ${skipped} card(s) do arquivo não foram casados (título repetido ou inexistente no quadro).`
+              : ''),
+          { id: 'kanban-trello-import', duration: 9000 },
+        );
+      } else {
+        toast.success(
+          `Importado: ${result.columnsCreated ?? 0} coluna(s), ${result.cardsCreated ?? 0} card(s)`,
+          { id: 'kanban-trello-import' },
+        );
+      }
       await new Promise((r) => window.setTimeout(r, 280));
       setImportModalOpen(false);
       setImportPayload(null);
@@ -4256,6 +4269,7 @@ function KanbanPage() {
                       <Archive className="h-4 w-4 shrink-0 text-gray-500" />
                       Cartões arquivados
                     </button>
+                    {isAdministrator && (
                     <button
                       type="button"
                       role="menuitem"
@@ -4269,8 +4283,10 @@ function KanbanPage() {
                       <Download className="h-4 w-4 shrink-0 text-gray-500" />
                       {exportingBoard ? 'Exportando…' : 'Exportar'}
                     </button>
+                    )}
                     {!boardReadOnly && (
                       <>
+                        {isAdministrator && (
                         <button
                           type="button"
                           role="menuitem"
@@ -4281,12 +4297,14 @@ function KanbanPage() {
                             setImportPayload(null);
                             setImportFileName('');
                             setImportReplace(true);
+                            setImportAppendMissing(false);
                           }}
                           className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:text-gray-200 dark:hover:bg-gray-800"
                         >
                           <Upload className="h-4 w-4 shrink-0 text-gray-500" />
                           Importar
                         </button>
+                        )}
                         <button
                           type="button"
                           role="menuitem"
@@ -4655,12 +4673,38 @@ function KanbanPage() {
                 <label className="flex cursor-pointer items-center gap-3">
                   <input
                     type="checkbox"
-                    checked={importReplace}
+                    checked={importAppendMissing}
+                    onChange={(e) => setImportAppendMissing(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <span className="shrink-0">
+                    <CheckboxIndicator checked={importAppendMissing} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 dark:text-gray-100">
+                      Só acrescentar o que falta
+                    </span>
+                    <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                      Não apaga nada: acrescenta comentários e anexos que faltam nos cards que já existem (casa pelo título).
+                    </span>
+                  </span>
+                </label>
+
+                <label
+                  className={clsx(
+                    'flex items-center gap-3',
+                    importAppendMissing ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={importReplace && !importAppendMissing}
+                    disabled={importAppendMissing}
                     onChange={(e) => setImportReplace(e.target.checked)}
                     className="sr-only"
                   />
                   <span className="shrink-0">
-                    <CheckboxIndicator checked={importReplace} />
+                    <CheckboxIndicator checked={importReplace && !importAppendMissing} />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-gray-800 dark:text-gray-100">

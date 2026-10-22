@@ -254,7 +254,7 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const body = req.body || {};
-      const { departmentKey, replace, memberMap } = body;
+      const { departmentKey, replace, memberMap, appendMissing } = body;
       const trelloData =
         body.board && typeof body.board === 'object'
           ? body.board
@@ -272,7 +272,8 @@ export class KanbanController {
 
       const result = await kanbanService.importBoardFromTrello(userId, trelloData, {
         departmentKey: typeof departmentKey === 'string' ? departmentKey : undefined,
-        replace: !!replace,
+        replace: !!replace && !appendMissing,
+        appendMissing: !!appendMissing,
         memberMap:
           memberMap && typeof memberMap === 'object' && !Array.isArray(memberMap)
             ? (memberMap as Record<string, string>)

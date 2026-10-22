@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { KanbanController } from '../controllers/KanbanController';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireAdministrator } from '../middleware/auth';
 
 const router = Router();
 const controller = new KanbanController();
@@ -24,10 +24,10 @@ router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
 router.get('/board/archived-cards', (req, res, next) =>
   controller.listArchivedCards(req, res, next),
 );
-router.get('/board/export-trello', (req, res, next) =>
+router.get('/board/export-trello', requireAdministrator, (req, res, next) =>
   controller.exportBoardTrello(req, res, next),
 );
-router.post('/board/import-trello', (req, res, next) =>
+router.post('/board/import-trello', requireAdministrator, (req, res, next) =>
   controller.importBoardTrello(req, res, next),
 );
 router.patch('/board/label-presets', (req, res, next) =>
