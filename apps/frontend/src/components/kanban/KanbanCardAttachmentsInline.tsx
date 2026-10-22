@@ -20,6 +20,8 @@ import {
   type KanbanCardDetail,
   deleteKanbanAttachment,
   isKanbanLinkAttachment,
+  isExternalAttachmentUrl,
+  isTrelloAttachmentUrl,
 } from '@/lib/kanban';
 import { kanbanLabel } from './kanbanFormStyles';
 import { KanbanLinkFavicon } from './KanbanLinkFavicon';
@@ -150,6 +152,10 @@ export function KanbanCardAttachmentsInline({
       toast.error('URL do arquivo indisponível');
       return;
     }
+    if (isExternalAttachmentUrl(item.fileUrl) && !isTrelloAttachmentUrl(item.fileUrl)) {
+      window.open(item.fileUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     setDownloadingId(item.id);
     try {
       const response = await api.get(`/kanban/attachments/${item.id}/download`, {
@@ -166,7 +172,15 @@ export function KanbanCardAttachmentsInline({
       a.click();
       a.remove();
       URL.revokeObjectURL(objectUrl);
-    } catch {
+    } catch (error: unknown) {
+      // Servidor sem chave do Trello configurada: cai para abrir o link direto (exige login no Trello).
+      if (
+        isTrelloAttachmentUrl(item.fileUrl) &&
+        (error as { response?: { status?: number } })?.response?.status === 503
+      ) {
+        window.open(item.fileUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
       toast.error('Erro ao baixar anexo');
     } finally {
       setDownloadingId(null);

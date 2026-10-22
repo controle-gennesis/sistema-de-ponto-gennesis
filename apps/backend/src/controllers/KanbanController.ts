@@ -3,7 +3,22 @@ import multer from 'multer';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { KanbanService, KANBAN_FORBIDDEN } from '../services/KanbanService';
+import { Readable } from 'stream';
 import { readFuelStoredPhoto } from '../lib/fuelPhotoStorage';
+
+/** Anexo importado do Trello: o arquivo mora em trello.com e só baixa com a chave/token da API. */
+function isTrelloAttachmentUrl(url: string | null | undefined): boolean {
+  try {
+    const u = new URL(String(url ?? ''));
+    return (
+      u.protocol === 'https:' &&
+      (u.hostname === 'trello.com' || u.hostname.endsWith('.trello.com')) &&
+      u.pathname.startsWith('/1/cards/')
+    );
+  } catch {
+    return false;
+  }
+}
 
 const kanbanService = new KanbanService();
 
@@ -731,18 +746,47 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const att = await kanbanService.getAttachmentForDownload(userId, req.params.id);
+      const safeName = String(att.fileName || 'anexo').replace(/[\\/:*?"<>|\r\n]+/g, '_');
+      const disposition = `attachment; filename="${safeName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
+
+      if (isTrelloAttachmentUrl(att.fileUrl)) {
+        const key = process.env.TRELLO_API_KEY?.trim();
+        const token = process.env.TRELLO_API_TOKEN?.trim();
+        if (!key || !token) {
+          return next(
+            createError(
+              'Download de anexos do Trello não configurado (TRELLO_API_KEY / TRELLO_API_TOKEN).',
+              503,
+            ),
+          );
+        }
+        const upstream = await fetch(att.fileUrl, {
+          headers: { Authorization: `OAuth oauth_consumer_key="${key}", oauth_token="${token}"` },
+          redirect: 'follow',
+        });
+        if (!upstream.ok || !upstream.body) {
+          return next(
+            createError(`O Trello recusou o download do arquivo (status ${upstream.status}).`, 502),
+          );
+        }
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+        const length = upstream.headers.get('content-length');
+        if (length) res.setHeader('Content-Length', length);
+        res.setHeader('Content-Disposition', disposition);
+        res.status(200);
+        // Streaming: arquivos grandes não ficam inteiros na memória do servidor.
+        Readable.fromWeb(upstream.body as unknown as import('stream/web').ReadableStream).pipe(res);
+        return;
+      }
+
       const stored = await readFuelStoredPhoto({
         fileUrl: att.fileUrl,
         fileKey: att.fileKey,
         fileName: att.fileName,
       });
       if (!stored) return next(createError('Não foi possível baixar o anexo', 404));
-      const safeName = String(att.fileName || 'anexo').replace(/[\\/:*?"<>|\r\n]+/g, '_');
       res.setHeader('Content-Type', stored.contentType);
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${safeName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
-      );
+      res.setHeader('Content-Disposition', disposition);
       res.status(200).send(stored.buffer);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';

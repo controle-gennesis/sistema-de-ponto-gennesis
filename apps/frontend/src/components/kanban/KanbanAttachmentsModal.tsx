@@ -22,6 +22,8 @@ import {
   isOptimisticKanbanCardId,
   uploadKanbanAttachments,
   deleteKanbanAttachment,
+  isExternalAttachmentUrl,
+  isTrelloAttachmentUrl,
 } from '@/lib/kanban';
 import { kanbanInput, kanbanLabel } from './kanbanFormStyles';
 import { KanbanLinkFavicon } from './KanbanLinkFavicon';
@@ -241,6 +243,10 @@ export function KanbanAttachmentsModal({
       toast.error('URL do arquivo indisponível');
       return;
     }
+    if (isExternalAttachmentUrl(fileUrl) && !isTrelloAttachmentUrl(fileUrl)) {
+      openUrl(fileUrl);
+      return;
+    }
     setDownloadingId(attachmentId);
     try {
       const response = await api.get(`/kanban/attachments/${attachmentId}/download`, {
@@ -258,7 +264,15 @@ export function KanbanAttachmentsModal({
       a.click();
       a.remove();
       URL.revokeObjectURL(objectUrl);
-    } catch {
+    } catch (error: unknown) {
+      // Servidor sem chave do Trello configurada: cai para abrir o link direto (exige login no Trello).
+      if (
+        isTrelloAttachmentUrl(fileUrl) &&
+        (error as { response?: { status?: number } })?.response?.status === 503
+      ) {
+        openUrl(fileUrl);
+        return;
+      }
       toast.error('Erro ao baixar anexo');
     } finally {
       setDownloadingId(null);

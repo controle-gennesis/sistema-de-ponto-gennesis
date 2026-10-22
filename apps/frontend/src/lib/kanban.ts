@@ -825,6 +825,32 @@ export function isKanbanLinkAttachment(mimeType: string): boolean {
   return mimeType === KANBAN_LINK_MIME_TYPE;
 }
 
+/**
+ * Anexo que mora fora do armazenamento do sistema (ex.: arquivos importados do Trello apontam
+ * para trello.com). O servidor não tem login nesses sites, então o botão de baixar abre o
+ * endereço direto no navegador da pessoa. Arquivos do sistema (S3 privado ou /uploads) passam
+ * pelo servidor.
+ */
+/** Arquivo do Trello: o servidor baixa com a chave da empresa (quem usa não precisa de login no Trello). */
+export function isTrelloAttachmentUrl(url: string | null | undefined): boolean {
+  try {
+    const u = new URL(String(url ?? ''));
+    return u.hostname === 'trello.com' || u.hostname.endsWith('.trello.com');
+  } catch {
+    return false;
+  }
+}
+
+export function isExternalAttachmentUrl(url: string | null | undefined): boolean {
+  const value = String(url ?? '').trim();
+  if (!/^https?:\/\//i.test(value)) return false;
+  try {
+    return !/(^|\.)amazonaws\.com$/i.test(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export interface KanbanCardAttachment {
   id: string;
   fileName: string;
