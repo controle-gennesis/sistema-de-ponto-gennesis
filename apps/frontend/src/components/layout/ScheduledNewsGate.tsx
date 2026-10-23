@@ -71,7 +71,7 @@ export function ScheduledNewsGate({ userId }: { userId?: string }) {
             <img
               src={imageSrc}
               alt={data.title}
-              className="max-h-[24rem] w-full object-cover"
+              className="h-auto w-full"
             />
           </div>
         ) : null}

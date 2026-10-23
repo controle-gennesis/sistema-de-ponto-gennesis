@@ -19,7 +19,14 @@ import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
 import { FileDropZone } from '@/components/ui/FileDropZone';
-import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import {
+  cadastroListClasses,
+  getListTableRowClassName,
+  RowActionMenuCell,
+  RowActionMenuPortal,
+  type RowActionMenuExtraItem,
+} from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
@@ -180,6 +187,13 @@ function rowToForm(row: ScheduledNewsRow): FormState {
     imageUrl: row.imageUrl,
   };
 }
+
+const STATUS_BADGE: Record<ScheduledNewsStatus, string> = {
+  DRAFT: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  SCHEDULED: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  PUBLISHED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+  CANCELLED: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
+};
 
 function statusLabel(status: ScheduledNewsStatus): string {
   return (
@@ -372,6 +386,36 @@ export default function NoticiasPage() {
     setIsModalOpen(true);
   };
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    isRowMenuOpen,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+  } = useRowActionMenu(rows);
+
+  const buildRowMenuItems = (row: ScheduledNewsRow): RowActionMenuExtraItem[] => [
+    {
+      label: 'Editar',
+      icon: <Pencil className="h-4 w-4 shrink-0" />,
+      onClick: () => openEdit(row),
+    },
+    {
+      label: 'Publicar',
+      icon: <Send className="h-4 w-4 shrink-0" />,
+      tone: 'success',
+      disabled: publishMutation.isPending,
+      onClick: () => publishMutation.mutate(row.id),
+    },
+    {
+      label: 'Cancelar',
+      icon: <Ban className="h-4 w-4 shrink-0" />,
+      tone: 'danger',
+      disabled: cancelMutation.isPending,
+      onClick: () => cancelMutation.mutate(row.id),
+    },
+  ];
+
   if (loadingUser) {
     return (
       <ProtectedRoute route="/ponto/noticias">
@@ -467,64 +511,69 @@ export default function NoticiasPage() {
                     totalPages={pagination?.totalPages}
                   />
 
-                  <div className="space-y-3">
-                    {rows.map((row) => (
-                      <div
-                        key={row.id}
-                        className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-                      >
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="table-scroll">
+                    <table className={cadastroListClasses.table}>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className={cadastroListClasses.th}>Título</th>
+                          <th className={cadastroListClasses.th}>Público</th>
+                          <th className={cadastroListClasses.thCenter}>Publicação</th>
+                          <th className={cadastroListClasses.thCenter}>Expira em</th>
+                          <th className={cadastroListClasses.thCenter}>Visualizações</th>
+                          <th className={cadastroListClasses.thCenter}>Status</th>
+                          {canEdit ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        {rows.map((row) => (
+                          <tr
+                            key={row.id}
+                            className={getListTableRowClassName(canEdit)}
+                            onClick={canEdit ? () => openEdit(row) : undefined}
+                          >
+                            <td className={cadastroListClasses.tdTruncate}>
+                              <p className="truncate font-medium text-gray-900 dark:text-gray-100">
                                 {row.title}
-                              </h4>
-                              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                              </p>
+                              <p className="truncate text-xs text-gray-500">{row.summary}</p>
+                            </td>
+                            <td className={cadastroListClasses.tdTruncate}>
+                              <p className="truncate">{audienceLabel(row)}</p>
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              {formatDateTime(row.publishAt)}
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              {formatDateTime(row.expiresAt)}
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>{row.viewsCount}</td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
+                              >
                                 {statusLabel(row.status)}
                               </span>
-                            </div>
-                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{row.summary}</p>
-                            <div className="mt-3 grid gap-2 text-xs text-gray-500 dark:text-gray-400 sm:grid-cols-2 xl:grid-cols-4">
-                              <span>Público: {audienceLabel(row)}</span>
-                              <span>Publicação: {formatDateTime(row.publishAt)}</span>
-                              <span>Expira em: {formatDateTime(row.expiresAt)}</span>
-                              <span>Visualizações: {row.viewsCount}</span>
-                            </div>
-                          </div>
-                          {canEdit && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEdit(row)}
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                            >
-                              <Pencil className="h-4 w-4" />
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => publishMutation.mutate(row.id)}
-                              disabled={publishMutation.isPending}
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                            >
-                              <Send className="h-4 w-4" />
-                              Publicar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => cancelMutation.mutate(row.id)}
-                              disabled={cancelMutation.isPending}
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
-                            >
-                              <Ban className="h-4 w-4" />
-                              Cancelar
-                            </button>
-                          </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                            </td>
+                            {canEdit ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(row.id)}
+                                onToggle={(e) => toggleRowActionMenu(row.id, e.currentTarget)}
+                              />
+                            ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
+                  {rowActionMenu && rowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => {}}
+                      hideDefaultActions
+                      extraItems={buildRowMenuItems(rowForActionMenu)}
+                    />
+                  ) : null}
 
                   <ListPagination
                     currentPage={pagination?.page || 1}
@@ -718,7 +767,7 @@ export default function NoticiasPage() {
                     <img
                       src={imagePreview}
                       alt="Prévia da notícia"
-                      className="max-h-[22rem] w-full object-cover"
+                      className="h-auto max-h-[28rem] w-full object-contain"
                     />
                   </div>
                 ) : null}
