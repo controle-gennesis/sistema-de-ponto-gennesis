@@ -53,6 +53,8 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import toast from 'react-hot-toast';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
+import { usePermissions } from '@/hooks/usePermissions';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { BRAZIL_STATE_LABELS } from '@/lib/brazilStates';
@@ -3697,6 +3699,17 @@ function aparenciaCamposDaAba(
   if (!abaAparenciaTemComposicao(aba)) out = aparenciaSemComposicaoCustom(out);
   if (!abaAparenciaTemSubtitulo(aba)) out = aparenciaSemSubtituloCustom(out);
   if (!abaAparenciaTemItem(aba)) out = aparenciaSemItemCustom(out);
+  return out;
+}
+
+/** Cor do título do contrato aplicada ao fundo do título de todas as abas de um orçamento novo. */
+function aparenciaAbasComTituloFundo(cor: string): AparenciaAbasOrcamento | undefined {
+  const tituloFundo = corHexOrcamento(cor);
+  if (!tituloFundo) return undefined;
+  const out: AparenciaAbasOrcamento = {};
+  for (const aba of ['montagem', 'memorial', 'analitico', 'fichaDemanda', 'cronograma'] as const) {
+    out[aba] = aparenciaCamposDaAba(aba, { ...aparenciaPadraoDaAba(aba), tituloFundo });
+  }
   return out;
 }
 
@@ -7574,6 +7587,10 @@ export function OrcamentoPageView({
   fichaDemandaRecord = null,
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
+  // O envio para aprovação cria a ficha de demanda: só aparece para quem acessa a página de Fichas de Demanda.
+  const { can: podeAcessarModulo, isAdministrator: usuarioAdministrador } = usePermissions();
+  const podeAcessarFichasDemanda =
+    usuarioAdministrador || podeAcessarModulo(pathToModuleKey('/ponto/aprovacao-fds'));
   const queryClient = useQueryClient();
   const { isDark } = useTheme();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -9100,6 +9117,7 @@ export function OrcamentoPageView({
     bdiPercentual: string;
     descontoPercentual: string;
     reajustes: Array<{ nome: string; percentual: string }> | null;
+    tituloFundo: string | null;
   } | null => {
     const raw = contractsListData?.data ?? contractsListData;
     const lista = Array.isArray(raw)
@@ -9109,6 +9127,7 @@ export function OrcamentoPageView({
           defaultBdiPercent?: number | string | null;
           defaultDiscountPercent?: number | string | null;
           defaultReajustes?: Array<{ nome?: string; percentual?: string }> | null;
+          defaultTituloFundo?: string | null;
         }>)
       : [];
     const contrato =
@@ -9133,11 +9152,13 @@ export function OrcamentoPageView({
             percentual: String(r?.percentual ?? '').trim(),
           }))
         : null;
-    if (bdiPercentual == null && descontoPercentual == null && !reajustes) return null;
+    const tituloFundo = corHexOrcamento(contrato?.defaultTituloFundo ?? '') ?? null;
+    if (bdiPercentual == null && descontoPercentual == null && !reajustes && !tituloFundo) return null;
     return {
       bdiPercentual: bdiPercentual ?? '',
       descontoPercentual: descontoPercentual ?? '',
       reajustes,
+      tituloFundo,
     };
   };
 
@@ -9179,6 +9200,9 @@ export function OrcamentoPageView({
               ? { descontoPercentual: padraoContrato.descontoPercentual }
               : {}),
             ...(padraoContrato.reajustes ? { reajustes: padraoContrato.reajustes } : {}),
+            ...(padraoContrato.tituloFundo
+              ? { aparenciaAbas: aparenciaAbasComTituloFundo(padraoContrato.tituloFundo) }
+              : {}),
           }
         : {}),
       nomeOrcamento: '',
@@ -10821,6 +10845,9 @@ export function OrcamentoPageView({
         descontoPercentual,
         bdiPercentual,
         reajustes: reajustesImportacao,
+        ...(padraoImp?.tituloFundo
+          ? { aparenciaAbas: aparenciaAbasComTituloFundo(padraoImp.tituloFundo) }
+          : {}),
         prazoExecucaoDias: orcafascioMetaExtra.prazoExecucaoDias.trim(),
         responsavelOrcamento: orcafascioMetaExtra.responsavelOrcamento.trim(),
         unidade: orcafascioMetaExtra.unidade.trim(),
@@ -20112,7 +20139,7 @@ export function OrcamentoPageView({
                     </button>
                     )
                   ) : null}
-                  {analiticoDisponivel && !fichaDemandaOnly && (
+                  {analiticoDisponivel && !fichaDemandaOnly && podeAcessarFichasDemanda && (
                     <button
                       type="button"
                       onClick={() => void abrirEnvioFichaDemandaAprovacao()}

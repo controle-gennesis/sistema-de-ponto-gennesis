@@ -1,5 +1,6 @@
 'use client';
 
+import { KanbanLabelColorPicker } from '@/components/kanban/KanbanLabelColorPicker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -71,6 +72,7 @@ interface Contract {
   defaultBdiPercent?: number | string | null;
   defaultDiscountPercent?: number | string | null;
   defaultReajustes?: Array<{ nome: string; percentual: string }> | null;
+  defaultTituloFundo?: string | null;
 }
 
 type ContractPermissionUser = {
@@ -276,6 +278,7 @@ export default function ContratosPage() {
     orcafascioClientId: '',
     defaultBdiPercent: '',
     defaultDiscountPercent: '',
+    defaultTituloFundo: '',
     reajustes: [] as Array<{ nome: string; percentual: string }>,
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
@@ -455,6 +458,7 @@ export default function ContratosPage() {
       orcafascioClientId: '',
       defaultBdiPercent: '',
       defaultDiscountPercent: '',
+      defaultTituloFundo: '',
       reajustes: [],
     });
     setEditingContract(null);
@@ -480,6 +484,7 @@ export default function ContratosPage() {
         '',
       defaultBdiPercent: formatPercentInput(contract.defaultBdiPercent),
       defaultDiscountPercent: formatPercentInput(contract.defaultDiscountPercent),
+      defaultTituloFundo: contract.defaultTituloFundo || '',
       reajustes: Array.isArray(contract.defaultReajustes)
         ? contract.defaultReajustes.map((r) => ({
             nome: String(r?.nome ?? ''),
@@ -560,6 +565,7 @@ export default function ContratosPage() {
       orcafascioClientId,
       defaultBdiPercent: bdiPadrao,
       defaultDiscountPercent: descontoPadrao,
+      defaultTituloFundo: formData.defaultTituloFundo.trim(),
       defaultReajustes: reajustesPadrao,
     };
 
@@ -1371,6 +1377,44 @@ function ContractFormModal({
               <p className="md:col-span-2 -mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Usados automaticamente nos orçamentos deste contrato.
               </p>
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Cor do título dos orçamentos
+                </label>
+                <div className="flex items-center gap-2">
+                  <KanbanLabelColorPicker
+                    className="[&_button]:shadow-none"
+                    color={formData.defaultTituloFundo || '#DC2626'}
+                    onChange={(cor) => setFormData({ ...formData, defaultTituloFundo: cor })}
+                  />
+                  <input
+                    type="text"
+                    value={formData.defaultTituloFundo}
+                    onChange={(e) => {
+                      let v = e.target.value.toUpperCase().replace(/[^#0-9A-F]/g, '');
+                      if (v && !v.startsWith('#')) v = `#${v}`;
+                      if (v.length <= 7) setFormData({ ...formData, defaultTituloFundo: v });
+                    }}
+                    className="h-10 w-28 rounded-lg border border-gray-300 bg-white px-3 py-2 text-center font-mono text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    placeholder="Padrão"
+                    maxLength={7}
+                    spellCheck={false}
+                    aria-label="Cor do título dos orçamentos"
+                  />
+                  {formData.defaultTituloFundo ? (
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, defaultTituloFundo: '' })}
+                      className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      Usar a cor padrão do sistema
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Vale para os novos orçamentos deste contrato, no fundo do título de todas as abas. Os orçamentos que já existem não mudam.
+                </p>
+              </div>
               <div className="md:col-span-2">
                 <div className="mb-1.5 flex items-center justify-between">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">

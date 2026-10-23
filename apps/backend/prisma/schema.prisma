@@ -1456,6 +1456,8 @@ model Contract {
   defaultDiscountPercent Decimal? @db.Decimal(7, 2)
   /// Reajustes padrão dos orçamentos do contrato: [{ nome, percentual }].
   defaultReajustes Json?
+  /// Cor de fundo do título (#RRGGBB) dos orçamentos novos do contrato, em todas as abas.
+  defaultTituloFundo String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

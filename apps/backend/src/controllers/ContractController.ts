@@ -29,6 +29,12 @@ import { resolveOrcafascioClientIdForContractName } from '../lib/orcafascioClien
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
 
+/** Cor #RRGGBB do título dos orçamentos; vazio ou inválida = sem cor padrão (null). */
+function parseHexColorInput(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
+}
+
 /** Percentual (0–100) vindo do formulário; vazio/ inválido = sem padrão (null). Aceita vírgula decimal. */
 function parsePercentInput(raw: unknown): number | null {
   if (raw === undefined || raw === null) return null;
@@ -345,6 +351,7 @@ export class ContractController {
         defaultBdiPercent,
         defaultDiscountPercent,
         defaultReajustes,
+        defaultTituloFundo,
       } = req.body;
 
       if (!name?.trim()) {
@@ -406,6 +413,7 @@ export class ContractController {
               resolveOrcafascioClientIdForContractName(name),
             defaultBdiPercent: parsePercentInput(defaultBdiPercent),
             defaultDiscountPercent: parsePercentInput(defaultDiscountPercent),
+            defaultTituloFundo: parseHexColorInput(defaultTituloFundo),
             ...(parseReajustesInput(defaultReajustes) !== undefined
               ? { defaultReajustes: parseReajustesInput(defaultReajustes) }
               : {}),
@@ -474,6 +482,7 @@ export class ContractController {
         defaultBdiPercent,
         defaultDiscountPercent,
         defaultReajustes,
+        defaultTituloFundo,
       } = req.body;
 
       const existing = await prisma.contract.findUnique({
@@ -526,6 +535,9 @@ export class ContractController {
       }
       if (defaultReajustes !== undefined) {
         updateData.defaultReajustes = parseReajustesInput(defaultReajustes);
+      }
+      if (defaultTituloFundo !== undefined) {
+        updateData.defaultTituloFundo = parseHexColorInput(defaultTituloFundo);
       }
 
       if (updateData.endDate && updateData.startDate && updateData.endDate < updateData.startDate) {
