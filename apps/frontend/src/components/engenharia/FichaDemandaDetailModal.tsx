@@ -859,7 +859,8 @@ export function FichaDemandaDetailModal({
                 <Paperclip className="h-4 w-4 text-gray-500" />
                 Demais anexos
               </div>
-              {editavelAnexos ? (
+              {/* Qualquer pessoa com acesso à ficha pode juntar anexos, em qualquer etapa (aprovada, cotação, finalizada...). */}
+              {allowPendingUpload ? (
                 <button
                   type="button"
                   onClick={() => {

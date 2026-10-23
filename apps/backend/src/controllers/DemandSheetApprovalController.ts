@@ -484,8 +484,10 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
-      if (existing.status !== 'WAITING_MANAGER') {
-        throw createError('Somente fichas aguardando aprovação podem ser editadas', 400);
+      // Edição liberada enquanto aguarda aprovação e na Fila (aprovada, ainda sem status de compras).
+      const naFila = existing.status === 'APPROVED' && !existing.purchaseStatus;
+      if (existing.status !== 'WAITING_MANAGER' && !naFila) {
+        throw createError('A ficha só pode ser editada até a etapa Fila', 400);
       }
       if (!req.user.isAdmin && existing.createdBy !== req.user.id) {
         throw createError('Sem permissão para editar esta ficha', 403);

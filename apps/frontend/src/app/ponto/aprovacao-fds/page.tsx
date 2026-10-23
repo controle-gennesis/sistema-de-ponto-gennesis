@@ -58,6 +58,11 @@ const ROW_ACTION_MENU_WIDTH_PX = 224;
 
 type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
+/** A Engenharia edita a ficha enquanto aguarda aprovação e também na Fila (aprovada, antes da Cotação). */
+function canEditFicha(r: FichaDemandaApprovalRecord): boolean {
+  return r.status === 'WAITING_MANAGER' || (r.status === 'APPROVED' && !r.purchaseStatus);
+}
+
 /** Aguardando Aprovação = aguardando o gestor. Fila/Cotação/Finalizadas = status de compras da ficha já aprovada. */
 function matchesCard(r: FichaDemandaApprovalRecord, card: CardFilter): boolean {
   switch (card) {
@@ -340,8 +345,8 @@ export default function AprovacaoFdsPage() {
   };
 
   const openEdit = (row: FichaDemandaApprovalRecord) => {
-    if (row.status !== 'WAITING_MANAGER') {
-      toast.error('Somente fichas aguardando aprovação podem ser editadas.');
+    if (!canEditFicha(row)) {
+      toast.error('A ficha só pode ser editada até a etapa Fila.');
       return;
     }
     setEditingRecord(row);
@@ -634,7 +639,7 @@ export default function AprovacaoFdsPage() {
                           setRowActionMenu(null);
                           openEdit(rowForActionMenu);
                         }}
-                        disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
+                        disabled={!canEditFicha(rowForActionMenu)}
                         className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                       >
                         <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
