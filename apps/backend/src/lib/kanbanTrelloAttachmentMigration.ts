@@ -21,7 +21,7 @@ const MAX_FILE_BYTES = 300 * 1024 * 1024;
 const CONCURRENCY = 3;
 const BATCH = 60;
 
-type Failure = { attachmentId: string; fileName: string; reason: string };
+type Failure = { attachmentId: string; fileName: string; reason: string; cardTitle?: string; board?: string };
 
 type JobState = {
   running: boolean;
@@ -35,6 +35,8 @@ type JobState = {
   limit: number | null;
   lastError: string | null;
   failures: Failure[];
+  /** Total de falhas por motivo (a lista `failures` guarda só as mais recentes). */
+  failureCounts: Record<string, number>;
 };
 
 const state: JobState = {
@@ -49,6 +51,7 @@ const state: JobState = {
   limit: null,
   lastError: null,
   failures: [],
+  failureCounts: {},
 };
 
 function trelloCredentials(): { key: string; token: string } | null {
@@ -57,18 +60,57 @@ function trelloCredentials(): { key: string; token: string } | null {
   return key && token ? { key, token } : null;
 }
 
+type BoardBreakdownRow = {
+  board: string;
+  pending: bigint;
+  migrated: bigint;
+  native: bigint;
+  external: bigint;
+};
+
+/** Anexos por quadro: ainda no Trello, já copiados, enviados direto no Conecta e links externos. */
+async function getBoardBreakdown() {
+  const rows = await prisma.$queryRaw<BoardBreakdownRow[]>`
+    SELECT b.department_label AS board,
+      COUNT(*) FILTER (WHERE a."fileUrl" LIKE 'https://trello.com/1/cards/%') AS pending,
+      COUNT(*) FILTER (WHERE a."fileUrl" LIKE '/uploads/kanban-trello/%') AS migrated,
+      COUNT(*) FILTER (
+        WHERE a."fileKey" IS NOT NULL AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
+      ) AS native,
+      COUNT(*) FILTER (
+        WHERE a."fileUrl" NOT LIKE 'https://trello.com/1/cards/%'
+          AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
+          AND a."fileKey" IS NULL
+      ) AS external
+    FROM kanban_card_attachments a
+    JOIN kanban_cards c ON c.id = a."cardId"
+    JOIN kanban_columns col ON col.id = c."columnId"
+    JOIN kanban_boards b ON b.id = col."boardId"
+    GROUP BY b.department_label
+    ORDER BY COUNT(*) DESC`;
+  return rows.map((r) => ({
+    board: r.board,
+    pending: Number(r.pending),
+    migrated: Number(r.migrated),
+    native: Number(r.native),
+    external: Number(r.external),
+  }));
+}
+
 export async function getTrelloMigrationStatus() {
-  const [pending, migrated] = await Promise.all([
+  const [pending, migrated, byBoard] = await Promise.all([
     prisma.kanbanCardAttachment.count({ where: { fileUrl: { startsWith: TRELLO_URL_PREFIX } } }),
     prisma.kanbanCardAttachment.count({
       where: { fileUrl: { startsWith: `/uploads/${MIGRATED_FOLDER}/` } },
     }),
+    getBoardBreakdown(),
   ]);
   return {
     configured: !!trelloCredentials(),
     pending,
     migrated,
-    job: { ...state, failures: state.failures.slice(-20) },
+    byBoard,
+    job: { ...state, failures: state.failures.slice(-100) },
   };
 }
 
@@ -160,10 +202,23 @@ async function runJob(limit: number | null) {
           } catch (error) {
             failedIds.add(att.id);
             state.failed += 1;
+            const reason = error instanceof Error ? error.message : String(error);
+            state.failureCounts[reason] = (state.failureCounts[reason] ?? 0) + 1;
+            // Onde está o anexo (card e quadro), para a pessoa achar o arquivo no Trello.
+            const where = await prisma.kanbanCardAttachment
+              .findUnique({
+                where: { id: att.id },
+                select: {
+                  card: { select: { title: true, column: { select: { board: { select: { departmentLabel: true } } } } } },
+                },
+              })
+              .catch(() => null);
             state.failures.push({
               attachmentId: att.id,
               fileName: att.fileName,
-              reason: error instanceof Error ? error.message : String(error),
+              reason,
+              cardTitle: where?.card.title.slice(0, 120),
+              board: where?.card.column.board.departmentLabel,
             });
             if (state.failures.length > 200) state.failures.shift();
           }
@@ -216,6 +271,7 @@ export function startTrelloMigration(limit: number | null): { started: boolean; 
     limit,
     lastError: null,
     failures: [],
+    failureCounts: {},
   } satisfies Partial<JobState>);
   void runJob(limit);
   return { started: true };

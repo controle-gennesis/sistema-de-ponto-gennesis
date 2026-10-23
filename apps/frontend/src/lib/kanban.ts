@@ -835,6 +835,8 @@ export type TrelloAttachmentMigrationStatus = {
   configured: boolean;
   pending: number;
   migrated: number;
+  /** Por quadro: ainda no Trello, copiados, enviados direto no Conecta e links externos. */
+  byBoard: Array<{ board: string; pending: number; migrated: number; native: number; external: number }>;
   job: {
     running: boolean;
     stopRequested: boolean;
@@ -846,7 +848,14 @@ export type TrelloAttachmentMigrationStatus = {
     bytesCopied: number;
     limit: number | null;
     lastError: string | null;
-    failures: Array<{ attachmentId: string; fileName: string; reason: string }>;
+    failures: Array<{
+      attachmentId: string;
+      fileName: string;
+      reason: string;
+      cardTitle?: string;
+      board?: string;
+    }>;
+    failureCounts: Record<string, number>;
   };
 };
 
