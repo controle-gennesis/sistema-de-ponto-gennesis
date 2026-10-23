@@ -14,6 +14,7 @@ type PdfjsDocument = {
 };
 
 type PdfjsPage = {
+  getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
   getViewport: (params: { scale: number }) => { width: number; height: number };
   render: (params: {
     canvasContext: CanvasRenderingContext2D;

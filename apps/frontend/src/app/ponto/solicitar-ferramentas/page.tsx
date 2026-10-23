@@ -1245,7 +1245,7 @@ function SolicitarLocacoesFerramentasPage() {
                                   originalName: anexo.name || 'Arquivo',
                                   fileUrl: anexo.url,
                                 }}
-                                displayName={section.kind === 'oc' && ocId ? `OC ${ocId}` : section.extra}
+                                displayName={section.kind === 'oc' && ocId ? `ID ${ocId}` : section.extra}
                                 extra={anexo.name || 'Arquivo'}
                               />
                             ))}

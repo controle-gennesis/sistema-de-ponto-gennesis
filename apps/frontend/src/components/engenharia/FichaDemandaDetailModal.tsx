@@ -11,6 +11,7 @@ import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDema
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { usePermissions } from '@/hooks/usePermissions';
+import { detectOcIdFromFile } from '@/lib/extractOcId';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
@@ -126,6 +127,8 @@ export function FichaDemandaDetailModal({
   const [anexoFile, setAnexoFile] = useState<File | null>(null);
   const [anexoDescricao, setAnexoDescricao] = useState('');
   const [ocFile, setOcFile] = useState<File | null>(null);
+  // Leitura do ID no arquivo da OC: o campo só aparece se não der para ler.
+  const [ocIdStatus, setOcIdStatus] = useState<'none' | 'found' | 'missing'>('none');
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelNote, setCancelNote] = useState('');
 
@@ -455,7 +458,7 @@ export function FichaDemandaDetailModal({
                 fileUrl: anexo.url,
               }}
               // Número da OC em cima e o nome do arquivo embaixo.
-              displayName={anexo.ocRef ? `OC ${anexo.ocRef}` : undefined}
+              displayName={anexo.ocRef ? `ID ${anexo.ocRef}` : undefined}
               extra={anexo.ocRef ? anexo.name || 'Arquivo' : 'Ordem de compra'}
               {...removerProps(anexo)}
               uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
@@ -494,6 +497,7 @@ export function FichaDemandaDetailModal({
         onClick={() => {
           setNovaOcRef('');
           setOcFile(null);
+          setOcIdStatus('none');
           setOcModalOpen(true);
         }}
         title="Adicionar OC"
@@ -1049,17 +1053,22 @@ export function FichaDemandaDetailModal({
         size="md"
       >
         <div className="space-y-4">
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              ID da OC<span className="text-red-500"> *</span>
-            </span>
-            <input
-              value={novaOcRef}
-              onChange={(e) => setNovaOcRef(e.target.value)}
-              className={FORM_FIELD_INPUT_CLS}
-              placeholder="Digite o ID da ordem de compra"
-            />
-          </label>
+          {ocIdStatus === 'missing' ? (
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                ID da OC<span className="text-red-500"> *</span>
+              </span>
+              <input
+                value={novaOcRef}
+                onChange={(e) => setNovaOcRef(e.target.value)}
+                className={FORM_FIELD_INPUT_CLS}
+                placeholder="Digite o ID da ordem de compra"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Não foi possível ler o ID no arquivo. Informe manualmente.
+              </span>
+            </label>
+          ) : null}
           <div>
             <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Anexo da OC<span className="text-red-500"> *</span>
@@ -1068,9 +1077,21 @@ export function FichaDemandaDetailModal({
               label={ocFile ? ocFile.name : 'Anexar ordem de compra'}
               hint={ocFile ? 'Clique ou arraste para trocar o arquivo' : 'Clique ou arraste imagem/PDF'}
               onFiles={(files) => {
-                if (files[0]) setOcFile(files[0]);
+                const file = files[0];
+                if (!file) return;
+                setOcFile(file);
+                setOcIdStatus('none');
+                void detectOcIdFromFile(file).then((id) => {
+                  if (id) setNovaOcRef(id);
+                  setOcIdStatus(id ? 'found' : 'missing');
+                });
               }}
             />
+            {ocIdStatus === 'found' ? (
+              <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                ID da OC identificado no arquivo: {novaOcRef}
+              </p>
+            ) : null}
           </div>
           <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <Button

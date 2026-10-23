@@ -29,6 +29,7 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { Bloco } from '@/components/ferramentas/Bloco';
+import { detectOcIdFromFile } from '@/lib/extractOcId';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import {
   cadastroListClasses,
@@ -267,6 +268,8 @@ function SolicitacoesFerramentasPage() {
   const [scModalOpen, setScModalOpen] = useState(false);
   const [ocModalOpen, setOcModalOpen] = useState(false);
   const [ocFile, setOcFile] = useState<File | null>(null);
+  // Leitura do ID no arquivo da OC: o campo só aparece se não der para ler.
+  const [ocIdStatus, setOcIdStatus] = useState<'none' | 'found' | 'missing'>('none');
   const [uploadingKind, setUploadingKind] = useState<'oc' | 'nf' | 'boleto' | 'payment' | null>(null);
   const [removingAnexoId, setRemovingAnexoId] = useState<string | null>(null);
   const [renewTarget, setRenewTarget] = useState<ToolRentalRequest | null>(null);
@@ -530,8 +533,9 @@ function SolicitacoesFerramentasPage() {
   };
 
   const openOcModal = () => {
-    setOcIdDraft(selected?.ocId || '');
+    setOcIdDraft('');
     setOcFile(null);
+    setOcIdStatus('none');
     setOcModalOpen(true);
   };
 
@@ -1157,7 +1161,7 @@ function SolicitacoesFerramentasPage() {
                                     originalName: anexo.name || 'Arquivo',
                                     fileUrl: anexo.url,
                                   }}
-                                  displayName={section.kind === 'oc' && selected.ocId ? `OC ${selected.ocId}` : section.extra}
+                                  displayName={section.kind === 'oc' && selected.ocId ? `ID ${selected.ocId}` : section.extra}
                                   extra={anexo.name || 'Arquivo'}
                                   removing={removingAnexoId === anexo.id}
                                   onRemove={
@@ -1361,17 +1365,22 @@ function SolicitacoesFerramentasPage() {
           }
         >
           <div className="space-y-4">
-            <div>
-              <label className={labelCls}>
-                ID da OC <span className="text-red-600">*</span>
-              </label>
-              <input
-                className={fieldCls}
-                value={ocIdDraft}
-                onChange={(e) => setOcIdDraft(e.target.value)}
-                placeholder="Digite o ID da ordem de compra"
-              />
-            </div>
+            {ocIdStatus === 'missing' ? (
+              <div>
+                <label className={labelCls}>
+                  ID da OC <span className="text-red-600">*</span>
+                </label>
+                <input
+                  className={fieldCls}
+                  value={ocIdDraft}
+                  onChange={(e) => setOcIdDraft(e.target.value)}
+                  placeholder="Digite o ID da ordem de compra"
+                />
+                <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                  Não foi possível ler o ID no arquivo. Informe manualmente.
+                </span>
+              </div>
+            ) : null}
             <div>
               <label className={labelCls}>
                 Anexo da OC <span className="text-red-600">*</span>
@@ -1380,9 +1389,21 @@ function SolicitacoesFerramentasPage() {
                 label={ocFile ? ocFile.name : 'Anexar ordem de compra'}
                 hint={ocFile ? 'Clique ou arraste para trocar o arquivo' : 'Clique ou arraste imagem/PDF'}
                 onFiles={(files) => {
-                  if (files[0]) setOcFile(files[0]);
+                  const file = files[0];
+                  if (!file) return;
+                  setOcFile(file);
+                  setOcIdStatus('none');
+                  void detectOcIdFromFile(file).then((id) => {
+                    if (id) setOcIdDraft(id);
+                    setOcIdStatus(id ? 'found' : 'missing');
+                  });
                 }}
               />
+              {ocIdStatus === 'found' ? (
+                <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                  ID da OC identificado no arquivo: {ocIdDraft}
+                </p>
+              ) : null}
             </div>
           </div>
         </Modal>
