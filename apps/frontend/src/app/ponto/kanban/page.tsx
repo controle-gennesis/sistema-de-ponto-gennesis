@@ -781,7 +781,7 @@ function CardLabelPill({
   color: string;
   text: string;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
 }) {
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -813,6 +813,8 @@ function CardLabelPill({
         ref={triggerRef}
         type="button"
         onClick={(e) => {
+          // Sem onToggle (etiquetas sempre com nome), o clique segue para o card.
+          if (!onToggle) return;
           e.stopPropagation();
           e.preventDefault();
           onToggle();
@@ -878,38 +880,18 @@ function CardLabelsRow({
   labels: KanbanCard['labels'];
   labelPresets?: readonly KanbanLabelPreset[];
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const rowRef = useRef<HTMLDivElement>(null);
   const normalized = normalizeKanbanLabels(labels, labelPresets);
-
-  useEffect(() => {
-    if (!expanded) return;
-    function handlePointerDown(e: MouseEvent | TouchEvent) {
-      const el = rowRef.current;
-      if (!el) return;
-      const target = e.target as Node | null;
-      if (target && el.contains(target)) return;
-      setExpanded(false);
-    }
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
-    };
-  }, [expanded]);
 
   if (normalized.length === 0) return null;
 
   return (
-    <div ref={rowRef} className="mb-2 flex flex-wrap gap-1">
+    <div className="mb-2 flex flex-wrap gap-1">
       {normalized.map((l) => (
         <CardLabelPill
           key={`${l.color}-${l.text}`}
           color={l.color}
           text={l.text}
-          expanded={expanded}
-          onToggle={() => setExpanded((v) => !v)}
+          expanded={!!l.text.trim()}
         />
       ))}
     </div>
@@ -2870,6 +2852,33 @@ function KanbanPage() {
   const boardLabelPresets = getKanbanLabelPalette(board?.labelPresets);
   const labelFilterAllValues = boardLabelPresets.map((p) => p.color);
 
+  // Filtro por atribuição: pessoas que aparecem nos cards do quadro (+ "Sem atribuição").
+  const memberFilterNone = '__sem_atribuicao__';
+  const memberFilterOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    let hasUnassigned = false;
+    for (const col of columns) {
+      for (const card of col.cards) {
+        const members = getCardMembers(card);
+        if (members.length === 0) hasUnassigned = true;
+        for (const m of members) {
+          if (m.userId && !byId.has(m.userId)) byId.set(m.userId, m.name);
+        }
+      }
+    }
+    const people = [...byId.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    return hasUnassigned ? [{ value: memberFilterNone, label: 'Sem atribuição' }, ...people] : people;
+  }, [columns]);
+  const memberFilterAllValues = memberFilterOptions.map((o) => o.value);
+  const cardMatchesMemberFilter = (card: KanbanCard, selected: string[]) => {
+    if (multiselectFilterShowsAll(selected, memberFilterAllValues)) return true;
+    const ids = getCardMembers(card).map((m) => m.userId);
+    if (ids.length === 0) return selected.includes(memberFilterNone);
+    return ids.some((id) => selected.includes(id));
+  };
+
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2877,10 +2886,12 @@ function KanbanPage() {
   const [cardViewMode, setCardViewMode] = useState<KanbanCardViewMode>(() => readKanbanCardViewMode());
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [filterLabelColors, setFilterLabelColors] = useState<string[]>([]);
+  const [filterMemberIds, setFilterMemberIds] = useState<string[]>([]);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const hasActiveKanbanFilters =
     isMultiselectFilterActive(filterPriorities, KANBAN_PRIORITY_ALL_VALUES) ||
-    isMultiselectFilterActive(filterLabelColors, labelFilterAllValues);
+    isMultiselectFilterActive(filterLabelColors, labelFilterAllValues) ||
+    isMultiselectFilterActive(filterMemberIds, memberFilterAllValues);
   const [savingColumn, setSavingColumn] = useState(false);
 
   const [cardModal, setCardModal] = useState<
@@ -3637,7 +3648,7 @@ function KanbanPage() {
               (c) => l.color.trim().toLowerCase() === c.trim().toLowerCase(),
             ),
           );
-        return matchSearch && matchPriority && matchLabel;
+        return matchSearch && matchPriority && matchLabel && cardMatchesMemberFilter(card, filterMemberIds);
       });
 
       const visualDropIndex = resolveKanbanVisualDropIndex(
@@ -3711,6 +3722,8 @@ function KanbanPage() {
       search,
       filterPriorities,
       filterLabelColors,
+      filterMemberIds,
+      memberFilterAllValues,
       labelFilterAllValues,
       boardLabelPresets,
       queryClient,
@@ -4055,7 +4068,12 @@ function KanbanPage() {
                 (c) => l.color.trim().toLowerCase() === c.trim().toLowerCase(),
               ),
             );
-          return matchSearch && matchPriority && matchLabel;
+          return (
+            matchSearch &&
+            matchPriority &&
+            matchLabel &&
+            cardMatchesMemberFilter(card, filterMemberIds)
+          );
         }),
       })),
     [
@@ -4063,6 +4081,8 @@ function KanbanPage() {
       search,
       filterPriorities,
       filterLabelColors,
+      filterMemberIds,
+      memberFilterAllValues,
       labelFilterAllValues,
       boardLabelPresets,
     ],
@@ -4518,12 +4538,26 @@ function KanbanPage() {
             menuInline
             noFocusRing
           />
+          <MultiSelectSearchDropdown
+            label="Atribuições"
+            options={memberFilterOptions}
+            selected={filterMemberIds}
+            onChange={setFilterMemberIds}
+            placeholder="Todas as pessoas"
+            searchPlaceholder="Pesquisar pessoa..."
+            emptyOptionsMessage="Nenhum card com pessoa atribuída neste quadro."
+            emptySearchMessage="Nenhuma pessoa encontrada."
+            icon={<Users className="h-4 w-4" aria-hidden />}
+            menuInline
+            noFocusRing
+          />
           <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button
               type="button"
               onClick={() => {
                 setFilterPriorities([]);
                 setFilterLabelColors([]);
+                setFilterMemberIds([]);
               }}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 outline-none transition-colors hover:bg-gray-50 focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
             >

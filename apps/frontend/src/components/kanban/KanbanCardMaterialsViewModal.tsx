@@ -23,11 +23,11 @@ export function KanbanCardMaterialsViewModal({
 }: KanbanCardMaterialsViewModalProps) {
   const download = () => {
     const rows = [
-      ['Código', 'Nome', 'Unidade', 'Quantidade'],
-      ...materials.map((m) => [m.code ?? '', m.name, m.unit, Number(m.quantity ?? 1)]),
+      ['Código', 'Nome', 'Unidade', 'Quantidade', 'Observação'],
+      ...materials.map((m) => [m.code ?? '', m.name, m.unit, Number(m.quantity ?? 1), m.observation ?? '']),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 14 }, { wch: 70 }, { wch: 10 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 14 }, { wch: 70 }, { wch: 10 }, { wch: 12 }, { wch: 40 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Materiais');
     const safe = (cardTitle || 'card').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60) || 'card';
@@ -61,6 +61,7 @@ export function KanbanCardMaterialsViewModal({
               <th className="px-3 py-2 text-left font-medium">Nome</th>
               <th className="px-3 py-2 text-center font-medium">Un.</th>
               <th className="px-3 py-2 text-center font-medium">Quantidade</th>
+              <th className="px-3 py-2 text-left font-medium">Observação</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -76,6 +77,7 @@ export function KanbanCardMaterialsViewModal({
                 <td className="whitespace-nowrap px-3 py-2 text-center text-gray-900 dark:text-gray-100">
                   {Number(m.quantity ?? 1).toLocaleString('pt-BR')}
                 </td>
+                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{m.observation?.trim() || '—'}</td>
               </tr>
             ))}
           </tbody>

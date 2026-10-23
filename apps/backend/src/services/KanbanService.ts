@@ -1480,20 +1480,21 @@ export class KanbanService {
         code: string | null;
         productType: string | null;
         quantity: number;
+        observation: string | null;
       }>
     >`
-      SELECT km.id, km."materialId", km.quantity::float8 AS quantity, m.name, m.unit, m.code, m."productType"
+      SELECT km.id, km."materialId", km.quantity::float8 AS quantity, km.observation, m.name, m.unit, m.code, m."productType"
       FROM kanban_card_materials km
       JOIN construction_materials m ON m.id = km."materialId"
       WHERE km."cardId" = ${cardId}
       ORDER BY km."createdAt" ASC, m.name ASC`;
   }
 
-  /** Adiciona materiais ao card; se já existir, atualiza a quantidade. */
+  /** Adiciona materiais ao card; se já existir, atualiza a quantidade e a observação. */
   async addCardMaterials(
     userId: string,
     cardId: string,
-    items: Array<{ materialId: string; quantity?: number }>,
+    items: Array<{ materialId: string; quantity?: number; observation?: string | null }>,
   ) {
     await this.assertCardAccess(userId, cardId);
     const materialIds = items
@@ -1511,10 +1512,14 @@ export class KanbanService {
       if (!item || typeof item.materialId !== 'string' || !item.materialId) continue;
       const q = Number(item.quantity);
       const quantity = Number.isFinite(q) && q > 0 ? Math.min(q, 99999999999) : 1;
+      const observation =
+        typeof item.observation === 'string' && item.observation.trim()
+          ? item.observation.trim().slice(0, 500)
+          : null;
       await prisma.$executeRaw`
-        INSERT INTO kanban_card_materials (id, "cardId", "materialId", quantity)
-        SELECT ${randomUUID()}, ${cardId}, m.id, ${quantity} FROM construction_materials m WHERE m.id = ${item.materialId}
-        ON CONFLICT ("cardId", "materialId") DO UPDATE SET quantity = EXCLUDED.quantity`;
+        INSERT INTO kanban_card_materials (id, "cardId", "materialId", quantity, observation)
+        SELECT ${randomUUID()}, ${cardId}, m.id, ${quantity}, ${observation} FROM construction_materials m WHERE m.id = ${item.materialId}
+        ON CONFLICT ("cardId", "materialId") DO UPDATE SET quantity = EXCLUDED.quantity, observation = EXCLUDED.observation`;
     }
     if (addedNames.length > 0) {
       await this.logActivity(cardId, userId, 'MATERIALS_CHANGED', { names: addedNames });

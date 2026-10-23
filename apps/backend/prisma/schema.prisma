@@ -3537,6 +3537,8 @@ model KanbanCardMaterial {
   cardId     String
   materialId String
   quantity   Decimal  @default(1) @db.Decimal(14, 3)
+  /// Observação livre sobre o material neste card (ex.: cor, marca, medida).
+  observation String? @db.Text
   createdAt  DateTime @default(now())
 
   card    KanbanCard           @relation(fields: [cardId], references: [id], onDelete: Cascade)

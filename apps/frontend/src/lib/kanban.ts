@@ -762,6 +762,7 @@ export interface KanbanCardMaterial {
   code: string | null;
   productType: string | null;
   quantity: number;
+  observation?: string | null;
 }
 
 export async function fetchKanbanCardMaterials(cardId: string): Promise<KanbanCardMaterial[]> {
@@ -771,7 +772,7 @@ export async function fetchKanbanCardMaterials(cardId: string): Promise<KanbanCa
 
 export async function addKanbanCardMaterials(
   cardId: string,
-  materials: Array<{ materialId: string; quantity: number }>,
+  materials: Array<{ materialId: string; quantity: number; observation?: string }>,
 ): Promise<KanbanCardMaterial[]> {
   const res = await api.post(`/kanban/cards/${cardId}/materials`, { materials });
   return res.data.data as KanbanCardMaterial[];

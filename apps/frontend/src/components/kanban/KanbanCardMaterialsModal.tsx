@@ -18,7 +18,10 @@ interface Row {
   name: string;
   unit: string;
   qty: string;
+  observation: string;
 }
+
+const OBSERVATION_MAX = 500;
 
 const RECENTS_KEY = 'kanban-materials-recents-totvs';
 const RECENTS_MAX = 15;
@@ -85,17 +88,27 @@ export function KanbanCardMaterialsModal({
         name: m.name,
         unit: m.unit,
         qty: String(m.quantity ?? 1).replace('.', ','),
+        observation: m.observation ?? '',
       })),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const changed = useMemo(() => {
-    const initial = new Map(selected.map((m) => [m.materialId, m.quantity ?? 1]));
+    const initial = new Map(
+      selected.map((m) => [m.materialId, { qty: m.quantity ?? 1, obs: (m.observation ?? '').trim() }]),
+    );
     const current = new Set(rows.map((r) => r.materialId));
     const toAdd = rows
-      .filter((r) => initial.get(r.materialId) !== parseQty(r.qty))
-      .map((r) => ({ materialId: r.materialId, quantity: parseQty(r.qty) }));
+      .filter((r) => {
+        const before = initial.get(r.materialId);
+        return !before || before.qty !== parseQty(r.qty) || before.obs !== r.observation.trim();
+      })
+      .map((r) => ({
+        materialId: r.materialId,
+        quantity: parseQty(r.qty),
+        observation: r.observation.trim(),
+      }));
     const toRemove = [...initial.keys()].filter((id) => !current.has(id));
     return { toAdd, toRemove };
   }, [rows, selected]);
@@ -116,13 +129,23 @@ export function KanbanCardMaterialsModal({
         ? prev.filter((r) => r.materialId !== id)
         : [
             ...prev,
-            { materialId: id, code: m.code ?? null, name: m.name, unit: m.unit, qty: '1' },
+            {
+              materialId: id,
+              code: m.code ?? null,
+              name: m.name,
+              unit: m.unit,
+              qty: '1',
+              observation: '',
+            },
           ],
     );
   };
 
   const setQty = (id: string, qty: string) =>
     setRows((prev) => prev.map((r) => (r.materialId === id ? { ...r, qty } : r)));
+
+  const setObservation = (id: string, observation: string) =>
+    setRows((prev) => prev.map((r) => (r.materialId === id ? { ...r, observation } : r)));
 
   const confirm = async () => {
     setSaving(true);
@@ -201,6 +224,7 @@ export function KanbanCardMaterialsModal({
                   <th className="px-3 py-2 font-medium">Nome</th>
                   <th className="px-3 py-2 text-center font-medium">Un.</th>
                   <th className="px-3 py-2 text-center font-medium">Quantidade</th>
+                  <th className="px-3 py-2 font-medium">Observação</th>
                   <th className="w-10 px-3 py-2" />
                 </tr>
               </thead>
@@ -225,6 +249,17 @@ export function KanbanCardMaterialsModal({
                         onBlur={() => setQty(r.materialId, String(parseQty(r.qty)).replace('.', ','))}
                         className="w-24 rounded-lg border-0 bg-transparent px-2 py-1 text-center text-sm text-gray-900 hover:bg-gray-50 focus:bg-gray-100 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-700/50 dark:focus:bg-gray-700"
                         aria-label={`Quantidade de ${r.name}`}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        value={r.observation}
+                        maxLength={OBSERVATION_MAX}
+                        placeholder="Opcional"
+                        onChange={(e) => setObservation(r.materialId, e.target.value)}
+                        className="w-full min-w-[12rem] rounded-lg border-0 bg-transparent px-2 py-1 text-sm text-gray-900 placeholder:text-gray-400 hover:bg-gray-50 focus:bg-gray-100 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-700/50 dark:focus:bg-gray-700"
+                        aria-label={`Observação de ${r.name}`}
                       />
                     </td>
                     <td className="px-3 py-2">
