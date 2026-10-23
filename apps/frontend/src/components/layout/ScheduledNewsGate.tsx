@@ -63,7 +63,12 @@ export function ScheduledNewsGate({ userId }: { userId?: string }) {
   const imageSrc = resolveApiMediaUrl(data.imageUrl ?? null);
 
   return (
-    <Modal isOpen={open} onClose={handleClose} size="xl" title={data.title}>
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      size="xl"
+      title={data.title}
+    >
       <div className="space-y-5">
         {imageSrc ? (
           <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
@@ -84,17 +89,6 @@ export function ScheduledNewsGate({ userId }: { userId?: string }) {
           <div className="whitespace-pre-wrap text-sm leading-6 text-gray-700 dark:text-gray-300">
             {data.content}
           </div>
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={closeMutation.isPending}
-            className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {closeMutation.isPending ? 'Fechando...' : 'Entendi'}
-          </button>
         </div>
       </div>
     </Modal>
