@@ -140,6 +140,7 @@ import { startMaterialTotvsSyncScheduler } from './services/MaterialTotvsSyncSer
 import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
 import { startPaymentConditionTotvsSyncScheduler } from './services/PaymentConditionTotvsSync';
 import { startFluigDatasetMirrorScheduler } from './services/FluigDatasetMirrorSync';
+import { comOrigemFluig } from './lib/fluigRequestLog';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -870,7 +871,9 @@ try {
       ];
       // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
       setTimeout(() => {
-        void fluigService.warmupDatasets(FLUIG_WARM_DATASETS);
+        void comOrigemFluig({ origem: 'aquecimento_automatico', detalhe: 'warmup ao subir' }, () =>
+          fluigService.warmupDatasets(FLUIG_WARM_DATASETS)
+        );
         fluigService.startPeriodicRefresh(FLUIG_WARM_DATASETS, 8 * 60 * 1000);
       }, 10_000);
     }

@@ -4,9 +4,14 @@ import path from 'path';
 // Garantir que .env seja carregado antes de ler process.env (imports são avaliados antes do index)
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, type AxiosResponse } from 'axios';
 import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
+import {
+  comOrigemFluig,
+  registrarChamadaFluig,
+  type TipoChamadaFluig,
+} from '../lib/fluigRequestLog';
 
 export interface FluigDatasetValues {
   content?: {
@@ -57,6 +62,27 @@ export interface FluigDatasetStructure {
     lastUpdate: number;
   };
   message?: string | null;
+}
+
+/** Classifica a chamada para o registro (tipo e dataset, quando houver). */
+function classificarChamadaFluig(
+  path: string,
+  body?: unknown
+): { tipo: TipoChamadaFluig; datasetId?: string } {
+  const b = (body ?? {}) as { name?: unknown; datasetId?: unknown };
+  if (path.includes('/ecm/dataset/availableDatasets')) return { tipo: 'lista_datasets' };
+  if (path.includes('/ecm/dataset/datasetStructure/')) {
+    const id = decodeURIComponent(path.split('/ecm/dataset/datasetStructure/')[1] ?? '').split('?')[0];
+    return { tipo: 'estrutura', datasetId: id || undefined };
+  }
+  if (path.includes('/ecm/dataset/search')) {
+    return { tipo: 'busca', datasetId: typeof b.datasetId === 'string' ? b.datasetId : undefined };
+  }
+  if (path.includes('/ecm/dataset/datasets')) {
+    return { tipo: 'dataset', datasetId: typeof b.name === 'string' ? b.name : undefined };
+  }
+  if (path.includes('/document')) return { tipo: 'documento_url' };
+  return { tipo: 'outro' };
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -179,14 +205,33 @@ export class FluigService {
         };
         if (body && method === 'POST') config.data = body;
 
+        const inicioChamada = Date.now();
+        const classe = classificarChamadaFluig(path, body);
         try {
           const response = await axios.request<T>(config);
+          registrarChamadaFluig({
+            ...classe,
+            metodo: method,
+            url,
+            status: response.status,
+            ok: true,
+            duracaoMs: Date.now() - inicioChamada,
+          });
           if (options?.useDatasetBase !== false && !this.workingDatasetBase) {
             this.workingDatasetBase = base;
             console.log(`Fluig: Path funcionando: ${base} (auth: OAuth 1.0)`);
           }
           return response.data;
         } catch (err) {
+          registrarChamadaFluig({
+            ...classe,
+            metodo: method,
+            url,
+            status: (err as AxiosError)?.response?.status ?? null,
+            ok: false,
+            duracaoMs: Date.now() - inicioChamada,
+            erro: (err as Error)?.message,
+          });
           lastErr = err;
           // Se falhar, tenta o próximo path/base.
           const status = (err as AxiosError)?.response?.status;
@@ -460,7 +505,7 @@ export class FluigService {
       console.log('⏸️  Fluig: refresh periódico ignorado (fetch de datasets desativado).');
       return setInterval(() => {}, intervalMs);
     }
-    return setInterval(() => {
+    return setInterval(() => comOrigemFluig({ origem: 'aquecimento_automatico', detalhe: 'refresh periódico' }, () => {
       for (const id of active) {
         const cacheKey = this.datasetCacheKey(id);
         const entry = this.datasetCache.get(cacheKey);
@@ -471,7 +516,7 @@ export class FluigService {
         if (age < CACHE_FRESH_TTL_MS) continue;
         this.refreshDatasetInBackground(id, cacheKey);
       }
-    }, intervalMs);
+    }), intervalMs);
   }
 
   async searchDataset(
@@ -682,13 +727,36 @@ export class FluigService {
       }
       headers = bearerHeaders;
     }
-    const response = await axios.get<ArrayBuffer>(url, {
-      headers,
-      responseType: 'arraybuffer',
-      timeout: 120000,
-      maxContentLength: 80 * 1024 * 1024,
-      maxBodyLength: 80 * 1024 * 1024,
-      validateStatus: (s) => s >= 200 && s < 400,
+    const inicioDownload = Date.now();
+    let response: AxiosResponse<ArrayBuffer>;
+    try {
+      response = await axios.get<ArrayBuffer>(url, {
+        headers,
+        responseType: 'arraybuffer',
+        timeout: 120000,
+        maxContentLength: 80 * 1024 * 1024,
+        maxBodyLength: 80 * 1024 * 1024,
+        validateStatus: (s) => s >= 200 && s < 400,
+      });
+    } catch (err) {
+      registrarChamadaFluig({
+        tipo: 'download_arquivo',
+        metodo: 'GET',
+        url,
+        status: (err as AxiosError)?.response?.status ?? null,
+        ok: false,
+        duracaoMs: Date.now() - inicioDownload,
+        erro: (err as Error)?.message,
+      });
+      throw err;
+    }
+    registrarChamadaFluig({
+      tipo: 'download_arquivo',
+      metodo: 'GET',
+      url,
+      status: response.status,
+      ok: true,
+      duracaoMs: Date.now() - inicioDownload,
     });
     const contentType =
       typeof response.headers['content-type'] === 'string'

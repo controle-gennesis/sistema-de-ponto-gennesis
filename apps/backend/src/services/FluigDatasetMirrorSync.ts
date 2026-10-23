@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
 import { ensureFluigDatasetMirrorSchema } from '../lib/ensureFluigDatasetMirrorSchema';
 import { FluigService, type FluigDatasetValues } from './FluigService';
+import { comOrigemFluig } from '../lib/fluigRequestLog';
 
 const fluigForMirror = new FluigService();
 
@@ -297,7 +298,9 @@ export function startFluigDatasetMirrorScheduler(): void {
   const tz = process.env.TZ || 'America/Sao_Paulo';
 
   const run = (reason: string, ids: readonly string[]) => {
-    void syncFluigDatasetIds(ids, { force: true })
+    void comOrigemFluig({ origem: 'espelho_diario', detalhe: reason }, () =>
+      syncFluigDatasetIds(ids, { force: true })
+    )
       .then((results) => {
         const ok = results.filter((r) => !r.error).length;
         console.log(`[fluig-mirror] ${reason}: ${ok}/${results.length} dataset(s) ok`);

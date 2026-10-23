@@ -5811,6 +5811,27 @@ model FluigDatasetMirrorRow {
   @@map("fluig_dataset_mirror_rows")
 }
 
+/// Cada chamada HTTP do Conecta ao Fluig: de onde veio (espelho diário, atualização manual, anexos…), tipo e resultado.
+model FluigRequestLog {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  origem     String
+  detalhe    String?
+  userId     String?
+  tipo       String
+  metodo     String
+  path       String
+  datasetId  String?
+  status     Int?
+  ok         Boolean  @default(true)
+  durationMs Int      @default(0)
+  erro       String?
+
+  @@index([createdAt])
+  @@index([origem, createdAt])
+  @@map("fluig_request_logs")
+}
+
 /// Nome e situação de um anexo do GED já confirmados no Fluig.
 /// A abertura da solicitação reutiliza este registro em vez de consultar o Fluig de novo.
 model FluigDocumentFileMeta {

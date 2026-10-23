@@ -80,6 +80,7 @@ import {
   HardHat,
   LayoutGrid,
   Star,
+  Activity,
   type LucideIcon,
 } from 'lucide-react';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
@@ -778,6 +779,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator ||
               can(pk('/ponto/controle/gerenciar-aprovadores-fluig')) ||
               fluigApproverNameKeys.length > 0
+          },
+          {
+            name: 'Chamadas ao Fluig',
+            href: '/ponto/fluig-chamadas',
+            icon: Activity,
+            description: 'Registro das requisições do Conecta ao Fluig (só administrador)',
+            permission: isAdministrator
           },
           {
             name: 'Solicitações Internas',
