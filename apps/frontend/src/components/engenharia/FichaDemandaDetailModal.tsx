@@ -1,13 +1,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Plus } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Paperclip, Pencil, Plus } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { usePermissions } from '@/hooks/usePermissions';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
@@ -104,6 +107,10 @@ export function FichaDemandaDetailModal({
   footer,
 }: Props) {
   const queryClient = useQueryClient();
+  const { isAdministrator } = usePermissions();
+  const [editandoContrato, setEditandoContrato] = useState(false);
+  const [contratoEdit, setContratoEdit] = useState('');
+  const [obraEdit, setObraEdit] = useState('');
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
   const [scNumero, setScNumero] = useState('');
   const [scId, setScId] = useState('');
@@ -121,7 +128,75 @@ export function FichaDemandaDetailModal({
   useEffect(() => {
     setCancelOpen(false);
     setCancelNote('');
+    setEditandoContrato(false);
   }, [record?.id]);
+
+  const { data: contratosRes, isLoading: carregandoContratos } = useQuery({
+    queryKey: ['fd-edit-contracts'],
+    queryFn: async () => {
+      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      return res.data;
+    },
+    enabled: editandoContrato,
+  });
+  const { data: obrasEdit = [], isLoading: carregandoObras } = useQuery({
+    queryKey: ['fd-edit-obras', contratoEdit],
+    enabled: editandoContrato && Boolean(contratoEdit),
+    queryFn: async () => {
+      const res = await api.get('/obras', {
+        params: { isActive: 'true', contratoId: contratoEdit, limit: 500, page: 1 },
+      });
+      return ((res.data?.data || []) as Array<{ id: string; name: string }>).filter(
+        (o) => o.id && o.name?.trim(),
+      );
+    },
+  });
+  const contratoOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        ((contratosRes?.data ?? []) as Array<{ id: string; name: string; number?: string }>).map(
+          (c) => ({
+            value: c.id,
+            label: c.name,
+            searchText: [c.name, c.number].filter(Boolean).join(' '),
+          }),
+        ),
+      ),
+    [contratosRes?.data],
+  );
+  const obraOptionsEdit = useMemo(() => {
+    const options = obrasEdit.map((o) => ({ value: o.name, label: o.name }));
+    // Mantém a obra atual selecionável mesmo que não esteja na lista do contrato escolhido.
+    if (obraEdit && !options.some((o) => o.value === obraEdit)) {
+      options.unshift({ value: obraEdit, label: obraEdit });
+    }
+    return labeledToSelectOptions(options);
+  }, [obrasEdit, obraEdit]);
+
+  const contratoObraMutation = useMutation({
+    mutationFn: async () => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const res = await api.patch(`/demand-sheet-approvals/${record.id}/contract-obra`, {
+        contratoId: contratoEdit,
+        obra: obraEdit,
+      });
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onSuccess: async (updated) => {
+      toast.success('Contrato e obra atualizados');
+      setEditandoContrato(false);
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      toast.error(msg || 'Não foi possível atualizar contrato e obra.');
+    },
+  });
 
   useEffect(() => {
     setScNumero(record?.scNumero || '');
@@ -460,12 +535,97 @@ export function FichaDemandaDetailModal({
         <dl className="grid gap-4 sm:grid-cols-2">
           <Field label="Código da FD">{record.codFichaDemanda || '—'}</Field>
           <Field label="Pedido">{record.codigoPedido || '—'}</Field>
-          <Field label="Contrato">
-            <span className="uppercase">{record.contratoNome || '—'}</span>
-          </Field>
-          <Field label="Obra">
-            <span className="uppercase">{record.obra || '—'}</span>
-          </Field>
+          {editandoContrato ? (
+            <div className="sm:col-span-2">
+              <div className="grid gap-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Contrato
+                  </p>
+                  <SingleSelectSearchDropdown
+                    value={contratoEdit}
+                    onChange={(id) => {
+                      setContratoEdit(id);
+                      setObraEdit('');
+                    }}
+                    options={contratoOptions}
+                    allowEmpty={false}
+                    disabled={carregandoContratos}
+                    placeholder={carregandoContratos ? 'Carregando…' : 'Selecionar contrato…'}
+                    searchPlaceholder="Pesquisar contrato…"
+                    emptyOptionsMessage="Nenhum contrato encontrado."
+                    noFocusRing
+                  />
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Obra
+                  </p>
+                  <SingleSelectSearchDropdown
+                    value={obraEdit}
+                    onChange={setObraEdit}
+                    options={obraOptionsEdit}
+                    allowEmpty={false}
+                    disabled={!contratoEdit || carregandoObras}
+                    placeholder={
+                      !contratoEdit
+                        ? 'Selecione o contrato primeiro…'
+                        : carregandoObras
+                          ? 'Carregando…'
+                          : 'Selecionar obra…'
+                    }
+                    searchPlaceholder="Pesquisar obra…"
+                    emptyOptionsMessage="Nenhuma obra neste contrato."
+                    noFocusRing
+                  />
+                </div>
+                <div className="flex justify-end gap-2 sm:col-span-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={contratoObraMutation.isPending}
+                    onClick={() => setEditandoContrato(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="error"
+                    disabled={contratoObraMutation.isPending || !contratoEdit || !obraEdit}
+                    onClick={() => contratoObraMutation.mutate()}
+                  >
+                    {contratoObraMutation.isPending ? 'Salvando...' : 'Salvar'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Field label="Contrato">
+                <span className="uppercase">{record.contratoNome || '—'}</span>
+              </Field>
+              <Field label="Obra">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="uppercase">{record.obra || '—'}</span>
+                  {isAdministrator ? (
+                    <button
+                      type="button"
+                      title="Editar contrato e obra"
+                      aria-label="Editar contrato e obra"
+                      onClick={() => {
+                        setContratoEdit(record.contratoId);
+                        setObraEdit(record.obra);
+                        setEditandoContrato(true);
+                      }}
+                      className="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </Field>
+            </>
+          )}
           <Field label="Solicitante">{record.solicitanteNome || '—'}</Field>
           <Field label="Polo">{record.polo || '—'}</Field>
           <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>

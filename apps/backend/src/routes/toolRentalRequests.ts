@@ -22,6 +22,7 @@ router.get('/supplies-pending-count', requireToolRentalSuppliesAccess, (req, res
 router.get('/supplies-summary', requireToolRentalSuppliesAccess, (req, res, next) =>
   controller.suppliesSummary(req, res, next)
 );
+router.get('/my-summary', (req, res, next) => controller.mySummary(req, res, next));
 router.get('/receipt-users', (req, res, next) => controller.listReceiptUsers(req, res, next));
 
 router.post(
@@ -136,9 +137,6 @@ router.get('/:id', (req, res, next) => controller.getById(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));
 router.put('/:id/sc-number', requireToolRentalSuppliesAccess, (req, res, next) =>
   controller.updateScNumber(req, res, next)
-);
-router.put('/:id/to-supplier-relation', requireToolRentalSuppliesAccess, (req, res, next) =>
-  controller.moveToSupplierRelation(req, res, next)
 );
 router.put('/:id/to-quotation', requireToolRentalSuppliesAccess, (req, res, next) =>
   controller.moveToQuotation(req, res, next)

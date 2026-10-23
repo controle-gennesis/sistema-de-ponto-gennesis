@@ -4706,6 +4706,10 @@ model ToolRentalRequest {
   status                  ToolRentalRequestStatus @default(OPEN)
   /// Número da SC (Solicitação de Compra) criada pela Logística
   scNumber                String?
+  /// ID da SC (identificador interno no Fluig)
+  scId                    String?
+  /// ID da OC (ordem de compra) informado na Cotação
+  ocId                    String?
   ocMirrorUrl             String?
   ocMirrorName            String?
   paymentProofUrl         String?

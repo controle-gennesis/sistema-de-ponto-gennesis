@@ -67,6 +67,15 @@ function parseFdAttachmentsInput(value: unknown): ToolRentalAnexo[] {
   return parseToolRentalAttachments(value).map((item) => ({ ...item, kind: 'fd' }));
 }
 
+/** Etapas em que cada tipo de anexo do Suprimentos pode ser adicionado/removido. */
+const ANEXO_KIND_STATUSES: Record<string, ToolRentalRequestStatus[]> = {
+  nf: [ToolRentalRequestStatus.OPEN],
+  boleto: [ToolRentalRequestStatus.OPEN],
+  oc: [ToolRentalRequestStatus.QUOTATION],
+  payment: [ToolRentalRequestStatus.AWAITING_PAYMENT],
+  outro: [ToolRentalRequestStatus.QUOTATION],
+};
+
 function legacyAttachmentsFromRow(row: {
   ocMirrorUrl?: string | null;
   ocMirrorName?: string | null;
@@ -326,7 +335,6 @@ export class ToolRentalRequestController {
           status: {
             in: [
               ToolRentalRequestStatus.OPEN,
-              ToolRentalRequestStatus.SUPPLIER_RELATION,
               ToolRentalRequestStatus.QUOTATION,
               ToolRentalRequestStatus.AWAITING_PAYMENT,
             ],
@@ -368,7 +376,6 @@ export class ToolRentalRequestController {
       }
 
       const open = byStatus[ToolRentalRequestStatus.OPEN] ?? 0;
-      const supplierRelation = byStatus[ToolRentalRequestStatus.SUPPLIER_RELATION] ?? 0;
       const quotation = byStatus[ToolRentalRequestStatus.QUOTATION] ?? 0;
       const awaitingPayment = byStatus[ToolRentalRequestStatus.AWAITING_PAYMENT] ?? 0;
       const inUse = byStatus[ToolRentalRequestStatus.IN_USE] ?? 0;
@@ -382,11 +389,10 @@ export class ToolRentalRequestController {
         success: true,
         data: {
           open,
-          supplierRelation,
           quotation,
           awaitingPayment,
           inUse,
-          pending: open + supplierRelation + quotation + awaitingPayment,
+          pending: open + quotation + awaitingPayment,
           completed,
           awaitingReceipt: legacyAwaitingReceipt,
           rejected,
@@ -446,6 +452,51 @@ export class ToolRentalRequestController {
         .filter((row) => row.id && row.name)
         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Contagem por status das solicitações visíveis para a Engenharia (próprias + contratos liberados). */
+  async mySummary(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const where: Record<string, unknown> = {};
+      if (!req.user.isAdmin) {
+        const access = await getLiberadoContractAccessForUser(req.user.id, false);
+        const or: Record<string, unknown>[] = [
+          { createdById: req.user.id },
+          { assignedUserId: req.user.id },
+        ];
+        if (access.filter === 'ids' && access.ids.length > 0) {
+          or.push({ contractId: { in: access.ids } });
+        }
+        where.OR = or;
+      }
+      const grouped = await prisma.toolRentalRequest.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+      });
+      const byStatus: Record<string, number> = {};
+      let total = 0;
+      for (const row of grouped) {
+        byStatus[row.status] = row._count._all;
+        total += row._count._all;
+      }
+      const n = (...keys: string[]) => keys.reduce((acc, k) => acc + (byStatus[k] ?? 0), 0);
+      res.json({
+        success: true,
+        data: {
+          total,
+          open: n('OPEN'),
+          quotation: n('QUOTATION'),
+          awaitingPayment: n('AWAITING_PAYMENT'),
+          awaitingReceipt: n('COMPLETED', 'AWAITING_RECEIPT'),
+          inUse: n('IN_USE'),
+          cancelled: n('CANCELLED', 'REJECTED'),
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -710,13 +761,9 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (
-        row.status !== ToolRentalRequestStatus.OPEN &&
-        row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION &&
-        row.status !== ToolRentalRequestStatus.QUOTATION
-      ) {
+      if (row.status !== ToolRentalRequestStatus.OPEN) {
         throw createError(
-          'Número da SC só pode ser informado em Aberta, Em análise ou Cotação',
+          'Número da SC só pode ser informado em Aberta',
           400,
         );
       }
@@ -726,10 +773,12 @@ export class ToolRentalRequestController {
         'Número da SC',
       );
 
+      const scId = requireString(req.body?.scId ?? req.body?.idSc, 'ID da SC');
+
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
           where: { id: row.id },
-          data: { scNumber },
+          data: { scNumber, scId },
         });
         if (row.scNumber !== scNumber) {
           await appendStatusEvent(tx, {
@@ -753,47 +802,6 @@ export class ToolRentalRequestController {
     }
   }
 
-  async moveToSupplierRelation(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) throw createError('Usuário não autenticado', 401);
-      await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
-
-      const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
-      if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.OPEN) {
-        throw createError('Somente solicitações abertas podem ir para Em análise', 400);
-      }
-
-      const comment = normalizeOptionalString(req.body?.comment ?? req.body?.suppliesApprovalComment);
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.toolRentalRequest.update({
-          where: { id: row.id, status: row.status },
-          data: {
-            status: ToolRentalRequestStatus.SUPPLIER_RELATION,
-            suppliesApprovedById: req.user!.id,
-            suppliesApprovedAt: new Date(),
-            suppliesApprovalComment: comment,
-            suppliesRejectionReason: null,
-          },
-        });
-        await appendStatusEvent(tx, {
-          requestId: row.id,
-          fromStatus: ToolRentalRequestStatus.OPEN,
-          toStatus: ToolRentalRequestStatus.SUPPLIER_RELATION,
-          actorId: req.user!.id,
-          note: comment || 'Encaminhada para Em análise',
-        });
-        return tx.toolRentalRequest.findUniqueOrThrow({
-          where: { id: row.id },
-          include,
-        });
-      });
-      res.json({ success: true, data: updated });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   async moveToQuotation(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -801,16 +809,22 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION) {
-        throw createError('Somente solicitações em Em análise podem ir para Cotação', 400);
+      if (row.status !== ToolRentalRequestStatus.OPEN) {
+        throw createError('Somente solicitações abertas podem ir para Cotação', 400);
       }
 
       const scNumberFromBody = normalizeOptionalString(
         req.body?.scNumber ?? req.body?.numeroSc ?? req.body?.sc,
       );
       const scNumber = scNumberFromBody || normalizeOptionalString(row.scNumber);
+      const scId =
+        normalizeOptionalString(req.body?.scId ?? req.body?.idSc) ||
+        normalizeOptionalString(row.scId);
       if (!scNumber) {
         throw createError('Informe o número da SC antes de encaminhar para Cotação', 400);
+      }
+      if (!scId) {
+        throw createError('Informe o ID da SC antes de encaminhar para Cotação', 400);
       }
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -819,13 +833,14 @@ export class ToolRentalRequestController {
           data: {
             status: ToolRentalRequestStatus.QUOTATION,
             scNumber,
+            scId,
             suppliesApprovedById: req.user!.id,
             suppliesApprovedAt: new Date(),
           },
         });
         await appendStatusEvent(tx, {
           requestId: row.id,
-          fromStatus: ToolRentalRequestStatus.SUPPLIER_RELATION,
+          fromStatus: ToolRentalRequestStatus.OPEN,
           toStatus: ToolRentalRequestStatus.QUOTATION,
           actorId: req.user!.id,
           note: `Encaminhada para Cotação (SC ${scNumber})`,
@@ -857,12 +872,17 @@ export class ToolRentalRequestController {
 
       const ocMirrorUrl = normalizeOptionalString(req.body?.ocMirrorUrl);
       const ocMirrorName = normalizeOptionalString(req.body?.ocMirrorName);
+      const ocId = normalizeOptionalString(req.body?.ocId) || normalizeOptionalString(row.ocId);
+      if (!ocId) {
+        throw createError('Informe o ID da OC antes de encaminhar para Aguardando Pagamento', 400);
+      }
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
           where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.AWAITING_PAYMENT,
+            ocId,
             ...(ocMirrorUrl
               ? {
                   ocMirrorUrl,
@@ -909,6 +929,16 @@ export class ToolRentalRequestController {
 
       const paymentProofUrl = normalizeOptionalString(req.body?.paymentProofUrl);
       const paymentProofName = normalizeOptionalString(req.body?.paymentProofName);
+      const attachmentsMap = await loadAttachmentsMap([row.id]);
+      const hasPaymentProof =
+        Boolean(paymentProofUrl) ||
+        Boolean(row.paymentProofUrl?.trim()) ||
+        legacyAttachmentsFromRow({ ...row, attachments: attachmentsMap.get(row.id) }).some(
+          (a) => a.kind === 'payment',
+        );
+      if (!hasPaymentProof) {
+        throw createError('Anexe o comprovante de pagamento antes de encaminhar para Recebimento', 400);
+      }
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
@@ -1039,7 +1069,15 @@ export class ToolRentalRequestController {
       });
       if (!origin) throw createError('Solicitação não encontrada', 404);
 
-      if (!(await canAccessToolRentalRequest(req.user, origin))) {
+      // Quem tem acesso à página de Pedidos de Ferramentas (Suprimentos) também pode renovar.
+      let hasSuppliesAccess = false;
+      try {
+        await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
+        hasSuppliesAccess = true;
+      } catch {
+        hasSuppliesAccess = false;
+      }
+      if (!hasSuppliesAccess && !(await canAccessToolRentalRequest(req.user, origin))) {
         throw createError('Sem permissão para renovar esta solicitação', 403);
       }
 
@@ -1058,7 +1096,7 @@ export class ToolRentalRequestController {
       ) {
         throw createError('Apenas locações podem ser renovadas', 400);
       }
-      if (origin.contractId) {
+      if (origin.contractId && !hasSuppliesAccess) {
         await assertLiberadoContractAccess(req, origin.contractId);
       }
 
@@ -1263,21 +1301,14 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.QUOTATION) {
-        throw createError('Ordem de compra só pode ser anexada na etapa Cotação', 400);
-      }
-
       const file = req.file;
       if (!file?.buffer?.length) throw createError('Selecione um arquivo', 400);
 
       const kindRaw = String(req.body?.kind || 'oc').trim().toLowerCase();
-      if (kindRaw === 'payment') {
-        throw createError(
-          'Neste fluxo só é permitido anexar Ordem de compra. Comprovante de pagamento não é utilizado.',
-          400,
-        );
+      const kind = ANEXO_KIND_STATUSES[kindRaw] ? kindRaw : 'oc';
+      if (!ANEXO_KIND_STATUSES[kind].includes(row.status)) {
+        throw createError('Este anexo não pode ser adicionado na etapa atual', 400);
       }
-      const kind = kindRaw === 'outro' ? 'outro' : 'oc';
 
       const originalName =
         fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
@@ -1301,7 +1332,16 @@ export class ToolRentalRequestController {
         kind,
       });
 
-      const note = kind === 'oc' ? 'Ordem de compra anexada' : 'Anexo adicionado';
+      const note =
+        kind === 'oc'
+          ? 'Ordem de compra anexada'
+          : kind === 'nf'
+            ? 'Nota fiscal anexada'
+            : kind === 'boleto'
+              ? 'Boleto anexado'
+              : kind === 'payment'
+                ? 'Comprovante de pagamento anexado'
+                : 'Anexo adicionado';
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
@@ -1309,6 +1349,10 @@ export class ToolRentalRequestController {
           SET "attachments" = ${JSON.stringify(list)}::jsonb, "updatedAt" = CURRENT_TIMESTAMP
           WHERE "id" = ${row.id}
         `;
+        const ocIdBody = kind === 'oc' ? normalizeOptionalString(req.body?.ocId) : null;
+        if (ocIdBody) {
+          await tx.toolRentalRequest.update({ where: { id: row.id }, data: { ocId: ocIdBody } });
+        }
         await appendStatusEvent(tx, {
           requestId: row.id,
           fromStatus: row.status,
@@ -1339,18 +1383,21 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.QUOTATION) {
-        throw createError('Ordem de compra só pode ser removida na etapa Cotação', 400);
-      }
-
       const anexoId = String(req.params.anexoId || '').trim();
       if (!anexoId) throw createError('Anexo inválido', 400);
 
       const attachmentsMap = await loadAttachmentsMap([row.id]);
-      const list = legacyAttachmentsFromRow({
+      const current = legacyAttachmentsFromRow({
         ...row,
         attachments: attachmentsMap.get(row.id),
-      }).filter((a) => a.id !== anexoId);
+      });
+      const target = current.find((a) => a.id === anexoId);
+      if (!target) throw createError('Anexo não encontrado', 404);
+      const allowed = ANEXO_KIND_STATUSES[target.kind || 'outro'] ?? [];
+      if (!allowed.includes(row.status)) {
+        throw createError('Este anexo não pode ser removido na etapa atual', 400);
+      }
+      const list = current.filter((a) => a.id !== anexoId);
       await prisma.$executeRaw`
         UPDATE "tool_rental_requests"
         SET "attachments" = ${JSON.stringify(list)}::jsonb, "updatedAt" = CURRENT_TIMESTAMP
@@ -1379,11 +1426,9 @@ export class ToolRentalRequestController {
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
       if (
-        row.status !== ToolRentalRequestStatus.OPEN &&
-        row.status !== ToolRentalRequestStatus.SUPPLIER_RELATION &&
-        row.status !== ToolRentalRequestStatus.QUOTATION
+        row.status !== ToolRentalRequestStatus.OPEN
       ) {
-        throw createError('Somente solicitações abertas, em análise ou em cotação podem ser rejeitadas', 400);
+        throw createError('Somente solicitações abertas podem ser rejeitadas', 400);
       }
 
       const reason = requireString(

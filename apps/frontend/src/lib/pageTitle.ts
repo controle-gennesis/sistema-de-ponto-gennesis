@@ -20,6 +20,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     category: 'Departamento Pessoal',
   },
   '/ponto/conversas': { title: 'Conversas', category: 'Principal' },
+  '/ponto/fluig-chamadas': { title: 'Chamadas ao Fluig', category: 'Principal' },
   '/ponto/gestao-solicitacoes': { title: 'Gestão de Solicitações', category: 'Principal' },
   '/ponto/regioes-postos-combustivel': {
     title: 'Postos de Combustível',

@@ -221,6 +221,23 @@ export async function ensureToolRentalRequestsSchema(prisma: PrismaClient): Prom
     ADD COLUMN IF NOT EXISTS "scNumber" TEXT;
   `);
 
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "scId" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "tool_rental_requests"
+    ADD COLUMN IF NOT EXISTS "ocId" TEXT;
+  `);
+
+  // Etapa "Em análise" removida: pedidos nela seguem direto para Cotação
+  await prisma.$executeRawUnsafe(`
+    UPDATE "tool_rental_requests"
+    SET "status" = 'QUOTATION'
+    WHERE "status" = 'SUPPLIER_RELATION'
+  `);
+
   // Backfill: vincula pelo nome do contrato quando houver match único
   await prisma.$executeRawUnsafe(`
     UPDATE "tool_rental_requests" tr

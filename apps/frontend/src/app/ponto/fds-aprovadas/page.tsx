@@ -253,7 +253,7 @@ export default function FdsAprovadasPage() {
             description="Consulte e acompanhe as fichas de demanda aprovadas."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-5">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4">
             {(
               [
                 { filter: 'ALL', label: 'Todas' },
@@ -266,6 +266,7 @@ export default function FdsAprovadasPage() {
               const style = LIST_HEADER_BY_FILTER[card.filter];
               return (
                 <FilterStatCard
+                  size="sm"
                   key={card.filter}
                   label={card.label}
                   count={statCounts[card.filter]}

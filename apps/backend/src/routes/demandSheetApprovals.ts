@@ -174,6 +174,11 @@ router.delete(
   controller.removeAnexo.bind(controller)
 );
 router.patch(
+  '/:id/contract-obra',
+  requireAnyModuleAccess([fdModule, fdsAprovadasModule]),
+  controller.updateContractObra.bind(controller)
+);
+router.patch(
   '/:id/ficha-demanda-pct',
   requireModuleAccess(fdsAprovadasModule),
   controller.updateFichaDemandaPct.bind(controller)

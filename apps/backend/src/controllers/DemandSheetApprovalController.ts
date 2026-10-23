@@ -945,6 +945,46 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Administrador corrige contrato e obra de uma ficha (ex.: cadastro com contrato/obra errados). */
+  async updateContractObra(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      if (!req.user.isAdmin) {
+        throw createError('Somente o administrador pode alterar contrato e obra', 403);
+      }
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const body = z
+        .object({ contratoId: z.string().min(1), obra: z.string().min(1) })
+        .parse(req.body);
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+
+      const contract = await prisma.contract.findUnique({ where: { id: body.contratoId } });
+      if (!contract) throw createError('Contrato não encontrado', 404);
+
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: { contratoId: body.contratoId, obra: body.obra.trim() },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Informe o contrato e a obra' });
+      }
+      return res.status(500).json({ error: 'Erro ao alterar contrato e obra' });
+    }
+  }
+
   async updateFichaDemandaPct(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);

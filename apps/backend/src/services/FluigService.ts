@@ -85,6 +85,27 @@ function classificarChamadaFluig(
   return { tipo: 'outro' };
 }
 
+/**
+ * O Fluig só é chamado pelo site no ar (produção com banco remoto). Em localhost nenhuma requisição sai para o Fluig:
+ * quem roda o sistema no computador usa os dados já espelhados no banco local.
+ */
+export function fluigPermitidoNesteAmbiente(): boolean {
+  if (process.env.NODE_ENV !== 'production') return false;
+  return !/localhost|127\.0\.0\.1/i.test(process.env.DATABASE_URL || '');
+}
+
+let avisouFluigBloqueado = false;
+function assertFluigPermitido(): void {
+  if (fluigPermitidoNesteAmbiente()) return;
+  if (!avisouFluigBloqueado) {
+    avisouFluigBloqueado = true;
+    console.warn('Fluig: chamadas desativadas fora do site no ar (localhost não acessa o Fluig).');
+  }
+  throw Object.assign(new Error('Fluig indisponível neste ambiente: só o site no ar acessa o Fluig.'), {
+    status: 503,
+  });
+}
+
 function isRetryableError(err: unknown): boolean {
   const axiosErr = err as AxiosError;
   const status = axiosErr?.response?.status;
@@ -174,6 +195,7 @@ export class FluigService {
       extraHeaders?: Record<string, string>;
     }
   ): Promise<T> {
+    assertFluigPermitido();
     const bases = options?.useDatasetBase !== false
       ? (this.workingDatasetBase ? [this.workingDatasetBase] : this.datasetBasePaths)
       : [this.baseUrl];
@@ -718,6 +740,7 @@ export class FluigService {
     url: string,
     auth: 'none' | 'oauth' | 'bearer'
   ): Promise<{ buffer: Buffer; contentType: string | null }> {
+    assertFluigPermitido();
     let headers: Record<string, string> = {};
     if (auth === 'oauth') headers = this.getAuthHeaders(url, 'GET');
     if (auth === 'bearer') {

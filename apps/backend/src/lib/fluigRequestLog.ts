@@ -37,6 +37,18 @@ export function contextoFluigAtual(): ContextoFluig {
 
 let tabelaPronta: Promise<void> | null = null;
 
+/**
+ * Só registra no site no ar (produção com banco remoto): as chamadas feitas em localhost não entram na contagem.
+ * `FLUIG_REQUEST_LOG=on` força o registro (para depurar localmente); `off` desliga.
+ */
+function registroFluigHabilitado(): boolean {
+  const forcado = (process.env.FLUIG_REQUEST_LOG || '').trim().toLowerCase();
+  if (forcado === 'on') return true;
+  if (forcado === 'off') return false;
+  if (process.env.NODE_ENV !== 'production') return false;
+  return !/localhost|127\.0\.0\.1/i.test(process.env.DATABASE_URL || '');
+}
+
 function caminhoSemQuery(url: string): string {
   try {
     return new URL(url).pathname.slice(0, 300);
@@ -59,6 +71,7 @@ export function registrarChamadaFluig(dados: {
   duracaoMs: number;
   erro?: string;
 }): void {
+  if (!registroFluigHabilitado()) return;
   const ctx = contextoFluigAtual();
   void (async () => {
     try {

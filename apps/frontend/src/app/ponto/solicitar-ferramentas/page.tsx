@@ -4,7 +4,20 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Plus, Search, Wrench, X, XCircle } from 'lucide-react';
+import {
+  CreditCard,
+  FileSearch,
+  Hammer,
+  Inbox,
+  PackageCheck,
+  Plus,
+  Search,
+  Users,
+  Wrench,
+  X,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -18,8 +31,11 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
+import { Bloco } from '@/components/ferramentas/Bloco';
 import { getOcSupplierLabel } from '@/components/oc/OcPurchaseOrderFormFields';
 import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
+import { SupplierOptionLines } from '@/components/oc/SupplierOptionLines';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -37,6 +53,7 @@ import {
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { useLogout } from '@/hooks/useLogout';
 import { usePermissions } from '@/hooks/usePermissions';
 import { authService } from '@/lib/auth';
@@ -85,6 +102,8 @@ type ToolRentalRequest = {
   linkSugestao?: string | null;
   supplierName?: string | null;
   scNumber?: string | null;
+  scId?: string | null;
+  ocId?: string | null;
   createdAt?: string;
   updatedAt?: string;
   suppliesApprovedAt?: string | null;
@@ -160,11 +179,10 @@ function formatEquipamentosLabel(items: EquipamentoItem[]): string {
   return items.map((item) => `${item.nome} (${item.quantidade})`).join(', ');
 }
 
-const labelCls =
-  'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300';
+// Mesmo padrão das outras telas de solicitação (combustível, reserva de veículos).
+const labelCls = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400';
 const requiredMark = <span className="text-red-600"> *</span>;
-const fieldCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500';
+const fieldCls = FORM_FIELD_INPUT_CLS;
 
 function formatDateOnly(value: string | null | undefined): string {
   if (!value) return '—';
@@ -187,6 +205,34 @@ function toLocalDateTimeInput(value?: Date): string {
 
 type ReceiptAnexo = { id: string; name: string; url: string };
 
+type StatusFilter =
+  | 'ALL'
+  | 'OPEN'
+  | 'QUOTATION'
+  | 'AWAITING_PAYMENT'
+  | 'AWAITING_RECEIPT'
+  | 'IN_USE'
+  | 'CANCELLED';
+
+const STATUS_CARDS: Array<{
+  filter: StatusFilter;
+  label: string;
+  /** Valor enviado em `status` na listagem. */
+  query?: string;
+  summaryKey: string;
+  Icon: LucideIcon;
+  iconBg: string;
+  iconColor: string;
+}> = [
+  { filter: 'ALL', label: 'Todas', summaryKey: 'total', Icon: Users, iconBg: 'bg-blue-100 dark:bg-blue-900/30', iconColor: 'text-blue-600 dark:text-blue-400' },
+  { filter: 'OPEN', label: 'Abertas', query: 'OPEN', summaryKey: 'open', Icon: Inbox, iconBg: 'bg-amber-100 dark:bg-amber-900/30', iconColor: 'text-amber-600 dark:text-amber-400' },
+  { filter: 'QUOTATION', label: 'Cotação', query: 'QUOTATION', summaryKey: 'quotation', Icon: FileSearch, iconBg: 'bg-indigo-100 dark:bg-indigo-900/30', iconColor: 'text-indigo-600 dark:text-indigo-400' },
+  { filter: 'AWAITING_PAYMENT', label: 'Pagamento', query: 'AWAITING_PAYMENT', summaryKey: 'awaitingPayment', Icon: CreditCard, iconBg: 'bg-violet-100 dark:bg-violet-900/30', iconColor: 'text-violet-600 dark:text-violet-400' },
+  { filter: 'AWAITING_RECEIPT', label: 'Recebimento', query: 'COMPLETED,AWAITING_RECEIPT', summaryKey: 'awaitingReceipt', Icon: PackageCheck, iconBg: 'bg-teal-100 dark:bg-teal-900/30', iconColor: 'text-teal-600 dark:text-teal-400' },
+  { filter: 'IN_USE', label: 'Em uso', query: 'IN_USE', summaryKey: 'inUse', Icon: Hammer, iconBg: 'bg-emerald-100 dark:bg-emerald-900/30', iconColor: 'text-emerald-600 dark:text-emerald-400' },
+  { filter: 'CANCELLED', label: 'Canceladas', query: 'CANCELLED,REJECTED', summaryKey: 'cancelled', Icon: XCircle, iconBg: 'bg-red-100 dark:bg-red-900/30', iconColor: 'text-red-600 dark:text-red-400' },
+];
+
 function fdAnexosOf(row: ToolRentalRequest): ReceiptAnexo[] {
   return (row.attachments || []).filter((anexo) => anexo.kind === 'fd' && anexo.url);
 }
@@ -200,6 +246,7 @@ function SolicitarLocacoesFerramentasPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [selected, setSelected] = useState<ToolRentalRequest | null>(null);
@@ -231,12 +278,25 @@ function SolicitarLocacoesFerramentasPage() {
   const [uploadingFd, setUploadingFd] = useState(false);
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['tool-rental-requests', searchTerm, page],
+    queryKey: ['tool-rental-requests', searchTerm, page, statusFilter],
     queryFn: async () => {
       const res = await api.get('/tool-rental-requests', {
-        params: { search: searchTerm || undefined, page, limit: 20 },
+        params: {
+          search: searchTerm || undefined,
+          page,
+          limit: 20,
+          status: STATUS_CARDS.find((c) => c.filter === statusFilter)?.query,
+        },
       });
       return res.data;
+    },
+  });
+
+  const { data: summaryData } = useQuery({
+    queryKey: ['tool-rental-requests', 'summary'],
+    queryFn: async () => {
+      const res = await api.get('/tool-rental-requests/my-summary');
+      return (res.data?.data ?? {}) as Record<string, number>;
     },
   });
 
@@ -332,6 +392,8 @@ function SolicitarLocacoesFerramentasPage() {
       setShowForm(false);
       setForm(EMPTY_FORM());
       queryClient.invalidateQueries({ queryKey: ['tool-rental-requests'] });
+      // Atualiza na hora a bolinha de pendências do menu «Pedidos de Ferramentas» (Suprimentos).
+      queryClient.invalidateQueries({ queryKey: ['tool-rental-supplies-pending-count'] });
     },
     onError: (err: any) => {
       toast.error(
@@ -357,6 +419,8 @@ function SolicitarLocacoesFerramentasPage() {
         setConfirmAction(null);
       }
       queryClient.invalidateQueries({ queryKey: ['tool-rental-requests'] });
+      // Atualiza na hora a bolinha de pendências do menu «Pedidos de Ferramentas» (Suprimentos).
+      queryClient.invalidateQueries({ queryKey: ['tool-rental-supplies-pending-count'] });
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.error || 'Não foi possível cancelar');
@@ -433,6 +497,8 @@ function SolicitarLocacoesFerramentasPage() {
       if (updated) setSelected(updated);
       setConfirmAction(null);
       queryClient.invalidateQueries({ queryKey: ['tool-rental-requests'] });
+      // Atualiza na hora a bolinha de pendências do menu «Pedidos de Ferramentas» (Suprimentos).
+      queryClient.invalidateQueries({ queryKey: ['tool-rental-supplies-pending-count'] });
     },
     onError: (err: any) => {
       toast.error(
@@ -488,7 +554,6 @@ function SolicitarLocacoesFerramentasPage() {
       setForm((f) => ({
         ...f,
         fdAttachments: [
-          ...f.fdAttachments,
           {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             name: data.originalName || file.name,
@@ -536,6 +601,8 @@ function SolicitarLocacoesFerramentasPage() {
       setSelected(null);
       setDetailTab('detalhes');
       queryClient.invalidateQueries({ queryKey: ['tool-rental-requests'] });
+      // Atualiza na hora a bolinha de pendências do menu «Pedidos de Ferramentas» (Suprimentos).
+      queryClient.invalidateQueries({ queryKey: ['tool-rental-supplies-pending-count'] });
     },
     onError: (err: any) => {
       toast.error(
@@ -566,6 +633,8 @@ function SolicitarLocacoesFerramentasPage() {
       setSelected(null);
       setDetailTab('detalhes');
       queryClient.invalidateQueries({ queryKey: ['tool-rental-requests'] });
+      // Atualiza na hora a bolinha de pendências do menu «Pedidos de Ferramentas» (Suprimentos).
+      queryClient.invalidateQueries({ queryKey: ['tool-rental-supplies-pending-count'] });
     },
     onError: (err: any) => {
       toast.error(
@@ -673,7 +742,29 @@ function SolicitarLocacoesFerramentasPage() {
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
       <PageStack>
-          <ListPageHeader title="Solicitação de Ferramentas" />
+          <ListPageHeader
+            title="Solicitação de Ferramentas"
+            description="Solicite e acompanhe ferramentas e equipamentos."
+          />
+
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4">
+          {STATUS_CARDS.map((card) => (
+            <FilterStatCard
+              size="sm"
+              key={card.filter}
+              label={card.label}
+              count={summaryData?.[card.summaryKey] ?? 0}
+              icon={card.Icon}
+              iconBg={card.iconBg}
+              iconColor={card.iconColor}
+              isActive={statusFilter === card.filter}
+              onClick={() => {
+                setStatusFilter(card.filter);
+                setPage(1);
+              }}
+            />
+          ))}
+        </div>
 
         <Card className={cadastroListClasses.card}>
           <CardHeader className={cadastroListClasses.cardHeader}>
@@ -856,13 +947,62 @@ function SolicitarLocacoesFerramentasPage() {
           setDetailTab('detalhes');
         }}
         title={selected ? `Solicitação #${selected.code}` : 'Solicitação'}
-        size="lg"
+        size="xl"
         headerClassName="!border-b-0 !pb-2"
         contentClassName="!pt-0"
+        footer={
+          selected && detailTab === 'detalhes' ? (
+            <>
+              {canRenewOrDevolve(selected) ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openDevolution(selected)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                  >
+                    Solicitar devolução
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openRenew(selected)}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                  >
+                    Solicitar renovação
+                  </button>
+                </>
+              ) : null}
+              {selected.status === 'OPEN' ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmAction({
+                      kind: 'cancel',
+                      id: selected.id,
+                      closeDetail: true,
+                    })
+                  }
+                  className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+                >
+                  Cancelar solicitação
+                </button>
+              ) : null}
+              {canConfirmReceipt(selected) ? (
+                <button
+                  type="button"
+                  disabled={confirmReceiptMutation.isPending}
+                  onClick={() => openReceiptForm(selected.id)}
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+                >
+                  Confirmar recebimento
+                </button>
+              ) : null}
+            </>
+          ) : null
+        }
       >
         {selected ? (
           <div className="space-y-4 text-sm">
-            <div className="-mx-6">
+            <div className="sticky top-0 z-10 -mx-6 bg-white dark:bg-gray-800">
               <DetailInfoTabs
                 tabs={
                   [
@@ -978,31 +1118,6 @@ function SolicitarLocacoesFerramentasPage() {
                     <p className="text-xs font-semibold uppercase text-gray-500">Obra</p>
                     <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">{selected.obra}</p>
                   </div>
-                  {selected.scNumber ? (
-                    <div>
-                      <p className="text-xs font-semibold uppercase text-gray-500">Nº da SC</p>
-                      <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">
-                        {selected.scNumber}
-                      </p>
-                    </div>
-                  ) : null}
-                  {fdAnexosOf(selected).length > 0 ? (
-                    <div className="sm:col-span-2">
-                      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">FD - anexo</p>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {fdAnexosOf(selected).map((anexo) => (
-                          <FilePreviewCard
-                            key={anexo.id}
-                            file={{
-                              originalName: anexo.name || 'Arquivo',
-                              fileUrl: anexo.url,
-                            }}
-                            extra="FD"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
                   {selected.renewedFrom ? (
                     <div className="sm:col-span-2">
                       <p className="text-xs font-semibold uppercase text-gray-500">
@@ -1045,7 +1160,7 @@ function SolicitarLocacoesFerramentasPage() {
                           <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
                             Anexos do recebimento
                           </p>
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             {selected.receiptAttachments.map((anexo) => (
                               <FilePreviewCard
                                 key={anexo.id}
@@ -1062,53 +1177,60 @@ function SolicitarLocacoesFerramentasPage() {
                     </>
                   ) : null}
                 </div>
-                {canRenewOrDevolve(selected) ? (
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
-                    <button
-                      type="button"
-                      onClick={() => openDevolution(selected)}
-                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                    >
-                      Solicitar devolução
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openRenew(selected)}
-                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-                    >
-                      Solicitar renovação
-                    </button>
-                  </div>
+                {selected.scNumber || selected.scId ? (
+                  <Bloco title="Solicitação de compra">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">Nº da SC</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+                          {selected.scNumber || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">ID da SC</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+                          {selected.scId || '—'}
+                        </p>
+                      </div>
+                    </div>
+                  </Bloco>
                 ) : null}
-                {selected.status === 'OPEN' ? (
-                  <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setConfirmAction({
-                          kind: 'cancel',
-                          id: selected.id,
-                          closeDetail: true,
-                        })
-                      }
-                      className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
-                    >
-                      Cancelar solicitação
-                    </button>
-                  </div>
-                ) : null}
-                {canConfirmReceipt(selected) ? (
-                  <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
-                    <button
-                      type="button"
-                      disabled={confirmReceiptMutation.isPending}
-                      onClick={() => openReceiptForm(selected.id)}
-                      className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
-                    >
-                      Confirmar recebimento
-                    </button>
-                  </div>
-                ) : null}
+                {(
+                  [
+                    { kind: 'fd', title: 'Ficha de demanda', extra: 'FD' },
+                    { kind: 'nf', title: 'Nota fiscal', extra: 'NF' },
+                    { kind: 'boleto', title: 'Boleto', extra: 'Boleto' },
+                    { kind: 'oc', title: 'Ordem de compra', extra: 'OC' },
+                    { kind: 'payment', title: 'Comprovante de pagamento', extra: 'Comprovante' },
+                  ] as const
+                ).map((section) => {
+                  const lista = (selected.attachments || []).filter(
+                    (anexo) => anexo.kind === section.kind && anexo.url,
+                  );
+                  const ocId = section.kind === 'oc' ? selected.ocId : null;
+                  if (lista.length === 0 && !ocId) return null;
+                  return (
+                    <Bloco key={section.kind} title={section.title}>
+                      <div className="space-y-3">
+                        {lista.length > 0 ? (
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {lista.map((anexo) => (
+                              <FilePreviewCard
+                                key={anexo.id}
+                                file={{
+                                  originalName: anexo.name || 'Arquivo',
+                                  fileUrl: anexo.url,
+                                }}
+                                displayName={section.kind === 'oc' && ocId ? `OC ${ocId}` : section.extra}
+                                extra={anexo.name || 'Arquivo'}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Bloco>
+                  );
+                })}
               </>
             ) : (
               <DpRequestHistoryTimeline
@@ -1362,9 +1484,11 @@ function SolicitarLocacoesFerramentasPage() {
               getOptionLabel={(supplier) =>
                 supplier.tradeName?.trim() || supplier.name?.trim() || getOcSupplierLabel(supplier)
               }
+              renderOption={(supplier) => <SupplierOptionLines supplier={supplier} />}
               queryKeyPrefix="tool-rental-supplier"
               placeholder="Digite para buscar fornecedor…"
               searchPlaceholder="Nome, fantasia ou CNPJ…"
+              minSearchLength={0}
               noFocusRing
             />
           </div>
@@ -1373,7 +1497,7 @@ function SolicitarLocacoesFerramentasPage() {
             <div>
               <label className={labelCls}>FD - anexo{requiredMark}</label>
               {form.fdAttachments.length > 0 ? (
-                <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {form.fdAttachments.map((anexo) => (
                     <FilePreviewCard
                       key={anexo.id}
@@ -1392,15 +1516,18 @@ function SolicitarLocacoesFerramentasPage() {
                   ))}
                 </div>
               ) : null}
-              <FileDropZone
-                label="Adicionar FD"
-                hint="Obrigatório na primeira locação. Clique ou arraste imagem/PDF"
-                uploading={uploadingFd}
-                disabled={createMutation.isPending}
-                onFiles={(files) => {
-                  void uploadFdFile(files);
-                }}
-              />
+              {/* A FD é um arquivo só: com ele anexado, o campo de envio some (remover o arquivo traz o campo de volta). */}
+              {form.fdAttachments.length === 0 ? (
+                <FileDropZone
+                  label="Adicionar FD"
+                  hint="Obrigatório na primeira locação. Clique ou arraste imagem/PDF"
+                  uploading={uploadingFd}
+                  disabled={createMutation.isPending}
+                  onFiles={(files) => {
+                    void uploadFdFile(files);
+                  }}
+                />
+              ) : null}
             </div>
           ) : null}
 
@@ -1617,7 +1744,7 @@ function SolicitarLocacoesFerramentasPage() {
           <div>
             <label className={labelCls}>Anexos</label>
             {receiptForm.attachments.length > 0 ? (
-              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {receiptForm.attachments.map((anexo) => (
                   <FilePreviewCard
                     key={anexo.id}

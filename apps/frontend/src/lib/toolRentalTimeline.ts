@@ -20,6 +20,7 @@ type TimelineRequest = {
   suppliesApprovedAt?: string | null;
   suppliesApprovalComment?: string | null;
   suppliesRejectionReason?: string | null;
+  receivedAt?: string | null;
   events?: ToolRentalTimelineEvent[] | null;
   createdBy?: { id: string; name: string } | null;
   suppliesApprovedBy?: { id: string; name: string } | null;
@@ -183,7 +184,10 @@ function buildLegacyTimeline(
 export function buildToolRentalTimeline(r: TimelineRequest): DpTimelineStep[] {
   const now = Date.now();
   const mapLead = (from: number, to: number) => formatToolRentalDuration(Math.max(0, to - from));
-  const rawEvents = Array.isArray(r.events) ? r.events : [];
+  // Eventos sem mudança de status (ex.: SC informada, anexos) não viram etapa própria.
+  const rawEvents = (Array.isArray(r.events) ? r.events : []).filter(
+    (ev, index) => index === 0 || ev.fromStatus !== ev.toStatus,
+  );
 
   if (rawEvents.length === 0) {
     return buildLegacyTimeline(r, now, mapLead);
@@ -239,6 +243,8 @@ export function buildToolRentalTimeline(r: TimelineRequest): DpTimelineStep[] {
     const tPrev = new Date(prev.createdAt).getTime();
     const tCur = new Date(cur.createdAt).getTime();
     const isLast = i === events.length - 1;
+    // Finalizada pelo Suprimentos, mas ainda sem recebimento confirmado: segue em andamento.
+    const waitingReceipt = isLast && cur.toStatus === 'COMPLETED' && !r.receivedAt;
 
     steps.push({
       key: `ev-${cur.id}-phase-${prev.toStatus}`,
@@ -252,7 +258,7 @@ export function buildToolRentalTimeline(r: TimelineRequest): DpTimelineStep[] {
       actorName: cur.actor?.name,
     });
 
-    if (TERMINAL.has(cur.toStatus)) {
+    if (TERMINAL.has(cur.toStatus) && !waitingReceipt) {
       steps.push({
         key: `ev-${cur.id}-terminal-${cur.toStatus}`,
         title: statusLabel(cur.toStatus),
@@ -268,7 +274,7 @@ export function buildToolRentalTimeline(r: TimelineRequest): DpTimelineStep[] {
     if (isLast && r.status === cur.toStatus) {
       steps.push({
         key: `ongoing-${cur.toStatus}`,
-        title: statusLabel(cur.toStatus),
+        title: statusLabel(waitingReceipt ? 'AWAITING_RECEIPT' : cur.toStatus),
         from: tCur,
         to: now,
         done: false,

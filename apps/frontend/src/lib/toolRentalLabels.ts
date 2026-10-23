@@ -53,7 +53,6 @@ export const TOOL_RENTAL_DEMAND_LABELS: Record<ToolRentalDemandType, string> = {
 export const TOOL_RENTAL_DEMAND_OPTIONS = (
   [
     { value: 'NOVA_LOCACAO', label: 'Locação' },
-    { value: 'RENOVACAO', label: 'Renovação' },
     { value: 'DEVOLUCAO', label: 'Devolução' },
     { value: 'COMPRA', label: 'Compra' },
   ] as const
