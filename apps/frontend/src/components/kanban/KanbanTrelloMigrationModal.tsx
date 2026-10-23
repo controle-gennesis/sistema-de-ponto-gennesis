@@ -11,6 +11,11 @@ import {
   type TrelloAttachmentMigrationStatus,
 } from '@/lib/kanban';
 
+function formatDay(iso: string) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR');
+}
+
 function formatBytes(bytes: number) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
@@ -98,7 +103,16 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {status.byBoard.map((row) => (
                   <tr key={row.board} className="text-gray-700 dark:text-gray-200">
-                    <td className="px-3 py-1.5">{row.board}</td>
+                    <td className="px-3 py-1.5">
+                      <span className="font-medium">{row.board}</span>
+                      <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                        Criado por {row.createdBy ?? '—'}
+                        {row.boardCreatedAt ? ` em ${formatDay(row.boardCreatedAt)}` : ''}
+                        {row.importedBy
+                          ? ` · Importado por ${row.importedBy}${row.firstImportAt ? ` em ${formatDay(row.firstImportAt)}` : ''}`
+                          : ''}
+                      </span>
+                    </td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{row.pending}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{row.migrated}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{row.native + row.external}</td>

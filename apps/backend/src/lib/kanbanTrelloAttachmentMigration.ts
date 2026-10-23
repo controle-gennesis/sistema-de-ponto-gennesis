@@ -66,34 +66,60 @@ type BoardBreakdownRow = {
   migrated: bigint;
   native: bigint;
   external: bigint;
+  created_by: string | null;
+  board_created_at: Date | null;
+  imported_by: string | null;
+  first_import_at: Date | null;
 };
 
 /** Anexos por quadro: ainda no Trello, já copiados, enviados direto no Conecta e links externos. */
 async function getBoardBreakdown() {
+  // "Importado por": quem aparece como dono dos anexos vindos do Trello (a importação grava no nome
+  // de quem importou). "Criado por": usuário que criou o quadro.
   const rows = await prisma.$queryRaw<BoardBreakdownRow[]>`
-    SELECT b.department_label AS board,
-      COUNT(*) FILTER (WHERE a."fileUrl" LIKE 'https://trello.com/1/cards/%') AS pending,
-      COUNT(*) FILTER (WHERE a."fileUrl" LIKE '/uploads/kanban-trello/%') AS migrated,
-      COUNT(*) FILTER (
-        WHERE a."fileKey" IS NOT NULL AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
-      ) AS native,
-      COUNT(*) FILTER (
-        WHERE a."fileUrl" NOT LIKE 'https://trello.com/1/cards/%'
-          AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
-          AND a."fileKey" IS NULL
-      ) AS external
-    FROM kanban_card_attachments a
-    JOIN kanban_cards c ON c.id = a."cardId"
-    JOIN kanban_columns col ON col.id = c."columnId"
-    JOIN kanban_boards b ON b.id = col."boardId"
-    GROUP BY b.department_label
-    ORDER BY COUNT(*) DESC`;
+    SELECT t.board, t.pending, t.migrated, t.native, t.external,
+           cu.name AS created_by, t.board_created_at,
+           iu.name AS imported_by, t.first_import_at
+    FROM (
+      SELECT b.id AS board_id,
+        b.department_label AS board,
+        b."createdById" AS created_by_id,
+        b."createdAt" AS board_created_at,
+        COUNT(*) FILTER (WHERE a."fileUrl" LIKE 'https://trello.com/1/cards/%') AS pending,
+        COUNT(*) FILTER (WHERE a."fileUrl" LIKE '/uploads/kanban-trello/%') AS migrated,
+        COUNT(*) FILTER (
+          WHERE a."fileKey" IS NOT NULL AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
+        ) AS native,
+        COUNT(*) FILTER (
+          WHERE a."fileUrl" NOT LIKE 'https://trello.com/1/cards/%'
+            AND a."fileUrl" NOT LIKE '/uploads/kanban-trello/%'
+            AND a."fileKey" IS NULL
+        ) AS external,
+        mode() WITHIN GROUP (ORDER BY a."userId") FILTER (
+          WHERE a."fileUrl" LIKE 'https://trello.com/1/cards/%' OR a."fileUrl" LIKE '/uploads/kanban-trello/%'
+        ) AS importer_id,
+        MIN(a."createdAt") FILTER (
+          WHERE a."fileUrl" LIKE 'https://trello.com/1/cards/%' OR a."fileUrl" LIKE '/uploads/kanban-trello/%'
+        ) AS first_import_at
+      FROM kanban_card_attachments a
+      JOIN kanban_cards c ON c.id = a."cardId"
+      JOIN kanban_columns col ON col.id = c."columnId"
+      JOIN kanban_boards b ON b.id = col."boardId"
+      GROUP BY b.id, b.department_label, b."createdById", b."createdAt"
+    ) t
+    LEFT JOIN users cu ON cu.id = t.created_by_id
+    LEFT JOIN users iu ON iu.id = t.importer_id
+    ORDER BY (t.pending + t.migrated + t.native + t.external) DESC`;
   return rows.map((r) => ({
     board: r.board,
     pending: Number(r.pending),
     migrated: Number(r.migrated),
     native: Number(r.native),
     external: Number(r.external),
+    createdBy: r.created_by,
+    boardCreatedAt: r.board_created_at ? new Date(r.board_created_at).toISOString() : null,
+    importedBy: r.imported_by,
+    firstImportAt: r.first_import_at ? new Date(r.first_import_at).toISOString() : null,
   }));
 }
 
