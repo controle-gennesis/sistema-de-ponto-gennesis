@@ -164,6 +164,11 @@ router.patch(
   controller.updatePurchaseStatus.bind(controller)
 );
 router.patch(
+  '/:id/supplies-edit',
+  requireModuleAccess(fdsAprovadasModule),
+  controller.updateBySupplies.bind(controller)
+);
+router.patch(
   '/:id/purchase-refs',
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseRefs.bind(controller)

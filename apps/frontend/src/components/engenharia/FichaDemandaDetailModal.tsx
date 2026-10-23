@@ -7,6 +7,7 @@ import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -21,6 +22,8 @@ import {
   findAnexoByKind,
   FD_STATUS_LABELS,
   formatCurrencyDisplay,
+  formToApiPayload,
+  type FichaDemandaApprovalFormState,
   inferFdAnexoKind,
   purchaseStatusLabel,
   type FdAnexo,
@@ -108,6 +111,7 @@ export function FichaDemandaDetailModal({
 }: Props) {
   const queryClient = useQueryClient();
   const { isAdministrator } = usePermissions();
+  const [editFichaOpen, setEditFichaOpen] = useState(false);
   const [editandoContrato, setEditandoContrato] = useState(false);
   const [contratoEdit, setContratoEdit] = useState('');
   const [obraEdit, setObraEdit] = useState('');
@@ -129,6 +133,7 @@ export function FichaDemandaDetailModal({
     setCancelOpen(false);
     setCancelNote('');
     setEditandoContrato(false);
+    setEditFichaOpen(false);
   }, [record?.id]);
 
   const { data: contratosRes, isLoading: carregandoContratos } = useQuery({
@@ -172,6 +177,31 @@ export function FichaDemandaDetailModal({
     }
     return labeledToSelectOptions(options);
   }, [obrasEdit, obraEdit]);
+
+  const editFichaMutation = useMutation({
+    mutationFn: async (form: FichaDemandaApprovalFormState) => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const res = await api.patch(
+        `/demand-sheet-approvals/${record.id}/supplies-edit`,
+        formToApiPayload(form),
+      );
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onSuccess: async (updated) => {
+      toast.success('Ficha de demanda atualizada');
+      setEditFichaOpen(false);
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      toast.error(msg || 'Não foi possível atualizar a ficha.');
+    },
+  });
 
   const contratoObraMutation = useMutation({
     mutationFn: async () => {
@@ -483,6 +513,11 @@ export function FichaDemandaDetailModal({
     <div className="w-full">{footer}</div>
   ) : (
     <div className="flex w-full items-center justify-end gap-2">
+      {allowAddOrdemCompra ? (
+        <Button type="button" variant="outline" onClick={() => setEditFichaOpen(true)}>
+          Editar
+        </Button>
+      ) : null}
       {allowAddOrdemCompra && canCancel ? (
         <Button
           type="button"
@@ -941,6 +976,16 @@ export function FichaDemandaDetailModal({
           </div>
         </div>
       </Modal>
+      <FichaDemandaApprovalFormModal
+        isOpen={editFichaOpen}
+        onClose={() => {
+          if (!editFichaMutation.isPending) setEditFichaOpen(false);
+        }}
+        editingRecord={record}
+        onSave={(form) => editFichaMutation.mutate(form)}
+        isSaving={editFichaMutation.isPending}
+        title="Editar ficha de demanda"
+      />
       <Modal
         isOpen={scModalOpen}
         onClose={() => {

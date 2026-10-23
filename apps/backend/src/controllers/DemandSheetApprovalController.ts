@@ -523,6 +523,58 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Suprimentos: edita os dados da ficha em qualquer etapa (não depende de status nem de quem criou). */
+  async updateBySupplies(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const canAccess = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!canAccess) {
+        throw createError('Sem permissão para editar fichas de demanda', 403);
+      }
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!existing) throw createError('Ficha de demanda não encontrada', 404);
+
+      const body = formSchema.parse(req.body);
+      const contract = await prisma.contract.findUnique({ where: { id: body.contratoId } });
+      if (!contract) throw createError('Contrato não encontrado', 404);
+
+      const row = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: {
+          numMovRm: body.numMovRm.trim(),
+          idMovRm: body.idMovRm.trim(),
+          codigoPedido: body.codigoPedido.trim(),
+          contratoId: body.contratoId,
+          obra: body.obra.trim(),
+          codFichaDemanda: body.codFichaDemanda.trim(),
+          faturamentoEstimado: parseMoney(body.faturamentoEstimado),
+          custoEstimado: parseMoney(body.custoEstimado),
+          observacao: body.observacao.trim(),
+          dataHora: parseDataHora(body.dataHora),
+          polo: body.polo,
+          anexos: body.anexos,
+        },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(row) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Confira os campos obrigatórios da ficha' });
+      }
+      return res.status(500).json({ error: 'Erro ao atualizar ficha de demanda' });
+    }
+  }
+
   async remove(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);

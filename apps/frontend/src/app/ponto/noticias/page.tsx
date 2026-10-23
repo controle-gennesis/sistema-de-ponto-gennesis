@@ -7,11 +7,9 @@ import {
   Megaphone,
   Plus,
   Search,
-  CalendarDays,
   Pencil,
   Send,
   Ban,
-  ImagePlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -19,6 +17,10 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
+import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
+import { FileDropZone } from '@/components/ui/FileDropZone';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
   CadastroListEmpty,
@@ -131,11 +133,9 @@ const positionOptions: MultiSelectSearchOption[] = CARGOS_AVAILABLE.map((value) 
   label: value,
 }));
 
-const inputClass =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
-
-const textAreaClass = `${inputClass} min-h-[110px] resize-y`;
-const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
+const inputClass = FORM_FIELD_INPUT_CLS;
+const textAreaClass = FORM_FIELD_TEXTAREA_CLS;
+const labelClass = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400';
 
 function emptyForm(): FormState {
   const now = new Date();
@@ -391,24 +391,24 @@ export default function NoticiasPage() {
             description="Programe flyers e comunicados para aparecer no primeiro acesso dos usuários."
           />
 
-          <Card className="w-full">
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-50 p-2 text-red-700 dark:bg-red-950/40 dark:text-red-300 sm:p-3">
-                    <Megaphone className="h-5 w-5 sm:h-6 sm:w-6" />
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                    <Megaphone className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
                       Comunicados e flyers
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       Escolha a data, o público e a arte que será exibida no login.
                     </p>
                   </div>
                 </div>
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-                  <div className="relative min-w-0 flex-1 basis-full sm:w-[280px] sm:flex-none">
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-0 w-full flex-1 basis-full sm:basis-auto sm:min-w-[240px] sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                     <input
                       type="text"
@@ -418,7 +418,7 @@ export default function NoticiasPage() {
                         setSearch(e.target.value);
                       }}
                       placeholder="Buscar notícia..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                   </div>
                   <div className="min-w-[220px]">
@@ -436,10 +436,10 @@ export default function NoticiasPage() {
                   <button
                     type="button"
                     onClick={openCreate}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
-                    <Plus className="h-4 w-4" />
-                    Nova notícia
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova notícia</span>
                   </button>
                   )}
                 </div>
@@ -543,6 +543,25 @@ export default function NoticiasPage() {
           onClose={() => setIsModalOpen(false)}
           title={editing ? 'Editar notícia' : 'Nova notícia'}
           size="2xl"
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Criar notícia'}
+              </button>
+            </>
+          }
         >
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -599,23 +618,35 @@ export default function NoticiasPage() {
               </div>
               <div>
                 <label className={labelClass}>Data e hora da publicação</label>
-                <div className="relative">
-                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="datetime-local"
-                    value={form.publishAt}
-                    onChange={(e) => setForm((prev) => ({ ...prev, publishAt: e.target.value }))}
-                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                </div>
+                <DateTimePickerField
+                  value={form.publishAt}
+                  onChange={(publishAt) => setForm((prev) => ({ ...prev, publishAt }))}
+                  placeholder="dd/mm/aaaa hh:mm"
+                  noFocusRing
+                  aria-label="Data e hora da publicação"
+                />
               </div>
               <div>
-                <label className={labelClass}>Expira em</label>
-                <input
-                  type="datetime-local"
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Expira em
+                  </label>
+                  {form.expiresAt ? (
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, expiresAt: '' }))}
+                      className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      Remover data
+                    </button>
+                  ) : null}
+                </div>
+                <DateTimePickerField
                   value={form.expiresAt}
-                  onChange={(e) => setForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
-                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  onChange={(expiresAt) => setForm((prev) => ({ ...prev, expiresAt }))}
+                  placeholder="Sem data de expiração"
+                  noFocusRing
+                  aria-label="Expira em"
                 />
               </div>
               <div>
@@ -675,21 +706,12 @@ export default function NoticiasPage() {
 
               <div className="md:col-span-2">
                 <label className={labelClass}>Flyer / imagem</label>
-                <label className="flex min-h-[9rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center dark:border-gray-600 dark:bg-gray-800/60">
-                  <ImagePlus className="h-6 w-6 text-gray-400" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                    Clique para selecionar uma imagem
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    JPG, PNG ou WEBP. A arte será mostrada no modal do usuário.
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-                  />
-                </label>
+                <FileDropZone
+                  label={imageFile ? imageFile.name : 'Clique ou arraste uma imagem'}
+                  hint="JPG, PNG ou WEBP. A arte será mostrada no modal do usuário."
+                  accept="image/png,image/jpeg,image/webp"
+                  onFiles={(files) => setImageFile(files[0] || null)}
+                />
                 {imagePreview ? (
                   <div className="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -703,23 +725,6 @@ export default function NoticiasPage() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="inline-flex h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                onClick={() => saveMutation.mutate()}
-                disabled={saveMutation.isPending}
-                className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Criar notícia'}
-              </button>
-            </div>
           </div>
         </Modal>
       </MainLayout>
