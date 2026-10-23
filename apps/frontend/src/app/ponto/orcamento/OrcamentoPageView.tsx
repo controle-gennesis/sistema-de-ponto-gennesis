@@ -12045,6 +12045,9 @@ export function OrcamentoPageView({
         } else {
           qtd = qtdSintetico ?? 0;
         }
+        // Quantidade do orçamento sempre com no máximo 2 casas (igual ao Orçafascio): a mesma
+        // quantidade vale na tela, nos totais e na exportação.
+        qtd = Math.round((qtd + Number.EPSILON) * 100) / 100;
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao, qtd);
         const valoresManuais = moMatManualPorItem[itemKey];
