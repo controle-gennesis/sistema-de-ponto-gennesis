@@ -916,6 +916,8 @@ function getCardMembers(card: KanbanCard) {
 function CardMemberAvatars({ card }: { card: KanbanCard }) {
   const list = getCardMembers(card);
   const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
+  // Tooltip fora da coluna (portal): dentro dela o nome era cortado pela borda do quadro.
+  const [tooltip, setTooltip] = useState<{ name: string; top: number; left: number; arrowShift: number } | null>(null);
 
   if (list.length === 0) return null;
 
@@ -932,8 +934,18 @@ function CardMemberAvatars({ card }: { card: KanbanCard }) {
             style={{
               zIndex: isHovered ? visible.length + 10 : visible.length - index,
             }}
-            onMouseEnter={() => setHoveredUserId(m.userId)}
-            onMouseLeave={() => setHoveredUserId(null)}
+            onMouseEnter={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const margin = 110; // metade da largura máxima do balão
+              setHoveredUserId(m.userId);
+              const center = rect.left + rect.width / 2;
+              const left = Math.min(Math.max(center, margin), window.innerWidth - margin);
+              setTooltip({ name: m.name, top: rect.top - 10, left, arrowShift: center - left });
+            }}
+            onMouseLeave={() => {
+              setHoveredUserId(null);
+              setTooltip(null);
+            }}
           >
             <KanbanUserAvatar
               name={m.name}
@@ -944,17 +956,32 @@ function CardMemberAvatars({ card }: { card: KanbanCard }) {
               showNativeTitle={false}
               className="ring-2 ring-white shadow-sm transition-transform duration-150 dark:ring-gray-800"
             />
-            {isHovered ? (
-              <div
-                role="tooltip"
-                className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
-              >
-                {m.name}
-              </div>
-            ) : null}
           </div>
         );
       })}
+      {tooltip && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              role="tooltip"
+              style={{
+                position: 'fixed',
+                top: tooltip.top,
+                left: tooltip.left,
+                transform: 'translate(-50%, -100%)',
+                zIndex: 9999,
+              }}
+              className="pointer-events-none relative max-w-[14rem] whitespace-nowrap rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+            >
+              <span
+                aria-hidden
+                className="absolute top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-800"
+                style={{ left: `calc(50% + ${tooltip.arrowShift}px)` }}
+              />
+              {tooltip.name}
+            </div>,
+            document.body,
+          )
+        : null}
       {list.length > 4 && (
         <div
           className="relative flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 ring-2 ring-white dark:bg-gray-600 dark:text-gray-200 dark:ring-gray-800"

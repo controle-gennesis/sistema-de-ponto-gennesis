@@ -974,8 +974,10 @@ export class KanbanService {
 
     if (next.labels !== undefined) {
       const labelKey = (l: unknown) => {
-        const row = (l ?? {}) as { color?: string; name?: string };
-        return { key: `${row.color ?? ''}|${row.name ?? ''}`, name: (row.name || '').trim() || (row.color ?? '') };
+        // As etiquetas do card guardam o nome em `text` (`name` só em dados antigos).
+        const row = (l ?? {}) as { color?: string; text?: string; name?: string };
+        const label = (row.text ?? row.name ?? '').trim();
+        return { key: `${row.color ?? ''}|${label}`, name: label || 'Etiqueta sem nome' };
       };
       const before = new Map(
         (Array.isArray(existing.labels) ? existing.labels : []).map((l) => {

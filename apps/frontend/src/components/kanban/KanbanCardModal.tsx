@@ -71,7 +71,7 @@ import { KanbanPriorityPicker } from './KanbanPriorityPicker';
 import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
-import type { KanbanLabelPreset } from './kanbanLabels';
+import { getKanbanLabelNameForColor, type KanbanLabelPreset } from './kanbanLabels';
 import {
   LicitacaoCommentEditor,
   LicitacaoCommentFormatted,
@@ -193,7 +193,10 @@ function activityDay(value: unknown): string {
 }
 
 /** Texto (sem o nome de quem fez) e ícone de cada tipo de atividade registrada no card. */
-function describeCardActivity(a: KanbanCardActivity): { text: string; icon: ActivityIconKind } {
+function describeCardActivity(
+  a: KanbanCardActivity,
+  labelPresets?: KanbanLabelPreset[],
+): { text: string; icon: ActivityIconKind } {
   const d = a.data ?? {};
   const str = (key: string) => (typeof d[key] === 'string' ? (d[key] as string) : '');
   const isSelf = !!a.user && str('userId') === a.user.id;
@@ -238,8 +241,13 @@ function describeCardActivity(a: KanbanCardActivity): { text: string; icon: Acti
       return { text: parts.join(' e ') || 'alterou as datas do cartão', icon: 'edit' };
     }
     case 'LABELS_CHANGED': {
-      const added = Array.isArray(d.added) ? (d.added as string[]) : [];
-      const removed = Array.isArray(d.removed) ? (d.removed as string[]) : [];
+      // Registros antigos guardaram a cor (#RRGGBB) no lugar do nome: troca pelo nome do preset.
+      const labelName = (n: string) =>
+        /^#[0-9a-f]{6}$/i.test(n.trim())
+          ? getKanbanLabelNameForColor(n, labelPresets) ?? 'Etiqueta sem nome'
+          : n;
+      const added = (Array.isArray(d.added) ? (d.added as string[]) : []).map(labelName);
+      const removed = (Array.isArray(d.removed) ? (d.removed as string[]) : []).map(labelName);
       const parts: string[] = [];
       if (added.length) parts.push(`adicionou ${added.length > 1 ? 'as etiquetas' : 'a etiqueta'} ${added.map((n) => `“${n}”`).join(', ')}`);
       if (removed.length) parts.push(`removeu ${removed.length > 1 ? 'as etiquetas' : 'a etiqueta'} ${removed.map((n) => `“${n}”`).join(', ')}`);
@@ -283,11 +291,14 @@ function describeCardActivity(a: KanbanCardActivity): { text: string; icon: Acti
   }
 }
 
-function buildCardTimeline(card: KanbanCardDetail): CardTimelineItem[] {
+function buildCardTimeline(
+  card: KanbanCardDetail,
+  labelPresets?: KanbanLabelPreset[],
+): CardTimelineItem[] {
   const items: CardTimelineItem[] = [];
 
   for (const activity of card.activitiesList ?? []) {
-    const { text, icon } = describeCardActivity(activity);
+    const { text, icon } = describeCardActivity(activity, labelPresets);
     items.push({
       kind: 'activity',
       id: `activity-${activity.id}`,
@@ -1498,8 +1509,8 @@ export function KanbanCardModal({
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
   const [showActivityDetails, setShowActivityDetails] = useState(true);
   const timeline = useMemo(
-    () => (card ? buildCardTimeline(card) : []),
-    [card],
+    () => (card ? buildCardTimeline(card, labelPresets) : []),
+    [card, labelPresets],
   );
   const showChecklistPanel = checklistEnabled && isDetail;
   const hasMaterialsPanel = materialsEnabled && cardMaterials.length > 0;
