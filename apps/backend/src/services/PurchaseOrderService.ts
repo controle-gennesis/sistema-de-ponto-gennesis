@@ -8,6 +8,9 @@ import {
   collectInvoicesForOrderFromMovements,
   collectLatestPaymentSlipsPerParcelFromMovements,
   extractOcNumberFromMovementNotes,
+  movementNotesMatchOc,
+  parseMovementReceiptTypeFromNotes,
+  parsePaymentSlipsFromMovementNotes,
   type StockPaymentSlipParsed
 } from '../utils/stockMovementNotes';
 import { isValidNfNumber, normalizeNfNumberKey } from '../utils/nfInvoiceNumber';
@@ -228,6 +231,10 @@ export type BoletoInstallmentStored = {
   /** Comprovante do pagamento desta parcela (financeiro, enquanto AWAITING_PAYMENT ou após PAID) */
   installmentProofUrl?: string | null;
   installmentProofName?: string | null;
+  /** Parcela acrescentada pelo estoque numa entrega parcial (além das da condição de pagamento). */
+  extra?: boolean;
+  /** A OC está em "boletos por entrega parcial": só avança quando as parcelas cobrem o total. */
+  stockPartial?: boolean;
 };
 
 function normalizeParcelDueDaysJson(input: unknown): number[] {
@@ -257,7 +264,9 @@ function parseStoredInstallments(raw: unknown): BoletoInstallmentStored[] {
       installmentProofUrl:
         typeof ipu === 'string' && ipu.trim() ? String(ipu).trim() : null,
       installmentProofName:
-        typeof ipn === 'string' && ipn.trim() ? String(ipn).trim() : null
+        typeof ipn === 'string' && ipn.trim() ? String(ipn).trim() : null,
+      ...(x.extra === true ? { extra: true } : {}),
+      ...(x.stockPartial === true ? { stockPartial: true } : {})
     };
   });
 }
@@ -287,6 +296,22 @@ function allMultiInstallmentsPaid(
     if (rowStatus(inst[i]) !== 'PAID') return false;
   }
   return true;
+}
+
+/**
+ * Em entrega parcial com boletos por entrega, a OC não pode avançar (nem ser finalizada) enquanto a soma
+ * das parcelas for menor que o total: ainda faltam boletos das próximas entregas.
+ * OCs que nunca passaram por esse modo não são afetadas.
+ */
+function installmentsCoverOrderTotal(inst: BoletoInstallmentStored[], amountToPay: unknown): boolean {
+  if (!inst.some((r) => r.stockPartial)) return true;
+  const total = Number(amountToPay);
+  if (!Number.isFinite(total) || total <= 0) return true;
+  const sumCents = inst.reduce(
+    (acc, r) => acc + Math.round((Number.isFinite(r.amount) ? r.amount : 0) * 100),
+    0
+  );
+  return sumCents >= Math.round(total * 100) - 1;
 }
 
 function allInstallmentsHaveBoleto(inst: BoletoInstallmentStored[], parcelCount: number): boolean {
@@ -650,7 +675,9 @@ function buildCreationPaymentInstallments(
   });
 }
 
-async function enrichOrdersParcelPlans<T extends { paymentCondition: string | null }>(
+async function enrichOrdersParcelPlans<
+  T extends { paymentCondition: string | null; paymentBoletoInstallments?: unknown }
+>(
   orders: T[]
 ): Promise<Array<T & { paymentParcelCount: number; paymentParcelDueDays: number[] }>> {
   const codes = [...new Set(orders.map((o) => o.paymentCondition).filter(Boolean))] as string[];
@@ -661,7 +688,12 @@ async function enrichOrdersParcelPlans<T extends { paymentCondition: string | nu
   }
   return orders.map((o) => {
     const c = o.paymentCondition ? condMap.get(o.paymentCondition) : undefined;
-    const paymentParcelCount = c?.parcelCount && c.parcelCount >= 1 ? c.parcelCount : 1;
+    const plannedParcelCount = c?.parcelCount && c.parcelCount >= 1 ? c.parcelCount : 1;
+    // Parcelas acrescentadas pelo estoque (entrega parcial) entram na contagem da OC.
+    const extraParcels = Array.isArray(o.paymentBoletoInstallments)
+      ? (o.paymentBoletoInstallments as Array<{ extra?: unknown }>).filter((r) => r?.extra === true).length
+      : 0;
+    const paymentParcelCount = plannedParcelCount + extraParcels;
     const paymentParcelDueDays = normalizeParcelDueDaysJson(c?.parcelDueDays);
     return { ...o, paymentParcelCount, paymentParcelDueDays };
   });
@@ -1879,7 +1911,8 @@ export class PurchaseOrderService {
         select: {
           paymentType: true,
           paymentCondition: true,
-          paymentBoletoInstallments: true
+          paymentBoletoInstallments: true,
+          amountToPay: true
         }
       });
       if (forSeq?.paymentType === 'BOLETO') {
@@ -1893,7 +1926,7 @@ export class PurchaseOrderService {
               const next = inst.map((row, j) =>
                 j === proofIdx ? { ...row, paymentStatus: 'PAID' as const } : row
               );
-              if (!allMultiInstallmentsPaid(next, n)) {
+              if (!allMultiInstallmentsPaid(next, n) || !installmentsCoverOrderTotal(next, forSeq.amountToPay)) {
                 targetStatus = 'APPROVED';
                 sequentialAfterProofValidation = {
                   paymentBoletoInstallments: next,
@@ -2575,6 +2608,10 @@ export class PurchaseOrderService {
     const merged: BoletoInstallmentStored[] = body.installments.map((row, i) => {
       const prev = existing[i] || {};
       const prevSt = rowStatus(prev);
+      const partialFlags = {
+        ...(prev.extra ? { extra: true as const } : {}),
+        ...(prev.stockPartial ? { stockPartial: true as const } : {})
+      };
       if (prevSt === 'AWAITING_PAYMENT' || prevSt === 'PAID') {
         return {
           amount: prev.amount,
@@ -2583,7 +2620,8 @@ export class PurchaseOrderService {
           boletoName: prev.boletoName,
           paymentStatus: prevSt,
           installmentProofUrl: prev.installmentProofUrl ?? null,
-          installmentProofName: prev.installmentProofName ?? null
+          installmentProofName: prev.installmentProofName ?? null,
+          ...partialFlags
         };
       }
       const urlIn = row.boletoUrl;
@@ -2605,7 +2643,8 @@ export class PurchaseOrderService {
         dueDate,
         boletoUrl: url,
         boletoName: name,
-        paymentStatus: 'PENDING_BOLETO' as const
+        paymentStatus: 'PENDING_BOLETO' as const,
+        ...partialFlags
       };
     });
     for (const m of merged) {
@@ -2623,9 +2662,13 @@ export class PurchaseOrderService {
     if (Number.isFinite(orderTotal)) {
       const sumCents = merged.reduce((s, m) => s + Math.round(Number(m.amount) * 100), 0);
       const totalCents = Math.round(orderTotal * 100);
-      if (sumCents !== totalCents) {
+      // Entrega parcial: os boletos podem somar menos que o total (o resto vem nas próximas entregas).
+      const partialMode = merged.some((m) => m.stockPartial);
+      if (partialMode ? sumCents > totalCents : sumCents !== totalCents) {
         throw new Error(
-          `A soma das parcelas deve ser igual ao total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
+          partialMode
+            ? `A soma das parcelas ultrapassa o total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
+            : `A soma das parcelas deve ser igual ao total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
         );
       }
       for (const m of merged) {
@@ -3126,9 +3169,12 @@ export class PurchaseOrderService {
             ];
       const sumCents = rowsForSum.reduce((s, m) => s + Math.round(Number(m.amount) * 100), 0);
       const totalCents = Math.round(orderTotal * 100);
-      if (sumCents !== totalCents) {
+      const partialMode = instForSum.some((m) => m.stockPartial);
+      if (partialMode ? sumCents > totalCents : sumCents !== totalCents) {
         throw new Error(
-          `A soma das parcelas deve ser igual ao total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
+          partialMode
+            ? `A soma das parcelas ultrapassa o total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
+            : `A soma das parcelas deve ser igual ao total da OC (R$ ${orderTotal.toFixed(2).replace('.', ',')}).`
         );
       }
       for (const m of rowsForSum) {
@@ -3279,7 +3325,8 @@ export class PurchaseOrderService {
         paymentType: true,
         paymentCondition: true,
         paymentBoletoInstallments: true,
-        paymentBoletoPhaseReleased: true
+        paymentBoletoPhaseReleased: true,
+        amountToPay: true
       }
     });
     if (!order) {
@@ -3311,7 +3358,8 @@ export class PurchaseOrderService {
     const next = inst.map((row, j) =>
       j === idx ? { ...row, paymentStatus: 'PAID' as const } : row
     );
-    const allPaid = allMultiInstallmentsPaid(next, n);
+    const allPaid =
+      allMultiInstallmentsPaid(next, n) && installmentsCoverOrderTotal(next, order.amountToPay);
     const updated = await prisma.purchaseOrder.update({
       where: { id },
       data: {
@@ -3697,6 +3745,100 @@ export class PurchaseOrderService {
   }
 
   /**
+   * Boletos por entrega parcial: aplica na lista de parcelas, em ordem cronológica das entradas, os boletos
+   * que ainda não estão nela. Cada boleto preenche a primeira parcela vazia (não paga) ou, se não houver,
+   * vira uma parcela extra no fim da lista. Nunca sobrescreve um boleto já registrado.
+   */
+  private async syncPartialBoletoInstallmentsFromStock(
+    order: { id: string; orderDate: Date; amountToPay: unknown },
+    existing: BoletoInstallmentStored[],
+    inMovementsNewestFirst: Array<{ notes: string | null }>,
+    orderNumber: string,
+    plannedCount: number,
+    plannedDueDays: number[]
+  ): Promise<void> {
+    const totalPay =
+      order.amountToPay != null && String(order.amountToPay).trim() !== '' ? Number(order.amountToPay) : 0;
+    const rows: BoletoInstallmentStored[] = existing.map((r) => ({ ...r }));
+    const defaultAmount =
+      plannedCount > 0 && Number.isFinite(totalPay) ? Math.round((totalPay / plannedCount) * 100) / 100 : 0;
+    for (let i = rows.length; i < plannedCount; i++) {
+      rows.push({
+        amount: defaultAmount,
+        dueDate: ymdAddDays(order.orderDate, plannedDueDays[i] ?? plannedDueDays[0] ?? 30),
+        boletoUrl: null,
+        boletoName: null,
+        paymentStatus: 'PENDING_BOLETO',
+        installmentProofUrl: null,
+        installmentProofName: null
+      });
+    }
+
+    const known = new Set(rows.map((r) => (r.boletoUrl || '').trim()).filter(Boolean));
+    const slips: StockPaymentSlipParsed[] = [];
+    for (const mov of [...inMovementsNewestFirst].reverse()) {
+      if (!movementNotesMatchOc(mov.notes, orderNumber)) continue;
+      const fromMovement = parsePaymentSlipsFromMovementNotes(mov.notes)
+        .filter((slip) => (slip.url || '').trim())
+        .sort((a, b) => {
+          const ta = a.dueDateYmd ? new Date(a.dueDateYmd).getTime() : 0;
+          const tb = b.dueDateYmd ? new Date(b.dueDateYmd).getTime() : 0;
+          return ta - tb;
+        });
+      slips.push(...fromMovement);
+    }
+
+    let changed = false;
+    for (const slip of slips) {
+      const url = (slip.url || '').trim();
+      if (!url || known.has(url)) continue;
+      known.add(url);
+      const filled: BoletoInstallmentStored = {
+        amount: slip.amount != null && Number.isFinite(slip.amount) && slip.amount >= 0 ? slip.amount : 0,
+        dueDate:
+          slip.dueDateYmd && /^\d{4}-\d{2}-\d{2}$/.test(slip.dueDateYmd)
+            ? slip.dueDateYmd
+            : ymdAddDays(order.orderDate, 30),
+        boletoUrl: url,
+        boletoName: (slip.name || '').trim() || null,
+        paymentStatus: 'PENDING_BOLETO',
+        installmentProofUrl: null,
+        installmentProofName: null
+      };
+      const target = rows.findIndex((r) => !(r.boletoUrl || '').trim() && rowStatus(r) !== 'PAID');
+      if (target >= 0) {
+        rows[target] = { ...filled, ...(rows[target].extra ? { extra: true } : {}) };
+      } else {
+        rows.push({ ...filled, extra: true });
+      }
+      changed = true;
+    }
+
+    // Parcelas planejadas ainda sem boleto guardam o saldo que falta (a soma continua fechando o total).
+    const placeholders = rows.filter(
+      (r) => !r.extra && !(r.boletoUrl || '').trim() && rowStatus(r) === 'PENDING_BOLETO'
+    );
+    if (changed && placeholders.length > 0 && Number.isFinite(totalPay) && totalPay > 0) {
+      const taken = rows
+        .filter((r) => !placeholders.includes(r))
+        .reduce((acc, r) => acc + (Number.isFinite(r.amount) ? r.amount : 0), 0);
+      const each = Math.max(0, Math.round(((totalPay - taken) / placeholders.length) * 100) / 100);
+      for (const r of placeholders) r.amount = each;
+    }
+
+    for (const r of rows) {
+      if (!r.stockPartial) {
+        r.stockPartial = true;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+
+    await this.persistBoletoInstallmentsFromStock(order.id, rows, rows.length);
+    await this.maybeAutoReleasePaymentBoletoPhaseFromStock(order.id);
+  }
+
+  /**
    * Sincroniza boletos das entradas de estoque para as parcelas da OC.
    * Preenche parcelas vazias e substitui arquivos quando o estoque envia um boleto mais recente.
    */
@@ -3730,6 +3872,27 @@ export class PurchaseOrderService {
     const [meta] = await enrichOrdersParcelPlans([order]);
     const parcelCount = meta.paymentParcelCount;
     const existing = parseStoredInstallments(order.paymentBoletoInstallments);
+
+    // Entrega parcial: cada entrada traz os boletos que o fornecedor emitiu nela (podem ser mais ou
+    // menos que as parcelas da condição). Os boletos vão preenchendo as parcelas vazias e o que
+    // sobrar vira parcela extra. OCs sem entrega parcial seguem o fluxo de sempre, abaixo.
+    const extraCount = existing.filter((r) => r.extra).length;
+    const plannedCount = parcelCount - extraCount;
+    const hasPartialEntry = inMovements.some(
+      (m) => movementNotesMatchOc(m.notes, trimmed) && parseMovementReceiptTypeFromNotes(m.notes) === 'PARCIAL'
+    );
+    if (plannedCount > 1 && (hasPartialEntry || existing.some((r) => r.stockPartial))) {
+      await this.syncPartialBoletoInstallmentsFromStock(
+        { id: order.id, orderDate: order.orderDate, amountToPay: order.amountToPay },
+        existing,
+        inMovements,
+        trimmed,
+        plannedCount,
+        meta.paymentParcelDueDays
+      );
+      return;
+    }
+
     const totalPay =
       order.amountToPay != null && String(order.amountToPay).trim() !== ''
         ? Number(order.amountToPay)

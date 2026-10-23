@@ -28,6 +28,7 @@ import {
   rowsToInstallments,
   redistributeInstallmentAmounts,
   parseOrderTotalAmount,
+  rowsInPartialDeliveryMode,
   validateInstallmentAmountsSum,
   type BoletoParcelasOrderFields,
   type RowDraft
@@ -145,9 +146,10 @@ function BoletoParcelasListInner({
     });
   };
 
+  const partialDelivery = useMemo(() => rowsInPartialDeliveryMode(rows), [rows]);
   const amountValidation = useMemo(
-    () => validateInstallmentAmountsSum(rows, orderTotal),
-    [rows, orderTotal]
+    () => validateInstallmentAmountsSum(rows, orderTotal, { allowBelowTotal: partialDelivery }),
+    [rows, orderTotal, partialDelivery]
   );
 
   const canSave = useMemo(() => {
@@ -267,7 +269,15 @@ function BoletoParcelasListInner({
       {editable && orderTotal > 0 ? (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Total da OC: <span className="font-medium text-gray-700 dark:text-gray-300">{formatMoneyDisplay(orderTotal)}</span>
-          {n > 1 ? ' — ao alterar uma parcela, as demais ajustam automaticamente.' : '.'}
+          {n > 1 && !partialDelivery ? ' — ao alterar uma parcela, as demais ajustam automaticamente.' : '.'}
+        </p>
+      ) : null}
+      {partialDelivery && amountValidation.valid && (amountValidation.remaining ?? 0) > 0 ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-100">
+          Entrega parcial: boletos de {formatMoneyDisplay(amountValidation.sum)}. Faltam{' '}
+          <span className="font-semibold">{formatMoneyDisplay(amountValidation.remaining)}</span> em boletos —
+          vêm com a próxima entrega (o Estoque registra a nova nota e os novos boletos). A OC só conclui o
+          pagamento quando os boletos cobrirem o total.
         </p>
       ) : null}
       {canForceSingleParcel ? (

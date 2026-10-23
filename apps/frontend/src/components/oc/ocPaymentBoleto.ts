@@ -8,6 +8,10 @@ export type BoletoInstallmentRow = {
   paymentStatus?: BoletoInstallmentPaymentStatus | null;
   installmentProofUrl?: string | null;
   installmentProofName?: string | null;
+  /** Parcela a mais, criada por uma nova entrega de estoque (entrega parcial). */
+  extra?: boolean;
+  /** Parcela que veio de uma entrada parcial do estoque (a soma pode ficar abaixo do total da OC). */
+  stockPartial?: boolean;
 };
 
 export function parsePaymentBoletoInstallments(raw: unknown): BoletoInstallmentRow[] {
@@ -31,7 +35,9 @@ export function parsePaymentBoletoInstallments(raw: unknown): BoletoInstallmentR
       installmentProofUrl:
         typeof ipu === 'string' && ipu.trim() ? String(ipu).trim() : null,
       installmentProofName:
-        typeof ipn === 'string' && ipn.trim() ? String(ipn).trim() : null
+        typeof ipn === 'string' && ipn.trim() ? String(ipn).trim() : null,
+      ...(x.extra === true ? { extra: true } : {}),
+      ...(x.stockPartial === true ? { stockPartial: true } : {})
     };
   });
 }

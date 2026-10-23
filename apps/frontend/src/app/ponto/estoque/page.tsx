@@ -52,7 +52,9 @@ import {
 } from '@/lib/ocStockDocuments';
 import { isOcBoletoPaymentType } from '@/components/oc/ocUploadBoleto';
 import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import { parsePaymentBoletoInstallments } from '@/components/oc/ocPaymentBoleto';
 import {
+  formatDueDateBr,
   formatMoneyDisplay,
   parseOrderTotalAmount,
   redistributeInstallmentAmounts,
@@ -1134,7 +1136,9 @@ export default function EstoquePage() {
       }
       const parcelCount =
         selectedOrderDetail && isOcBoletoPaymentType(selectedOrderDetail.paymentType)
-          ? selectedOrderDetail.paymentParcelCount ?? 1
+          ? secondEntryMode
+            ? 1
+            : selectedOrderDetail.paymentParcelCount ?? 1
           : 0;
       const effectiveSlips = mergeStockPaymentSlipsWithLinked(
         paymentSlips,
@@ -1618,7 +1622,20 @@ export default function EstoquePage() {
     setPaymentSlips([]);
   }, [selectedOcInboundComplete, formData.type]);
 
-  const linkedOcStockDocuments = useMemo(
+  // Boletos que entradas parciais anteriores já registraram na OC (a próxima entrega acrescenta os novos).
+  const registeredPartialSlips = useMemo(() => {
+    if (!selectedOrderDetail || !isOcBoletoPaymentType(selectedOrderDetail.paymentType)) return [];
+    return parsePaymentBoletoInstallments(selectedOrderDetail.paymentBoletoInstallments).filter(
+      (r) => (r.stockPartial || r.extra) && (r.boletoUrl || '').trim()
+    );
+  }, [selectedOrderDetail]);
+  const secondEntryMode = registeredPartialSlips.length > 0;
+  const registeredPartialSum = useMemo(
+    () => registeredPartialSlips.reduce((s, r) => s + (Number.isFinite(r.amount) ? r.amount : 0), 0),
+    [registeredPartialSlips]
+  );
+
+  const linkedOcStockDocumentsAll = useMemo(
     () =>
       buildLinkedOcStockDocuments(
         selectedOrderDetail,
@@ -1627,23 +1644,64 @@ export default function EstoquePage() {
       ),
     [selectedOrderDetail, movementsForOc, formData.ocNumber]
   );
+  // Nova entrega de uma OC com entrada parcial: nota e boletos são novos, não reaproveita os vinculados.
+  const linkedOcStockDocuments = useMemo(
+    () =>
+      secondEntryMode
+        ? { ...linkedOcStockDocumentsAll, invoices: [], boletos: [] }
+        : linkedOcStockDocumentsAll,
+    [secondEntryMode, linkedOcStockDocumentsAll]
+  );
 
   const expectedBoletoParcelCount = useMemo(() => {
     if (!selectedOrderDetail || !isOcBoletoPaymentType(selectedOrderDetail.paymentType)) return 0;
+    if (secondEntryMode) return 1;
     return selectedOrderDetail.paymentParcelCount ?? 1;
-  }, [selectedOrderDetail]);
+  }, [selectedOrderDetail, secondEntryMode]);
 
   const selectedOrderTotal = useMemo(() => {
     if (!selectedOrderDetail) return 0;
     return parseOrderTotalAmount(selectedOrderDetail);
   }, [selectedOrderDetail]);
 
-  const paymentSlipAmountValidation = useMemo(() => {
-    if (expectedBoletoParcelCount <= 1 || selectedOrderTotal <= 0 || paymentSlips.length === 0) {
-      return { valid: true as const };
+  const paymentSlipAmountValidation = useMemo((): {
+    valid: boolean;
+    message?: string;
+    remaining?: number;
+  } => {
+    if (secondEntryMode) {
+      const filled = paymentSlips.filter((s) => (s.url || '').trim() || s.amount.trim());
+      if (selectedOrderTotal <= 0 || filled.length === 0) {
+        return { valid: true, remaining: Math.max(0, selectedOrderTotal - registeredPartialSum) };
+      }
+      const left = Math.round((selectedOrderTotal - registeredPartialSum) * 100) / 100;
+      if (left <= 0) {
+        return { valid: false, message: 'Os boletos já registrados cobrem o total da OC.' };
+      }
+      const res = validateInstallmentAmountsSum(paymentSlipsToRowDrafts(filled), left, {
+        allowBelowTotal: true
+      });
+      return res.valid
+        ? res
+        : {
+            ...res,
+            message: res.message?.replace('total da OC', `saldo da OC (${formatMoneyDisplay(left)})`)
+          };
     }
-    return validateInstallmentAmountsSum(paymentSlipsToRowDrafts(paymentSlips), selectedOrderTotal);
-  }, [expectedBoletoParcelCount, selectedOrderTotal, paymentSlips]);
+    if (expectedBoletoParcelCount <= 1 || selectedOrderTotal <= 0 || paymentSlips.length === 0) {
+      return { valid: true };
+    }
+    return validateInstallmentAmountsSum(paymentSlipsToRowDrafts(paymentSlips), selectedOrderTotal, {
+      allowBelowTotal: formData.movementSplit === 'PARCIAL'
+    });
+  }, [
+    secondEntryMode,
+    registeredPartialSum,
+    expectedBoletoParcelCount,
+    selectedOrderTotal,
+    paymentSlips,
+    formData.movementSplit
+  ]);
 
   useEffect(() => {
     if (formData.type !== 'IN') {
@@ -2254,6 +2312,12 @@ export default function EstoquePage() {
   };
 
   const handlePaymentSlipAmountChange = (slipIndex: number, rawValue: string) => {
+    // Entrada parcial: cada boleto tem o valor que o fornecedor emitiu; não redistribui entre parcelas.
+    if (formData.movementSplit === 'PARCIAL') {
+      const partialSlip = paymentSlips[slipIndex];
+      if (partialSlip) handlePaymentSlipFieldChange(partialSlip.id, 'amount', rawValue);
+      return;
+    }
     const orderTotal = selectedOrderDetail ? parseOrderTotalAmount(selectedOrderDetail) : 0;
     if (expectedBoletoParcelCount > 1 && orderTotal > 0) {
       setPaymentSlips((prev) => {
@@ -3807,7 +3871,9 @@ export default function EstoquePage() {
                         Boletos para pagamento
                         {expectedBoletoParcelCount > 1
                           ? ` (${expectedBoletoParcelCount} parcelas)`
-                          : ''}
+                          : secondEntryMode
+                            ? ' (novos desta entrega)'
+                            : ''}
                       </label>
                       {expectedBoletoParcelCount <= 1 ? (
                         <button
@@ -3819,9 +3885,37 @@ export default function EstoquePage() {
                         </button>
                       ) : null}
                     </div>
+                    {secondEntryMode ? (
+                      <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-900/40">
+                        <p className="font-medium text-gray-800 dark:text-gray-200">
+                          Já registrados nesta OC ({formatMoneyDisplay(registeredPartialSum)} de{' '}
+                          {formatMoneyDisplay(selectedOrderTotal)})
+                        </p>
+                        <ul className="mt-1 space-y-0.5 text-gray-600 dark:text-gray-400">
+                          {registeredPartialSlips.map((r, i) => (
+                            <li key={`${r.boletoUrl}-${i}`}>
+                              {i + 1}) {formatMoneyDisplay(r.amount)} · venc.{' '}
+                              {formatDueDateBr(r.dueDate)}
+                              {r.boletoName ? ` · ${r.boletoName}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 text-gray-500 dark:text-gray-400">
+                          Esta entrega usa uma nova nota fiscal; adicione abaixo só os boletos novos.
+                        </p>
+                      </div>
+                    ) : null}
                     {!paymentSlipAmountValidation.valid && paymentSlipAmountValidation.message ? (
                       <p className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
                         {paymentSlipAmountValidation.message}
+                      </p>
+                    ) : null}
+                    {paymentSlipAmountValidation.valid &&
+                    (formData.movementSplit === 'PARCIAL' || secondEntryMode) &&
+                    (paymentSlipAmountValidation.remaining ?? 0) > 0 ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                        Entrada parcial: os boletos somam menos que o total da OC. Restam{' '}
+                        {formatMoneyDisplay(paymentSlipAmountValidation.remaining ?? 0)} da OC para as próximas entregas.
                       </p>
                     ) : null}
                     {paymentSlips.length === 0 ? (
@@ -3833,7 +3927,7 @@ export default function EstoquePage() {
                     ) : (
                       <div className="space-y-3">
                         {paymentSlips.map((slip, index) => {
-                          const parcelNumber = index + 1;
+                          const parcelNumber = index + 1 + registeredPartialSlips.length;
                           const parcelLabel =
                             expectedBoletoParcelCount > 1
                               ? `${parcelNumber}${index === 0 ? ' *' : ''}`

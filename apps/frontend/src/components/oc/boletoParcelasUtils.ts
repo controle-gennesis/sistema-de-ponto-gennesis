@@ -27,7 +27,14 @@ export type RowDraft = {
   boletoName: string | null;
   uploading: boolean;
   paymentStatus?: BoletoInstallmentPaymentStatus | null;
+  extra?: boolean;
+  stockPartial?: boolean;
 };
+
+/** Entrega parcial: os boletos podem somar menos que o total da OC (o resto vem nas próximas entregas). */
+export function rowsInPartialDeliveryMode(rows: Array<{ stockPartial?: boolean }>): boolean {
+  return rows.some((r) => r.stockPartial === true);
+}
 
 export function ymdAddDays(ymd: string | undefined | null, add: number): string {
   const raw = (ymd ?? '').trim();
@@ -94,6 +101,29 @@ export function redistributeInstallmentAmounts(
   orderTotal: number,
   rowLocked: boolean[]
 ): { rows: RowDraft[]; wasCapped: boolean } {
+  if (rowsInPartialDeliveryMode(rows)) {
+    // Sem redistribuição: cada boleto tem o valor que o fornecedor emitiu.
+    const parsed = parseMoneyInput(rawEditedValue);
+    if (parsed == null) {
+      return {
+        rows: rows.map((r, i) => (i === editedIndex ? { ...r, amount: rawEditedValue } : r)),
+        wasCapped: false
+      };
+    }
+    const othersSum = rows.reduce(
+      (s, r, i) => (i === editedIndex ? s : s + (parseMoneyInput(r.amount) ?? 0)),
+      0
+    );
+    const maxAllowed = Math.max(0, Math.round((orderTotal - othersSum) * 100) / 100);
+    const clamped = Math.max(0, Math.min(parsed, maxAllowed));
+    return {
+      rows: rows.map((r, i) =>
+        i === editedIndex ? { ...r, amount: formatCurrencyInputBrFromNumber(clamped) } : r
+      ),
+      wasCapped: parsed > maxAllowed + 0.001
+    };
+  }
+
   if (rows.length <= 1) {
     const parsed = parseMoneyInput(rawEditedValue);
     if (parsed == null) {
@@ -160,8 +190,9 @@ export function sumInstallmentAmounts(rows: RowDraft[]): number {
 
 export function validateInstallmentAmountsSum(
   rows: RowDraft[],
-  orderTotal: number
-): { valid: boolean; message?: string; sum: number } {
+  orderTotal: number,
+  options?: { allowBelowTotal?: boolean }
+): { valid: boolean; message?: string; sum: number; remaining?: number } {
   if (orderTotal <= 0 || rows.length === 0) {
     return { valid: true, sum: 0 };
   }
@@ -196,6 +227,10 @@ export function validateInstallmentAmountsSum(
   }
 
   if (sumCents !== totalCents) {
+    // Entrada parcial: o fornecedor emite boleto só do que entregou; o restante vem nas próximas entregas.
+    if (options?.allowBelowTotal && sumCents < totalCents) {
+      return { valid: true, sum, remaining: (totalCents - sumCents) / 100 };
+    }
     return {
       valid: false,
       message: `A soma das parcelas (${formatMoneyDisplay(sum)}) deve ser igual ao total da OC (${formatMoneyDisplay(orderTotal)}).`,
@@ -209,7 +244,8 @@ export function validateInstallmentAmountsSum(
 /** Corrige parcelas salvas com soma ou valor acima do total da OC (mantém parcelas já no financeiro/pagas). */
 export function normalizeRowAmountsToOrderTotal(rows: RowDraft[], orderTotal: number): RowDraft[] {
   if (orderTotal <= 0 || rows.length === 0) return rows;
-  if (validateInstallmentAmountsSum(rows, orderTotal).valid) return rows;
+  const allowBelowTotal = rowsInPartialDeliveryMode(rows);
+  if (validateInstallmentAmountsSum(rows, orderTotal, { allowBelowTotal }).valid) return rows;
 
   const locked = rows.map((r) => {
     const st = rowStatus(draftToRow(r));
@@ -236,9 +272,9 @@ export function normalizeRowAmountsToOrderTotal(rows: RowDraft[], orderTotal: nu
 }
 
 export function buildInitialRows(order: BoletoParcelasOrderFields): RowDraft[] {
-  const n = order.paymentParcelCount ?? 1;
-  const days = order.paymentParcelDueDays?.length ? order.paymentParcelDueDays : [30];
   const existing = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
+  const n = Math.max(order.paymentParcelCount ?? 1, existing.filter((r) => r.extra).length ? existing.length : 0);
+  const days = order.paymentParcelDueDays?.length ? order.paymentParcelDueDays : [30];
   const total = parseOrderTotalAmount(order);
   const amounts = splitAmountInInstallments(total, n);
   const rows = Array.from({ length: n }, (_, i) => {
@@ -252,7 +288,9 @@ export function buildInitialRows(order: BoletoParcelasOrderFields): RowDraft[] {
       boletoUrl: ex?.boletoUrl ?? null,
       boletoName: ex?.boletoName ?? null,
       uploading: false,
-      paymentStatus: ex?.paymentStatus
+      paymentStatus: ex?.paymentStatus,
+      ...(ex?.extra ? { extra: true } : {}),
+      ...(ex?.stockPartial ? { stockPartial: true } : {})
     };
   });
   return normalizeRowAmountsToOrderTotal(rows, total);
@@ -264,7 +302,9 @@ export function draftToRow(d: RowDraft): BoletoInstallmentRow {
     dueDate: (d.dueDate ?? '').trim().slice(0, 10),
     boletoUrl: d.boletoUrl,
     boletoName: d.boletoName,
-    paymentStatus: d.paymentStatus
+    paymentStatus: d.paymentStatus,
+    ...(d.extra ? { extra: true } : {}),
+    ...(d.stockPartial ? { stockPartial: true } : {})
   };
 }
 
@@ -280,7 +320,9 @@ export function rowsToInstallments(rows: RowDraft[]): BoletoInstallmentRow[] {
       dueDate: (r.dueDate ?? '').trim().slice(0, 10),
       boletoUrl: (r.boletoUrl || '').trim() || null,
       boletoName: (r.boletoName || '').trim() || null,
-      paymentStatus: r.paymentStatus
+      paymentStatus: r.paymentStatus,
+      ...(r.extra ? { extra: true } : {}),
+      ...(r.stockPartial ? { stockPartial: true } : {})
     };
   });
 }

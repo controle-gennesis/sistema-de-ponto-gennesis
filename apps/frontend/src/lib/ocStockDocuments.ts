@@ -266,6 +266,10 @@ export function buildStockPaymentSlipsForOrder(
   if (!order || !isOcBoletoPaymentType(order.paymentType)) return [];
   const parcelCount = order.paymentParcelCount ?? 1;
   if (parcelCount <= 1) return [];
+  // Já houve entrada parcial com boletos: a nova entrega informa só os boletos novos.
+  if (parsePaymentBoletoInstallments(order.paymentBoletoInstallments).some((r) => r.stockPartial)) {
+    return [];
+  }
 
   const rows = buildInitialRows(order);
   const linkedBoletos = buildLinkedOcStockDocuments(order, movements, ocNumber).boletos;
