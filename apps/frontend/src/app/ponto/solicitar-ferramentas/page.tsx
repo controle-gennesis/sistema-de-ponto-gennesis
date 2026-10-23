@@ -832,6 +832,11 @@ function SolicitarLocacoesFerramentasPage() {
                     <th className={cadastroListClasses.th}>ID</th>
                     <th className={cadastroListClasses.th}>Título</th>
                     <th className={cadastroListClasses.thCenter}>Tipo</th>
+                    <th className={cadastroListClasses.th}>Contrato</th>
+                    <th className={cadastroListClasses.th}>Obra</th>
+                    <th className={cadastroListClasses.thCenter}>Polo</th>
+                    <th className={cadastroListClasses.thCenter}>Prioridade</th>
+                    <th className={cadastroListClasses.th}>Solicitante</th>
                     <th className={cadastroListClasses.thCenter}>Período</th>
                     <th className={cadastroListClasses.thCenter}>Status</th>
                     <th className={cadastroListClasses.thRight}>Ação</th>
@@ -864,6 +869,25 @@ function SolicitarLocacoesFerramentasPage() {
                       </td>
                       <td className={cadastroListClasses.tdCenter}>
                         {formatToolRentalDemand(row.demandType)}
+                      </td>
+                      <td className={cadastroListClasses.tdTruncate}>
+                        <p className="truncate" title={row.contrato}>
+                          {row.contrato || '—'}
+                        </p>
+                      </td>
+                      <td className={cadastroListClasses.tdTruncate}>
+                        <p className="truncate" title={row.obra}>
+                          {row.obra || '—'}
+                        </p>
+                      </td>
+                      <td className={cadastroListClasses.tdCenter}>{row.polo || '—'}</td>
+                      <td className={cadastroListClasses.tdCenter}>
+                        {formatToolRentalPriority(row.priority)}
+                      </td>
+                      <td className={cadastroListClasses.tdTruncate}>
+                        <p className="truncate">
+                          {row.createdBy?.name || row.assignedUser?.name || '—'}
+                        </p>
                       </td>
                       <td className={cadastroListClasses.tdCenter}>
                         {formatDateOnly(row.periodoInicio)} – {formatDateOnly(row.periodoFim)}
