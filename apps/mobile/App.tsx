@@ -216,27 +216,15 @@ function StatusBarComponent() {
 
   React.useEffect(() => {
     if (Platform.OS !== 'android') return;
-    // Status bar transparente pra o fundo do app aparecer atrás (vermelho no perfil, etc.)
-    RNStatusBar.setTranslucent(true);
-    RNStatusBar.setBackgroundColor('transparent', true);
+    // SDK 58: o Android é sempre edge-to-edge (barras transparentes), então só o estilo dos ícones é ajustado.
     try {
       NavigationBar.setStyle(barStyle === 'light' ? 'light' : 'dark');
-      // Fundo da navigation bar acompanha o tema (quando a API existir)
-      void NavigationBar.setBackgroundColorAsync?.(
-        onAuthSurface ? '#111827' : colors.appShell ?? colors.background ?? '#ffffff',
-      );
     } catch {
       // Expo Go / plataformas sem suporte nativo
     }
-  }, [barStyle, colors.appShell, colors.background, onAuthSurface]);
+  }, [barStyle]);
 
-  return (
-    <StatusBar
-      style={barStyle}
-      translucent
-      backgroundColor="transparent"
-    />
-  );
+  return <StatusBar style={barStyle} />;
 }
 
 export default function App() {

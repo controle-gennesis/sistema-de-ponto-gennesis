@@ -28,17 +28,17 @@ export function ThemePatternFill() {
   return (
     <View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.appShell }]}
+      style={[StyleSheet.absoluteFill, { backgroundColor: colors.appShell }]}
     >
       <ImageBackground
         source={BG_LIGHT}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         imageStyle={{ opacity: isDark ? 0 : 1 }}
         resizeMode="repeat"
       />
       <ImageBackground
         source={BG_DARK}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         imageStyle={{ opacity: isDark ? 0.55 : 0 }}
         resizeMode="repeat"
       />

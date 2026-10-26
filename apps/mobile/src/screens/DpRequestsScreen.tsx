@@ -3067,7 +3067,7 @@ function getStyles(colors: any, isDark: boolean) {
       paddingBottom: 28,
     },
     pickerBackdrop: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
     pickerSheet: {
       borderRadius: 20,

@@ -362,7 +362,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
 
   return (
     <View style={styles.root} onLayout={hideNativeSplash}>
-      <StatusBar style="light" translucent backgroundColor="transparent" />
+      <StatusBar style="light" />
       {/* O degradê encolhe junto com a faixa vermelha, pra aparecer inteiro acima do sheet. */}
       <Animated.View
         pointerEvents="none"

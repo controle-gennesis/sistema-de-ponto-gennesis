@@ -9,7 +9,6 @@ import React, {
   type ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { InteractionManager } from 'react-native';
 
 type Theme = 'light' | 'dark';
 
@@ -87,11 +86,12 @@ const THEME_STORAGE_KEY = '@theme';
 const ThemeContext = createContext<ThemeContextData>({} as ThemeContextData);
 
 function persistTheme(next: Theme) {
-  InteractionManager.runAfterInteractions(() => {
+  // InteractionManager saiu do RN 0.88: adia a gravação para depois da animação de troca de tema.
+  setTimeout(() => {
     void AsyncStorage.setItem(THEME_STORAGE_KEY, next).catch((error) => {
       console.error('Erro ao salvar tema:', error);
     });
-  });
+  }, 0);
 }
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {

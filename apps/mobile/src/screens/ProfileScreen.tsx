@@ -12,7 +12,6 @@ import {
   Pressable,
   TextInput,
   Platform,
-  InteractionManager,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -163,9 +162,7 @@ export default function ProfileScreen() {
     setBioBusy(true);
     try {
       await new Promise<void>((resolve) => {
-        InteractionManager.runAfterInteractions(() => {
-          setTimeout(resolve, 500);
-        });
+        setTimeout(resolve, 500);
       });
       await enableBiometrics(identifier, password);
       Alert.alert('Pronto', `Acesso com ${biometric.label} ativado.`);

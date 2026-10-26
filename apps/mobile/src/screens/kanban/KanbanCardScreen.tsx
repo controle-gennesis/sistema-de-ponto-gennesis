@@ -8,7 +8,6 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Modal,
   Platform,
   Linking,
 } from 'react-native';
@@ -17,9 +16,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import {
+  Archive,
+  ArrowRightLeft,
   Check,
   ChevronDown,
+  Copy,
+  History,
+  Package,
   Plus,
+  UserPlus,
   Trash2,
   Send,
   Tag,
@@ -33,8 +38,14 @@ import {
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import AppHeader from '../../components/AppHeader';
+import KanbanMaterialsSheet from '../../components/KanbanMaterialsSheet';
+import KanbanSheet from '../../components/KanbanSheet';
+import { MemberAvatar, MemberPickerSheet } from '../../components/KanbanMemberUi';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { describeCardActivity } from '../../lib/kanbanActivity';
 import {
+  addKanbanCardMember,
   addKanbanLinkAttachment,
   createChecklistItem,
   createKanbanComment,
@@ -42,8 +53,13 @@ import {
   deleteChecklistItem,
   deleteKanbanAttachment,
   deleteKanbanCard,
+  deleteKanbanComment,
+  duplicateKanbanCard,
   fetchKanbanBoard,
   fetchKanbanCard,
+  fetchKanbanCardMaterials,
+  removeKanbanCardMaterial,
+  removeKanbanCardMember,
   isKanbanLinkAttachment,
   moveKanbanCard,
   PRIORITY_LABEL,
@@ -152,6 +168,10 @@ export default function KanbanCardScreen() {
   const [checklistEnabled, setChecklistEnabled] = useState(false);
   const [showDatesPanel, setShowDatesPanel] = useState(false);
   const [showAttachmentsPanel, setShowAttachmentsPanel] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [materialsOpen, setMaterialsOpen] = useState(false);
+  const [showActivity, setShowActivity] = useState(true);
+  const { user: authUser } = useAuth();
 
   const cardQuery = useQuery({
     queryKey: ['kanban-card', cardId],
@@ -161,6 +181,11 @@ export default function KanbanCardScreen() {
   const boardQuery = useQuery({
     queryKey: ['kanban-board', departmentKey ?? 'own'],
     queryFn: () => fetchKanbanBoard(departmentKey),
+  });
+
+  const materialsQuery = useQuery({
+    queryKey: ['kanban-card-materials', cardId],
+    queryFn: () => fetchKanbanCardMaterials(cardId),
   });
 
   const card = cardQuery.data;
@@ -533,6 +558,122 @@ export default function KanbanCardScreen() {
     }
   };
 
+  const members = card?.members ?? [];
+
+  const addMember = async (u: { id: string }) => {
+    if (!card || readOnly) return;
+    try {
+      await addKanbanCardMember(card.id, u.id);
+      await invalidate();
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: e?.message || 'Falha ao adicionar pessoa' });
+      throw e;
+    }
+  };
+
+  const removeMember = (userId: string, name: string) => {
+    if (readOnly) return;
+    Alert.alert('Remover pessoa', `Remover ${name} deste card?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeKanbanCardMember(cardId, userId);
+            await invalidate();
+          } catch (e: any) {
+            Toast.show({ type: 'error', text1: e?.message || 'Falha ao remover' });
+          }
+        },
+      },
+    ]);
+  };
+
+  const removeMaterial = (materialId: string, name: string) => {
+    if (readOnly) return;
+    Alert.alert('Remover material', `Remover "${name}" do card?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeKanbanCardMaterial(cardId, materialId);
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['kanban-card-materials', cardId] }),
+              invalidate(),
+            ]);
+          } catch (e: any) {
+            Toast.show({ type: 'error', text1: e?.message || 'Falha ao remover material' });
+          }
+        },
+      },
+    ]);
+  };
+
+  const removeComment = (id: string) => {
+    Alert.alert('Excluir comentário', 'Remover este comentário?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteKanbanComment(id);
+            await invalidate();
+          } catch (e: any) {
+            Toast.show({ type: 'error', text1: e?.message || 'Falha ao excluir' });
+          }
+        },
+      },
+    ]);
+  };
+
+  const toggleArchive = () => {
+    if (!card || readOnly) return;
+    const archiving = true;
+    Alert.alert(
+      archiving ? 'Arquivar card' : 'Restaurar card',
+      'O card some do quadro, mas pode ser restaurado depois.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Arquivar',
+          onPress: async () => {
+            try {
+              await updateKanbanCard(card.id, { archivedAt: new Date().toISOString() });
+              await queryClient.invalidateQueries({
+                queryKey: ['kanban-board', departmentKey ?? 'own'],
+              });
+              navigation.goBack();
+              Toast.show({ type: 'success', text1: 'Card arquivado' });
+            } catch (e: any) {
+              Toast.show({ type: 'error', text1: e?.message || 'Falha ao arquivar' });
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const duplicateCard = async () => {
+    if (!card || readOnly) return;
+    try {
+      await duplicateKanbanCard(card.id, {
+        columnId: card.columnId,
+        copyLabels: true,
+        copyAttachments: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['kanban-board', departmentKey ?? 'own'],
+      });
+      Toast.show({ type: 'success', text1: 'Card copiado' });
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: e?.message || 'Falha ao copiar' });
+    }
+  };
+
   const removeCard = () => {
     Alert.alert('Excluir card', 'Esta ação não pode ser desfeita.', [
       { text: 'Cancelar', style: 'cancel' },
@@ -575,6 +716,44 @@ export default function KanbanCardScreen() {
 
   const checklistItems = card.checklistItems || [];
   const comments = card.commentsList || [];
+
+  type TimelineItem =
+    | {
+        kind: 'activity';
+        id: string;
+        createdAt: string;
+        text: string;
+        actor?: string;
+        user?: { id: string; name: string; profilePhotoUrl: string | null; avatarColor: string } | null;
+      }
+    | { kind: 'comment'; id: string; createdAt: string; comment: (typeof comments)[number] };
+
+  const timeline: TimelineItem[] = [];
+  for (const a of card.activitiesList ?? []) {
+    timeline.push({
+      kind: 'activity',
+      id: `act-${a.id}`,
+      createdAt: a.createdAt,
+      text: describeCardActivity(a, labelPresets),
+      actor: a.user?.name?.trim() || 'Alguém',
+      user: a.user,
+    });
+  }
+  if (card.createdAt) {
+    timeline.push({ kind: 'activity', id: `created-${card.id}`, createdAt: card.createdAt, text: 'Card criado' });
+  }
+  for (const att of card.attachmentsList ?? []) {
+    timeline.push({
+      kind: 'activity',
+      id: `att-${att.id}`,
+      createdAt: att.createdAt,
+      text: `${att.uploader?.name?.trim() || 'Alguém'} anexou “${att.fileName}”`,
+    });
+  }
+  for (const c of comments) {
+    timeline.push({ kind: 'comment', id: c.id, createdAt: c.createdAt, comment: c });
+  }
+  timeline.sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
   const doneTasks = checklistItems.filter((i) => i.isDone).length;
   const isCardCompleted = Boolean(card.completedAt);
   const pickerValue = datePicker
@@ -673,6 +852,22 @@ export default function KanbanCardScreen() {
 
         <View style={styles.actionsGrid}>
           <ActionButton
+            label="Membros"
+            icon={UserPlus}
+            active={members.length > 0}
+            colors={colors}
+            disabled={readOnly}
+            onPress={() => setMembersOpen(true)}
+          />
+          <ActionButton
+            label="Materiais"
+            icon={Package}
+            active={(materialsQuery.data ?? []).length > 0}
+            colors={colors}
+            disabled={readOnly}
+            onPress={() => setMaterialsOpen(true)}
+          />
+          <ActionButton
             label="Etiquetas"
             icon={Tag}
             active={hasLabels}
@@ -726,6 +921,39 @@ export default function KanbanCardScreen() {
             }}
           />
         </View>
+
+        {members.length > 0 ? (
+          <View style={styles.block}>
+            <Text style={styles.blockLabel}>Membros</Text>
+            <View style={styles.labelsRow}>
+              {members.map((m) => (
+                <TouchableOpacity
+                  key={m.userId}
+                  style={styles.memberChip}
+                  onPress={() => removeMember(m.userId, m.name)}
+                  disabled={readOnly}
+                  activeOpacity={0.7}
+                >
+                  <MemberAvatar
+                    name={m.name}
+                    photoUrl={m.profilePhotoUrl}
+                    color={m.avatarColor}
+                    size={24}
+                  />
+                  <Text style={styles.memberChipText} numberOfLines={1}>
+                    {m.name}
+                  </Text>
+                  {!readOnly ? <X size={12} color={colors.textSecondary} /> : null}
+                </TouchableOpacity>
+              ))}
+              {!readOnly ? (
+                <TouchableOpacity style={styles.labelAdd} onPress={() => setMembersOpen(true)}>
+                  <Plus size={14} color={colors.primary} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
 
         {hasLabels ? (
           <View style={styles.block}>
@@ -869,6 +1097,14 @@ export default function KanbanCardScreen() {
                 >
                   {item.title}
                 </Text>
+                {item.assignee ? (
+                  <MemberAvatar
+                    name={item.assignee.name}
+                    photoUrl={item.assignee.profilePhotoUrl}
+                    color={item.assignee.avatarColor}
+                    size={22}
+                  />
+                ) : null}
                 {!readOnly ? (
                   <TouchableOpacity onPress={() => removeItem(item.id)} hitSlop={8}>
                     <Trash2 size={14} color={colors.textSecondary} />
@@ -956,21 +1192,76 @@ export default function KanbanCardScreen() {
 
         <View style={styles.block}>
           <View style={styles.blockLabelRow}>
-            <Text style={[styles.blockLabel, styles.blockLabelInRow]}>Comentários</Text>
-            {comments.length > 0 ? (
-              <Text style={styles.blockCount}>{comments.length}</Text>
-            ) : null}
+            <Text style={[styles.blockLabel, styles.blockLabelInRow]}>Comentários e atividade</Text>
+            <TouchableOpacity
+              style={styles.detailsBtn}
+              onPress={() => setShowActivity((v) => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.detailsBtnText}>
+                {showActivity ? 'Ocultar detalhes' : 'Mostrar detalhes'}
+              </Text>
+            </TouchableOpacity>
           </View>
-          {comments.length === 0 ? (
-            <Text style={styles.hint}>Nenhum comentário</Text>
+
+          {timeline.filter((i) => i.kind === 'comment' || showActivity).length === 0 ? (
+            <Text style={styles.hint}>Nenhuma atividade ainda</Text>
           ) : (
-            comments.map((c) => (
-              <View key={c.id} style={styles.comment}>
-                <Text style={styles.commentAuthor}>{c.author?.name || 'Usuário'}</Text>
-                <Text style={styles.commentBody}>{c.content}</Text>
-              </View>
-            ))
+            timeline.map((item) => {
+              if (item.kind === 'activity') {
+                if (!showActivity) return null;
+                return (
+                  <View key={item.id} style={styles.feedRow}>
+                    {item.user ? (
+                      <MemberAvatar
+                        name={item.user.name}
+                        photoUrl={item.user.profilePhotoUrl}
+                        color={item.user.avatarColor}
+                        size={30}
+                      />
+                    ) : (
+                      <View style={styles.feedIcon}>
+                        <History size={14} color={colors.textSecondary} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.activityText}>
+                        {item.actor ? <Text style={styles.activityWho}>{item.actor} </Text> : null}
+                        {item.text}
+                      </Text>
+                      <Text style={styles.activityWhen}>{formatRelativeTime(item.createdAt)}</Text>
+                    </View>
+                  </View>
+                );
+              }
+              const c = item.comment;
+              return (
+                <View key={item.id} style={styles.feedRow}>
+                  <MemberAvatar
+                    name={c.author?.name || 'Usuário'}
+                    photoUrl={c.author?.profilePhotoUrl}
+                    color={c.author?.avatarColor}
+                    size={30}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.commentHead}>
+                      <Text style={[styles.commentAuthor, { flex: 1, marginBottom: 0 }]} numberOfLines={1}>
+                        {c.author?.name || 'Usuário'}
+                      </Text>
+                      <Text style={styles.commentDate}>{formatRelativeTime(c.createdAt)}</Text>
+                      {!readOnly && authUser?.id && c.author?.id === authUser.id ? (
+                        <TouchableOpacity onPress={() => removeComment(c.id)} hitSlop={8}>
+                          <Trash2 size={13} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <Text style={styles.commentBody}>{c.content}</Text>
+                  </View>
+                </View>
+              );
+            })
           )}
+
           {!readOnly ? (
             <View style={styles.addRow}>
               <TextInput
@@ -988,6 +1279,60 @@ export default function KanbanCardScreen() {
           ) : null}
         </View>
 
+        {(materialsQuery.data ?? []).length > 0 ? (
+          <View style={styles.block}>
+            <View style={styles.blockLabelRow}>
+              <Text style={[styles.blockLabel, { marginBottom: 0 }]}>Materiais</Text>
+              <Text style={styles.blockCountPlain}>{(materialsQuery.data ?? []).length}</Text>
+              <View style={{ flex: 1 }} />
+              {!readOnly ? (
+                <TouchableOpacity
+                  style={styles.sectionAction}
+                  onPress={() => setMaterialsOpen(true)}
+                >
+                  <Text style={styles.sectionActionText}>Adicionar</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {(materialsQuery.data ?? []).map((m) => (
+              <View key={m.id} style={styles.attachRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.attachName} numberOfLines={3}>
+                    {m.name}
+                    {m.code ? <Text style={styles.materialCodeInline}> - {m.code}</Text> : null}
+                  </Text>
+                  <Text style={styles.materialMeta}>
+                    {m.quantity} {m.unit}
+                  </Text>
+                  {m.observation ? (
+                    <Text style={styles.materialMeta} numberOfLines={3}>
+                      {m.observation}
+                    </Text>
+                  ) : null}
+                </View>
+                {!readOnly ? (
+                  <TouchableOpacity onPress={() => removeMaterial(m.materialId, m.name)} hitSlop={8}>
+                    <Trash2 size={14} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {!readOnly ? (
+          <View style={styles.footerActions}>
+            <TouchableOpacity style={styles.footerBtn} onPress={() => void duplicateCard()}>
+              <Copy size={16} color={colors.text} />
+              <Text style={styles.footerBtnText}>Copiar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.footerBtn} onPress={toggleArchive}>
+              <Archive size={16} color={colors.text} />
+              <Text style={styles.footerBtnText}>Arquivar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {!readOnly ? (
           <TouchableOpacity style={styles.dangerBtn} onPress={removeCard}>
             <Trash2 size={16} color={colors.error} />
@@ -995,6 +1340,27 @@ export default function KanbanCardScreen() {
           </TouchableOpacity>
         ) : null}
       </ScrollView>
+
+      <KanbanMaterialsSheet
+        visible={materialsOpen}
+        cardId={card.id}
+        alreadyIds={(materialsQuery.data ?? []).map((m) => m.materialId)}
+        onClose={() => setMaterialsOpen(false)}
+        onSaved={async () => {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['kanban-card-materials', cardId] }),
+            invalidate(),
+          ]);
+        }}
+      />
+
+      <MemberPickerSheet
+        visible={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        onSelect={addMember}
+        excludeUserIds={members.map((m) => m.userId)}
+        title="Adicionar pessoa ao card"
+      />
 
       {datePicker ? (
         <DateTimePicker
@@ -1005,165 +1371,152 @@ export default function KanbanCardScreen() {
         />
       ) : null}
 
-      <Modal
+      <KanbanSheet
         visible={labelsOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLabelsOpen(false)}
+        onClose={() => setLabelsOpen(false)}
+        title="Etiquetas"
+        subtitle="Toque para adicionar ou remover do card"
+        icon={Tag}
       >
-        <View style={styles.sheetOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
-            activeOpacity={1}
-            onPress={() => setLabelsOpen(false)}
-          />
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Etiquetas</Text>
-                <Text style={styles.sheetSubtitle}>
-                  Toque para adicionar ou remover do card
-                </Text>
-              </View>
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={styles.sheetScrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {labelPresets.map((preset) => {
+            const active = labels.some(
+              (l) => l.color.toLowerCase() === preset.color.toLowerCase(),
+            );
+            const fg = labelTextColor(preset.color);
+            return (
               <TouchableOpacity
-                style={styles.sheetClose}
-                onPress={() => setLabelsOpen(false)}
-                hitSlop={8}
+                key={preset.color}
+                activeOpacity={0.85}
+                style={[styles.labelOption, { backgroundColor: preset.color }]}
+                onPress={() => void toggleLabel(preset)}
               >
-                <X size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.sheetScroll}
-              contentContainerStyle={styles.sheetScrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {labelPresets.map((preset) => {
-                const active = labels.some(
-                  (l) => l.color.toLowerCase() === preset.color.toLowerCase(),
-                );
-                const fg = labelTextColor(preset.color);
-                return (
-                  <TouchableOpacity
-                    key={preset.color}
-                    activeOpacity={0.85}
-                    style={[styles.labelOption, { backgroundColor: preset.color }]}
-                    onPress={() => void toggleLabel(preset)}
-                  >
-                    <Text
-                      style={[styles.labelOptionText, { color: fg }]}
-                      numberOfLines={1}
-                    >
-                      {preset.name}
-                    </Text>
-                    <View
-                      style={[
-                        styles.labelOptionCheck,
-                        {
-                          borderColor: fg,
-                          backgroundColor: active ? fg : 'transparent',
-                        },
-                      ]}
-                    >
-                      {active ? (
-                        <Check
-                          size={12}
-                          color={preset.color}
-                          strokeWidth={3}
-                        />
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {labels.length > 0 ? (
-              <TouchableOpacity
-                style={styles.sheetSecondaryBtn}
-                onPress={() => void clearAllLabels()}
-              >
-                <Text style={[styles.sheetSecondaryText, { color: colors.error }]}>
-                  Remover todas
+                <Text style={[styles.labelOptionText, { color: fg }]} numberOfLines={1}>
+                  {preset.name}
                 </Text>
+                <View
+                  style={[
+                    styles.labelOptionCheck,
+                    { borderColor: fg, backgroundColor: active ? fg : 'transparent' },
+                  ]}
+                >
+                  {active ? <Check size={12} color={preset.color} strokeWidth={3} /> : null}
+                </View>
               </TouchableOpacity>
-            ) : null}
+            );
+          })}
+        </ScrollView>
 
+        {labels.length > 0 ? (
+          <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={() => void clearAllLabels()}>
+            <Text style={[styles.sheetSecondaryText, { color: colors.error }]}>Remover todas</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => setLabelsOpen(false)}>
+          <Text style={styles.primaryBtnText}>Concluído</Text>
+        </TouchableOpacity>
+      </KanbanSheet>
+
+      <KanbanSheet
+        visible={linkOpen}
+        onClose={() => setLinkOpen(false)}
+        title="Adicionar link"
+        subtitle="Cole o endereço e, se quiser, dê um nome"
+        icon={LinkIcon}
+      >
+        <TextInput
+          value={linkUrl}
+          onChangeText={setLinkUrl}
+          placeholder="https://..."
+          placeholderTextColor={colors.textSecondary}
+          autoCapitalize="none"
+          keyboardType="url"
+          style={styles.modalInput}
+        />
+        <TextInput
+          value={linkName}
+          onChangeText={setLinkName}
+          placeholder="Nome (opcional)"
+          placeholderTextColor={colors.textSecondary}
+          style={styles.modalInput}
+        />
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => void saveLink()}>
+          <Text style={styles.primaryBtnText}>Adicionar</Text>
+        </TouchableOpacity>
+      </KanbanSheet>
+
+      <KanbanSheet
+        visible={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        title="Mover para"
+        subtitle="Escolha a coluna do card"
+        icon={ArrowRightLeft}
+      >
+        <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
+          {(boardQuery.data?.columns ?? []).map((col) => (
             <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => setLabelsOpen(false)}
+              key={col.id}
+              style={[
+                styles.moveRow,
+                { backgroundColor: columnTint(col.color, isDark) },
+                col.id === card.columnId && { borderColor: col.color || colors.primary },
+              ]}
+              activeOpacity={0.8}
+              onPress={() => void moveTo(col.id)}
             >
-              <Text style={styles.primaryBtnText}>Concluído</Text>
+              <View style={[styles.colDot, { backgroundColor: col.color || colors.primary }]} />
+              <Text style={styles.moveText} numberOfLines={1}>
+                {col.title}
+              </Text>
+              {col.id === card.columnId ? (
+                <Check size={16} color={col.color || colors.primary} strokeWidth={3} />
+              ) : null}
+              <Text style={styles.moveCount}>{(col.cards ?? []).length}</Text>
             </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={linkOpen} transparent animationType="fade" onRequestClose={() => setLinkOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Adicionar link</Text>
-              <TouchableOpacity onPress={() => setLinkOpen(false)}>
-                <X size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              value={linkUrl}
-              onChangeText={setLinkUrl}
-              placeholder="https://..."
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-              keyboardType="url"
-              style={styles.modalInput}
-            />
-            <TextInput
-              value={linkName}
-              onChangeText={setLinkName}
-              placeholder="Nome (opcional)"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.modalInput}
-            />
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => void saveLink()}>
-              <Text style={styles.primaryBtnText}>Adicionar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={moveOpen} transparent animationType="fade" onRequestClose={() => setMoveOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Mover para</Text>
-              <TouchableOpacity onPress={() => setMoveOpen(false)}>
-                <X size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            {(boardQuery.data?.columns ?? []).map((col) => (
-              <TouchableOpacity
-                key={col.id}
-                style={[
-                  styles.moveRow,
-                  col.id === card.columnId && styles.moveRowActive,
-                ]}
-                onPress={() => void moveTo(col.id)}
-              >
-                <View style={[styles.colDot, { backgroundColor: col.color || colors.primary }]} />
-                <Text style={styles.moveText}>{col.title}</Text>
-                {col.id === card.columnId ? (
-                  <Check size={16} color={colors.primary} strokeWidth={3} />
-                ) : null}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </Modal>
+          ))}
+        </ScrollView>
+      </KanbanSheet>
     </View>
   );
+}
+
+/** Fundo da linha = cor da coluna misturada ao fundo (mesmo mix do quadro). */
+function columnTint(color: string | null | undefined, isDark: boolean): string {
+  const raw = (color || '#6B7280').replace('#', '');
+  const hex = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+  const n = parseInt(hex, 16);
+  const accent = Number.isNaN(n)
+    ? { r: 107, g: 114, b: 128 }
+    : { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  const base = isDark ? { r: 31, g: 41, b: 55 } : { r: 255, g: 255, b: 255 };
+  const w = isDark ? 0.28 : 0.22;
+  const mix = (a: number, b: number) => Math.round(a * w + b * (1 - w));
+  const h = (v: number) => v.toString(16).padStart(2, '0');
+  return `#${h(mix(accent.r, base.r))}${h(mix(accent.g, base.g))}${h(mix(accent.b, base.b))}`;
+}
+
+function formatRelativeTime(iso: string): string {
+  const d = new Date(iso);
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `há ${days} dia${days > 1 ? 's' : ''}`;
+  return d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function ActionButton({
@@ -1344,6 +1697,11 @@ function getStyles(colors: any, _isDark: boolean) {
       overflow: 'hidden',
       marginBottom: 0,
     },
+    blockCountPlain: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSecondary,
+    },
     sectionAction: {
       paddingHorizontal: 4,
       paddingVertical: 2,
@@ -1469,9 +1827,11 @@ function getStyles(colors: any, _isDark: boolean) {
     addRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
     addInput: {
       flex: 1,
-      height: 42,
+      minHeight: 42,
       borderRadius: 10,
       paddingHorizontal: 12,
+      paddingVertical: 12,
+      fontSize: 15,
       backgroundColor: colors.background,
       color: colors.text,
     },
@@ -1507,6 +1867,56 @@ function getStyles(colors: any, _isDark: boolean) {
     },
     commentAuthor: { fontSize: 12, fontWeight: '700', color: colors.text, marginBottom: 2 },
     commentBody: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
+    memberChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      maxWidth: '100%',
+      backgroundColor: colors.background,
+      borderRadius: 20,
+      paddingVertical: 4,
+      paddingLeft: 4,
+      paddingRight: 10,
+    },
+    memberChipText: { flexShrink: 1, fontSize: 13, fontWeight: '600', color: colors.text },
+    commentHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+    commentDate: { fontSize: 11, color: colors.textSecondary },
+    materialCodeInline: { fontWeight: '500', color: colors.textSecondary },
+    materialMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    feedRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    feedIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    detailsBtn: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    detailsBtnText: { fontSize: 11, fontWeight: '700', color: colors.text },
+    activityText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+    activityWho: { fontWeight: '700', color: colors.text },
+    activityWhen: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+    footerActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+    footerBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    footerBtnText: { fontSize: 13, fontWeight: '700', color: colors.text },
     dangerBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1625,11 +2035,20 @@ function getStyles(colors: any, _isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
-      paddingVertical: 12,
-      paddingHorizontal: 8,
-      borderRadius: 10,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+      marginBottom: 8,
     },
-    moveRowActive: { backgroundColor: colors.background },
+    moveCount: {
+      minWidth: 24,
+      textAlign: 'right',
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textSecondary,
+    },
     moveText: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
   });
 }

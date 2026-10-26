@@ -52,7 +52,7 @@ export default function AuthBrandSplash({
 
   return (
     <View style={styles.root} onLayout={hideNativeSplash}>
-      <StatusBar style="light" translucent backgroundColor="transparent" />
+      <StatusBar style="light" />
       <AuthGradientBackground />
       <Animated.View style={{ transform: [{ scale: pulse }] }}>
         <Image

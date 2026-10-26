@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Alert,
   FlatList,
   TextInput,
   Modal,
@@ -16,8 +17,12 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Archive,
   Check,
+  Columns3,
+  MoreHorizontal,
   Plus,
+  Tag,
   MessageSquare,
   Paperclip,
   ListChecks,
@@ -28,6 +33,14 @@ import {
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import Toast from 'react-native-toast-message';
 import AppHeader from '../../components/AppHeader';
+import KanbanSheet from '../../components/KanbanSheet';
+import {
+  ArchivedCardsModal,
+  ColumnEditModal,
+  LabelSettingsModal,
+  labelTextColor,
+} from '../../components/KanbanBoardModals';
+import { MemberAvatar } from '../../components/KanbanMemberUi';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveKanbanDefaultBoard } from '../../lib/kanbanDefaultBoard';
@@ -295,7 +308,14 @@ function BoardCardBase({
             <View
               key={`${l.color}-${i}`}
               style={[styles.labelChip, { backgroundColor: l.color || colors.primary }]}
-            />
+            >
+              <Text
+                style={[styles.labelChipText, { color: labelTextColor(l.color || '#6B7280') }]}
+                numberOfLines={1}
+              >
+                {l.text?.trim() || 'Sem nome'}
+              </Text>
+            </View>
           ))}
         </View>
       ) : null}
@@ -390,6 +410,26 @@ function BoardCardBase({
             </View>
           </View>
         )}
+        {(card.members ?? []).length > 0 ? (
+          <View style={styles.footerAvatars}>
+            {(card.members ?? []).slice(0, 3).map((m, idx) => (
+              <View key={m.userId} style={{ marginLeft: idx === 0 ? 0 : -8 }}>
+                <MemberAvatar
+                  name={m.name}
+                  photoUrl={m.profilePhotoUrl}
+                  color={m.avatarColor}
+                  size={24}
+                  ring={isDark ? '#1f2937' : '#ffffff'}
+                />
+              </View>
+            ))}
+            {(card.members ?? []).length > 3 ? (
+              <Text style={[styles.metaText, { color: metaColor, marginLeft: 4 }]}>
+                +{(card.members ?? []).length - 3}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -423,6 +463,9 @@ export default function KanbanBoardScreen() {
   const [newColumnTitle, setNewColumnTitle] = useState('');
   const [newColumnColor, setNewColumnColor] = useState(COLUMN_COLORS[0]);
   const [savingColumn, setSavingColumn] = useState(false);
+  const [columnEdit, setColumnEdit] = useState<KanbanColumn | null>(null);
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
 
   useEffect(() => {
     if (paramKey) {
@@ -468,6 +511,10 @@ export default function KanbanBoardScreen() {
   const board = boardQuery.data;
   const readOnly = board?.canWrite === false;
   const displayTitle = board?.department || headerTitle;
+  const boardQueryKey = useMemo(
+    () => ['kanban-board', departmentKey ?? 'own'] as const,
+    [departmentKey],
+  );
 
   const openCard = useCallback(
     (card: KanbanCard) => {
@@ -530,6 +577,7 @@ export default function KanbanBoardScreen() {
         onOpenCard={openCard}
         onToggleComplete={toggleCardComplete}
         onAdd={openAddCard}
+        onEdit={setColumnEdit}
       />
     ),
     [styles, colors, isDark, readOnly, openCard, toggleCardComplete, openAddCard],
@@ -588,15 +636,30 @@ export default function KanbanBoardScreen() {
         title={displayTitle}
         onBack={() => navigation.goBack()}
         rightAction={
-          <TouchableOpacity
-            onPress={() => navigation.navigate('KanbanBoards')}
-            hitSlop={8}
-            accessibilityLabel="Trocar de quadro"
-            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-            activeOpacity={0.7}
-          >
-            <LayoutGrid size={22} color={colors.text} strokeWidth={2.1} />
-          </TouchableOpacity>
+          <View style={styles.headerBtns}>
+            <TouchableOpacity
+              onPress={() => {
+                const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
+                  { text: 'Cards arquivados', onPress: () => setArchivedOpen(true) },
+                ];
+                if (!readOnly) {
+                  options.push({ text: 'Etiquetas do quadro', onPress: () => setLabelsOpen(true) });
+                }
+                options.push({
+                  text: 'Trocar de quadro',
+                  onPress: () => navigation.navigate('KanbanBoards'),
+                });
+                options.push({ text: 'Cancelar', style: 'cancel' });
+                Alert.alert(displayTitle || 'Quadro', undefined, options);
+              }}
+              hitSlop={6}
+              accessibilityLabel="Mais opções"
+              style={styles.headerBtn}
+              activeOpacity={0.7}
+            >
+              <MoreHorizontal size={22} color={colors.text} strokeWidth={2.1} />
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -650,95 +713,95 @@ export default function KanbanBoardScreen() {
         </View>
       )}
 
-      <Modal
+      <KanbanSheet
         visible={!!addColId}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAddColId(null)}
+        onClose={() => setAddColId(null)}
+        title="Novo card"
+        subtitle="Dê um título para começar"
+        icon={Plus}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Novo card</Text>
-              <TouchableOpacity onPress={() => setAddColId(null)}>
-                <X size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              value={newTitle}
-              onChangeText={setNewTitle}
-              placeholder="Título do card"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-              autoFocus
-              onSubmitEditing={() => void addCard()}
-            />
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => void addCard()}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryBtnText}>Criar</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        <TextInput
+          value={newTitle}
+          onChangeText={setNewTitle}
+          placeholder="Título do card"
+          placeholderTextColor={colors.textSecondary}
+          style={styles.input}
+          autoFocus
+          onSubmitEditing={() => void addCard()}
+        />
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => void addCard()} disabled={saving}>
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Criar</Text>}
+        </TouchableOpacity>
+      </KanbanSheet>
 
-      <Modal
+      <KanbanSheet
         visible={addColumnOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAddColumnOpen(false)}
+        onClose={() => setAddColumnOpen(false)}
+        title="Nova coluna"
+        subtitle="Escolha o nome e a cor"
+        icon={Columns3}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nova coluna</Text>
-              <TouchableOpacity onPress={() => setAddColumnOpen(false)}>
-                <X size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              value={newColumnTitle}
-              onChangeText={setNewColumnTitle}
-              placeholder="Nome da coluna"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-              autoFocus
-              onSubmitEditing={() => void addColumn()}
-            />
-            <Text style={styles.colorLabel}>Cor</Text>
-            <View style={styles.colorRow}>
-              {COLUMN_COLORS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  onPress={() => setNewColumnColor(c)}
-                  style={[
-                    styles.colorSwatch,
-                    { backgroundColor: c },
-                    newColumnColor === c && styles.colorSwatchActive,
-                  ]}
-                />
-              ))}
-            </View>
+        <TextInput
+          value={newColumnTitle}
+          onChangeText={setNewColumnTitle}
+          placeholder="Nome da coluna"
+          placeholderTextColor={colors.textSecondary}
+          style={styles.input}
+          autoFocus
+          onSubmitEditing={() => void addColumn()}
+        />
+        <Text style={styles.colorLabel}>Cor</Text>
+        <View style={styles.colorRow}>
+          {COLUMN_COLORS.map((c) => (
             <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => void addColumn()}
-              disabled={savingColumn}
-            >
-              {savingColumn ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryBtnText}>Criar coluna</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+              key={c}
+              onPress={() => setNewColumnColor(c)}
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: c },
+                newColumnColor === c && styles.colorSwatchActive,
+              ]}
+            />
+          ))}
         </View>
-      </Modal>
+        <TouchableOpacity
+          style={styles.primaryBtn}
+          onPress={() => void addColumn()}
+          disabled={savingColumn}
+        >
+          {savingColumn ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.primaryBtnText}>Criar coluna</Text>
+          )}
+        </TouchableOpacity>
+      </KanbanSheet>
+
+      <ColumnEditModal
+        column={columnEdit}
+        boardQueryKey={boardQueryKey}
+        onClose={() => setColumnEdit(null)}
+      />
+      <ArchivedCardsModal
+        visible={archivedOpen}
+        departmentKey={departmentKey}
+        canWrite={!readOnly}
+        boardQueryKey={boardQueryKey}
+        onClose={() => setArchivedOpen(false)}
+        onOpenCard={(cardId) =>
+          navigation.navigate('KanbanCard', {
+            cardId,
+            departmentKey: board?.departmentKey ?? departmentKey,
+          })
+        }
+      />
+      <LabelSettingsModal
+        visible={labelsOpen}
+        presets={board?.labelPresets ?? []}
+        departmentKey={board?.departmentKey ?? departmentKey}
+        boardQueryKey={boardQueryKey}
+        onClose={() => setLabelsOpen(false)}
+      />
     </View>
   );
 }
@@ -752,6 +815,7 @@ function ColumnBase({
   onOpenCard,
   onToggleComplete,
   onAdd,
+  onEdit,
 }: {
   column: KanbanColumn;
   styles: ReturnType<typeof getStyles>;
@@ -761,6 +825,7 @@ function ColumnBase({
   onOpenCard: (c: KanbanCard) => void;
   onToggleComplete: (c: KanbanCard) => void;
   onAdd: (columnId: string) => void;
+  onEdit: (column: KanbanColumn) => void;
 }) {
   const columnBg = getKanbanColumnBg(column.color, isDark);
   const cards = Array.isArray(column.cards) ? column.cards : [];
@@ -802,6 +867,16 @@ function ColumnBase({
           {column.title}
         </Text>
         <Text style={styles.colCount}>{cards.length}</Text>
+        {!readOnly ? (
+          <TouchableOpacity
+            style={styles.colMenuBtn}
+            onPress={() => onEdit(column)}
+            hitSlop={8}
+            accessibilityLabel="Editar coluna"
+          >
+            <MoreHorizontal size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.colScrollWrap}>
@@ -958,10 +1033,30 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       marginBottom: 8,
     },
     labelChip: {
-      height: 8,
-      width: 40,
-      borderRadius: 4,
+      maxWidth: '100%',
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
     },
+    labelChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    footerAvatars: {
+      marginLeft: 'auto',
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    colMenuBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerBtns: { flexDirection: 'row', alignItems: 'center' },
+    headerBtn: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+
     titleRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',

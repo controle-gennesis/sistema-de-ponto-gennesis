@@ -47,11 +47,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "splash": {
-      "image": "./assets/splash-native.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#ce3736"
-    },
     "androidStatusBar": {
       "backgroundColor": "#00000000",
       "barStyle": "light-content",

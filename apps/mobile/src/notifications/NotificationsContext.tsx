@@ -344,6 +344,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (Platform.OS === 'web') return;
     // Tocar num push abre direto a aba do assunto; sem dado, abre a lista de notificações.
     return addNotificationOpenListener((data) => {
+      if (
+        data?.kind === 'kanban-assigned' &&
+        typeof data.cardId === 'string' &&
+        navigationRef.isReady()
+      ) {
+        navigationRef.navigate('KanbanCard', { cardId: data.cardId });
+        return;
+      }
       const route =
         data?.kind === 'fuel'
           ? 'Combustivel'

@@ -1975,7 +1975,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       backgroundColor: '#000',
     },
     scannerOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
     scannerCenterBlock: {
       position: 'absolute',

@@ -6,16 +6,18 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Modal,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { LayoutGrid, Plus, Star, X } from 'lucide-react-native';
+import { LayoutGrid, MoreHorizontal, Plus, Star, X } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import AppHeader from '../../components/AppHeader';
+import { BoardRenameModal, BoardShareModal } from '../../components/KanbanBoardModals';
+import KanbanSheet from '../../components/KanbanSheet';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -25,6 +27,7 @@ import {
 } from '../../lib/kanbanDefaultBoard';
 import {
   createKanbanBoard,
+  deleteKanbanBoard,
   fetchKanbanBoards,
   type KanbanBoardSummary,
 } from '../../services/kanban';
@@ -41,6 +44,8 @@ export default function KanbanBoardsScreen() {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [defaultKey, setDefaultKey] = useState<string | null>(null);
+  const [renameBoard, setRenameBoard] = useState<{ id: string; name: string } | null>(null);
+  const [shareBoard, setShareBoard] = useState<{ id: string; name: string } | null>(null);
   const canCreateBoard = !isAdministrator;
 
   const boardsQuery = useQuery({
@@ -74,6 +79,39 @@ export default function KanbanBoardsScreen() {
     await saveKanbanDefaultBoard(user.id, board.departmentKey);
     setDefaultKey(board.departmentKey);
     Toast.show({ type: 'success', text1: 'Quadro favorito definido' });
+  };
+
+  const openBoardMenu = (board: KanbanBoardSummary) => {
+    const target = { id: board.id, name: board.department };
+    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
+      { text: 'Renomear', onPress: () => setRenameBoard(target) },
+    ];
+    if (board.canManageShares !== false) {
+      options.push({ text: 'Compartilhar', onPress: () => setShareBoard(target) });
+    }
+    options.push({
+      text: 'Excluir',
+      style: 'destructive',
+      onPress: () =>
+        Alert.alert('Excluir quadro', `Excluir "${board.department}" e todos os cards dele?`, [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Excluir',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteKanbanBoard(board.id);
+                await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+                Toast.show({ type: 'success', text1: 'Quadro excluído' });
+              } catch (e: any) {
+                Toast.show({ type: 'error', text1: e?.message || 'Falha ao excluir' });
+              }
+            },
+          },
+        ]),
+    });
+    options.push({ text: 'Cancelar', style: 'cancel' });
+    Alert.alert(board.department, undefined, options);
   };
 
   const create = async () => {
@@ -159,6 +197,15 @@ export default function KanbanBoardsScreen() {
                     {board.sharedWithMe ? ' · Compartilhado' : ''}
                   </Text>
                 </View>
+                {board.isCustom && board.isOwner ? (
+                  <TouchableOpacity
+                    onPress={() => openBoardMenu(board)}
+                    hitSlop={10}
+                    accessibilityLabel="Opções do quadro"
+                  >
+                    <MoreHorizontal size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   onPress={() => void setAsDefault(board)}
                   hitSlop={10}
@@ -179,43 +226,33 @@ export default function KanbanBoardsScreen() {
         )}
       </ScrollView>
 
+      <BoardRenameModal board={renameBoard} onClose={() => setRenameBoard(null)} />
+      <BoardShareModal board={shareBoard} onClose={() => setShareBoard(null)} />
+
       {canCreateBoard ? (
-        <Modal
+        <KanbanSheet
           visible={createOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setCreateOpen(false)}
+          onClose={() => setCreateOpen(false)}
+          title="Novo quadro"
+          subtitle="Dê um nome ao seu quadro"
+          icon={LayoutGrid}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Novo quadro</Text>
-                <TouchableOpacity onPress={() => setCreateOpen(false)}>
-                  <X size={22} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="Nome do quadro"
-                placeholderTextColor={colors.textSecondary}
-                style={styles.input}
-                autoFocus
-              />
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => void create()}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryBtnText}>Criar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Nome do quadro"
+            placeholderTextColor={colors.textSecondary}
+            style={styles.input}
+            autoFocus
+          />
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => void create()} disabled={saving}>
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryBtnText}>Criar</Text>
+            )}
+          </TouchableOpacity>
+        </KanbanSheet>
       ) : null}
     </View>
   );
