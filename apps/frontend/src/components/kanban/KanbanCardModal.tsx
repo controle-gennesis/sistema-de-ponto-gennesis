@@ -1853,10 +1853,9 @@ export function KanbanCardModal({
         <div
           className={clsx(
             'flex flex-1 min-h-0 flex-col overflow-hidden',
-            isDetail &&
-              (showChecklistPanel || hasMaterialsPanel
-                ? 'lg:flex-row lg:min-h-0 lg:items-stretch'
-                : 'lg:flex-row lg:min-h-0 lg:items-start'),
+            // As colunas sempre ocupam a altura do modal: com `items-start` a coluna da esquerda crescia
+            // junto com a descrição, ficava cortada pelo modal e o scroll dela não funcionava.
+            isDetail && 'lg:flex-row lg:min-h-0 lg:items-stretch',
             isCreate && 'gap-0',
             '[&_input:focus]:outline-none [&_input:focus]:ring-0 [&_input:focus-visible]:ring-0',
             '[&_textarea:focus]:outline-none [&_textarea:focus]:ring-0 [&_textarea:focus-visible]:ring-0',

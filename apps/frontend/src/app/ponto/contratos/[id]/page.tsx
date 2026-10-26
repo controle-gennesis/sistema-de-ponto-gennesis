@@ -201,6 +201,8 @@ interface Contract {
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
   allowBillingImportWithoutOsPleito?: boolean;
+  /** Cor do contrato (#RRGGBB), definida no cadastro. */
+  defaultTituloFundo?: string | null;
 }
 
 interface ContractAnnualValueRow {
@@ -2924,24 +2926,13 @@ export default function ContractDetailPage() {
 
     return [
       {
-        title: 'Orçamentos',
-        value: canAccessOrcamento ? String(orcamentosCount) : '—',
-        subtitle: canAccessOrcamento ? undefined : 'Sem acesso',
-        loading: canAccessOrcamento && loadingOrcamentosCount,
-        href: canAccessOrcamento ? `/ponto/contratos/${contractId}/orcamento` : undefined,
-      },
-      {
-        title: 'Relatórios fotográficos',
-        value: canAccessRelatorios ? String(relatoriosCount) : '—',
-        subtitle: canAccessRelatorios ? undefined : 'Sem acesso',
-        loading: canAccessRelatorios && loadingRelatoriosCount,
-        href: canAccessRelatorios ? '/ponto/relatorios-fotograficos' : undefined,
-      },
-      {
         title: 'Reuniões',
-        value: canAccessReunioesDeContrato ? String(reunioesCount) : '—',
+        value: '',
+        variant: 'atalho',
+        description: 'Acompanhe as reuniões e os relatórios deste contrato.',
+        actionLabel: 'Abrir reuniões',
         subtitle: canAccessReunioesDeContrato ? undefined : 'Sem acesso',
-        loading: canAccessReunioesDeContrato && reunioesLoading,
+        loading: false,
         badgeCount: canAccessReunioesDeContrato ? mensalReportPendingForContract : 0,
         href: canAccessReunioesDeContrato
           ? mensalReportPendingForContract > 0
@@ -2951,28 +2942,13 @@ export default function ContractDetailPage() {
               : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
           : undefined,
       },
-      {
-        title: 'Cronogramas',
-        value: canAccessCronogramasModulo ? String(cronogramasCount) : '—',
-        subtitle: canAccessCronogramasModulo ? undefined : 'Sem acesso',
-        loading: canAccessCronogramasModulo && loadingOrcamentosCount,
-        href: canAccessCronogramasModulo ? `/ponto/cronogramas?contrato=${contractId}` : undefined,
-      },
     ];
   }, [
     contractId,
-    canAccessOrcamento,
-    canAccessRelatorios,
     canAccessReunioesDeContrato,
     canAccessReunioesAba,
-    canAccessCronogramasModulo,
-    orcamentosCount,
-    relatoriosCount,
     mensalCount,
     semanalCount,
-    cronogramasCount,
-    loadingOrcamentosCount,
-    loadingRelatoriosCount,
     loadingMensalCount,
     loadingSemanalCount,
     mensalReportPendingForContract,
@@ -4621,13 +4597,23 @@ export default function ContractDetailPage() {
           {/* Header */}
           <div className="space-y-4">
             <div className="flex flex-col gap-4 py-1 xl:flex-row xl:items-center xl:gap-6">
-              <div className="min-w-0 shrink-0 text-left">
-                <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-                  {contract.name}
-                </h1>
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-                  Contrato nº {contract.number}
-                </p>
+              <div className="flex min-w-0 shrink-0 items-stretch gap-3 text-left">
+                {/^#[0-9a-f]{6}$/i.test(contract.defaultTituloFundo ?? '') ? (
+                  <span
+                    aria-hidden
+                    title="Cor do contrato"
+                    className="w-1.5 shrink-0 self-stretch rounded-full"
+                    style={{ backgroundColor: contract.defaultTituloFundo ?? undefined }}
+                  />
+                ) : null}
+                <div className="min-w-0">
+                  <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+                    {contract.name}
+                  </h1>
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                    Contrato nº {contract.number}
+                  </p>
+                </div>
               </div>
 
               <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:gap-4">

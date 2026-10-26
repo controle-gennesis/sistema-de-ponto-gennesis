@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
+  BarChart3,
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
@@ -248,12 +249,25 @@ export default function FdsAprovadasPage() {
     <ProtectedRoute route="/ponto/fds-aprovadas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
-          <ListPageHeader
-            title="Fichas de Demanda"
-            description="Consulte e acompanhe as fichas de demanda aprovadas."
-          />
+          <div className="relative flex flex-col items-center gap-3 sm:block">
+            <ListPageHeader
+              title="Fichas de Demanda"
+              description="Consulte e acompanhe as fichas de demanda aprovadas."
+            />
+            <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+              <button
+                type="button"
+                onClick={() => router.push('/ponto/fds-aprovadas/analises')}
+                aria-label="Análises"
+                title="Análises"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
 
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
             {(
               [
                 { filter: 'ALL', label: 'Todas' },

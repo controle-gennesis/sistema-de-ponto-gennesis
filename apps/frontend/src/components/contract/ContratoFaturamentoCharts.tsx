@@ -18,7 +18,13 @@ import {
 } from 'recharts';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, Loader2, TrendingDown, TrendingUp } from 'lucide-react';
+import {
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
@@ -579,8 +585,12 @@ export type ContratoResumoKpi = {
   href?: string;
   /** Aviso numérico (ex.: relatório mensal pendente). */
   badgeCount?: number;
-  /** Card compacto/quadrado (ex.: Caixinha). */
-  variant?: 'default' | 'square';
+  /** Card compacto/quadrado (ex.: Caixinha) ou atalho largo com botão de abrir. */
+  variant?: 'default' | 'square' | 'atalho';
+  /** Texto de apoio do atalho. */
+  description?: string;
+  /** Texto do botão do atalho. */
+  actionLabel?: string;
   /** Destaque invertido (ex.: vermelho com texto branco). */
   tone?: 'default' | 'brand';
 };
@@ -1165,6 +1175,102 @@ function PessoasContratoCard({
   );
 }
 
+/** Ilustração de calendário em quadradinhos que esmaecem, no estilo dos cartões de dicas. */
+function CalendarioDecorativo({ pendente }: { pendente: boolean }) {
+  const colunas = 6;
+  const linhas = 4;
+  // Quadradinhos preenchidos (coluna, linha); os demais ficam só com contorno suave.
+  const cheios = new Set(['1,1', '2,1', '2,2', '3,0', '3,1', '3,2', '4,0', '4,1', '5,0']);
+  return (
+    <svg
+      viewBox="0 0 168 112"
+      className={`h-24 w-auto sm:h-28 ${
+        pendente ? 'text-red-500 dark:text-red-400' : 'text-emerald-500 dark:text-emerald-400'
+      }`}
+      aria-hidden
+      focusable="false"
+    >
+      <defs>
+        <pattern id="reunioes-listras" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="currentColor" opacity="0.18" />
+          <rect width="2.5" height="6" fill="currentColor" opacity="0.5" />
+        </pattern>
+      </defs>
+      {Array.from({ length: linhas }).map((_, l) =>
+        Array.from({ length: colunas }).map((__, c) => {
+          const cheio = cheios.has(`${c},${l}`);
+          const opacidade = 0.12 + (c / (colunas - 1)) * 0.5;
+          return (
+            <rect
+              key={`${c}-${l}`}
+              x={c * 28 + 2}
+              y={l * 28 + 2}
+              width="24"
+              height="24"
+              rx="5"
+              fill={cheio ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="1.5"
+              opacity={cheio ? opacidade + 0.1 : 0.14}
+            />
+          );
+        })
+      )}
+      <rect x="86" y="58" width="24" height="24" rx="5" fill="url(#reunioes-listras)" />
+    </svg>
+  );
+}
+
+/** Atalho largo para um módulo, no estilo "dica": texto à esquerda, ilustração à direita e link de abrir. */
+function AtalhoKpiCard({ title, description, href, badgeCount = 0, actionLabel = 'Abrir' }: ContratoResumoKpi) {
+  return (
+    <Card
+      className={`${cadastroListClasses.card} relative overflow-hidden ${
+        badgeCount > 0
+          ? 'bg-red-50/40 dark:bg-red-950/10'
+          : 'bg-emerald-50/40 dark:bg-emerald-950/10'
+      }`}
+    >
+      <CardContent className="flex items-stretch justify-between gap-6 p-5 sm:p-6">
+        <div className="flex min-w-0 flex-col justify-between gap-4 sm:min-h-[7rem]">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                {title}
+              </h3>
+              {badgeCount > 0 ? (
+                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-md bg-red-600 px-1 text-[11px] font-bold leading-none text-white">
+                  {badgeCount}
+                </span>
+              ) : null}
+            </div>
+            {description ? (
+              <p className="max-w-xl text-sm text-gray-600 dark:text-gray-400">{description}</p>
+            ) : null}
+          </div>
+          {href ? (
+            <Link
+              href={href}
+              className="group inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 transition-colors hover:text-red-600 dark:text-gray-100 dark:hover:text-red-400"
+            >
+              {actionLabel}
+              <ChevronRight
+                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                aria-hidden
+              />
+            </Link>
+          ) : (
+            <span className="text-sm font-medium text-gray-400 dark:text-gray-500">Sem acesso</span>
+          )}
+        </div>
+        <div className="hidden shrink-0 items-center sm:flex">
+          <CalendarioDecorativo pendente={badgeCount > 0} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function KpiStatCard({
   title,
   value,
@@ -1291,9 +1397,15 @@ export function ContratoFaturamentoCharts({
     <div className="space-y-4">
       {resumoKpis.length > 0 ? (
         <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {resumoKpis.map((kpi) => (
-            <KpiStatCard key={kpi.title} {...kpi} />
-          ))}
+          {resumoKpis.map((kpi) =>
+            kpi.variant === 'atalho' ? (
+              <div key={kpi.title} className="col-span-full">
+                <AtalhoKpiCard {...kpi} />
+              </div>
+            ) : (
+              <KpiStatCard key={kpi.title} {...kpi} />
+            )
+          )}
         </div>
       ) : null}
 

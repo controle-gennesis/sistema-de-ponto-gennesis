@@ -204,7 +204,10 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
         const segment = decodePathSegment(raw);
         built += `/${raw}`;
         if (looksLikeOpaqueId(segment)) continue;
-        const subTitle = SUB_PATH_TITLES[segment] ?? humanizeSegment(segment);
+        const subTitle =
+          segment === 'analises' && module.href === '/ponto/fds-aprovadas'
+            ? 'Análises'
+            : (SUB_PATH_TITLES[segment] ?? humanizeSegment(segment));
         crumbs.push({ label: subTitle, href: built });
       }
 

@@ -189,7 +189,7 @@ function formatDateTime(value: string): string {
 }
 
 const pageStatCardsGrid6Class =
-  'grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4';
+  'grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6';
 
 const labelCls = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400';
 const fieldCls = FORM_FIELD_INPUT_CLS;

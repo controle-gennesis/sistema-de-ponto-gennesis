@@ -185,7 +185,7 @@ export default function FluigChamadasPage() {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6">
               <Card>
                 <CardContent className="p-5 text-center">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -218,7 +218,7 @@ export default function FluigChamadasPage() {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
               <TabelaContagem
                 titulo="Por origem"
                 linhas={(resumo?.porOrigem ?? []).map((o) => ({
