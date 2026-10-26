@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
+  Dimensions,
   Platform,
   ScrollView,
   StyleSheet,
@@ -46,15 +46,19 @@ export const KANBAN_COLUMN_COLORS = [
 /** Paleta das etiquetas (as mesmas cores padrão do quadro). */
 const LABEL_COLORS = [
   '#FF78CB',
-  '#00C2E0',
-  '#FF9F1A',
-  '#F2D600',
   '#C377E0',
-  '#51E898',
-  '#EB5A46',
-  '#344563',
+  '#9F8FEF',
   '#0079BF',
+  '#00C2E0',
+  '#51E898',
   '#61BD4F',
+  '#B3D4A3',
+  '#F2D600',
+  '#FF9F1A',
+  '#EB5A46',
+  '#B04632',
+  '#344563',
+  '#838C91',
 ];
 
 export function labelTextColor(background: string): string {
@@ -301,7 +305,7 @@ export function ArchivedCardsModal({
   );
 }
 
-/** Renomear etiquetas do quadro e criar novas. */
+/** Etiquetas do quadro: lista colorida; tocar numa etiqueta abre a edição de nome e cor. */
 export function LabelSettingsModal({
   visible,
   presets,
@@ -318,14 +322,27 @@ export function LabelSettingsModal({
   const { colors } = useTheme();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<KanbanLabelPreset[]>([]);
+  const [draft, setDraft] = useState<Array<KanbanLabelPreset & { origColor?: string }>>([]);
   const [saving, setSaving] = useState(false);
+  // Índice da etiqueta em edição (null = vendo a lista).
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState(LABEL_COLORS[0]);
 
   useEffect(() => {
-    if (visible) setDraft(presets.map((p) => ({ ...p })));
+    if (visible) {
+      setDraft(presets.map((p) => ({ ...p, origColor: p.color })));
+      setEditing(null);
+    }
   }, [visible, presets]);
 
-  const addPreset = () => {
+  const openEdit = (index: number) => {
+    setEditName(draft[index].name);
+    setEditColor(draft[index].color);
+    setEditing(index);
+  };
+
+  const openNew = () => {
     const used = new Set(draft.map((p) => p.color.toLowerCase()));
     const color = LABEL_COLORS.find((c) => !used.has(c.toLowerCase()));
     if (!color) {
@@ -333,17 +350,49 @@ export function LabelSettingsModal({
       return;
     }
     setDraft([...draft, { color, name: '' }]);
+    setEditName('');
+    setEditColor(color);
+    setEditing(draft.length);
+  };
+
+  const closeEdit = () => {
+    // Etiqueta nova que ficou sem nome não entra na lista.
+    if (editing !== null && !draft[editing]?.name.trim()) {
+      setDraft((prev) => prev.filter((_, i) => i !== editing));
+    }
+    setEditing(null);
+  };
+
+  const applyEdit = () => {
+    if (editing === null) return;
+    const name = editName.trim();
+    if (!name) {
+      Toast.show({ type: 'error', text1: 'Dê um nome para a etiqueta' });
+      return;
+    }
+    setDraft((prev) => prev.map((x, i) => (i === editing ? { ...x, name, color: editColor } : x)));
+    setEditing(null);
+  };
+
+  const removeEdit = () => {
+    if (editing === null) return;
+    setDraft((prev) => prev.filter((_, i) => i !== editing));
+    setEditing(null);
   };
 
   const save = async () => {
-    const cleaned = draft.map((p) => ({ ...p, name: p.name.trim() }));
+    const cleaned = draft.map((p) => ({ color: p.color, name: p.name.trim() }));
     if (cleaned.some((p) => !p.name)) {
       Toast.show({ type: 'error', text1: 'Dê um nome para cada etiqueta' });
       return;
     }
+    // Etiqueta que mudou de cor: os cards que usavam a cor antiga passam para a nova.
+    const colorRemaps = draft
+      .filter((p) => p.origColor && p.origColor.toLowerCase() !== p.color.toLowerCase())
+      .map((p) => ({ from: p.origColor as string, to: p.color }));
     setSaving(true);
     try {
-      await updateKanbanBoardLabelPresets(cleaned, departmentKey);
+      await updateKanbanBoardLabelPresets(cleaned, departmentKey, { colorRemaps });
       await queryClient.invalidateQueries({ queryKey: boardQueryKey });
       onClose();
       Toast.show({ type: 'success', text1: 'Etiquetas atualizadas' });
@@ -354,43 +403,114 @@ export function LabelSettingsModal({
     }
   };
 
+  const usedByOthers = new Set(
+    draft.filter((_, i) => i !== editing).map((x) => x.color.toLowerCase()),
+  );
+  const previewFg = labelTextColor(editColor);
+
   return (
     <Sheet
       visible={visible}
       onClose={onClose}
-      title="Etiquetas do quadro"
-      subtitle="Nome e cor usados nos cards"
+      title={editing === null ? 'Etiquetas do quadro' : 'Editar etiqueta'}
+      subtitle={
+        editing === null ? 'Toque numa etiqueta para mudar nome e cor' : 'Escolha o nome e a cor'
+      }
       icon={Tag}
     >
-      <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
-        {draft.map((p, i) => (
-          <View key={`${p.color}-${i}`} style={styles.labelEditRow}>
-            <View style={[styles.labelDot, { backgroundColor: p.color }]} />
-            <TextInput
-              value={p.name}
-              onChangeText={(t) =>
-                setDraft(draft.map((x, idx) => (idx === i ? { ...x, name: t } : x)))
-              }
-              placeholder="Nome da etiqueta"
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.input, { flex: 1, marginBottom: 0 }]}
-            />
-            <TouchableOpacity
-              onPress={() => setDraft(draft.filter((_, idx) => idx !== i))}
-              hitSlop={8}
-            >
-              <Trash2 size={16} color={colors.textSecondary} />
+      {editing === null ? (
+        <>
+          <ScrollView
+            style={{ maxHeight: Dimensions.get('window').height * 0.45 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {draft.map((p, i) => {
+              const fg = labelTextColor(p.color);
+              return (
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.85}
+                  style={[styles.labelOption, { backgroundColor: p.color }]}
+                  onPress={() => openEdit(i)}
+                >
+                  <Text style={[styles.labelOptionText, { color: fg }]} numberOfLines={1}>
+                    {p.name || 'Sem nome'}
+                  </Text>
+                  <Pencil size={15} color={fg} />
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity style={styles.addLabelBtn} onPress={openNew}>
+            <Plus size={16} color={colors.primary} />
+            <Text style={[styles.linkText, { color: colors.primary }]}>Nova etiqueta</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => void save()}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryText}>Salvar</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <View style={[styles.labelPreview, { backgroundColor: editColor }]}>
+            <Text style={[styles.labelPreviewText, { color: previewFg }]} numberOfLines={1}>
+              {editName.trim() || 'Etiqueta'}
+            </Text>
+          </View>
+
+          <TextInput
+            value={editName}
+            onChangeText={setEditName}
+            placeholder="Nome da etiqueta"
+            placeholderTextColor={colors.textSecondary}
+            style={styles.input}
+            autoCorrect={false}
+          />
+
+          <Text style={styles.fieldLabel}>Cor</Text>
+          <View style={styles.colorGrid}>
+            {LABEL_COLORS.map((c) => {
+              const taken = usedByOthers.has(c.toLowerCase());
+              const active = c.toLowerCase() === editColor.toLowerCase();
+              return (
+                <TouchableOpacity
+                  key={c}
+                  disabled={taken}
+                  onPress={() => setEditColor(c)}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.colorTile,
+                    { backgroundColor: c },
+                    active && styles.colorTileActive,
+                    taken && { opacity: 0.25 },
+                  ]}
+                >
+                  {active ? <Check size={18} color={labelTextColor(c)} strokeWidth={3} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity style={styles.primaryBtn} onPress={applyEdit}>
+            <Text style={styles.primaryText}>Concluído</Text>
+          </TouchableOpacity>
+          <View style={styles.editFooter}>
+            <TouchableOpacity onPress={closeEdit} hitSlop={8}>
+              <Text style={[styles.linkText, { color: colors.textSecondary }]}>Voltar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={removeEdit} hitSlop={8}>
+              <Text style={[styles.linkText, { color: colors.error }]}>Excluir etiqueta</Text>
             </TouchableOpacity>
           </View>
-        ))}
-      </ScrollView>
-      <TouchableOpacity style={styles.addLabelBtn} onPress={addPreset}>
-        <Plus size={16} color={colors.primary} />
-        <Text style={[styles.linkText, { color: colors.primary }]}>Nova etiqueta</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.primaryBtn} onPress={() => void save()} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Salvar</Text>}
-      </TouchableOpacity>
+        </>
+      )}
     </Sheet>
   );
 }
@@ -607,12 +727,14 @@ function getStyles(colors: any) {
       justifyContent: 'center',
     },
     input: {
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 15,
       backgroundColor: colors.background,
       color: colors.text,
-      fontSize: 15,
+      fontSize: 16,
       marginBottom: 10,
     },
     fieldLabel: {
@@ -687,8 +809,32 @@ function getStyles(colors: any) {
     },
     linkBtn: { alignItems: 'center', paddingVertical: 10 },
     linkText: { fontSize: 13, fontWeight: '700' },
-    labelEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-    labelDot: { width: 22, height: 22, borderRadius: 11 },
+    labelPreview: {
+      minHeight: 48,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      justifyContent: 'center',
+      marginBottom: 14,
+    },
+    labelPreviewText: { fontSize: 15, fontWeight: '700' },
+    colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 6 },
+    colorTile: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    colorTileActive: { borderWidth: 3, borderColor: colors.text },
+    editFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 14,
+    },
+    labelEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    labelDot: { width: 28, height: 28, borderRadius: 14 },
+    labelDotActive: { borderWidth: 3, borderColor: colors.text },
     addLabelBtn: {
       flexDirection: 'row',
       alignItems: 'center',

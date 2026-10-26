@@ -17,6 +17,7 @@ import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeAprovacoesCard from '../components/HomeAprovacoesCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
+import HomeTasksButton from '../components/HomeTasksButton';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import type { RootStackParamList } from '../../App';
 
@@ -107,6 +108,8 @@ export default function HomeScreen() {
         </View>
 
         <HomeAprovacoesCard />
+
+        <HomeTasksButton />
 
         <HomeAgendaCard />
 

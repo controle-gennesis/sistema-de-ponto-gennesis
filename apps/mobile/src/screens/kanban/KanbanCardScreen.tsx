@@ -2023,12 +2023,14 @@ function getStyles(colors: any, _isDark: boolean) {
     },
     modalTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
     modalInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 15,
       backgroundColor: colors.background,
       color: colors.text,
-      fontSize: 15,
+      fontSize: 16,
       marginBottom: 10,
     },
     moveRow: {

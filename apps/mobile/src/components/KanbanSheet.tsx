@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { AppToastHost } from './AppToast';
 
 const BRAND = '#ce3736';
 const SHEET_BOTTOM_PAD = Platform.OS === 'ios' ? 26 : 18;
@@ -195,6 +196,8 @@ export default function KanbanSheet({
           {/* Continua o branco da folha para baixo: nada da tela de trás aparece abaixo dela. */}
           <View pointerEvents="none" style={styles.fill} />
         </Animated.View>
+        {/* O Modal cobre o toast do App: este fica por cima, no topo da tela. */}
+        <AppToastHost />
       </View>
     </Modal>
   );

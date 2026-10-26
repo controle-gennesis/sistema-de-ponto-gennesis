@@ -9,7 +9,6 @@ import {
   TextInput,
   Modal,
   ActivityIndicator,
-  RefreshControl,
   Dimensions,
   type ListRenderItemInfo,
 } from 'react-native';
@@ -21,6 +20,7 @@ import {
   Check,
   Columns3,
   MoreHorizontal,
+  Package,
   Plus,
   Tag,
   MessageSquare,
@@ -373,6 +373,12 @@ function BoardCardBase({
                 <Paperclip size={13} color={metaColor} strokeWidth={2.2} />
                 <Text style={[styles.metaText, { color: metaColor }]}>{card.attachments ?? 0}</Text>
               </View>
+              {(card.materials ?? 0) > 0 ? (
+                <View style={styles.metaItem}>
+                  <Package size={13} color={metaColor} strokeWidth={2.2} />
+                  <Text style={[styles.metaText, { color: metaColor }]}>{card.materials}</Text>
+                </View>
+              ) : null}
               <View style={styles.metaItem}>
                 <MessageSquare size={13} color={metaColor} strokeWidth={2.2} />
                 <Text style={[styles.metaText, { color: metaColor }]}>{card.comments ?? 0}</Text>
@@ -404,6 +410,12 @@ function BoardCardBase({
               <Paperclip size={13} color={metaColor} strokeWidth={2.2} />
               <Text style={[styles.metaText, { color: metaColor }]}>{card.attachments ?? 0}</Text>
             </View>
+            {(card.materials ?? 0) > 0 ? (
+                <View style={styles.metaItem}>
+                  <Package size={13} color={metaColor} strokeWidth={2.2} />
+                  <Text style={[styles.metaText, { color: metaColor }]}>{card.materials}</Text>
+                </View>
+              ) : null}
             <View style={styles.metaItem}>
               <MessageSquare size={13} color={metaColor} strokeWidth={2.2} />
               <Text style={[styles.metaText, { color: metaColor }]}>{card.comments ?? 0}</Text>
@@ -682,13 +694,10 @@ export default function KanbanBoardScreen() {
             maxToRenderPerBatch={COLUMNS_INITIAL_RENDER}
             updateCellsBatchingPeriod={60}
             windowSize={3}
-            refreshControl={
-              <RefreshControl
-                refreshing={boardQuery.isRefetching}
-                onRefresh={() => void boardQuery.refetch()}
-                tintColor={colors.primary}
-              />
-            }
+            // O quadro só rola na horizontal; a rolagem vertical fica dentro de cada coluna.
+            alwaysBounceVertical={false}
+            directionalLockEnabled
+            overScrollMode="never"
             ListFooterComponent={
               readOnly ? null : (
                 <TouchableOpacity
@@ -1239,12 +1248,14 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
     },
     modalTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
     input: {
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 15,
       backgroundColor: colors.background,
       color: colors.text,
-      fontSize: 15,
+      fontSize: 16,
       marginBottom: 12,
     },
     primaryBtn: {

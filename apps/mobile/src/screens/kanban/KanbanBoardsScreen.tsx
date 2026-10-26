@@ -44,6 +44,7 @@ export default function KanbanBoardsScreen() {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [defaultKey, setDefaultKey] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
   const [renameBoard, setRenameBoard] = useState<{ id: string; name: string } | null>(null);
   const [shareBoard, setShareBoard] = useState<{ id: string; name: string } | null>(null);
   const canCreateBoard = !isAdministrator;
@@ -160,8 +161,11 @@ export default function KanbanBoardsScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={boardsQuery.isRefetching}
-            onRefresh={() => void boardsQuery.refetch()}
+            refreshing={pulling}
+            onRefresh={() => {
+              setPulling(true);
+              void boardsQuery.refetch().finally(() => setPulling(false));
+            }}
             tintColor={colors.primary}
           />
         }
@@ -320,12 +324,14 @@ function getStyles(colors: any, _isDark: boolean) {
     },
     modalTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
     input: {
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 15,
       backgroundColor: colors.background,
       color: colors.text,
-      fontSize: 15,
+      fontSize: 16,
       marginBottom: 12,
     },
     primaryBtn: {
