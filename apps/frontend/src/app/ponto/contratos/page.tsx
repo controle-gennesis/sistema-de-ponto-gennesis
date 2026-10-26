@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Shield,
   MoreVertical,
+  Info,
   Eye,
   Pencil,
 } from 'lucide-react';
@@ -105,6 +106,28 @@ function formatDate(dateStr: string) {
     : new Date(raw);
   if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
+
+/** Ícone "i" dentro do campo (canto direito) com a dica em tooltip ao passar o mouse. */
+function FieldInfoIcon({ text }: { text: string }) {
+  return (
+    <span className="group/field-info absolute inset-y-0 right-0 z-10 flex items-center pr-2.5">
+      <button
+        type="button"
+        tabIndex={-1}
+        className="inline-flex text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+        aria-label={text}
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute bottom-full right-0 z-30 mb-1.5 w-max max-w-[16rem] rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-normal leading-relaxed text-gray-700 opacity-0 shadow-lg transition-opacity duration-150 group-hover/field-info:visible group-hover/field-info:opacity-100 group-focus-within/field-info:visible group-focus-within/field-info:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+      >
+        {text}
+      </span>
+    </span>
+  );
 }
 
 function getSituacaoContrato(startDate: string, endDate: string): { label: string; className: string } {
@@ -1285,8 +1308,8 @@ function ContractFormModal({
     <>
     <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={requestClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+      <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             {editingContract ? 'Editar Contrato' : 'Cadastrar Contrato'}
           </h3>
@@ -1299,9 +1322,14 @@ function ContractFormModal({
           </button>
         </div>
 
-        <div className="p-6">
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-8 overflow-y-auto p-6">
+            <section className="space-y-4">
+              <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Dados do contrato</h4>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Identificação, vigência e centro de custo.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Nome do Contrato *
@@ -1322,8 +1350,8 @@ function ContractFormModal({
                       orcafascioClientId: keepTyped ? current : nextAuto,
                     });
                   }}
-                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: Contrato de Obra X"
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Digite o nome do contrato"
                 />
               </div>
               <div className="md:col-span-2">
@@ -1335,8 +1363,8 @@ function ContractFormModal({
                   required
                   value={formData.number}
                   onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: 001/2025"
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Digite o número do contrato"
                 />
               </div>
               <div>
@@ -1379,10 +1407,101 @@ function ContractFormModal({
                   className="w-full"
                 />
               </div>
+              </div>
+            </section>
+            <section className="space-y-4">
+              <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Valores</h4>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Valor total com aditivos e o rateio por ano.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Valor mais Aditivos *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 font-medium">
+                    R$
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={formData.valuePlusAddenda}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, '');
+                      const formatted = v
+                        ? (Number(v) / 100).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        : '';
+                      setFormData({ ...formData, valuePlusAddenda: formatted });
+                    }}
+                    className="h-10 w-full pl-12 pr-9 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="0,00"
+                  />
+                  <FieldInfoIcon text="Digite apenas números. Ex: 1500000 = R$ 15.000,00" />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Valor mais Aditivos Anual
+                </label>
+                {(() => {
+                  const valor = parseCurrencyInput(formData.valuePlusAddenda);
+                  const rows = getValorAnualPorAno(valor, formData.startDate, formData.endDate);
+                  const totalMonths = countVigenciaMonths(formData.startDate, formData.endDate);
+                  if (!rows.length) {
+                    return (
+                      <>
+                        <div className="relative flex h-10 items-center pl-3 pr-9 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-sm text-gray-400 dark:text-gray-500">
+                          Preencha o valor e a vigência
+                          <FieldInfoIcon text="Rateio proporcional aos meses de cada ano." />
+                        </div>
+                      </>
+                    );
+                  }
+                  const monthly = totalMonths > 0 ? valor / totalMonths : 0;
+                  return (
+                    <>
+                      <div className="relative space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-3 pr-9 dark:border-gray-600 dark:bg-gray-700/50">
+                        <FieldInfoIcon text="Calculado automaticamente: Valor ÷ meses × meses de cada ano." />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {formatCurrency(monthly)}/mês × {totalMonths}{' '}
+                          {totalMonths === 1 ? 'mês' : 'meses'}
+                        </p>
+                        {rows.map((r) => (
+                          <div
+                            key={r.year}
+                            className="flex items-center justify-between gap-3 text-sm font-medium text-gray-900 dark:text-gray-100"
+                          >
+                            <span className="text-gray-600 dark:text-gray-300">
+                              {r.year}{' '}
+                              <span className="font-normal text-gray-400 dark:text-gray-500">
+                                ({r.months} {r.months === 1 ? 'mês' : 'meses'})
+                              </span>
+                            </span>
+                            <span>{formatCurrency(r.value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+              </div>
+            </section>
+            <section className="space-y-4">
+              <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Orçamentos</h4>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Padrões aplicados automaticamente nos orçamentos deste contrato.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Código do cliente Orçafascio
                 </label>
+                <div className="relative">
                 <input
                   type="text"
                   value={formData.orcafascioClientId}
@@ -1391,42 +1510,44 @@ function ContractFormModal({
                   }
                   spellCheck={false}
                   autoComplete="off"
-                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: 6ac669d38705af669a8938ab"
+                  className="h-10 w-full pl-3 pr-9 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Digite o código do cliente"
                 />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Clientes já conhecidos preenchem este código sozinhos. Para um cliente novo, cole o código do Orçafascio.
-                </p>
+                <FieldInfoIcon text="Clientes já conhecidos preenchem este código sozinhos. Para um cliente novo, cole o código do Orçafascio." />
+                </div>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   BDI padrão (%)
                 </label>
+                <div className="relative">
                 <input
                   type="text"
                   inputMode="decimal"
                   value={formData.defaultBdiPercent}
                   onChange={(e) => setFormData({ ...formData, defaultBdiPercent: e.target.value })}
-                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: 28,35"
+                  className="h-10 w-full pl-3 pr-9 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Digite o BDI"
                 />
+                <FieldInfoIcon text="Usado automaticamente nos orçamentos deste contrato." />
+                </div>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Desconto padrão (%)
                 </label>
+                <div className="relative">
                 <input
                   type="text"
                   inputMode="decimal"
                   value={formData.defaultDiscountPercent}
                   onChange={(e) => setFormData({ ...formData, defaultDiscountPercent: e.target.value })}
-                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Ex: 25,01"
+                  className="h-10 w-full pl-3 pr-9 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Digite o desconto"
                 />
+                <FieldInfoIcon text="Usado automaticamente nos orçamentos deste contrato." />
+                </div>
               </div>
-              <p className="md:col-span-2 -mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Usados automaticamente nos orçamentos deste contrato.
-              </p>
               <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cor do título dos orçamentos
@@ -1461,161 +1582,109 @@ function ContractFormModal({
                     </button>
                   ) : null}
                 </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Vale para os novos orçamentos deste contrato, no fundo do título de todas as abas. Os orçamentos que já existem não mudam.
-                </p>
               </div>
               <div className="md:col-span-2">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Reajustes padrão (%)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        reajustes: [
-                          ...formData.reajustes,
-                          { nome: `${formData.reajustes.length + 1}º reajuste`, percentual: '' },
-                        ],
-                      })
-                    }
-                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                  >
-                    + Adicionar reajuste
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {formData.reajustes.map((r: { nome: string; percentual: string }, idx: number) => (
-                    <div key={`reajuste-${idx}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_9rem_auto]">
-                      <input
-                        type="text"
-                        value={r.nome}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
-                              i === idx ? { ...rr, nome: e.target.value } : rr
-                            ),
-                          })
-                        }
-                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder={`${idx + 1}º reajuste`}
-                      />
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={r.percentual}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
-                              i === idx ? { ...rr, percentual: e.target.value } : rr
-                            ),
-                          })
-                        }
-                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder="%"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormData({
-                            ...formData,
-                            reajustes: formData.reajustes.filter((_: unknown, i: number) => i !== idx),
-                          })
-                        }
-                        className="rounded-lg border border-red-300 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50/60 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30"
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Valor mais Aditivos *
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 font-medium">
-                    R$
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={formData.valuePlusAddenda}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/\D/g, '');
-                      const formatted = v
-                        ? (Number(v) / 100).toLocaleString('pt-BR', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })
-                        : '';
-                      setFormData({ ...formData, valuePlusAddenda: formatted });
-                    }}
-                    className="h-10 w-full pl-12 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="0,00"
-                  />
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Digite apenas números. Ex: 1500000 = R$ 15.000,00
-                </p>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Valor mais Aditivos Anual
-                </label>
-                {(() => {
-                  const valor = parseCurrencyInput(formData.valuePlusAddenda);
-                  const rows = getValorAnualPorAno(valor, formData.startDate, formData.endDate);
-                  const totalMonths = countVigenciaMonths(formData.startDate, formData.endDate);
-                  if (!rows.length) {
-                    return (
-                      <>
-                        <div className="flex h-10 items-center px-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 font-medium">
-                          Informe valor e vigência
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          Rateio proporcional aos meses de cada ano
-                        </p>
-                      </>
-                    );
-                  }
-                  const monthly = totalMonths > 0 ? valor / totalMonths : 0;
-                  return (
-                    <>
-                      <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700/50">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatCurrency(monthly)}/mês × {totalMonths}{' '}
-                          {totalMonths === 1 ? 'mês' : 'meses'}
-                        </p>
-                        {rows.map((r) => (
-                          <div
-                            key={r.year}
-                            className="flex items-center justify-between gap-3 text-sm font-medium text-gray-900 dark:text-gray-100"
-                          >
-                            <span className="text-gray-600 dark:text-gray-300">
-                              {r.year}{' '}
-                              <span className="font-normal text-gray-400 dark:text-gray-500">
-                                ({r.months} {r.months === 1 ? 'mês' : 'meses'})
-                              </span>
-                            </span>
-                            <span>{formatCurrency(r.value)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Calculado automaticamente: Valor ÷ meses × meses de cada ano
+                <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Reajustes padrão (%)
+                      </label>
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        Reajustes já preenchidos nos orçamentos deste contrato.
                       </p>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          reajustes: [
+                            ...formData.reajustes,
+                            { nome: `${formData.reajustes.length + 1}º reajuste`, percentual: '' },
+                          ],
+                        })
+                      }
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-gray-800 dark:text-red-300 dark:hover:bg-red-950/30"
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden />
+                      Adicionar
+                    </button>
+                  </div>
 
+                  {formData.reajustes.length === 0 ? (
+                    <p className="mt-3 rounded-lg border border-dashed border-gray-300 px-3 py-4 text-center text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                      Nenhum reajuste adicionado.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {formData.reajustes.map((r: { nome: string; percentual: string }, idx: number) => (
+                        <div
+                          key={`reajuste-${idx}`}
+                          className="grid grid-cols-[1fr_7.5rem_auto] items-center gap-2"
+                        >
+                          <input
+                            type="text"
+                            value={r.nome}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
+                                  i === idx ? { ...rr, nome: e.target.value } : rr
+                                ),
+                              })
+                            }
+                            className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            placeholder="Nome do reajuste"
+                            aria-label={`Nome do reajuste ${idx + 1}`}
+                          />
+                          <div className="relative">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={r.percentual}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  reajustes: formData.reajustes.map((rr: { nome: string; percentual: string }, i: number) =>
+                                    i === idx ? { ...rr, percentual: e.target.value } : rr
+                                  ),
+                                })
+                              }
+                              className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 pr-8 text-right"
+                              placeholder="Percentual"
+                              aria-label={`Percentual do reajuste ${idx + 1}`}
+                            />
+                            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-gray-400 dark:text-gray-500">
+                              %
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData({
+                                ...formData,
+                                reajustes: formData.reajustes.filter((_: unknown, i: number) => i !== idx),
+                              })
+                            }
+                            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                            aria-label={`Remover reajuste ${idx + 1}`}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              </div>
+            </section>
+            <section className="space-y-4">
+              <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Faturamento</h4>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Regras de importação de notas deste contrato.</p>
+              </div>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-600 dark:bg-gray-700/40">
               <input
                 type="checkbox"
@@ -1638,6 +1707,7 @@ function ContractFormModal({
                 </span>
               </span>
             </label>
+            </section>
 
             {(createMutation.isError || updateMutation.isError) && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -1649,7 +1719,9 @@ function ContractFormModal({
               </div>
             )}
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+          </div>
+
+            <div className="flex shrink-0 justify-end gap-3 border-t border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
               <button
                 type="button"
                 onClick={requestClose}
@@ -1669,8 +1741,7 @@ function ContractFormModal({
                   : 'Cadastrar'}
               </button>
             </div>
-          </form>
-        </div>
+        </form>
       </div>
     </AppModalOverlay>
     {confirmUi}
