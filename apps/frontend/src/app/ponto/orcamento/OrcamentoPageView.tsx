@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, startTransition, memo, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
+import { useOrcamentoColaboracao, type OrcamentoPresenca } from './useOrcamentoColaboracao';
+import { iguais, mesclarTresVias } from './orcamentoMerge';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -112,6 +114,7 @@ import {
 } from '@/lib/orcamentoOsSync';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { Modal } from '@/components/ui/Modal';
+import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { expandShortLabelHex, KanbanLabelColorPicker } from '@/components/kanban/KanbanLabelColorPicker';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
@@ -5132,15 +5135,20 @@ async function fetchOrcamentosListaComRetry(
   throw lastErr;
 }
 
+type OrcamentoDetalheCarregado = {
+  servicos: ServicoPadrao[];
+  imports: ImportRecord[];
+  sessaoOrcamento: SessaoOrcamentoPersist | null;
+  /** Revisão do orçamento no servidor (detecta edição simultânea). */
+  revisao?: number;
+};
+
 function parseOrcamentoDetailRaw(d: {
   servicos?: unknown;
   imports?: unknown;
   sessaoOrcamento?: unknown;
-}): {
-  servicos: ServicoPadrao[];
-  imports: ImportRecord[];
-  sessaoOrcamento: SessaoOrcamentoPersist | null;
-} | null {
+  revisao?: unknown;
+}): OrcamentoDetalheCarregado | null {
   if (!d || typeof d !== 'object') return null;
   const hasSessaoKey =
     'sessaoOrcamento' in d && d.sessaoOrcamento != null && typeof d.sessaoOrcamento === 'object';
@@ -5261,15 +5269,12 @@ function parseOrcamentoDetailRaw(d: {
   return {
     servicos: Array.isArray(d.servicos) ? (d.servicos as ServicoPadrao[]) : [],
     imports: Array.isArray(d.imports) ? (d.imports as ImportRecord[]) : [],
-    sessaoOrcamento
+    sessaoOrcamento,
+    ...(typeof d.revisao === 'number' ? { revisao: d.revisao } : {})
   };
 }
 
-async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string): Promise<{
-  servicos: ServicoPadrao[];
-  imports: ImportRecord[];
-  sessaoOrcamento: SessaoOrcamentoPersist | null;
-} | null> {
+async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string): Promise<OrcamentoDetalheCarregado | null> {
   try {
     const cached = await loadOrcamentoDetailCached(centroCustoId, orcamentoId);
     if (!cached) return null;
@@ -5291,11 +5296,7 @@ function assinaturaArvoreOrcamento(servicos: ServicoPadrao[], subtitulos: string
 function tryHydrateLocalOrcamento(
   centroCustoId: string,
   orcamentoId: string
-): {
-  servicos: ServicoPadrao[];
-  imports: ImportRecord[];
-  sessaoOrcamento: SessaoOrcamentoPersist | null;
-} | null {
+): OrcamentoDetalheCarregado | null {
   const cachedRaw = peekOrcamentoDetailCache(centroCustoId, orcamentoId);
   if (cachedRaw) {
     const parsed = parseOrcamentoDetailRaw(cachedRaw);
@@ -5363,6 +5364,113 @@ function isOrcamentoRequestTimeout(err: unknown): boolean {
   return code === 'ECONNABORTED' || /timeout/i.test(message);
 }
 
+/** Revisão do orçamento que está na memória desta aba (vai no PUT para detectar edição de outra pessoa). */
+const revisaoDoEstado = new Map<string, number>();
+
+/** Assinatura do último conteúdo gravado/carregado: salvar o mesmo conteúdo de novo não faz nada. */
+const assinaturaSincronizada = new Map<string, string>();
+
+type PayloadOrcamento = {
+  servicos?: ServicoPadrao[];
+  imports?: ImportRecord[];
+  sessaoOrcamento?: SessaoOrcamentoPersist | null;
+};
+
+/** Última versão completa em comum com o servidor: ponto de partida da mescla com o trabalho dos outros. */
+const baseSincronizada = new Map<string, PayloadOrcamento>();
+
+/** Gravações do mesmo orçamento saem uma de cada vez (cada uma usa a revisão devolvida pela anterior). */
+const filaDeSalvamento = new Map<string, Promise<unknown>>();
+
+type ConflitoRevisaoInfo = {
+  orcamentoId: string;
+  revisaoAtual: number;
+  ultimaAlteracao: { userId?: string; userName?: string; em?: string } | null;
+};
+
+class OrcamentoConflitoRevisaoError extends Error {
+  readonly info: ConflitoRevisaoInfo;
+  constructor(info: ConflitoRevisaoInfo) {
+    super('Este orçamento foi alterado por outra pessoa. Atualize antes de salvar.');
+    this.name = 'OrcamentoConflitoRevisaoError';
+    this.info = info;
+  }
+}
+
+let ouvinteConflitoRevisao: ((info: ConflitoRevisaoInfo) => void) | null = null;
+
+function assinaturaDoPayload(payload: unknown): string {
+  const texto = JSON.stringify(payload) ?? '';
+  let hash = 5381;
+  for (let i = 0; i < texto.length; i += 1) hash = ((hash << 5) + hash + texto.charCodeAt(i)) | 0;
+  return `${texto.length}:${hash}`;
+}
+
+function registrarPayloadSincronizado(orcamentoId: string, payload: PayloadOrcamento): void {
+  assinaturaSincronizada.set(orcamentoId, assinaturaDoPayload(payload));
+  baseSincronizada.set(orcamentoId, payload);
+}
+
+async function aguardarSalvamentoEmAndamento(orcamentoId: string): Promise<void> {
+  await (filaDeSalvamento.get(orcamentoId) ?? Promise.resolve()).catch(() => undefined);
+}
+
+function temSalvamentoEmAndamento(orcamentoId: string): boolean {
+  return filaDeSalvamento.has(orcamentoId);
+}
+
+async function enviarOrcamentoParaApi(
+  centroCustoId: string,
+  orcamentoId: string,
+  data: {
+    servicos?: ServicoPadrao[];
+    imports?: ImportRecord[];
+    sessaoOrcamento?: SessaoOrcamentoPersist | null;
+  },
+  force: boolean,
+  semDedupe: boolean
+): Promise<void> {
+  const assinatura = assinaturaDoPayload(data);
+  if (!force && !semDedupe && assinaturaSincronizada.get(orcamentoId) === assinatura) return;
+  const baseRevisao = revisaoDoEstado.get(orcamentoId);
+  let resposta;
+  try {
+    resposta = await api.put(
+      `/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`,
+      {
+        ...data,
+        ...(baseRevisao !== undefined ? { baseRevisao } : {}),
+        ...(force ? { force: true } : {}),
+      },
+      { timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS }
+    );
+  } catch (err) {
+    const resp = (err as { response?: { status?: number; data?: Record<string, unknown> } }).response;
+    if (resp?.status === 409 && resp.data?.code === 'ORCAMENTO_REVISAO_DESATUALIZADA') {
+      const info: ConflitoRevisaoInfo = {
+        orcamentoId,
+        revisaoAtual: typeof resp.data.revisaoAtual === 'number' ? resp.data.revisaoAtual : 0,
+        ultimaAlteracao: (resp.data.ultimaAlteracao as ConflitoRevisaoInfo['ultimaAlteracao']) ?? null,
+      };
+      ouvinteConflitoRevisao?.(info);
+      throw new OrcamentoConflitoRevisaoError(info);
+    }
+    throw err;
+  }
+  const revisao = (resposta.data as { revisao?: unknown } | undefined)?.revisao;
+  if (typeof revisao === 'number') revisaoDoEstado.set(orcamentoId, revisao);
+  assinaturaSincronizada.set(orcamentoId, assinatura);
+  // Só um payload completo serve de base para a mescla; gravação parcial invalida a base.
+  if (data.servicos && data.imports && data.sessaoOrcamento) baseSincronizada.set(orcamentoId, data);
+  else baseSincronizada.delete(orcamentoId);
+  seedOrcamentoDetailCache(centroCustoId, orcamentoId, {
+    servicos: data.servicos,
+    imports: data.imports,
+    sessaoOrcamento: data.sessaoOrcamento ?? null,
+    ...(typeof revisao === 'number' ? { revisao } : {}),
+  });
+}
+
 async function saveOrcamentoToApi(
   centroCustoId: string,
   orcamentoId: string,
@@ -5370,16 +5478,21 @@ async function saveOrcamentoToApi(
     servicos?: ServicoPadrao[];
     imports?: ImportRecord[];
     sessaoOrcamento?: SessaoOrcamentoPersist | null;
-  }
+  },
+  opts?: { force?: boolean; semDedupe?: boolean }
 ): Promise<void> {
-  await api.put(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, data, {
-    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
-  });
-  seedOrcamentoDetailCache(centroCustoId, orcamentoId, {
-    servicos: data.servicos,
-    imports: data.imports,
-    sessaoOrcamento: data.sessaoOrcamento ?? null,
-  });
+  const anterior = filaDeSalvamento.get(orcamentoId) ?? Promise.resolve();
+  const atual = anterior
+    .catch(() => undefined)
+    .then(() =>
+      enviarOrcamentoParaApi(centroCustoId, orcamentoId, data, opts?.force === true, opts?.semDedupe === true)
+    );
+  filaDeSalvamento.set(orcamentoId, atual);
+  try {
+    await atual;
+  } finally {
+    if (filaDeSalvamento.get(orcamentoId) === atual) filaDeSalvamento.delete(orcamentoId);
+  }
 }
 
 async function criarOrcamentoApi(
@@ -7568,6 +7681,48 @@ const ORCAFASCIO_META_EXTRA_VAZIO = {
   descricaoDetalhada: '',
 };
 
+const ABA_ROTULO_PRESENCA: Record<string, string> = {
+  dados: 'Dados',
+  montagem: 'Orçamento',
+  memorial: 'Memória de cálculo',
+  analitico: 'Analítico',
+  planilhaAnalitica: 'Ficha de demanda',
+  cronograma: 'Cronograma',
+};
+
+/** Pessoas que estão neste orçamento agora (foto com a cor delas e a aba em que estão). */
+function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
+  if (usuarios.length === 0) return null;
+  const visiveis = usuarios.slice(0, 4);
+  const resto = usuarios.length - visiveis.length;
+  return (
+    <div className="mr-1 flex items-center -space-x-2" aria-label="Pessoas neste orçamento">
+      {visiveis.map((u) => (
+        <div
+          key={u.userId}
+          title={`${u.name} · ${ABA_ROTULO_PRESENCA[u.aba ?? ''] ?? 'Orçamento'}${u.editing ? ' (editando)' : ''}`}
+          className="rounded-full"
+          style={{ boxShadow: `0 0 0 2px ${u.color}` }}
+        >
+          <KanbanUserAvatar
+            name={u.name}
+            profilePhotoUrl={u.profilePhotoUrl}
+            colorKey={u.userId}
+            size="sm"
+            showNativeTitle={false}
+            className="ring-2 ring-white dark:ring-gray-900"
+          />
+        </div>
+      ))}
+      {resto > 0 ? (
+        <span className="relative flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 ring-2 ring-white dark:bg-gray-600 dark:text-gray-200 dark:ring-gray-900">
+          +{resto}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null,
@@ -7966,6 +8121,10 @@ export function OrcamentoPageView({
     imports: []
   });
   const orcamentoAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Orçamento cujo estado recém-carregado do servidor vira a referência do que já está salvo. */
+  const armarBaselineRef = useRef<string | null>(null);
+  const forcarAplicacaoRef = useRef(false);
+  const aplicarApiDataRef = useRef<((d: OrcamentoDetalheCarregado) => void) | null>(null);
   const moMatHealOrcamentoRef = useRef<string | null>(null);
   const autosaveBaselineRef = useRef<{ orcamentoId: string | null; hadData: boolean }>({
     orcamentoId: null,
@@ -8032,6 +8191,330 @@ export function OrcamentoPageView({
       console.warn('Erro ao salvar orçamento no servidor:', err)
     );
   }, []);
+
+  // ── Colaboração em tempo real: quem está no orçamento, onde, e atualização ao vivo ──
+  const [conflitoRevisao, setConflitoRevisao] = useState<ConflitoRevisaoInfo | null>(null);
+  const [dialogoConflitoAberto, setDialogoConflitoAberto] = useState(false);
+  const [avisoRemoto, setAvisoRemoto] = useState<{ revisao: number; nome: string } | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+  const meuIdColabRef = useRef<string | null>(null);
+  const recarregandoRef = useRef(false);
+  const conflitoAtivoRef = useRef(false);
+  const ultimaLinhaPresencaRef = useRef<{ rowKey: string | null; field: string | null }>({
+    rowKey: null,
+    field: null,
+  });
+
+  /** Busca a versão atual no servidor e aplica na tela sem recarregar a página. */
+  const recarregarDoServidor = useCallback(async (): Promise<boolean> => {
+    const cc = centroCustoId;
+    const oid = orcamentoPersistIdsRef.current.orcamentoId;
+    if (!cc || !oid || recarregandoRef.current) return false;
+    recarregandoRef.current = true;
+    setSincronizando(true);
+    try {
+      const bruto = await loadOrcamentoDetailCached(cc, oid, { force: true });
+      const detalhe = bruto ? parseOrcamentoDetailRaw(bruto) : null;
+      if (!detalhe || !aplicarApiDataRef.current) return false;
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      forcarAplicacaoRef.current = true;
+      try {
+        aplicarApiDataRef.current(detalhe);
+      } finally {
+        forcarAplicacaoRef.current = false;
+      }
+      if (typeof detalhe.revisao === 'number') revisaoDoEstado.set(oid, detalhe.revisao);
+      conflitoAtivoRef.current = false;
+      setConflitoRevisao(null);
+      setDialogoConflitoAberto(false);
+      setAvisoRemoto(null);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      recarregandoRef.current = false;
+      setSincronizando(false);
+    }
+  }, [centroCustoId]);
+
+  const sincronizandoAutoRef = useRef(false);
+  const sincronizacaoPendenteRef = useRef(false);
+
+  /** Traz o que outra pessoa salvou e junta com o que eu alterei, sem botão e sem recarregar. */
+  const sincronizarUmaVez = useCallback(async (): Promise<boolean> => {
+    const cc = centroCustoId;
+    const oid = orcamentoPersistIdsRef.current.orcamentoId;
+    if (!cc || !oid) return false;
+    await aguardarSalvamentoEmAndamento(oid);
+    const bruto = await loadOrcamentoDetailCached(cc, oid, { force: true });
+    const remoto = bruto ? parseOrcamentoDetailRaw(bruto) : null;
+    if (!remoto || !aplicarApiDataRef.current) return false;
+    // Tudo abaixo roda sem pausa: o que eu alterei até este instante entra na mescla.
+    const { servicos: s, imports: i } = servicosImportsRef.current;
+    const meu = montarPayloadSalvarOrcamento(s, i, sessaoRef.current);
+    const remotoPayload = montarPayloadSalvarOrcamento(
+      remoto.servicos,
+      remoto.imports,
+      remoto.sessaoOrcamento ?? sessaoVazia()
+    );
+    const semAlteracaoMinha = assinaturaSincronizada.get(oid) === assinaturaDoPayload(meu);
+    let alvo: PayloadOrcamento = remotoPayload;
+    let precisaSalvar = false;
+    if (!semAlteracaoMinha) {
+      const base = baseSincronizada.get(oid);
+      if (!base) return false;
+      alvo = mesclarTresVias(base, meu, remotoPayload);
+      precisaSalvar = !iguais(alvo, remotoPayload);
+    }
+    if (orcamentoAutosaveTimerRef.current) {
+      clearTimeout(orcamentoAutosaveTimerRef.current);
+      orcamentoAutosaveTimerRef.current = null;
+    }
+    forcarAplicacaoRef.current = true;
+    try {
+      aplicarApiDataRef.current({
+        servicos: alvo.servicos ?? [],
+        imports: alvo.imports ?? [],
+        sessaoOrcamento: alvo.sessaoOrcamento ?? null,
+        revisao: remoto.revisao,
+      });
+    } finally {
+      forcarAplicacaoRef.current = false;
+    }
+    if (typeof remoto.revisao === 'number') revisaoDoEstado.set(oid, remoto.revisao);
+    if (precisaSalvar) await saveOrcamentoToApi(cc, oid, alvo, { semDedupe: true });
+    return true;
+  }, [centroCustoId]);
+
+  const sincronizarComServidor = useCallback(async (): Promise<boolean> => {
+    if (sincronizandoAutoRef.current) {
+      // Chegou outro aviso no meio: repete logo depois com a versão mais nova.
+      sincronizacaoPendenteRef.current = true;
+      return true;
+    }
+    sincronizandoAutoRef.current = true;
+    setSincronizando(true);
+    let ok = false;
+    try {
+      for (let tentativa = 0; tentativa < 3 && !ok; tentativa += 1) {
+        try {
+          ok = await sincronizarUmaVez();
+          if (!ok) break;
+        } catch (err) {
+          // Alguém salvou entre a leitura e a gravação: lê de novo e junta de novo.
+          if (!(err instanceof OrcamentoConflitoRevisaoError)) break;
+        }
+      }
+    } finally {
+      sincronizandoAutoRef.current = false;
+      setSincronizando(false);
+    }
+    if (ok) {
+      conflitoAtivoRef.current = false;
+      setConflitoRevisao(null);
+      setAvisoRemoto(null);
+    }
+    if (sincronizacaoPendenteRef.current) {
+      sincronizacaoPendenteRef.current = false;
+      void sincronizarComServidor();
+    }
+    return ok;
+  }, [sincronizarUmaVez]);
+
+  /**
+   * Só espera sair da célula quando a pessoa realmente digitou nela (valor mexido e ainda aberto).
+   * Apenas ter clicado na célula não atrasa a atualização.
+   */
+  const digitouNaCelulaRef = useRef(false);
+  useEffect(() => {
+    const aoDigitar = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest('table')) digitouNaCelulaRef.current = true;
+    };
+    const aoSair = () => {
+      digitouNaCelulaRef.current = false;
+    };
+    document.addEventListener('input', aoDigitar, true);
+    document.addEventListener('focusout', aoSair, true);
+    return () => {
+      document.removeEventListener('input', aoDigitar, true);
+      document.removeEventListener('focusout', aoSair, true);
+    };
+  }, []);
+  const digitandoNaGrade = () => {
+    const el = document.activeElement;
+    return (
+      digitouNaCelulaRef.current &&
+      el instanceof HTMLElement &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) &&
+      !!el.closest('table')
+    );
+  };
+
+  const aoSalvoPorOutro = useCallback(
+    (info: {
+      revisao: number;
+      by: { id: string; name: string } | null;
+      em: string | null;
+      origem: 'conexao' | 'salvamento';
+    }) => {
+      const oid = orcamentoPersistIdsRef.current.orcamentoId;
+      if (!oid) return;
+      // O aviso de salvamento também chega para quem salvou: não se atualiza com o próprio trabalho.
+      if (info.origem === 'salvamento' && info.by && info.by.id === meuIdColabRef.current) return;
+      const conhecida = revisaoDoEstado.get(oid);
+      if (typeof conhecida !== 'number' || info.revisao <= conhecida) return;
+      const nome = info.by?.name || 'Outra pessoa';
+      const executar = () => {
+        void sincronizarComServidor().then((ok) => {
+          if (!ok) setAvisoRemoto({ revisao: info.revisao, nome });
+        });
+      };
+      if (digitandoNaGrade()) {
+        const aoSair = () => {
+          document.removeEventListener('focusout', aoSair, true);
+          window.setTimeout(executar, 150);
+        };
+        document.addEventListener('focusout', aoSair, true);
+        return;
+      }
+      executar();
+    },
+    [sincronizarComServidor]
+  );
+
+  const {
+    usuarios: usuariosOnline,
+    meuId: meuIdColab,
+    conectado: colabConectado,
+    enviarPresenca,
+  } = useOrcamentoColaboracao({
+    centroCustoId,
+    orcamentoId: orcamentoAtivoId,
+    onSalvoPorOutro: aoSalvoPorOutro,
+  });
+  meuIdColabRef.current = meuIdColab;
+  const outrosUsuariosOnline = useMemo(
+    () => usuariosOnline.filter((u) => u.userId !== meuIdColab),
+    [usuariosOnline, meuIdColab]
+  );
+
+  // Ao trocar de orçamento, avisos e conflitos do anterior não valem mais.
+  useEffect(() => {
+    conflitoAtivoRef.current = false;
+    setConflitoRevisao(null);
+    setDialogoConflitoAberto(false);
+    setAvisoRemoto(null);
+  }, [orcamentoAtivoId]);
+
+  // Conflito de gravação (outra pessoa salvou antes): junta as duas versões sozinho e grava de novo.
+  // A janela de decisão só abre se essa junção automática não der certo (plano B).
+  const sincronizarRef = useRef(sincronizarComServidor);
+  sincronizarRef.current = sincronizarComServidor;
+  useEffect(() => {
+    ouvinteConflitoRevisao = (info) => {
+      if (info.orcamentoId !== orcamentoPersistIdsRef.current.orcamentoId) return;
+      // Já tem uma junção em andamento: ela repete sozinha com a versão mais nova.
+      if (sincronizandoAutoRef.current) return;
+      void sincronizarRef.current().then((ok) => {
+        if (ok) return;
+        const jaAvisado = conflitoAtivoRef.current;
+        conflitoAtivoRef.current = true;
+        setConflitoRevisao(info);
+        if (!jaAvisado) setDialogoConflitoAberto(true);
+      });
+    };
+    return () => {
+      ouvinteConflitoRevisao = null;
+    };
+  }, []);
+
+  // Onde estou: aba, linha e campo (clique ou foco), para os outros me verem na grade.
+  useEffect(() => {
+    if (!orcamentoAtivoId) return;
+    const aba = orcamentoViewTab;
+    ultimaLinhaPresencaRef.current = { rowKey: null, field: null };
+    enviarPresenca({ aba });
+    const informar = (alvo: EventTarget | null, editando: boolean) => {
+      const el = alvo instanceof Element ? alvo : null;
+      const rowKey = el?.closest('tr[data-item-key]')?.getAttribute('data-item-key') ?? null;
+      const field = el?.closest('[data-orc-col]')?.getAttribute('data-orc-col') ?? null;
+      if (rowKey) ultimaLinhaPresencaRef.current = { rowKey, field };
+      enviarPresenca({ aba, rowKey, field, editing: editando && !!rowKey });
+    };
+    const aoFocar = (e: FocusEvent) => {
+      const t = e.target;
+      const editando =
+        t instanceof HTMLElement &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      informar(t, editando);
+    };
+    const aoClicar = (e: PointerEvent) => informar(e.target, false);
+    const aoSairDoCampo = () => {
+      const { rowKey, field } = ultimaLinhaPresencaRef.current;
+      enviarPresenca({ aba, rowKey, field, editing: false });
+    };
+    document.addEventListener('focusin', aoFocar, true);
+    document.addEventListener('focusout', aoSairDoCampo, true);
+    document.addEventListener('pointerdown', aoClicar, true);
+    return () => {
+      document.removeEventListener('focusin', aoFocar, true);
+      document.removeEventListener('focusout', aoSairDoCampo, true);
+      document.removeEventListener('pointerdown', aoClicar, true);
+    };
+  }, [orcamentoAtivoId, orcamentoViewTab, enviarPresenca, colabConectado]);
+
+  /** Marca na grade a linha em que cada pessoa está (barra colorida + nome), só com CSS gerado. */
+  const cssPresencaLinhas = useMemo(() => {
+    const esc = (v: string) => v.replace(/["\\]/g, '\\$&');
+    const regras: string[] = [];
+    for (const u of outrosUsuariosOnline) {
+      if (u.aba !== 'montagem' || !u.rowKey) continue;
+      const cor = /^#[0-9a-f]{6}$/i.test(u.color) ? u.color : '#2563eb';
+      const linha = `tr[data-item-key="${esc(u.rowKey)}"]`;
+      const primeiroNome = esc((u.name.split(' ')[0] || u.name).slice(0, 24));
+      const etiqueta = `content: "${primeiroNome}"; position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; padding: 1px 6px; font-size: 10px; font-weight: 600; line-height: 14px; color: #fff; background: ${cor};`;
+      if (u.field && /^[a-z0-9_-]+$/i.test(u.field)) {
+        // Como no Google Planilhas: contorno na célula da pessoa e o nome colado no canto dela.
+        const celula = `${linha} > td[data-orc-col="${u.field}"]`;
+        regras.push(
+          `${celula} { position: relative; outline: ${u.editing ? 3 : 2}px solid ${cor}; outline-offset: -2px; }`,
+          `${celula}::after { ${etiqueta} right: 0; top: 0; transform: translateY(-100%); border-radius: 4px 4px 0 0; }`
+        );
+      } else {
+        // Sem célula conhecida: barra no começo da linha com o nome.
+        regras.push(
+          `${linha} > td:first-child { position: relative; box-shadow: inset 4px 0 0 ${cor}; }`,
+          `${linha} > td:first-child::after { ${etiqueta} left: 0; top: 0; transform: translateY(-50%); border-radius: 4px; }`
+        );
+      }
+    }
+    return regras.join('\n');
+  }, [outrosUsuariosOnline]);
+
+  const salvarMinhasAlteracoes = async () => {
+    const cc = centroCustoId;
+    const oid = orcamentoPersistIdsRef.current.orcamentoId;
+    if (!cc || !oid) return;
+    setSincronizando(true);
+    try {
+      const { servicos: s, imports: i } = servicosImportsRef.current;
+      await saveOrcamentoToApi(cc, oid, montarPayloadSalvarOrcamento(s, i, sessaoRef.current), {
+        force: true,
+      });
+      conflitoAtivoRef.current = false;
+      setConflitoRevisao(null);
+      setDialogoConflitoAberto(false);
+      setAvisoRemoto(null);
+      toast.success('Suas alterações foram salvas.');
+    } catch {
+      toast.error('Não foi possível salvar agora. Tente de novo.');
+    } finally {
+      setSincronizando(false);
+    }
+  };
 
   const embeddedOrcamentoBasePath = embeddedContractId
     ? listaGlobalEntry
@@ -8641,11 +9124,7 @@ export function OrcamentoPageView({
     };
 
     /** Aplica detalhe na UI na hora; catálogo do contrato completa em background (não segura o spinner). */
-    const aplicarApiData = (apiData: {
-      servicos: ServicoPadrao[];
-      imports: ImportRecord[];
-      sessaoOrcamento: SessaoOrcamentoPersist | null;
-    }) => {
+    const aplicarApiData = (apiData: OrcamentoDetalheCarregado) => {
       if (cancelled) return;
       const servicosDoOrcamento = Array.isArray(apiData.servicos) ? apiData.servicos : [];
       const importsDoOrcamento = Array.isArray(apiData.imports) ? apiData.imports : [];
@@ -8658,17 +9137,31 @@ export function OrcamentoPageView({
           : servicosDoOrcamento
         : servicosDoOrcamento;
       const nextSubs = Array.isArray(sessaoApi?.subtitulosNoOrcamento) ? sessaoApi!.subtitulosNoOrcamento : [];
+      const revisaoConhecida = revisaoDoEstado.get(oid);
+      const servidorMaisNovo =
+        typeof apiData.revisao === 'number' &&
+        typeof revisaoConhecida === 'number' &&
+        apiData.revisao > revisaoConhecida;
       const jaPintado =
+        !forcarAplicacaoRef.current &&
+        !servidorMaisNovo &&
         servicosRef.current.length > 0 &&
         sessaoRef.current.subtitulosNoOrcamento.length > 0 &&
         assinaturaArvoreOrcamento(servicosRef.current, sessaoRef.current.subtitulosNoOrcamento) ===
           assinaturaArvoreOrcamento(nextServicos, nextSubs);
       if (jaPintado) {
+        if (typeof apiData.revisao === 'number' && revisaoConhecida === undefined) {
+          revisaoDoEstado.set(oid, apiData.revisao);
+        }
         setImports(importsDoOrcamento);
         autosaveBaselineRef.current = { orcamentoId: oid, hadData: true };
         carregarCatalogoContratoEmBackground(servicosDoOrcamento, sessaoApi, importado);
         return;
       }
+
+      if (typeof apiData.revisao === 'number') revisaoDoEstado.set(oid, apiData.revisao);
+      // O estado que está prestes a ser exibido é o do servidor: não precisa ser salvo de volta.
+      armarBaselineRef.current = oid;
 
       if (importado) {
         const doc = sessaoApi?.servicosDocumento;
@@ -8732,6 +9225,8 @@ export function OrcamentoPageView({
       carregarCatalogoContratoEmBackground(servicosDoOrcamento, sessaoApi, importado);
     };
 
+    aplicarApiDataRef.current = aplicarApiData;
+
     let painted = false;
     if (localReady) {
       aplicarApiData(localReady);
@@ -8791,6 +9286,7 @@ export function OrcamentoPageView({
     })();
     return () => {
       cancelled = true;
+      aplicarApiDataRef.current = null;
       setLoadingFromApi(false);
       if (orcamentoAutosaveTimerRef.current) {
         clearTimeout(orcamentoAutosaveTimerRef.current);
@@ -8923,6 +9419,13 @@ export function OrcamentoPageView({
       cronograma
     };
     servicosImportsRef.current = { servicos, imports };
+    if (armarBaselineRef.current && armarBaselineRef.current === orcamentoAtivoId) {
+      armarBaselineRef.current = null;
+      registrarPayloadSincronizado(
+        orcamentoAtivoId,
+        montarPayloadSalvarOrcamento(servicos, imports, sessaoRef.current)
+      );
+    }
     if (!centroCustoId || !orcamentoAtivoId) return;
     // localStorage de sessão grande trava a UI se rodar a cada tecla/commit da FD.
     const delayMs = orcamentoViewTab === 'planilhaAnalitica' ? 2500 : 600;
@@ -8963,7 +9466,7 @@ export function OrcamentoPageView({
     imports
   ]);
   useEffect(() => {
-    const ORCAMENTO_AUTOSAVE_MS = orcamentoViewTab === 'planilhaAnalitica' ? 2800 : 900;
+    const ORCAMENTO_AUTOSAVE_MS = orcamentoViewTab === 'planilhaAnalitica' ? 2800 : 300;
     if (!centroCustoId || !orcamentoAtivoId || loadingFromApi) return;
 
     if (orcamentoAutosaveTimerRef.current) clearTimeout(orcamentoAutosaveTimerRef.current);
@@ -9067,6 +9570,8 @@ export function OrcamentoPageView({
     const sessao =
       (sessaoOverride !== undefined ? sessaoOverride : sessaoRef.current) ?? sessaoVazia();
     saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, montarPayloadSalvarOrcamento(s, i, sessao)).catch(err => {
+      // Conflito de edição: a janela de decisão já foi aberta, sem toast de erro genérico.
+      if (err instanceof OrcamentoConflitoRevisaoError) return;
       console.warn('Erro ao salvar orçamento no servidor:', err);
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       if (apiMsg && /congelado/i.test(apiMsg)) {
@@ -20049,6 +20554,7 @@ export function OrcamentoPageView({
                   />
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <PresencaOrcamento usuarios={outrosUsuariosOnline} />
                   <button
                     ref={btnAcoesGradeRef}
                     type="button"
@@ -20172,6 +20678,97 @@ export function OrcamentoPageView({
         )}
       </MainLayout>
       ) : null}
+
+      {cssPresencaLinhas ? <style>{cssPresencaLinhas}</style> : null}
+
+      {avisoRemoto || (conflitoRevisao && !dialogoConflitoAberto) ? (
+        <div
+          role="status"
+          className="fixed left-1/2 top-20 flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 shadow-lg dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          style={{ zIndex: 1500 }}
+        >
+          <span>
+            {conflitoRevisao
+              ? 'Outra pessoa alterou este orçamento. Suas últimas alterações ainda não foram salvas.'
+              : `${avisoRemoto?.nome ?? 'Outra pessoa'} alterou este orçamento e não consegui juntar as alterações sozinho.`}
+          </span>
+          <button
+            type="button"
+            disabled={sincronizando}
+            onClick={() =>
+              conflitoRevisao ? setDialogoConflitoAberto(true) : void sincronizarComServidor()
+            }
+            className="shrink-0 rounded-md bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+          >
+            {conflitoRevisao ? 'Resolver' : 'Tentar de novo'}
+          </button>
+          {!conflitoRevisao ? (
+            <button
+              type="button"
+              onClick={() => setAvisoRemoto(null)}
+              className="shrink-0 text-xs font-medium text-amber-800 hover:underline dark:text-amber-200"
+            >
+              Depois
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <Modal
+        isOpen={dialogoConflitoAberto && !!conflitoRevisao}
+        onClose={() => setDialogoConflitoAberto(false)}
+        title="Orçamento alterado por outra pessoa"
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              disabled={sincronizando}
+              onClick={() => setDialogoConflitoAberto(false)}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              Decidir depois
+            </button>
+            <button
+              type="button"
+              disabled={sincronizando}
+              onClick={() => void salvarMinhasAlteracoes()}
+              className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+            >
+              Salvar as minhas
+            </button>
+            <button
+              type="button"
+              disabled={sincronizando}
+              onClick={() => void recarregarDoServidor()}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {sincronizando ? 'Atualizando…' : 'Atualizar'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+          <p>
+            <strong>{conflitoRevisao?.ultimaAlteracao?.userName || 'Outra pessoa'}</strong> salvou
+            alterações neste orçamento
+            {conflitoRevisao?.ultimaAlteracao?.em
+              ? ` em ${new Date(conflitoRevisao.ultimaAlteracao.em).toLocaleString('pt-BR')}`
+              : ''}
+            . O que você alterou depois disso ainda não foi salvo.
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>Atualizar:</strong> traz a versão mais nova e descarta o que você alterou e não
+              salvou.
+            </li>
+            <li>
+              <strong>Salvar as minhas:</strong> grava a sua versão por cima, apagando o que a outra
+              pessoa salvou.
+            </li>
+          </ul>
+        </div>
+      </Modal>
 
       <FichaDemandaApprovalFormModal
         isOpen={fdAprovacaoModalOpen}

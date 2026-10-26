@@ -10,6 +10,10 @@ export interface OrcamentoData {
   imports: unknown[];
   /** Rascunho da aba Orçamento (itens no orçamento, quantidades, dimensões, itens ocultos). */
   sessaoOrcamento?: unknown;
+  /** Contador de salvamentos do orçamento (detecta edição simultânea por outra pessoa). */
+  revisao?: number;
+  /** Quem salvou por último e quando. */
+  ultimaAlteracao?: { userId: string; userName: string; em: string };
 }
 
 export interface OrcamentoIndexEntry {
@@ -742,7 +746,9 @@ export class OrcamentoService {
         servicos: rawObj.servicos,
         imports: Array.isArray(rawObj.imports) ? rawObj.imports : [],
         composicoes: [],
-        sessaoOrcamento: raw.sessaoOrcamento
+        sessaoOrcamento: raw.sessaoOrcamento,
+        revisao: typeof raw.revisao === 'number' ? raw.revisao : 0,
+        ultimaAlteracao: raw.ultimaAlteracao
       };
     }
     const padrao = await this.getServicosPadrao(centroCustoId);
@@ -750,7 +756,9 @@ export class OrcamentoService {
       servicos: padrao.servicos,
       imports: padrao.imports,
       composicoes: [],
-      sessaoOrcamento: raw.sessaoOrcamento
+      sessaoOrcamento: raw.sessaoOrcamento,
+      revisao: typeof raw.revisao === 'number' ? raw.revisao : 0,
+      ultimaAlteracao: raw.ultimaAlteracao
     };
   }
 
@@ -845,18 +853,78 @@ export class OrcamentoService {
   /**
    * Mescla sessão e/ou árvore de serviços no JSON do orçamento sem apagar o que não veio no patch.
    */
+  /** Fila de gravações por orçamento: duas pessoas salvando juntas não se atropelam. */
+  private readonly gravacaoFila = new Map<string, Promise<unknown>>();
+
+  /**
+   * Salva com checagem de revisão: se `baseRevisao` não bate com a atual, outra pessoa salvou antes
+   * e nada é gravado (devolve `conflito`). Sem `baseRevisao` (ou com `force`) grava direto.
+   */
+  async salvarOrcamentoComRevisao(
+    centroCustoId: string,
+    orcamentoId: string,
+    patch: { sessaoOrcamento?: unknown; servicos?: unknown[] },
+    opts: {
+      baseRevisao?: number;
+      force?: boolean;
+      autor?: { id: string; nome: string };
+      /** Chamado assim que o arquivo novo foi gravado (antes das demais atualizações do índice). */
+      aoGravarArquivo?: (revisao: number) => void;
+    } = {}
+  ): Promise<
+    | { ok: true; revisao: number }
+    | { ok: false; conflito: true; revisaoAtual: number; ultimaAlteracao?: OrcamentoData['ultimaAlteracao'] }
+  > {
+    const chave = `${centroCustoId}:${orcamentoId}`;
+    const anterior = this.gravacaoFila.get(chave) ?? Promise.resolve();
+    const atual = anterior
+      .catch(() => undefined)
+      .then(async () => {
+        const arquivo = await this.readOrcamentoFile(centroCustoId, orcamentoId);
+        const revisaoAtual = typeof arquivo?.revisao === 'number' ? arquivo.revisao : 0;
+        if (
+          typeof opts.baseRevisao === 'number' &&
+          !opts.force &&
+          opts.baseRevisao !== revisaoAtual
+        ) {
+          return {
+            ok: false as const,
+            conflito: true as const,
+            revisaoAtual,
+            ultimaAlteracao: arquivo?.ultimaAlteracao,
+          };
+        }
+        const { revisao } = await this.mergeOrcamentoArquivo(
+          centroCustoId,
+          orcamentoId,
+          patch,
+          opts.autor,
+          { existing: arquivo ?? undefined, aoGravarArquivo: opts.aoGravarArquivo }
+        );
+        return { ok: true as const, revisao };
+      });
+    this.gravacaoFila.set(chave, atual);
+    try {
+      return await atual;
+    } finally {
+      if (this.gravacaoFila.get(chave) === atual) this.gravacaoFila.delete(chave);
+    }
+  }
+
   async mergeOrcamentoArquivo(
     centroCustoId: string,
     orcamentoId: string,
-    patch: { sessaoOrcamento?: unknown; servicos?: unknown[] }
-  ): Promise<void> {
+    patch: { sessaoOrcamento?: unknown; servicos?: unknown[] },
+    autor?: { id: string; nome: string },
+    extra?: { existing?: Partial<OrcamentoData>; aoGravarArquivo?: (revisao: number) => void }
+  ): Promise<{ revisao: number }> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
     const index = await this.getIndex(centroCustoId);
     const indexEntry = index.orcamentos.find(o => o.id === orcamentoId);
     if (!indexEntry) throw new Error('Orçamento não encontrado no índice');
 
     const existing: Partial<OrcamentoData> =
-      (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
+      extra?.existing ?? (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
     const indexNorm = normalizeOrcamentoVersionFields(indexEntry);
     if (this.isOrcamentoCongelado(indexNorm, existing)) {
       throw new Error('Orçamento congelado: crie uma nova versão para editar');
@@ -883,8 +951,18 @@ export class OrcamentoService {
     const payload: Record<string, unknown> = {};
     if (nextSessao !== undefined) payload.sessaoOrcamento = nextSessao;
     if (nextServicos !== undefined) payload.servicos = nextServicos;
+    const revisao = (typeof existing.revisao === 'number' ? existing.revisao : 0) + 1;
+    payload.revisao = revisao;
+    payload.ultimaAlteracao = {
+      userId: autor?.id ?? existing.ultimaAlteracao?.userId ?? '',
+      userName: autor?.nome ?? existing.ultimaAlteracao?.userName ?? '',
+      em: new Date().toISOString(),
+    };
 
     await this.writeOrcamentoFileRaw(centroCustoId, orcamentoId, payload);
+    // O arquivo novo já vale para quem ler: libera o cache e avisa os outros antes de mexer no índice.
+    this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
+    extra?.aoGravarArquivo?.(revisao);
     const updatedAt = new Date().toISOString();
     const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
     const latestIndex = (await this.readIndexRaw(centroCustoId)) ?? index;
@@ -937,6 +1015,7 @@ export class OrcamentoService {
     };
     await this.writeIndex(centroCustoId, next);
     this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
+    return { revisao };
   }
 
   async saveOrcamentoSessao(centroCustoId: string, orcamentoId: string, sessaoOrcamento: unknown): Promise<void> {

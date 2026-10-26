@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { ChatType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ChatService } from '../services/ChatService';
+import { registerOrcamentoSocket } from './orcamentoPresence';
 
 const chatService = new ChatService();
 
@@ -324,6 +325,10 @@ export function attachCallSignaling(server: Server): void {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET) as { id: string };
       ws.userId = decoded.id;
+      if (url.searchParams.get('channel') === 'orcamento') {
+        void registerOrcamentoSocket(ws, decoded.id, url);
+        return;
+      }
       if (isUpdatesChannel) {
         let set = updateSockets.get(decoded.id);
         if (!set) {

@@ -1,3 +1,5 @@
+import { prisma } from '../lib/prisma';
+import { broadcastOrcamentoSalvo } from '../realtime/orcamentoPresence';
 import { Response, NextFunction } from 'express';
 import { OrcamentoService } from '../services/OrcamentoService';
 import {
@@ -118,7 +120,7 @@ export class OrcamentoController {
   async saveOrcamento(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { centroCustoId, orcamentoId } = req.params;
-      const { servicos, imports, sessaoOrcamento } = req.body;
+      const { servicos, imports, sessaoOrcamento, baseRevisao, force } = req.body;
       if (!centroCustoId || !orcamentoId) {
         return res.status(400).json({ message: 'centroCustoId e orcamentoId são obrigatórios' });
       }
@@ -126,7 +128,7 @@ export class OrcamentoController {
       if (!raw) {
         return res.status(404).json({ message: 'Orçamento não encontrado' });
       }
-      const persistTasks: Promise<void>[] = [];
+      const persistTasks: Promise<unknown>[] = [];
       // Histórico de imports no catálogo do contrato (sem sobrescrever a árvore do orçamento perfeito).
       if (imports !== undefined) {
         persistTasks.push(
@@ -140,16 +142,49 @@ export class OrcamentoController {
         );
       }
       // Árvore editada na montagem fica no arquivo do orçamento; não gravar em servicos-padrao.json.
+      let revisao: number | undefined;
+      const autorNome = req.user
+        ? (
+            await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } })
+          )?.name ?? ''
+        : '';
       if (sessaoOrcamento !== undefined || servicos !== undefined) {
-        persistTasks.push(
-          orcamentoService.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
+        const resultado = await orcamentoService.salvarOrcamentoComRevisao(
+          centroCustoId,
+          orcamentoId,
+          {
             ...(sessaoOrcamento !== undefined ? { sessaoOrcamento } : {}),
             ...(servicos !== undefined ? { servicos: servicos as unknown[] } : {})
-          })
+          },
+          {
+            baseRevisao: typeof baseRevisao === 'number' ? baseRevisao : undefined,
+            force: force === true,
+            autor: req.user ? { id: req.user.id, nome: autorNome } : undefined,
+            // Os outros são avisados assim que o arquivo é gravado, sem esperar o resto do salvamento.
+            aoGravarArquivo: (novaRevisao) => {
+              if (req.user) {
+                broadcastOrcamentoSalvo(centroCustoId, orcamentoId, {
+                  revisao: novaRevisao,
+                  userId: req.user.id,
+                  userName: autorNome
+                });
+              }
+            }
+          }
         );
+        if (!resultado.ok) {
+          // Outra pessoa salvou antes: nada foi gravado; o cliente decide (atualizar ou sobrescrever).
+          return res.status(409).json({
+            code: 'ORCAMENTO_REVISAO_DESATUALIZADA',
+            message: 'Este orçamento foi alterado por outra pessoa.',
+            revisaoAtual: resultado.revisaoAtual,
+            ultimaAlteracao: resultado.ultimaAlteracao ?? null
+          });
+        }
+        revisao = resultado.revisao;
       }
       await Promise.all(persistTasks);
-      return res.json({ success: true });
+      return res.json({ success: true, ...(revisao !== undefined ? { revisao } : {}) });
     } catch (err: unknown) {
       const e = err as { message?: string };
       if (e?.message?.includes('congelado')) {

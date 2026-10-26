@@ -15,9 +15,13 @@ import {
 export function useBrandingLogo() {
   const { isDark } = useTheme();
   const { user, isUnbUser, isLoading } = usePermissions();
-  const [storedUnb, setStoredUnb] = useState(() =>
-    typeof window !== 'undefined' ? readStoredUnbBranding() : false
-  );
+  // Começa igual ao servidor (false) e lê o localStorage logo após a hidratação:
+  // ler antes fazia o logo do cliente divergir do HTML do servidor (erro de hidratação).
+  const [storedUnb, setStoredUnb] = useState(false);
+
+  useEffect(() => {
+    setStoredUnb(readStoredUnbBranding());
+  }, []);
 
   const costCenter = user?.employee?.costCenter;
   const useUnbBranding = isLoading

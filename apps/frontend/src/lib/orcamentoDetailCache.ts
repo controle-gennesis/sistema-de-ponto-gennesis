@@ -14,6 +14,8 @@ export type OrcamentoDetailPayload = {
   servicos: unknown[];
   imports: unknown[];
   sessaoOrcamento: unknown | null;
+  /** Revisão do orçamento no servidor quando este detalhe foi lido/gravado. */
+  revisao?: number;
   fetchedAt: number;
 };
 
@@ -130,6 +132,7 @@ export function seedOrcamentoDetailCache(
     servicos?: unknown[];
     imports?: unknown[];
     sessaoOrcamento?: unknown | null;
+    revisao?: number;
   }
 ): void {
   const bucket = getBucket(centroCustoId, orcamentoId);
@@ -137,6 +140,7 @@ export function seedOrcamentoDetailCache(
     servicos: Array.isArray(data.servicos) ? data.servicos : [],
     imports: Array.isArray(data.imports) ? data.imports : [],
     sessaoOrcamento: data.sessaoOrcamento ?? null,
+    ...(typeof data.revisao === 'number' ? { revisao: data.revisao } : {}),
     fetchedAt: Date.now(),
   };
   persistDetailToDisk(centroCustoId, orcamentoId, bucket.payload);
@@ -205,6 +209,7 @@ async function fetchDetailFromApi(
       servicos: Array.isArray(d.servicos) ? d.servicos : [],
       imports: Array.isArray(d.imports) ? d.imports : [],
       sessaoOrcamento: d.sessaoOrcamento ?? null,
+      ...(typeof d.revisao === 'number' ? { revisao: d.revisao } : {}),
       fetchedAt: Date.now(),
     };
   } catch {

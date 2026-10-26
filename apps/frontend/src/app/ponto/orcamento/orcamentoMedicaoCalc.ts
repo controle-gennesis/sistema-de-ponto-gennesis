@@ -13,7 +13,8 @@ export function calcA(linha: LinhaMedicao): number {
     return linha.volumeM3BrutoSomado;
   }
   const { C, L, N } = linha;
-  return (C || 0) * (L || 0) * (N && N > 0 ? N : 1);
+  // N vazio/zero conta como 1; N negativo vale (desconta, ex.: vãos).
+  return (C || 0) * (L || 0) * (N ? N : 1);
 }
 
 export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
@@ -29,7 +30,7 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
   }
   const { C, H, N } = linha;
   const A = calcA(linha);
-  const n = N && N > 0 ? N : 1;
+  const n = N ? N : 1;
   switch (tipo) {
     case 'm3':
       return A * (H || 0);
@@ -38,9 +39,9 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
     case 'm':
       return (C || 0) * n;
     case 'un': {
-      if ((linha.H || 0) > 0) return A * (linha.H || 0);
-      if ((linha.L || 0) > 0) return A;
-      if ((linha.C || 0) > 0) return (C || 0) * n;
+      if ((linha.H || 0) !== 0) return A * (linha.H || 0);
+      if ((linha.L || 0) !== 0) return A;
+      if ((linha.C || 0) !== 0) return (C || 0) * n;
       return Number(linha.N) || 0;
     }
     default:
@@ -76,7 +77,7 @@ export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFo
   }
   const tipoOrigQ = linha.tipoOrigemMedicao ?? 'm3';
   const fator =
-    linha.empolamento != null && linha.empolamento > 0
+    linha.empolamento != null && linha.empolamento !== 0
       ? linha.empolamento
       : (linha as unknown as { percPerda?: number }).percPerda != null
         ? 1 + (linha as unknown as { percPerda: number }).percPerda / 100
@@ -87,7 +88,7 @@ export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFo
   }
   const temDimensoes = (linha.C || 0) !== 0 || (linha.L || 0) !== 0 || (linha.H || 0) !== 0;
   if (linha.valorManual != null && Number.isFinite(linha.valorManual)) {
-    if (!temDimensoes || linha.valorManual > 0) {
+    if (!temDimensoes || linha.valorManual !== 0) {
       return linha.valorManual * fator;
     }
   }
@@ -1279,12 +1280,12 @@ function aplicarNumeroFormula(
   n: number
 ): LinhaMedicao {
   if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
-    const v = campo === 'N' ? Math.max(0, n) : n;
+    const v = n;
     if (numeroMemoriaIgual(ln[campo], v)) return ln;
     return { ...ln, [campo]: v };
   }
   if (campo === 'empolamento') {
-    const v = Math.max(0, n);
+    const v = n;
     if (numeroMemoriaIgual(ln.empolamento, v)) return ln;
     return { ...ln, empolamento: v };
   }

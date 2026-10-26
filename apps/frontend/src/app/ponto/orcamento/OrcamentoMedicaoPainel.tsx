@@ -2247,12 +2247,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     if (n === null) return local;
     const opts = { formulaRaw: vazio ? '' : valor };
     if (col === 'C' || col === 'L' || col === 'H' || col === 'N') {
-      const v = col === 'N' ? Math.max(0, n) : n;
+      const v = n;
       updateLinhaMedicao(rowKey, i, col, v, opts);
       return { ...local, [col]: v };
     }
     if (col === 'empol') {
-      const v = Math.max(0, n);
+      const v = n;
       updateLinhaMedicao(rowKey, i, 'empolamento', v, opts);
       return { ...local, empolamento: v };
     }
@@ -2332,12 +2332,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       next.formulas = Object.keys(formulas).length > 0 ? formulas : undefined;
     };
     if (col === 'C' || col === 'L' || col === 'H' || col === 'N') {
-      next[col] = col === 'N' ? Math.max(0, n) : n;
+      next[col] = n;
       setFormula(col);
       return next;
     }
     if (col === 'empol') {
-      next.empolamento = Math.max(0, n);
+      next.empolamento = n;
       setFormula('empolamento');
       return next;
     }
@@ -3463,7 +3463,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       const formatado = formatMedicaoCampo(num || 0);
       const formula = ln.formulas?.[campo];
       const onCommit = (n: number, formulaRaw: string) => {
-        if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', Math.max(0, n), { formulaRaw });
+        if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', n, { formulaRaw });
         else updateLinhaMedicao(rowKey, idx, campo, n, { formulaRaw });
       };
       const bound = bindCalcInput(draftKey, onCommit, rowCtx);
@@ -3628,7 +3628,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     const empolFormatado = formatMedicaoCampo(Number(empolVal) || 0);
     const empolFormula = ln.formulas?.empolamento;
     const empolOnCommit = (n: number, formulaRaw: string) =>
-      updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n), { formulaRaw });
+      updateLinhaMedicao(rowKey, idx, 'empolamento', n, { formulaRaw });
     const empolBound = bindCalcInput(empolDraftKey, empolOnCommit, rowCtx);
     const empolHighlight = destacaCelula('empol', '%');
 
