@@ -21,6 +21,9 @@ import {
   Trash2,
   CheckCircle2,
   CalendarDays,
+  CalendarRange,
+  Calculator,
+  Wrench,
   Fuel,
   Loader2,
   Eye,
@@ -2920,6 +2923,38 @@ export default function ContractDetailPage() {
     };
   }, [canSeeContratoResumoFinanceiro, contractId, fuelQuotaBalance, loadingFuelQuotaBalance]);
 
+  const atalhosContrato = useMemo(() => {
+    const itens: NonNullable<ContratoResumoKpi['atalhos']> = [];
+    if (canAccessCronogramasModulo) {
+      itens.push({ label: 'Cronogramas', href: `/ponto/cronogramas/${contractId}`, icon: CalendarRange });
+    }
+    if (canAccessOrcamento) {
+      itens.push({ label: 'Orçamentos', href: '/ponto/orcamento', icon: Calculator });
+    }
+    if (
+      isAdministrator ||
+      can(pathToModuleKey('/ponto/fds-aprovadas')) ||
+      can(pathToModuleKey('/ponto/aprovacao-fds'))
+    ) {
+      itens.push({ label: 'Fichas de Demanda', href: '/ponto/fds-aprovadas', icon: ClipboardList });
+    }
+    if (
+      isAdministrator ||
+      can(pathToModuleKey('/ponto/solicitacoes-ferramentas')) ||
+      can(pathToModuleKey('/ponto/solicitar-ferramentas'))
+    ) {
+      itens.push({
+        label: 'Pedidos de ferramentas',
+        href:
+          isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-ferramentas'))
+            ? '/ponto/solicitacoes-ferramentas'
+            : '/ponto/solicitar-ferramentas',
+        icon: Wrench,
+      });
+    }
+    return itens;
+  }, [contractId, canAccessCronogramasModulo, canAccessOrcamento, isAdministrator, can]);
+
   const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
     const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
     const reunioesLoading = loadingMensalCount || (canAccessReunioesAba && loadingSemanalCount);
@@ -2931,6 +2966,7 @@ export default function ContractDetailPage() {
         variant: 'atalho',
         description: 'Acompanhe as reuniões e os relatórios deste contrato.',
         actionLabel: 'Abrir reuniões',
+        atalhos: atalhosContrato,
         subtitle: canAccessReunioesDeContrato ? undefined : 'Sem acesso',
         loading: false,
         badgeCount: canAccessReunioesDeContrato ? mensalReportPendingForContract : 0,
@@ -2952,6 +2988,7 @@ export default function ContractDetailPage() {
     loadingMensalCount,
     loadingSemanalCount,
     mensalReportPendingForContract,
+    atalhosContrato,
   ]);
 
   const faturamentoChartsYear = isAllYears

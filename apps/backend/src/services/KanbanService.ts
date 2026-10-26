@@ -24,6 +24,7 @@ import {
   type KanbanLabelPresetDto,
 } from '../lib/kanbanLabelPresets';
 import { prisma } from '../lib/prisma';
+import { sendPushToUsers } from './PushNotificationService';
 import {
   boardToTrelloExport,
   appendMissingTrelloData,
@@ -681,6 +682,36 @@ async function renumberKanbanColumnCards(tx: Prisma.TransactionClient, columnId:
     WHERE c.id = ordered.id
       AND c.position IS DISTINCT FROM ordered.new_pos
   `;
+}
+
+/**
+ * Avisa por push quem foi colocado em um card. Quem se atribui a si mesmo não recebe.
+ * Roda em segundo plano e nunca lança: o aviso não pode derrubar a operação.
+ */
+function notifyCardAssigned(actorId: string, cardId: string, userIds: Array<string | null | undefined>) {
+  const targets = [...new Set(userIds.filter((u): u is string => !!u && u !== actorId))];
+  if (targets.length === 0) return;
+  void (async () => {
+    try {
+      const [card, actor] = await Promise.all([
+        prisma.kanbanCard.findUnique({
+          where: { id: cardId },
+          select: { title: true, column: { select: { board: { select: { name: true } } } } },
+        }),
+        prisma.user.findUnique({ where: { id: actorId }, select: { name: true } }),
+      ]);
+      if (!card) return;
+      const quem = actor?.name?.trim() || 'Alguém';
+      const quadro = card.column?.board?.name?.trim();
+      await sendPushToUsers(targets, {
+        title: 'Você foi atribuído a um card',
+        body: `${quem} atribuiu você a "${card.title}"${quadro ? ` em ${quadro}` : ''}`,
+        data: { kind: 'kanban-assigned', cardId },
+      });
+    } catch {
+      /* push é best-effort */
+    }
+  })();
 }
 
 export class KanbanService {
@@ -1851,6 +1882,7 @@ export class KanbanService {
       });
     });
 
+    notifyCardAssigned(userId, card.id, memberIds);
     return formatCard(card);
   }
 
@@ -2054,6 +2086,9 @@ export class KanbanService {
         include: boardListCardInclude,
       });
       await logUpdate();
+      if (data.assigneeUserId && data.assigneeUserId !== existing.assigneeUserId) {
+        notifyCardAssigned(userId, id, [data.assigneeUserId]);
+      }
       return formatCard(card);
     }
 
@@ -2082,6 +2117,9 @@ export class KanbanService {
     });
 
     await logUpdate();
+    if (data.assigneeUserId && data.assigneeUserId !== existing.assigneeUserId) {
+      notifyCardAssigned(userId, id, [data.assigneeUserId]);
+    }
     return formatCard(card);
   }
 
@@ -2459,6 +2497,7 @@ export class KanbanService {
     await syncLegacyAssignee(cardId);
     if (!alreadyMember) {
       await this.logActivity(cardId, requesterId, 'MEMBER_ADDED', { userId, name: user.name });
+      notifyCardAssigned(requesterId, cardId, [userId]);
     }
     return this.getCardById(requesterId, cardId);
   }

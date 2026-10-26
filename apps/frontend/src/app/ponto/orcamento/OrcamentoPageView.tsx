@@ -14518,7 +14518,8 @@ export function OrcamentoPageView({
           : undefined,
       });
     }
-    const nextDim = { ...atual, linhas: [...mantidas, ...novas] };
+    // Composições recém-vinculadas entram no topo do memorial, antes das linhas que já existiam.
+    const nextDim = { ...atual, linhas: [...novas, ...mantidas] };
     setDimensoesPorItem((prev) => aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim }));
     syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim);
   };

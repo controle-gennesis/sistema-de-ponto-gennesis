@@ -17,6 +17,7 @@ import {
   YAxis,
 } from 'recharts';
 import Link from 'next/link';
+import type { ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ChevronRight,
@@ -591,6 +592,12 @@ export type ContratoResumoKpi = {
   description?: string;
   /** Texto do botão do atalho. */
   actionLabel?: string;
+  /** Botões de acesso rápido a outras páginas do contrato. */
+  atalhos?: Array<{
+    label: string;
+    href: string;
+    icon?: ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  }>;
   /** Destaque invertido (ex.: vermelho com texto branco). */
   tone?: 'default' | 'brand';
 };
@@ -1222,7 +1229,14 @@ function CalendarioDecorativo({ pendente }: { pendente: boolean }) {
 }
 
 /** Atalho largo para um módulo, no estilo "dica": texto à esquerda, ilustração à direita e link de abrir. */
-function AtalhoKpiCard({ title, description, href, badgeCount = 0, actionLabel = 'Abrir' }: ContratoResumoKpi) {
+function AtalhoKpiCard({
+  title,
+  description,
+  href,
+  badgeCount = 0,
+  actionLabel = 'Abrir',
+  atalhos = [],
+}: ContratoResumoKpi) {
   return (
     <Card
       className={`${cadastroListClasses.card} relative overflow-hidden ${
@@ -1231,11 +1245,11 @@ function AtalhoKpiCard({ title, description, href, badgeCount = 0, actionLabel =
           : 'bg-emerald-50/40 dark:bg-emerald-950/10'
       }`}
     >
-      <CardContent className="flex items-stretch justify-between gap-6 p-5 sm:p-6">
-        <div className="flex min-w-0 flex-col justify-between gap-4 sm:min-h-[7rem]">
+      <CardContent className="flex items-center justify-between gap-6 p-4 sm:p-5">
+        <div className="flex min-w-0 flex-col gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
                 {title}
               </h3>
               {badgeCount > 0 ? (
@@ -1245,23 +1259,36 @@ function AtalhoKpiCard({ title, description, href, badgeCount = 0, actionLabel =
               ) : null}
             </div>
             {description ? (
-              <p className="max-w-xl text-sm text-gray-600 dark:text-gray-400">{description}</p>
+              <p className="max-w-xl text-xs text-gray-600 dark:text-gray-400 sm:text-sm">{description}</p>
             ) : null}
           </div>
-          {href ? (
-            <Link
-              href={href}
-              className="group inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 transition-colors hover:text-red-600 dark:text-gray-100 dark:hover:text-red-400"
-            >
-              {actionLabel}
-              <ChevronRight
-                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                aria-hidden
-              />
-            </Link>
-          ) : (
-            <span className="text-sm font-medium text-gray-400 dark:text-gray-500">Sem acesso</span>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {href ? (
+              <Link
+                href={href}
+                className="group inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+              >
+                {actionLabel}
+                <ChevronRight
+                  className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </Link>
+            ) : null}
+            {atalhos.map(({ label, href: to, icon: Icon }) => (
+              <Link
+                key={label}
+                href={to}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+              >
+                {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden /> : null}
+                {label}
+              </Link>
+            ))}
+            {!href && atalhos.length === 0 ? (
+              <span className="text-sm font-medium text-gray-400 dark:text-gray-500">Sem acesso</span>
+            ) : null}
+          </div>
         </div>
         <div className="hidden shrink-0 items-center sm:flex">
           <CalendarioDecorativo pendente={badgeCount > 0} />
