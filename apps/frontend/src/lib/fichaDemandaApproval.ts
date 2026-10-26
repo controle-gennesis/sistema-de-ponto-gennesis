@@ -56,6 +56,30 @@ export function purchaseStatusLabel(value: DemandSheetPurchaseStatus | null | un
   return FD_PURCHASE_STATUS_LABELS[value] ?? value;
 }
 
+export type PedidosStatus = 'PENDENTE' | 'PARCIAL' | 'COMPLETO';
+
+const PEDIDOS_STATUS_LABELS: Record<PedidosStatus, string> = {
+  PENDENTE: 'Pendente',
+  PARCIAL: 'Pedido parcialmente',
+  COMPLETO: 'Pedido completo',
+};
+
+export function pedidosStatusLabel(value: PedidosStatus | null | undefined): string {
+  if (!value) return 'Pendente';
+  return PEDIDOS_STATUS_LABELS[value] ?? value;
+}
+
+export function pedidosStatusBadgeClass(value: PedidosStatus | null | undefined): string {
+  switch (value) {
+    case 'COMPLETO':
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    case 'PARCIAL':
+      return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+    default:
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+  }
+}
+
 export type FdAnexoKind = 'orcamento' | 'fd' | 'oc' | 'outro';
 
 export interface FdAnexo {
@@ -149,6 +173,7 @@ export interface FichaDemandaApprovalRecord {
   purchaseStatusUpdaterNome?: string | null;
   managerApprovalComment?: string | null;
   managerRejectionReason?: string | null;
+  managerRejectionComment?: string | null;
   managerApproverNome?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -156,9 +181,24 @@ export interface FichaDemandaApprovalRecord {
   orcamentoCentroCustoId?: string | null;
   contratoCostCenterId?: string | null;
   fichaDemandaPct?: number | null;
+  pedidosStatus?: 'PENDENTE' | 'PARCIAL' | 'COMPLETO';
+  pedidosEncerrados?: boolean;
+  /** Itens da FD já pedidos em RMs geradas pelo modal de associação (vazio = nenhum pedido pela FD). */
+  itensPedidos?: unknown[];
+  /** Custo real (OCs enviadas ao TOTVS) dos itens pedidos pela FD; null quando ainda não há pedidos. */
+  custoReal?: number | null;
+  /** Centro de custo da FD (o do contrato) — agrupamento da lista. */
+  centroCustoNome?: string | null;
+  /** OS e nº da pasta da importação do orçamento de origem ("OS - Nº123"). */
+  osNumeroPasta?: string | null;
+  /** Soma das OCs pagas (validadas pelo compras no G4), cada OC uma vez, pelo total da OC. */
+  totalPagoOcs?: number;
+  /** false quando o orçamento de origem foi excluído; null quando a FD não tem orçamento vinculado. */
+  orcamentoExiste?: boolean | null;
 }
 
 export interface FichaDemandaApprovalFormState {
+  rmFeita: boolean | null;
   numMovRm: string;
   idMovRm: string;
   codigoPedido: string;
@@ -177,7 +217,7 @@ export interface FichaDemandaApprovalFormState {
 export const FD_STATUS_LABELS: Record<DemandSheetApprovalStatus, string> = {
   WAITING_MANAGER: 'Pendente de aprovação',
   APPROVED: 'Aprovada',
-  REJECTED: 'Em correção',
+  REJECTED: 'Reprovada',
   CANCELLED: 'Cancelada',
 };
 
@@ -238,6 +278,7 @@ export function adjustCurrency(value: string, deltaCents: number): string {
 
 export function emptyFichaDemandaForm(): FichaDemandaApprovalFormState {
   return {
+    rmFeita: null,
     numMovRm: '',
     idMovRm: '',
     codigoPedido: '',
@@ -265,6 +306,7 @@ export function recordToForm(record: FichaDemandaApprovalRecord): FichaDemandaAp
       : String(record.custoEstimado || '');
 
   return {
+    rmFeita: !!(record.numMovRm || record.idMovRm),
     numMovRm: record.numMovRm,
     idMovRm: record.idMovRm,
     codigoPedido: record.codigoPedido,
@@ -282,8 +324,11 @@ export function recordToForm(record: FichaDemandaApprovalRecord): FichaDemandaAp
 }
 
 export function validateFichaDemandaForm(form: FichaDemandaApprovalFormState): string | null {
-  if (!form.numMovRm.trim()) return 'Informe o Número de Movimento da RM.';
-  if (!form.idMovRm.trim()) return 'Informe o ID de Movimento da RM.';
+  if (form.rmFeita === null) return 'Informe se a RM foi feita no TOTVS.';
+  if (form.rmFeita) {
+    if (!form.numMovRm.trim()) return 'Informe o Número de Movimento da RM.';
+    if (!form.idMovRm.trim()) return 'Informe o ID de Movimento da RM.';
+  }
   if (!form.codigoPedido.trim()) return 'Informe o Código do Pedido.';
   if (!form.contratoId.trim()) return 'Selecione o contrato.';
   if (!form.obra.trim()) return 'Selecione a obra.';

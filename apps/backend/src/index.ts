@@ -101,7 +101,6 @@ import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
 import { orcafascioService } from './controllers/OrcafascioController';
-import { fluigService } from './controllers/FluigController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
@@ -847,24 +846,8 @@ try {
     console.log('═══════════════════════════════════════');
     console.log('');
 
-    // Pré-aquecer os datasets Fluig em background para carregamento instantâneo.
-    // Com FLUIG_DISABLE_ALL_DATASET_FETCHES no FluigService, warmup/refresh viram no-op.
-    if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
-      const FLUIG_WARM_DATASETS = [
-        'Processos_Workflow_Aprovacao_G3',
-        'Processos_Workflow_Aprovacao_G5',
-        'DataSet_G3FollowUp',
-        'DataSet_G4FollowUp',
-        'G5-Relatorio-DF-GO-TODOS-SETORES',
-        'G5-Relatorio-DF-GO-DP',
-        'G5-Relatorio-DF-GO-JURIDICO',
-      ];
-      // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
-      setTimeout(() => {
-        void fluigService.warmupDatasets(FLUIG_WARM_DATASETS);
-        fluigService.startPeriodicRefresh(FLUIG_WARM_DATASETS, 8 * 60 * 1000);
-      }, 10_000);
-    }
+    // Fluig: sem aquecimento na subida nem refresh a cada 8 min — o servidor do Fluig cai com
+    // requisições frequentes. Os datasets vêm do espelho (03:00 e 12:30) e do botão de atualizar.
 
     // Pré-aquecer lista de orçamentos Orçafascio (mesmo padrão SWR do Fluig)
     if (process.env.ORCAFASCIO_EMAIL && process.env.ORCAFASCIO_SECRET_TOKEN) {

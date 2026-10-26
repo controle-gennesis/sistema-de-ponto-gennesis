@@ -1,6 +1,6 @@
-import cron from 'node-cron';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import { fetchRmConsultaRows, normRmKey, pickRmField } from '../lib/totvsRmConsulta';
 
 export type PaymentConditionSyncResult = {
@@ -138,14 +138,20 @@ export async function syncPaymentConditionsFromTotvs(
   return inFlight;
 }
 
-/** Sincroniza ao iniciar e a cada 30 minutos. */
+/** Sincroniza nos horários de `SYNC_TOTVS_HORARIOS` (e na subida só se a lista estiver vazia). */
 export function startPaymentConditionTotvsSyncScheduler(): void {
-  const tz = process.env.TZ || 'America/Sao_Paulo';
   const run = () => {
     void syncPaymentConditionsFromTotvs({ force: true }).catch((err) => {
       console.error('[payment-conditions-sync] falha:', err instanceof Error ? err.message : err);
     });
   };
-  run();
-  cron.schedule('*/30 * * * *', run, { timezone: tz });
+  agendarSincronizacaoTotvs('payment-conditions-sync', run);
+  void prisma.paymentCondition
+    .count()
+    .then((total) => {
+      if (total === 0) run();
+    })
+    .catch(() => {
+      /* tabela ainda não pronta — fica para o próximo horário */
+    });
 }

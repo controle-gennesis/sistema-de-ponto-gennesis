@@ -5,6 +5,7 @@ import {
   purchaseOrderPhaseLabelForOrder
 } from '@/components/oc/ocStatusLabels';
 import type { OcTab, PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { isOcFluxoDiretoTotvs, isOcTotvsEnviada, isOcTotvsNaoEnviada } from '@/components/oc/ocTotvsFluxoDireto';
 
 export const normalizeOcSearch = (value?: string | null) =>
   (value || '')
@@ -24,10 +25,15 @@ export const OC_TAB_LABELS: Record<OcTab, string> = {
   PROOF_CORRECTION: 'Correção Comprovante',
   ATTACH_NF: 'Anexar NF',
   FINALIZADAS: 'Finalizadas',
+  TOTVS_NAO_ENVIADAS: "TOTVS - OC's não enviadas",
+  TOTVS_ENVIADAS: "TOTVS - OC's enviadas",
   outras: 'Canceladas'
 };
 
 export function getOcTabForOrder(order: PurchaseOrder): OcTab | null {
+  if (isOcTotvsNaoEnviada(order)) return 'TOTVS_NAO_ENVIADAS';
+  if (isOcTotvsEnviada(order)) return 'TOTVS_ENVIADAS';
+  if (isOcFluxoDiretoTotvs(order)) return null;
   if (order.status === 'REJECTED' || order.status === 'CANCELLED') return 'outras';
   if (order.status === 'PENDING_COMPRAS' || order.status === 'DRAFT') return 'compras';
   if (order.status === 'PENDING') return 'gestor';

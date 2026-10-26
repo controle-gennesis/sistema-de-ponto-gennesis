@@ -26,7 +26,7 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 
 export default function OrdemDeCompraPage() {
   const router = useRouter();
-  const { user, isLoading: loadingUser } = usePermissions();
+  const { user, isLoading: loadingUser, ocFluxoConecta, ocFluxoTotvs } = usePermissions();
   const isUnbUser = isOcUnbUserCostCenter(
     (user?.employee?.costCenter as string | null | undefined) ?? null
   );
@@ -92,7 +92,11 @@ export default function OrdemDeCompraPage() {
           <OcGlobalSearch
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
-            onNavigate={(tab) => setOcTab(resolveOcFluxNavigateTab(tab, isUnbUser))}
+            onNavigate={(tab) =>
+              setOcTab(
+                resolveOcFluxNavigateTab(tab, isUnbUser, { conecta: ocFluxoConecta, totvs: ocFluxoTotvs })
+              )
+            }
             orders={allOrders}
           />
 

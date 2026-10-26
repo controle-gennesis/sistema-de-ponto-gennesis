@@ -1544,6 +1544,10 @@ export class QuoteMapService {
         pixKeyType?: string;
         pixKey?: string;
         observations?: string;
+        /** Histórico da OC (TOTVS: TMOVHISTORICO.HISTORICOLONGO). */
+        historico?: string;
+        /** Destino escolhido no mapa (Conecta ou TOTVS). */
+        totvsDestination?: string;
         amountToPay?: number;
         boletoAttachmentUrl?: string;
         boletoAttachmentName?: string;
@@ -1733,6 +1737,8 @@ export class QuoteMapService {
         stockLocationId: pay.stockLocationId ?? null,
         totvsCodLoc: pay.totvsCodLoc ?? null,
         notes: pay.observations ?? null,
+        historico: pay.historico ?? null,
+        totvsDestination: pay.totvsDestination ?? null,
         attachments: pay.attachments,
       });
     }

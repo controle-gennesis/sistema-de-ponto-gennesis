@@ -1,4 +1,5 @@
 import { Response, NextFunction } from 'express';
+import { proximaAtualizacaoManual, reservarAtualizacaoManual } from '../lib/totvsManualSyncCooldown';
 import { Prisma } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
@@ -13,10 +14,32 @@ type StockLocationRow = {
   name: string;
   polo: string | null;
   filial: number;
+  costCenterId: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
+
+/** Nome do centro de custo de cada local (só exibição; o envio da OC ao TOTVS não usa este campo). */
+async function comCentroCusto<T extends { costCenterId: string | null }>(
+  rows: T[]
+): Promise<Array<T & { costCenterName: string | null }>> {
+  const ids = [...new Set(rows.map((r) => r.costCenterId).filter((x): x is string => !!x))];
+  const ccs = ids.length
+    ? await prisma.costCenter.findMany({ where: { id: { in: ids } }, select: { id: true, code: true, name: true } })
+    : [];
+  const nome = new Map(ccs.map((c) => [c.id, c.name?.trim() || c.code]));
+  return rows.map((r) => ({ ...r, costCenterName: r.costCenterId ? nome.get(r.costCenterId) ?? null : null }));
+}
+
+/** Centro de custo opcional: vazio limpa; id precisa existir. */
+async function parseCostCenterId(value: unknown): Promise<string | null> {
+  const id = String(value ?? '').trim();
+  if (!id) return null;
+  const cc = await prisma.costCenter.findUnique({ where: { id }, select: { id: true } });
+  if (!cc) throw createError('Centro de custo não encontrado', 400);
+  return id;
+}
 
 function parseFilial(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
@@ -65,7 +88,7 @@ export class StockLocationController {
 
       const [rows, countRows] = await Promise.all([
         prisma.$queryRaw<StockLocationRow[]>`
-          SELECT id, code, name, polo, filial, "isActive", "createdAt", "updatedAt"
+          SELECT id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt"
           FROM stock_locations
           WHERE ${whereSql}
           ORDER BY filial ASC, code ASC
@@ -79,7 +102,7 @@ export class StockLocationController {
       const total = Number(countRows[0]?.c ?? 0);
       res.json({
         success: true,
-        data: rows,
+        data: await comCentroCusto(rows),
         pagination: {
           page: Number(page),
           limit: limitNum,
@@ -94,9 +117,19 @@ export class StockLocationController {
 
   async syncTotvs(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const espera = reservarAtualizacaoManual('locais-estoque');
+      if (espera) {
+        res.status(429).json({
+          success: false,
+          message: espera.mensagem,
+          retryAfterSeconds: espera.segundosRestantes,
+          liberaEm: espera.liberaEm,
+        });
+        return;
+      }
       const force = req.query.force === 'true' || req.body?.force === true;
       const result = await syncStockLocationsFromTotvs({ force });
-      res.json({ success: true, data: result });
+      res.json({ success: true, data: result, liberaEm: proximaAtualizacaoManual('locais-estoque') });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       next(createError(`Não foi possível sincronizar com o TOTVS: ${message}`, 502));
@@ -107,7 +140,7 @@ export class StockLocationController {
     try {
       await ensureStockLocationsTable(prisma);
       const rows = await prisma.$queryRaw<StockLocationRow[]>`
-        SELECT id, code, name, polo, filial, "isActive", "createdAt", "updatedAt"
+        SELECT id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt"
         FROM stock_locations WHERE id = ${req.params.id} LIMIT 1
       `;
       if (!rows[0]) {
@@ -122,7 +155,7 @@ export class StockLocationController {
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await ensureStockLocationsTable(prisma);
-      const { code, name, polo, filial, isActive } = req.body;
+      const { code, name, polo, filial, isActive, costCenterId } = req.body;
       const trimmedName = String(name || '').trim();
       const trimmedCode = String(code || '').trim();
 
@@ -145,18 +178,19 @@ export class StockLocationController {
       const now = new Date();
       const poloValue = polo ? String(polo).trim() : null;
       const active = isActive !== undefined ? Boolean(isActive) : true;
+      const ccId = await parseCostCenterId(costCenterId);
       await prisma.$executeRaw`
-        INSERT INTO stock_locations (id, code, name, polo, filial, "isActive", "createdAt", "updatedAt")
-        VALUES (${id}, ${trimmedCode}, ${trimmedName}, ${poloValue}, ${parsedFilial}, ${active}, ${now}, ${now})
+        INSERT INTO stock_locations (id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt")
+        VALUES (${id}, ${trimmedCode}, ${trimmedName}, ${poloValue}, ${parsedFilial}, ${ccId}, ${active}, ${now}, ${now})
       `;
       const rows = await prisma.$queryRaw<StockLocationRow[]>`
-        SELECT id, code, name, polo, filial, "isActive", "createdAt", "updatedAt"
+        SELECT id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt"
         FROM stock_locations WHERE id = ${id} LIMIT 1
       `;
 
       res.status(201).json({
         success: true,
-        data: rows[0],
+        data: (await comCentroCusto(rows))[0],
         message: 'Local de estoque criado com sucesso',
       });
     } catch (error) {
@@ -168,10 +202,10 @@ export class StockLocationController {
     try {
       await ensureStockLocationsTable(prisma);
       const { id } = req.params;
-      const { code, name, polo, filial, isActive } = req.body;
+      const { code, name, polo, filial, isActive, costCenterId } = req.body;
       const existing = (
         await prisma.$queryRaw<StockLocationRow[]>`
-          SELECT id, code, name, polo, filial, "isActive", "createdAt", "updatedAt"
+          SELECT id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt"
           FROM stock_locations WHERE id = ${id} LIMIT 1
         `
       )[0];
@@ -202,6 +236,8 @@ export class StockLocationController {
       const nextName = name !== undefined ? String(name).trim() : existing.name;
       const nextPolo = polo !== undefined ? (polo ? String(polo).trim() : null) : existing.polo;
       const nextActive = isActive !== undefined ? Boolean(isActive) : existing.isActive;
+      const nextCostCenterId =
+        costCenterId !== undefined ? await parseCostCenterId(costCenterId) : existing.costCenterId;
       const now = new Date();
       await prisma.$executeRaw`
         UPDATE stock_locations
@@ -209,18 +245,19 @@ export class StockLocationController {
             name = ${nextName},
             polo = ${nextPolo},
             filial = ${nextFilial},
+            "costCenterId" = ${nextCostCenterId},
             "isActive" = ${nextActive},
             "updatedAt" = ${now}
         WHERE id = ${id}
       `;
       const rows = await prisma.$queryRaw<StockLocationRow[]>`
-        SELECT id, code, name, polo, filial, "isActive", "createdAt", "updatedAt"
+        SELECT id, code, name, polo, filial, "costCenterId", "isActive", "createdAt", "updatedAt"
         FROM stock_locations WHERE id = ${id} LIMIT 1
       `;
 
       res.json({
         success: true,
-        data: rows[0],
+        data: (await comCentroCusto(rows))[0],
         message: 'Local de estoque atualizado com sucesso',
       });
     } catch (error) {

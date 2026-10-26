@@ -427,17 +427,59 @@ router.get('/:id/comments', async (req: AuthRequest, res: Response, next: NextFu
   }
 });
 
+// Conferência antes do envio ao TOTVS (só dados do Conecta, sem chamar o RM).
+router.get('/:id/totvs-preflight', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const data = await service.conferirEnvioTotvs(req.params.id);
+    res.json({ success: true, data });
+  } catch (error) {
+    if (error instanceof Error && !('statusCode' in error)) {
+      const status = /não encontrada/i.test(error.message) ? 404 : 400;
+      res.status(status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
 router.post('/:id/send-to-totvs', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
-    await assertUserHasOcModule(
-      req.user.id,
-      !!req.user.isAdmin,
-      OC_APPROVE_COMPRAS_MODULE_KEY,
-      'Sem permissão de compras para enviar a OC ao TOTVS'
-    );
+    // Criador da OC reaberta para reenvio pode reenviar sem o módulo de compras.
+    if (!(await service.isTotvsResendOpenForCreator(req.params.id, req.user.id))) {
+      await assertUserHasOcModule(
+        req.user.id,
+        !!req.user.isAdmin,
+        OC_APPROVE_COMPRAS_MODULE_KEY,
+        'Sem permissão de compras para enviar a OC ao TOTVS'
+      );
+    }
     const order = await service.sendToTotvs(req.params.id, req.user.id);
     res.json({ success: true, data: order, message: 'OC enviada ao TOTVS (movimento 1.1.26)' });
+  } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
+    if (error instanceof Error && !('statusCode' in error)) {
+      const status = /não encontrada/i.test(error.message) ? 404 : 400;
+      res.status(status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.post('/:id/totvs-resend/open', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const order = await service.reopenForTotvsResend(req.params.id, req.user.id, !!req.user.isAdmin);
+    res.json({
+      success: true,
+      data: order,
+      message: 'OC reaberta para ajuste. Depois de ajustar, envie novamente ao TOTVS.',
+    });
   } catch (error) {
     if (error instanceof Error && /Sem permissão/.test(error.message)) {
       res.status(403).json({ success: false, message: error.message });

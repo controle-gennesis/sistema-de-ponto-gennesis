@@ -142,7 +142,9 @@ export default function FichaDemandaAprovadaDetalhePage() {
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Status</dt>
                   <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {FD_STATUS_LABELS[record.status] || record.status}
+                    {record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
+                      ? 'FD Cancelada por exclusão de orçamento'
+                      : (FD_STATUS_LABELS[record.status] || record.status)}
                   </dd>
                 </div>
                 <div>

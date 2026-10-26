@@ -21,6 +21,8 @@ export type OcTabCounts = {
   PROOF_VALIDATION: number;
   PROOF_CORRECTION: number;
   ATTACH_NF: number;
+  TOTVS_NAO_ENVIADAS: number;
+  TOTVS_ENVIADAS: number;
   outras: number;
 };
 
@@ -28,7 +30,12 @@ export const OC_FLUX_DEFAULT_TAB: OcTab = 'compras';
 export const OC_FLUX_DEFAULT_TAB_UNB: OcTab = 'gestor';
 
 /** Abas ocultas quando o centro de custo do usuário é UNB. */
-export const OC_UNB_HIDDEN_TABS: readonly OcTab[] = ['compras', 'diretoria'];
+export const OC_UNB_HIDDEN_TABS: readonly OcTab[] = [
+  'compras',
+  'diretoria',
+  'TOTVS_NAO_ENVIADAS',
+  'TOTVS_ENVIADAS',
+];
 
 const OC_FLUX_TABS: ReadonlyArray<{
   id: OcTab;
@@ -45,6 +52,8 @@ const OC_FLUX_TABS: ReadonlyArray<{
   { id: 'ATTACH_NF', label: 'Anexar NF', countKey: 'ATTACH_NF' },
   { id: 'FINALIZADAS', label: 'Finalizadas', countKey: 'FINALIZADAS' },
   { id: 'IN_REVIEW', label: 'Correção', countKey: 'IN_REVIEW' },
+  { id: 'TOTVS_NAO_ENVIADAS', label: "TOTVS - OC's não enviadas", countKey: 'TOTVS_NAO_ENVIADAS' },
+  { id: 'TOTVS_ENVIADAS', label: "TOTVS - OC's enviadas", countKey: 'TOTVS_ENVIADAS' },
   { id: 'outras', label: 'Canceladas', countKey: 'outras' }
 ];
 
@@ -60,13 +69,25 @@ export function resolveOcFluxDefaultTab(isUnbUser: boolean): OcTab {
   return isUnbUser ? OC_FLUX_DEFAULT_TAB_UNB : OC_FLUX_DEFAULT_TAB;
 }
 
-export function isOcFluxTabVisible(tab: OcTab, isUnbUser: boolean): boolean {
+/** Fases do fluxo TOTVS; as demais (inclusive Canceladas) são do fluxo Conecta. */
+export const OC_TOTVS_FLUX_TABS: readonly OcTab[] = ['TOTVS_NAO_ENVIADAS', 'TOTVS_ENVIADAS'];
+
+/** Fluxos de OC liberados ao usuário (Permissões › Suprimentos › Ordens de Compra). */
+export type OcFluxos = { conecta: boolean; totvs: boolean };
+
+export function isOcFluxTabVisible(tab: OcTab, isUnbUser: boolean, fluxos?: OcFluxos): boolean {
+  if (fluxos) {
+    const isTotvsTab = OC_TOTVS_FLUX_TABS.includes(tab);
+    if (isTotvsTab ? !fluxos.totvs : !fluxos.conecta) return false;
+  }
   if (!isUnbUser) return true;
   return !OC_UNB_HIDDEN_TABS.includes(tab);
 }
 
-export function resolveOcFluxNavigateTab(tab: OcTab, isUnbUser: boolean): OcTab {
-  return isOcFluxTabVisible(tab, isUnbUser) ? tab : OC_FLUX_DEFAULT_TAB_UNB;
+export function resolveOcFluxNavigateTab(tab: OcTab, isUnbUser: boolean, fluxos?: OcFluxos): OcTab {
+  if (isOcFluxTabVisible(tab, isUnbUser, fluxos)) return tab;
+  if (fluxos && !fluxos.conecta) return 'TOTVS_NAO_ENVIADAS';
+  return OC_FLUX_DEFAULT_TAB_UNB;
 }
 
 export function OcFluxTabsNav({
@@ -80,7 +101,11 @@ export function OcFluxTabsNav({
   tabCounts: OcTabCounts;
   finalizedTotal: number;
 }) {
-  const { user } = usePermissions();
+  const { user, ocFluxoConecta, ocFluxoTotvs } = usePermissions();
+  const fluxos = useMemo(
+    () => ({ conecta: ocFluxoConecta, totvs: ocFluxoTotvs }),
+    [ocFluxoConecta, ocFluxoTotvs]
+  );
   const costCenter = user?.employee?.costCenter as string | null | undefined;
   const isUnbUser = isOcUnbUserCostCenter(costCenter);
 
@@ -91,15 +116,19 @@ export function OcFluxTabsNav({
   }, [costCenter]);
 
   useEffect(() => {
-    if (!isOcFluxTabVisible(activeTab, isUnbUser)) {
-      onActiveTab(OC_FLUX_DEFAULT_TAB_UNB);
+    if (!isOcFluxTabVisible(activeTab, isUnbUser, fluxos)) {
+      onActiveTab(resolveOcFluxNavigateTab(activeTab, isUnbUser, fluxos));
     }
-  }, [activeTab, isUnbUser, onActiveTab]);
+  }, [activeTab, isUnbUser, onActiveTab, fluxos]);
 
   const visibleTabs = useMemo(
-    () => OC_FLUX_TABS.filter((tab) => isOcFluxTabVisible(tab.id, isUnbUser)),
-    [isUnbUser]
+    () => OC_FLUX_TABS.filter((tab) => isOcFluxTabVisible(tab.id, isUnbUser, fluxos)),
+    [isUnbUser, fluxos]
   );
+  // Dois fluxos separados: Conecta numa linha, TOTVS na linha de baixo.
+  const conectaTabs = visibleTabs.filter((tab) => !OC_TOTVS_FLUX_TABS.includes(tab.id));
+  const totvsTabs = visibleTabs.filter((tab) => OC_TOTVS_FLUX_TABS.includes(tab.id));
+  const showFluxLabels = conectaTabs.length > 0 && totvsTabs.length > 0;
 
   const countFor = (key: keyof OcTabCounts | 'FINALIZADAS') =>
     key === 'FINALIZADAS' ? finalizedTotal : tabCounts[key];
@@ -107,24 +136,46 @@ export function OcFluxTabsNav({
   return (
     <div id="secao-fluxo-oc-tabs" className="scroll-mt-4">
       <div className="px-2 bg-transparent">
-        <nav className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2">
-          {visibleTabs.map((tab) => {
-            const active = activeTab === tab.id;
-            return (
-              <AppTabButton
-                key={tab.id}
-                active={active}
-                onClick={() => onActiveTab(tab.id)}
-                className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+        {[
+          { key: 'conecta', label: 'Fluxo Conecta', tabs: conectaTabs },
+          { key: 'totvs', label: 'Fluxo TOTVS', tabs: totvsTabs },
+        ]
+          .filter((row) => row.tabs.length > 0)
+          .map((row, idx) => (
+            <div
+              key={row.key}
+              className={idx > 0 ? 'border-t border-gray-200 dark:border-gray-700' : undefined}
+            >
+              {showFluxLabels ? (
+                <p className="pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500">
+                  {row.label}
+                </p>
+              ) : null}
+              <nav
+                aria-label={row.label}
+                className={`-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible sm:gap-x-2 ${
+                  showFluxLabels ? 'pb-3 pt-1.5' : 'py-3'
+                }`}
               >
-                {tab.label}
-                <span className="app-tab__badge">
-                  <TabCountBadge count={countFor(tab.countKey)} active={active} tone="red" />
-                </span>
-              </AppTabButton>
-            );
-          })}
-        </nav>
+                {row.tabs.map((tab) => {
+                  const active = activeTab === tab.id;
+                  return (
+                    <AppTabButton
+                      key={tab.id}
+                      active={active}
+                      onClick={() => onActiveTab(tab.id)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={countFor(tab.countKey)} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                  );
+                })}
+              </nav>
+            </div>
+          ))}
       </div>
     </div>
   );

@@ -237,6 +237,8 @@ export type FichaDemandaApprovalFormModalProps = {
   title?: string;
   /** Esconde o seletor de contrato (já vem preenchido, ex.: envio de dentro do contrato). */
   hideContractField?: boolean;
+  /** Obra já definida no orçamento de origem: mostrada sem edição. */
+  obraBloqueada?: boolean;
 };
 
 export function FichaDemandaApprovalFormModal({
@@ -248,6 +250,7 @@ export function FichaDemandaApprovalFormModal({
   isSaving = false,
   title,
   hideContractField = false,
+  obraBloqueada = false,
 }: FichaDemandaApprovalFormModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
@@ -471,37 +474,61 @@ export function FichaDemandaApprovalFormModal({
           <div className="space-y-6">
             <div className="space-y-4">
               <SectionTitle>Dados do Movimento</SectionTitle>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <FieldLabel required>Número de Movimento da RM</FieldLabel>
-                  <input
-                    type="text"
-                    value={form.numMovRm}
-                    onChange={(e) => setForm({ ...form, numMovRm: e.target.value })}
-                    placeholder="Ex.: 123456"
-                    className={fieldClass}
-                  />
+              <div>
+                <FieldLabel required>RM feita no TOTVS?</FieldLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  {([true, false] as const).map((val) => {
+                    const selected = form.rmFeita === val;
+                    return (
+                      <button
+                        key={String(val)}
+                        type="button"
+                        onClick={() => setForm({ ...form, rmFeita: val, ...(val ? {} : { numMovRm: '', idMovRm: '' }) })}
+                        className={`rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
+                          selected
+                            ? 'border-red-600 bg-red-600 text-white'
+                            : 'border-gray-300 bg-white text-gray-900 hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                        }`}
+                      >
+                        {val ? 'Sim' : 'Não'}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div>
-                  <FieldLabel required>ID de Movimento da RM</FieldLabel>
-                  <input
-                    type="text"
-                    value={form.idMovRm}
-                    onChange={(e) => setForm({ ...form, idMovRm: e.target.value })}
-                    placeholder="Ex.: 89660"
-                    className={fieldClass}
-                  />
+              </div>
+              {form.rmFeita === true && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <FieldLabel required>Número de Movimento da RM</FieldLabel>
+                    <input
+                      type="text"
+                      value={form.numMovRm}
+                      onChange={(e) => setForm({ ...form, numMovRm: e.target.value })}
+                      placeholder="Ex.: 123456"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel required>ID de Movimento da RM</FieldLabel>
+                    <input
+                      type="text"
+                      value={form.idMovRm}
+                      onChange={(e) => setForm({ ...form, idMovRm: e.target.value })}
+                      placeholder="Ex.: 89660"
+                      className={fieldClass}
+                    />
+                  </div>
                 </div>
-                <div className="sm:col-span-2">
-                  <FieldLabel required>Código do Pedido</FieldLabel>
-                  <input
-                    type="text"
-                    value={form.codigoPedido}
-                    onChange={(e) => setForm({ ...form, codigoPedido: e.target.value })}
-                    placeholder="Ex.: PED-001"
-                    className={fieldClass}
-                  />
-                </div>
+              )}
+              <div>
+                <FieldLabel required>Código do Pedido</FieldLabel>
+                <input
+                  type="text"
+                  value={form.codigoPedido}
+                  onChange={(e) => setForm({ ...form, codigoPedido: e.target.value })}
+                  placeholder="Ex.: PED-001"
+                  className={fieldClass}
+                />
               </div>
             </div>
 
@@ -525,6 +552,15 @@ export function FichaDemandaApprovalFormModal({
                   />
                 </div>
                 )}
+                {obraBloqueada ? (
+                <div>
+                  <FieldLabel required>Obra</FieldLabel>
+                  <p className="flex h-10 items-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm font-medium uppercase text-gray-900 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-100">
+                    {form.obra || '—'}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Definida no orçamento de origem.</p>
+                </div>
+                ) : (
                 <div>
                   <FieldLabel required>Obra</FieldLabel>
                   <StringSingleSelectDropdown
@@ -553,6 +589,7 @@ export function FichaDemandaApprovalFormModal({
                     }
                   />
                 </div>
+                )}
               </div>
             </div>
 
@@ -577,7 +614,7 @@ export function FichaDemandaApprovalFormModal({
                   />
                 </div>
                 <div>
-                  <FieldLabel required>Custo Estimado</FieldLabel>
+                  <FieldLabel required>Custo Estimado (40%)</FieldLabel>
                   <CurrencyStepperInput
                     value={form.custoEstimado}
                     onChange={(custoEstimado) => setForm({ ...form, custoEstimado })}
@@ -718,12 +755,12 @@ export function FichaDemandaApprovalFormModal({
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Salvando...
+                  Enviando...
                 </>
               ) : editingRecord ? (
                 'Salvar alterações'
               ) : (
-                'Salvar ficha'
+                'Enviar Ficha'
               )}
             </button>
           </div>

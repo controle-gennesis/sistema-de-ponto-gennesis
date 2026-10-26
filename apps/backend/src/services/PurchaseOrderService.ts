@@ -1,4 +1,5 @@
 import { prisma, getPrisma } from '../lib/prisma';
+import { observacaoParaTotvs, TOTVS_OC_OBSERVACAO_MAX } from '../lib/ocObservacaoTotvs';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
@@ -18,6 +19,7 @@ import {
 import {
   assertUserCanReturnOcItemToRm,
   assertUserCanReturnOrderToQuoteMap,
+  getUserOcFluxos,
   ocApprovalPhaseForStatus,
 } from '../lib/ocApprovalAccess';
 import {
@@ -35,12 +37,22 @@ import {
   toTotvsUnit,
   TOTVS_OC_PAYMENT_AVISTA,
 } from '../lib/ocTotvsRm';
-import { totvsRmMovimentoService } from './TotvsRmMovimentoService';
+import { TotvsLoginRecusadoError, totvsRmMovimentoService } from './TotvsRmMovimentoService';
 import { userTotvsCredentialService } from './UserTotvsCredentialService';
 import { ensurePurchaseOrderTotvsFields } from '../lib/ensureProductionSchema';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
+
+/** Status em que a OC enviada ao TOTVS pode ser reaberta para reenvio (antes do comprovante). */
+const TOTVS_RESEND_ALLOWED_STATUSES = new Set<string>([
+  'DRAFT',
+  'PENDING_COMPRAS',
+  'PENDING',
+  'PENDING_DIRETORIA',
+  'IN_REVIEW',
+  'APPROVED',
+]);
 
 /**
  * Transação com advisory lock + generateOrderNumber + create.
@@ -192,6 +204,29 @@ async function persistPurchaseOrderStockLocation(
     `;
   } catch (err) {
     console.warn('[OC] não gravou local de estoque (coluna ausente ou client antigo):', err);
+  }
+}
+
+/** OC nova com destino TOTVS: fluxo direto (sem aprovação do Conecta). Só OCs geradas daqui em diante. */
+async function marcarOcFluxoDiretoTotvs(orderId: string): Promise<void> {
+  try {
+    await prisma.$executeRaw`UPDATE purchase_orders SET "totvsFluxoDireto" = true WHERE id = ${orderId}`;
+  } catch (err) {
+    console.warn('[OC] não marcou fluxo direto TOTVS (coluna ausente ou client antigo):', err);
+  }
+}
+
+/** Grava (ou limpa, com null) o motivo da última falha de envio ao TOTVS. */
+async function registrarErroEnvioTotvs(orderId: string, erro: string | null): Promise<void> {
+  try {
+    await prisma.$executeRaw`
+      UPDATE purchase_orders
+      SET "totvsSendError" = ${erro},
+          "totvsSendErrorAt" = ${erro ? new Date() : null}
+      WHERE id = ${orderId}
+    `;
+  } catch (err) {
+    console.warn('[OC] não gravou o erro de envio ao TOTVS (coluna ausente ou client antigo):', err);
   }
 }
 
@@ -704,6 +739,8 @@ function buildCreationBoletoAutoReleaseData(
 
 export interface CreatePurchaseOrderData {
   materialRequestId?: string;
+  /** Destino escolhido na geração (Conecta ou TOTVS), conforme o fluxo de OC do usuário. */
+  totvsDestination?: string | null;
   quoteMapId?: string;
   supplierId: string;
   expectedDelivery?: Date;
@@ -730,6 +767,8 @@ export interface CreatePurchaseOrderData {
   /** @deprecated Ignorado: o total é sempre calculado como itens + frete. */
   amountToPay?: number;
   notes?: string;
+  /** Histórico da OC (TOTVS: TMOVHISTORICO.HISTORICOLONGO), até 500 caracteres. */
+  historico?: string | null;
   attachments?: Array<{ url: string; name: string }>;
   items: {
     materialRequestItemId?: string;
@@ -756,6 +795,7 @@ export interface UpdatePurchaseOrderDetailsData {
   stockLocationId?: string | null;
   totvsCodLoc?: string | null;
   notes?: string | null;
+  historico?: string | null;
   items?: {
     materialRequestItemId?: string | null;
     materialId: string;
@@ -764,6 +804,15 @@ export interface UpdatePurchaseOrderDetailsData {
     unitPrice: number;
     notes?: string | null;
   }[];
+}
+
+/** Histórico da OC: até 500 caracteres (vai para o TOTVS em TMOVHISTORICO.HISTORICOLONGO). */
+export const OC_HISTORICO_MAX = 500;
+
+function limitarHistoricoOc(texto: string | null | undefined): string | null {
+  const t = String(texto ?? '').trim();
+  if (!t) return null;
+  return t.slice(0, OC_HISTORICO_MAX);
 }
 
 /**
@@ -837,6 +886,7 @@ type PreparedOcCreateData = {
   totvsCodLoc: string | null;
   amountToPay: Decimal;
   notes: string | null;
+  historico: string | null;
   attachments?: Prisma.InputJsonValue;
   createdBy: string;
   items: { create: PreparedOcItemCreate[] };
@@ -944,7 +994,11 @@ const purchaseOrderIncludeDetail = {
       demandSheetAttachmentName: true,
       demandSheetAttachments: true,
       requester: true,
-      costCenter: true,
+      // Contratos do centro de custo: o detalhe da OC mostra o contrato (nome) separado do centro de custo.
+      costCenter: { include: { contracts: { select: { id: true, name: true, number: true, endDate: true } } } },
+      // Detalhe da OC mostra a situação e a data da RM de origem.
+      status: true,
+      createdAt: true,
       items: { include: { material: true } },
       quoteMaps: { orderBy: { createdAt: 'desc' as const }, take: 1 }
     }
@@ -1072,14 +1126,14 @@ export class PurchaseOrderService {
     }
     const itemsSum = items.reduce((s, row) => s.plus(row.totalPrice), new Decimal(0));
 
-    let totvsDestination: string | null = null;
+    // Destino da OC: escolha do usuário, limitada ao(s) fluxo(s) liberado(s) para ele.
+    const totvsDestination = await this.resolveDestinoEscolhido(data.totvsDestination, userId);
     let totvsCodFilial: number | null = parseTotvsFilial(data.totvsCodFilial);
     if (data.materialRequestId) {
       const rmCc = await prisma.materialRequest.findUnique({
         where: { id: data.materialRequestId },
         select: { costCenter: { select: { name: true, code: true, polo: true, state: true } } },
       });
-      totvsDestination = resolveOcDestinationFromCostCenter(rmCc?.costCenter?.name, rmCc?.costCenter?.code);
       if (totvsCodFilial == null) {
         totvsCodFilial = resolveTotvsFilialFromCostCenter(rmCc?.costCenter);
       }
@@ -1190,6 +1244,7 @@ export class PurchaseOrderService {
       totvsCodLoc: stockLocation.totvsCodLoc,
       amountToPay,
       notes: data.notes || null,
+      historico: limitarHistoricoOc(data.historico),
       attachments: (() => {
         const files = Array.isArray(data.attachments)
           ? data.attachments
@@ -1332,12 +1387,15 @@ export class PurchaseOrderService {
       const orderNumber = await generateOrderNumber(tx);
       return this.createRowInTx(tx, { ...createDataBase, orderNumber });
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
-    void this.notifyOcApprovers(order);
+    // Só OCs com destino TOTVS (mesma regra do envio automático); destino Conecta segue o fluxo normal.
+    const fluxoDireto = this.resolveCreatedOcDestination(order) === 'TOTVS';
+    if (fluxoDireto) await marcarOcFluxoDiretoTotvs(order.id);
+    else void this.notifyOcApprovers(order);
     await persistPurchaseOrderStockLocation(order.id, {
       stockLocationId: createDataBase.stockLocationId,
       totvsCodLoc: createDataBase.totvsCodLoc,
     });
-    return this.sendCreatedOrderToTotvsIfNeeded(order, userId);
+    return this.sendCreatedOrderToTotvsIfNeeded(Object.assign(order, { totvsFluxoDireto: fluxoDireto }), userId);
   }
 
   /**
@@ -1367,7 +1425,14 @@ export class PurchaseOrderService {
       }
       return rows;
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
-    for (const row of created) void this.notifyOcApprovers(row);
+    for (let i = 0; i < created.length; i++) {
+      if (this.resolveCreatedOcDestination(created[i]) === 'TOTVS') {
+        await marcarOcFluxoDiretoTotvs(created[i].id);
+        Object.assign(created[i], { totvsFluxoDireto: true });
+      } else {
+        void this.notifyOcApprovers(created[i]);
+      }
+    }
 
     for (let i = 0; i < created.length; i++) {
       await persistPurchaseOrderStockLocation(created[i].id, {
@@ -2071,9 +2136,17 @@ export class PurchaseOrderService {
   }
 
   async updateDetails(id: string, data: UpdatePurchaseOrderDetailsData, userId?: string) {
+    await ensurePurchaseOrderTotvsFields(prisma);
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, status: true, createdBy: true, freightAmount: true, totvsCodFilial: true }
+      select: {
+        id: true,
+        status: true,
+        createdBy: true,
+        freightAmount: true,
+        totvsCodFilial: true,
+        totvsResendOpenAt: true,
+      }
     });
 
     if (!order) {
@@ -2084,7 +2157,12 @@ export class PurchaseOrderService {
       throw new Error('Apenas o criador da OC pode editar a OC em correção');
     }
 
-    if (order.status !== 'IN_REVIEW') {
+    // Reaberta para reenvio ao TOTVS ou do fluxo direto ainda não enviada: edição liberada sem mudar o status.
+    if (
+      order.status !== 'IN_REVIEW' &&
+      !order.totvsResendOpenAt &&
+      !(await this.isFluxoDiretoNaoEnviado(id))
+    ) {
       throw new Error('A OC só pode ser editada durante a CORREÇÃO OC');
     }
 
@@ -2200,6 +2278,7 @@ export class PurchaseOrderService {
             : {}),
           amountToPay,
           notes: data.notes !== undefined ? data.notes : undefined,
+          historico: data.historico !== undefined ? limitarHistoricoOc(data.historico) : undefined,
           updatedAt: new Date()
         }
       });
@@ -2219,6 +2298,22 @@ export class PurchaseOrderService {
 
     const refreshed = await this.getById(id);
     return refreshed;
+  }
+
+  /**
+   * Usuário com os dois fluxos precisa escolher; com um só, o destino é esse fluxo.
+   * Não aceita destino de fluxo que o usuário não tem.
+   */
+  private async resolveDestinoEscolhido(escolhido: string | null | undefined, userId: string): Promise<'CONECTA' | 'TOTVS'> {
+    const fluxos = await getUserOcFluxos(userId);
+    const destino = String(escolhido || '').trim().toUpperCase();
+    if (destino === 'TOTVS' || destino === 'CONECTA') {
+      if (destino === 'TOTVS' && !fluxos.totvs) throw new Error('Sem permissão para gerar OC com destino TOTVS.');
+      if (destino === 'CONECTA' && !fluxos.conecta) throw new Error('Sem permissão para gerar OC com destino Conecta.');
+      return destino;
+    }
+    if (fluxos.conecta && fluxos.totvs) throw new Error('Selecione o destino da OC (Conecta ou TOTVS).');
+    return fluxos.totvs ? 'TOTVS' : 'CONECTA';
   }
 
   private resolveCreatedOcDestination(order: {
@@ -2248,11 +2343,18 @@ export class PurchaseOrderService {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       console.warn(`[TOTVS OC] OC ${order.orderNumber || order.id} criada no Conecta; POST RM falhou: ${detail}`);
-      return Object.assign(order, { totvsSendError: detail });
+      // sendToTotvs já gravou o motivo; a OC fica em "TOTVS - OC's não enviadas" para ajuste e envio.
+      return Object.assign(order, { totvsSendError: detail, totvsSendErrorAt: new Date() });
     }
   }
 
-  async sendToTotvs(id: string, userId: string) {
+  /**
+   * Conferência antes do envio ao TOTVS — só dados do Conecta, sem nenhuma chamada ao RM.
+   * Cabeçalho (vale para a OC inteira) conferido uma vez; cada item só no que é dele.
+   * Devolve TODOS os problemas de uma vez e os dados prontos para o envio.
+   */
+  private async prepararEnvioTotvs(id: string) {
+    await ensurePurchaseOrderTotvsFields(prisma);
     const order: any = await prisma.purchaseOrder.findUnique({
       where: { id },
       include: {
@@ -2287,23 +2389,26 @@ export class PurchaseOrderService {
         )
         .filter((mid: string | null): mid is string => Boolean(mid));
       if (cmIds.length) {
-        const prds = await prisma.$queryRaw<Array<{ id: string; totvsIdPrd: number | null }>>`
-          SELECT id, "totvsIdPrd" FROM construction_materials WHERE id IN (${Prisma.join(cmIds)})
+        const prds = await prisma.$queryRaw<Array<{ id: string; totvsIdPrd: number | null; unit: string | null }>>`
+          SELECT id, "totvsIdPrd", unit FROM construction_materials WHERE id IN (${Prisma.join(cmIds)})
         `;
-        const byId = new Map(prds.map((row) => [row.id, row.totvsIdPrd]));
+        const byId = new Map(prds.map((row) => [row.id, row]));
         for (const item of order.items || []) {
           const cmId = constructionMaterialIdFromSinapi(item.material?.sinapiCode);
-          const idPrd = cmId ? byId.get(cmId) : null;
-          if (idPrd != null && item.material) {
-            item.material.totvsIdPrd = idPrd;
+          const cadastro = cmId ? byId.get(cmId) : null;
+          if (cadastro && item.material) {
+            if (cadastro.totvsIdPrd != null) item.material.totvsIdPrd = cadastro.totvsIdPrd;
+            // Unidade do produto no RM (sincronizada em Materiais e Serviços).
+            item.material.totvsUnit = cadastro.unit;
           }
         }
       }
     } catch {
       /* coluna totvsIdPrd pode ainda não existir */
     }
+    const cabecalho: string[] = [];
     if (order.totvsIdMov) {
-      throw new Error(
+      cabecalho.push(
         `Esta OC já foi enviada ao TOTVS (IdMov ${order.totvsIdMov}). O Conecta não altera movimento existente no RM.`
       );
     }
@@ -2315,53 +2420,130 @@ export class PurchaseOrderService {
         order.materialRequest?.costCenter?.code
       );
     if (destination !== 'TOTVS') {
-      throw new Error('Esta OC segue o fluxo no Conecta e não é enviada ao TOTVS');
+      cabecalho.push('Esta OC segue o fluxo no Conecta e não é enviada ao TOTVS.');
     }
 
     const centroCusto = (order.materialRequest?.costCenter?.code || '').trim();
     if (!centroCusto) {
-      throw new Error('Centro de custo da RM sem código TOTVS. Cadastre o código do CC no Conecta.');
+      cabecalho.push('Centro de custo da RM sem código TOTVS. Cadastre o código do CC no Conecta.');
     }
     const fornecedorCodigo = toTotvsCodCfo(order.supplier?.code);
     if (!fornecedorCodigo) {
-      throw new Error('Fornecedor sem código TOTVS. Cadastre o código do fornecedor no Conecta.');
+      cabecalho.push('Fornecedor sem código TOTVS. Cadastre o código do fornecedor no Conecta.');
     }
     const tipoFrete = (order.freightType || '').trim().toUpperCase();
     if (!isTotvsFreightType(tipoFrete)) {
-      throw new Error('Tipo de frete é obrigatório para enviar ao TOTVS');
+      cabecalho.push('Tipo de frete não informado.');
     }
     const condicaoPagamento = toTotvsPaymentCondition(order.paymentCondition, order.paymentType);
     if (!condicaoPagamento) {
-      throw new Error('Condição de pagamento é obrigatória para enviar ao TOTVS');
+      cabecalho.push('Condição de pagamento não informada.');
+    } else {
+      if (order.paymentType === 'AVISTA' && condicaoPagamento !== TOTVS_OC_PAYMENT_AVISTA) {
+        cabecalho.push('Pagamento à vista exige a condição 001 — A VISTA SEM PRAZO.');
+      }
+      // Só confere contra a lista sincronizada do RM quando ela existe (lista vazia = sincronização pendente).
+      const condicoes = await prisma.paymentCondition.findMany({ where: { isActive: true }, select: { code: true } });
+      if (condicoes.length && !condicoes.some((c) => c.code.trim() === condicaoPagamento)) {
+        cabecalho.push(`Condição de pagamento ${condicaoPagamento} não está na lista de condições do TOTVS.`);
+      }
     }
-    if (order.paymentType === 'AVISTA' && condicaoPagamento !== TOTVS_OC_PAYMENT_AVISTA) {
-      throw new Error('Para teste à vista no TOTVS use a condição 001 — A VISTA SEM PRAZO');
+
+    const filial =
+      parseTotvsFilial((order as { totvsCodFilial?: number | null }).totvsCodFilial) ??
+      resolveTotvsFilialFromCostCenter(order.materialRequest?.costCenter);
+
+    const codLoc =
+      String((order as { totvsCodLoc?: string | null }).totvsCodLoc || '').trim() ||
+      String((order as { stockLocation?: { code?: string | null } | null }).stockLocation?.code || '').trim();
+    if (!codLoc) {
+      cabecalho.push('Local de estoque não informado.');
+    } else {
+      const locaisDaFilial = await prisma.stockLocation.findMany({
+        where: { filial: Number(filial) || 1, isActive: true },
+        select: { code: true },
+      });
+      if (locaisDaFilial.length && !locaisDaFilial.some((l) => l.code.trim() === codLoc)) {
+        cabecalho.push(`Local de estoque ${codLoc} não pertence à filial ${filial} do TOTVS.`);
+      }
+    }
+
+    const valorFrete =
+      order.freightAmount != null && String(order.freightAmount).trim() !== '' ? Number(order.freightAmount) : 0;
+    if (!Number.isFinite(valorFrete) || valorFrete < 0) {
+      cabecalho.push('Valor do frete inválido.');
+    } else if (valorFrete > 0) {
+      const frete = await prisma.constructionMaterial.findFirst({
+        where: { code: '14.01.0001' },
+        select: { totvsIdPrd: true, unit: true },
+      });
+      if (!frete?.totvsIdPrd) {
+        cabecalho.push(
+          'OC com frete: cadastre o Identificador (IDPRD) do FRETE GERAL (14.01.0001) em Materiais e Serviços.'
+        );
+      }
+    }
+
+    const historicoOc = String(order.historico || '').trim();
+    if (historicoOc.length > OC_HISTORICO_MAX) {
+      cabecalho.push(`Histórico da OC com ${historicoOc.length} caracteres — máximo ${OC_HISTORICO_MAX}.`);
+    }
+    const observacaoTotvs = observacaoParaTotvs(order.notes);
+    if (observacaoTotvs.length > TOTVS_OC_OBSERVACAO_MAX) {
+      cabecalho.push(
+        `Observações da OC com ${observacaoTotvs.length} caracteres — o TOTVS aceita no máximo ${TOTVS_OC_OBSERVACAO_MAX}. Resuma o texto.`
+      );
     }
 
     const [hydrated] = await withPurchaseOrderCatalogCodes([order]);
+    const itensOc = hydrated.items || [];
+    if (!itensOc.length) cabecalho.push('A OC não tem itens.');
+
+    const itensComProblema: Array<{ item: number; codigo: string; descricao: string; problemas: string[] }> = [];
     const items = [];
-    for (const [index, item] of (hydrated.items || []).entries()) {
+    for (const [index, item] of itensOc.entries()) {
       const catalogCode = (item.material?.code || '').trim();
       const sinapi = (item.material?.sinapiCode || '').trim();
       const produtoCodigo = catalogCode || (!sinapi.startsWith('CM-') ? sinapi : '');
       const descricao = (item.material?.description || item.material?.name || '').trim();
-      if (!produtoCodigo) {
-        throw new Error(
-          `Item ${index + 1}: cadastre o código do produto TOTVS no material. O código interno CM-* não existe no RM.`
+      const totvsIdPrd = Number((item.material as { totvsIdPrd?: number | null } | undefined)?.totvsIdPrd);
+      const unidade = toTotvsUnit(item.unit);
+      const quantidade = Number(item.quantity);
+      const precoUnitario = Number(item.unitPrice);
+
+      const problemas: string[] = [];
+      if (!produtoCodigo) problemas.push('sem código do produto TOTVS no cadastro do material');
+      if (!descricao) problemas.push('sem descrição');
+      if (!(Number.isFinite(totvsIdPrd) && totvsIdPrd > 0)) {
+        problemas.push('sem Identificador (IDPRD) em Materiais e Serviços');
+      }
+      if (!unidade) problemas.push('sem unidade de medida');
+      // O RM não converte entre unidades: a unidade do item precisa ser a do produto no TOTVS.
+      const unidadeCadastro = toTotvsUnit((item.material as { totvsUnit?: string | null } | undefined)?.totvsUnit);
+      if (unidade && unidadeCadastro && unidade !== unidadeCadastro) {
+        problemas.push(
+          `unidade da OC (${item.unit || unidade}) diferente da unidade do produto no TOTVS (${unidadeCadastro}) — ajuste a OC para ${unidadeCadastro}, com a quantidade equivalente`
         );
       }
-      if (!descricao) {
-        throw new Error(`Item ${index + 1}: descrição completa do item é obrigatória`);
+      if (!(Number.isFinite(quantidade) && quantidade > 0)) problemas.push('quantidade deve ser maior que zero');
+      if (!(Number.isFinite(precoUnitario) && precoUnitario > 0)) problemas.push('valor unitário deve ser maior que zero');
+      if (problemas.length) {
+        itensComProblema.push({
+          item: index + 1,
+          codigo: produtoCodigo || '—',
+          descricao: descricao || item.material?.name || '',
+          problemas,
+        });
       }
-      const totvsIdPrd = Number((item.material as { totvsIdPrd?: number | null } | undefined)?.totvsIdPrd);
+
       items.push({
         sequencial: index + 1,
         produtoCodigo,
         produtoId: Number.isFinite(totvsIdPrd) && totvsIdPrd > 0 ? totvsIdPrd : undefined,
         descricao,
-        unidade: toTotvsUnit(item.unit),
-        quantidade: Number(item.quantity),
-        precoUnitario: Number(item.unitPrice),
+        unidade,
+        quantidade,
+        precoUnitario,
         centroCusto,
       });
     }
@@ -2375,21 +2557,85 @@ export class PurchaseOrderService {
       .filter((v) => v && String(v).trim())
       .join(' | ');
 
-    const filial =
-      parseTotvsFilial((order as { totvsCodFilial?: number | null }).totvsCodFilial) ??
-      resolveTotvsFilialFromCostCenter(order.materialRequest?.costCenter);
+    return {
+      cabecalho,
+      itensComProblema,
+      totalItens: itensOc.length,
+      dados: {
+        order,
+        centroCusto,
+        fornecedorCodigo,
+        tipoFrete,
+        condicaoPagamento,
+        filial,
+        codLoc,
+        valorFrete,
+        items,
+        bancoAgPix,
+      },
+    };
+  }
 
-    const codLoc =
-      String((order as { totvsCodLoc?: string | null }).totvsCodLoc || '').trim() ||
-      String((order as { stockLocation?: { code?: string | null } | null }).stockLocation?.code || '').trim();
-    if (!codLoc) {
-      throw new Error('Informe o local de estoque da OC.');
+  /** Conferência para a tela: lista todos os problemas antes do envio (sem chamar o TOTVS). */
+  async conferirEnvioTotvs(id: string) {
+    const prep = await this.prepararEnvioTotvs(id);
+    return {
+      ok: prep.cabecalho.length === 0 && prep.itensComProblema.length === 0,
+      cabecalho: prep.cabecalho,
+      itens: prep.itensComProblema,
+      totalItens: prep.totalItens,
+    };
+  }
+
+  /** Envia a OC ao TOTVS; se falhar, grava o motivo na OC (mostrado em "TOTVS - OC's não enviadas"). */
+  async sendToTotvs(id: string, userId: string) {
+    try {
+      return await this.sendToTotvsSemRegistro(id, userId);
+    } catch (err) {
+      await registrarErroEnvioTotvs(id, err instanceof Error ? err.message : String(err));
+      throw err;
     }
+  }
+
+  private async sendToTotvsSemRegistro(id: string, userId: string) {
+    // Mesma conferência da tela: se houver qualquer problema, nada é enviado ao TOTVS.
+    const prep = await this.prepararEnvioTotvs(id);
+    if (prep.cabecalho.length || prep.itensComProblema.length) {
+      const partes: string[] = [];
+      if (prep.cabecalho.length) partes.push(`Cabeçalho: ${prep.cabecalho.join(' ')}`);
+      if (prep.itensComProblema.length) {
+        const lista = prep.itensComProblema
+          .slice(0, 10)
+          .map((i) => `item ${i.item} (${i.codigo}): ${i.problemas.join(', ')}`)
+          .join('; ');
+        const resto = prep.itensComProblema.length > 10 ? ` e mais ${prep.itensComProblema.length - 10} item(ns)` : '';
+        partes.push(`Itens: ${lista}${resto}.`);
+      }
+      throw new Error(`OC não enviada ao TOTVS. Corrija antes de enviar — ${partes.join(' | ')}`);
+    }
+    const {
+      order,
+      centroCusto,
+      fornecedorCodigo,
+      tipoFrete,
+      condicaoPagamento,
+      filial,
+      codLoc,
+      valorFrete,
+      items,
+      bancoAgPix,
+    } = prep.dados;
 
     const totvsCreds = await userTotvsCredentialService.getCredentialsForUser(userId);
     if (!totvsCreds) {
       throw new Error(
         'Vincule o seu usuário TOTVS em Ordens de Compra (botão Vincular meu usuário Totvs). Cada pessoa usa apenas o próprio login; sem vínculo pessoal a OC não é enviada.'
+      );
+    }
+    // Senha já recusada pelo TOTVS: não tenta de novo (cada recusa conta para o bloqueio do usuário no RM).
+    if (totvsCreds.rejected) {
+      throw new Error(
+        'OC não enviada: o TOTVS recusou a senha vinculada no Conecta. Para não bloquear seu usuário no RM, nenhum envio é feito com ela. Atualize a senha em "Vincular meu usuário Totvs" e envie de novo.'
       );
     }
 
@@ -2403,18 +2649,20 @@ export class PurchaseOrderService {
         codLoc,
         condicaoPagamento,
         tipoFrete,
-        valorFrete:
-          order.freightAmount != null && String(order.freightAmount).trim() !== ''
-            ? Number(order.freightAmount)
-            : 0,
+        valorFrete,
         dataEmissao: order.orderDate,
         dataEntrega: order.expectedDelivery,
         observacao: order.notes,
+        historico: (order.historico || '').trim() || null,
         bancoAgPix: bancoAgPix || null,
         items,
       },
       totvsCreds
-    );
+    ).catch(async (err) => {
+      // 401: trava a senha vinculada até o usuário atualizar (evita novas recusas que bloqueiam o RM).
+      if (err instanceof TotvsLoginRecusadoError) await userTotvsCredentialService.markRejected(userId);
+      throw err;
+    });
 
     const sentData = {
       totvsIdMov: saved.idMov,
@@ -2423,6 +2671,8 @@ export class PurchaseOrderService {
       totvsSentAt: new Date(),
       totvsSentBy: userId,
       totvsDestination: 'TOTVS',
+      totvsResendOpenAt: null,
+      totvsResendOpenBy: null,
     };
     try {
       await prisma.purchaseOrder.update({
@@ -2435,6 +2685,121 @@ export class PurchaseOrderService {
         data: sentData,
       });
     }
+    await registrarErroEnvioTotvs(id, null);
+
+    return this.getById(id);
+  }
+
+  async isTotvsResendOpenForCreator(id: string, userId: string): Promise<boolean> {
+    await ensurePurchaseOrderTotvsFields(prisma);
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: { createdBy: true, totvsResendOpenAt: true },
+    });
+    if (!order || order.createdBy !== userId) return false;
+    if (order.totvsResendOpenAt) return true;
+    // Fluxo direto ainda não enviado: quem gerou ajusta e envia.
+    return this.isFluxoDiretoNaoEnviado(id);
+  }
+
+  /** OC do fluxo direto TOTVS ainda sem movimento no RM (e não cancelada/reprovada). */
+  async isFluxoDiretoNaoEnviado(id: string): Promise<boolean> {
+    try {
+      const rows = await prisma.$queryRaw<Array<{ ok: boolean }>>`
+        SELECT ("totvsFluxoDireto" = true AND "totvsIdMov" IS NULL
+                AND status NOT IN ('CANCELLED', 'REJECTED')) AS ok
+        FROM purchase_orders WHERE id = ${id}
+      `;
+      return !!rows[0]?.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Reabre OC já enviada ao TOTVS (ex.: cancelada no Fluig) para ajuste e novo envio.
+   * O movimento antigo vai para `totvsPreviousMovs`; o Conecta não altera nem cancela o RM.
+   * O status da OC não muda.
+   */
+  async reopenForTotvsResend(id: string, userId: string, isAdmin: boolean) {
+    if (!userId) throw new Error('Usuário não autenticado');
+    await ensurePurchaseOrderTotvsFields(prisma);
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        createdBy: true,
+        paymentProofUrl: true,
+        totvsIdMov: true,
+        totvsNumMovimento: true,
+        totvsCodColigada: true,
+        totvsSentAt: true,
+        totvsSentBy: true,
+        totvsResendOpenAt: true,
+        totvsPreviousMovs: true,
+      },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+    if (!isAdmin && order.createdBy !== userId) {
+      throw new Error('Sem permissão: apenas quem criou a OC pode reabri-la para reenvio ao TOTVS');
+    }
+    if (!order.totvsIdMov) {
+      throw new Error('Esta OC não tem envio ao TOTVS para reabrir');
+    }
+    if (!TOTVS_RESEND_ALLOWED_STATUSES.has(order.status)) {
+      throw new Error(
+        'Só é possível reabrir para reenvio OC em aprovação, correção ou aprovada (antes do comprovante)'
+      );
+    }
+    if (order.paymentProofUrl) {
+      throw new Error('Não é possível reabrir para reenvio OC com comprovante de pagamento anexado');
+    }
+    const launchCount = await prisma.financialControlEntry.count({
+      where: { ocNumber: { equals: order.orderNumber, mode: 'insensitive' } },
+    });
+    if (launchCount > 0) {
+      throw new Error('Não é possível reabrir para reenvio OC com lançamento financeiro');
+    }
+
+    const now = new Date();
+    const previous = Array.isArray(order.totvsPreviousMovs) ? order.totvsPreviousMovs : [];
+    const entry = {
+      idMov: order.totvsIdMov,
+      numMovimento: order.totvsNumMovimento,
+      codColigada: order.totvsCodColigada,
+      sentAt: order.totvsSentAt ? order.totvsSentAt.toISOString() : null,
+      sentBy: order.totvsSentBy,
+      reopenedAt: now.toISOString(),
+      reopenedBy: userId,
+    };
+    const movLabel = order.totvsNumMovimento
+      ? `IdMov ${order.totvsIdMov} · ${order.totvsNumMovimento}`
+      : `IdMov ${order.totvsIdMov}`;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.purchaseOrder.update({
+        where: { id },
+        data: {
+          totvsPreviousMovs: [...previous, entry] as Prisma.InputJsonValue,
+          totvsIdMov: null,
+          totvsNumMovimento: null,
+          totvsSentAt: null,
+          totvsSentBy: null,
+          totvsResendOpenAt: now,
+          totvsResendOpenBy: userId,
+          updatedAt: now,
+        },
+      });
+      await tx.purchaseOrderComment.create({
+        data: {
+          purchaseOrderId: id,
+          userId,
+          content: `OC reaberta para ajuste e reenvio ao TOTVS. Movimento anterior (${movLabel}) informado como cancelado no Fluig.`,
+        },
+      });
+    });
 
     return this.getById(id);
   }

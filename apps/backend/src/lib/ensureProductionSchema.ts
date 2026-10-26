@@ -72,6 +72,14 @@ async function ensurePleitoBudgetAdditives(prisma: PrismaClient): Promise<void> 
   `);
 }
 
+async function ensurePleitoObra(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'pleitos', 'obra')) return;
+  console.warn('[Schema] Coluna pleitos.obra ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "obra" TEXT;
+  `);
+}
+
 async function ensurePleitoBudgetValueConfirmed(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'pleitos', 'budgetValueConfirmed')) return;
   console.warn('[Schema] Coluna pleitos.budgetValueConfirmed ausente — adicionando.');
@@ -331,6 +339,14 @@ async function ensurePurchaseOrderCommentsTable(prisma: PrismaClient): Promise<v
   } catch {
     /* constraint already exists */
   }
+}
+
+async function ensureDemandSheetItensPedidos(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'demand_sheet_approvals', 'itensPedidos')) return;
+  console.warn('[Schema] Coluna demand_sheet_approvals.itensPedidos ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "itensPedidos" JSONB NOT NULL DEFAULT '[]';
+  `);
 }
 
 async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
@@ -728,7 +744,15 @@ let userTotvsCredentialsTablePromise: Promise<void> | null = null;
 export async function ensureUserTotvsCredentialsTable(prisma: PrismaClient): Promise<void> {
   if (!userTotvsCredentialsTablePromise) {
     userTotvsCredentialsTablePromise = (async () => {
-      if (await tableExists(prisma, 'user_totvs_credentials')) return;
+      if (await tableExists(prisma, 'user_totvs_credentials')) {
+        if (!(await columnExists(prisma, 'user_totvs_credentials', 'rejectedAt'))) {
+          console.warn('[Schema] Coluna rejectedAt em user_totvs_credentials ausente — adicionando.');
+          await prisma.$executeRawUnsafe(`
+            ALTER TABLE "user_totvs_credentials" ADD COLUMN IF NOT EXISTS "rejectedAt" TIMESTAMP(3);
+          `);
+        }
+        return;
+      }
       console.warn('[Schema] Tabela user_totvs_credentials ausente — criando.');
       await prisma.$executeRawUnsafe(`
         CREATE TABLE IF NOT EXISTS "user_totvs_credentials" (
@@ -738,6 +762,7 @@ export async function ensureUserTotvsCredentialsTable(prisma: PrismaClient): Pro
           "totvsPasswordEnc" TEXT NOT NULL,
           "linkedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
           "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "rejectedAt" TIMESTAMP(3),
           CONSTRAINT "user_totvs_credentials_pkey" PRIMARY KEY ("id")
         );
       `);
@@ -760,6 +785,29 @@ export async function ensureUserTotvsCredentialsTable(prisma: PrismaClient): Pro
     });
   }
   await userTotvsCredentialsTablePromise;
+}
+
+let contractBillingMeasurementPromise: Promise<void> | null = null;
+
+/** Medição do faturamento (código, início e fim) em contract_billings. */
+export async function ensureContractBillingMeasurementColumns(prisma: PrismaClient): Promise<void> {
+  if (!contractBillingMeasurementPromise) {
+    contractBillingMeasurementPromise = (async () => {
+      if (!(await tableExists(prisma, 'contract_billings'))) return;
+      if (await columnExists(prisma, 'contract_billings', 'measurementCode')) return;
+      console.warn('[Schema] Colunas de medição em contract_billings ausentes — adicionando.');
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "contract_billings"
+          ADD COLUMN IF NOT EXISTS "measurementCode" TEXT,
+          ADD COLUMN IF NOT EXISTS "measurementStart" TIMESTAMP(3),
+          ADD COLUMN IF NOT EXISTS "measurementEnd" TIMESTAMP(3);
+      `);
+    })().catch((err) => {
+      contractBillingMeasurementPromise = null;
+      throw err;
+    });
+  }
+  await contractBillingMeasurementPromise;
 }
 
 let purchaseOrderTotvsFieldsPromise: Promise<void> | null = null;
@@ -808,6 +856,31 @@ export async function ensurePurchaseOrderTotvsFields(prisma: PrismaClient): Prom
         await prisma.$executeRawUnsafe(`
           CREATE INDEX IF NOT EXISTS "purchase_orders_stockLocationId_idx"
           ON "purchase_orders"("stockLocationId");
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'historico'))) {
+        console.warn('[Schema] Coluna historico em purchase_orders ausente — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "historico" TEXT;
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'totvsFluxoDireto'))) {
+        console.warn('[Schema] Colunas do fluxo direto TOTVS em purchase_orders ausentes — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "totvsFluxoDireto" BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS "totvsSendError" TEXT,
+            ADD COLUMN IF NOT EXISTS "totvsSendErrorAt" TIMESTAMP(3);
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'totvsResendOpenAt'))) {
+        console.warn('[Schema] Colunas de reenvio TOTVS em purchase_orders ausentes — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "totvsResendOpenAt" TIMESTAMP(3),
+            ADD COLUMN IF NOT EXISTS "totvsResendOpenBy" TEXT,
+            ADD COLUMN IF NOT EXISTS "totvsPreviousMovs" JSONB;
         `);
       }
     })().catch((err) => {
@@ -3054,8 +3127,22 @@ export async function ensureSupplierOriginColumn(prisma: PrismaClient): Promise<
   `);
 }
 
+async function ensureStockLocationCostCenter(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'stock_locations', 'costCenterId')) return;
+  console.warn('[Schema] Coluna stock_locations.costCenterId ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "stock_locations" ADD COLUMN IF NOT EXISTS "costCenterId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "stock_locations_costCenterId_idx" ON "stock_locations"("costCenterId");
+  `);
+}
+
 export async function ensureStockLocationsTable(prisma: PrismaClient): Promise<void> {
-  if (await tableExists(prisma, 'stock_locations')) return;
+  if (await tableExists(prisma, 'stock_locations')) {
+    await ensureStockLocationCostCenter(prisma);
+    return;
+  }
   console.warn('[Schema] Tabela stock_locations ausente — criando automaticamente.');
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "stock_locations" (
@@ -3083,6 +3170,7 @@ export async function ensureStockLocationsTable(prisma: PrismaClient): Promise<v
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "stock_locations_isActive_idx" ON "stock_locations"("isActive");
   `);
+  await ensureStockLocationCostCenter(prisma);
 }
 
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
@@ -3098,15 +3186,18 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureContractOrcafascioClientId(prisma);
     await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
+    await ensurePleitoObra(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);
     await ensurePurchaseOrderCommentsTable(prisma);
     await ensureDemandSheetApprovals(prisma);
+    await ensureDemandSheetItensPedidos(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);
     await ensureUserTotvsCredentialsTable(prisma);
+    await ensureContractBillingMeasurementColumns(prisma);
     await ensureConstructionMaterialTotvsIdPrd(prisma);
     await ensureConstructionMaterialTotvsAvgPaid(prisma);
     await ensureStockLocationsTable(prisma);

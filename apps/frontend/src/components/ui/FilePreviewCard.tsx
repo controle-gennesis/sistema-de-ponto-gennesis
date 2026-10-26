@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, Eye, FileText, Loader2, Trash2, Upload, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
@@ -26,6 +27,10 @@ function isPdfFile(file: FilePreviewCardFile): boolean {
   );
 }
 
+function isSpreadsheetFile(file: FilePreviewCardFile): boolean {
+  return /\.(xlsx?|csv)$/i.test(file.originalName || '');
+}
+
 function fileExtLabel(name: string): string {
   const ext = name.split('.').pop()?.toUpperCase();
   return ext && ext.length <= 5 ? ext : 'ARQ';
@@ -34,7 +39,7 @@ function fileExtLabel(name: string): string {
 const cardActionBtnCls =
   'inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white shadow-sm backdrop-blur-sm hover:bg-black/75';
 
-type PreviewKind = 'image' | 'pdf' | 'other';
+type PreviewKind = 'image' | 'pdf' | 'spreadsheet' | 'other';
 
 type Props = {
   file: FilePreviewCardFile;
@@ -58,6 +63,7 @@ export function FilePreviewCard({
   const href = resolveApiMediaUrl(file.fileUrl);
   const image = isImageFile(file);
   const pdf = isPdfFile(file);
+  const spreadsheet = isSpreadsheetFile(file);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<PreviewKind | null>(null);
   const [pdfThumb, setPdfThumb] = useState<string | null>(null);
@@ -66,6 +72,9 @@ export function FilePreviewCard({
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
   const [pdfPreviewError, setPdfPreviewError] = useState(false);
+  const [spreadsheetHtml, setSpreadsheetHtml] = useState<string | null>(null);
+  const [spreadsheetLoading, setSpreadsheetLoading] = useState(false);
+  const [spreadsheetError, setSpreadsheetError] = useState(false);
 
   useEffect(() => {
     if (!href || !pdf) return;
@@ -152,10 +161,43 @@ export function FilePreviewCard({
     };
   }, [lightbox, href]);
 
+  useEffect(() => {
+    if (lightbox !== 'spreadsheet' || !href) {
+      setSpreadsheetHtml(null);
+      setSpreadsheetLoading(false);
+      setSpreadsheetError(false);
+      return;
+    }
+    let cancelled = false;
+    setSpreadsheetLoading(true);
+    setSpreadsheetError(false);
+    setSpreadsheetHtml(null);
+    (async () => {
+      try {
+        const response = await fetch(href);
+        if (!response.ok) throw new Error('Falha ao baixar planilha');
+        const buffer = await response.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const sheets = wb.SheetNames.map((name) => {
+          const ws = wb.Sheets[name];
+          const html = XLSX.utils.sheet_to_html(ws, { id: `sheet-${name}` });
+          return `<h3 style="margin:16px 0 8px;font-size:14px;font-weight:600;">${name}</h3>${html}`;
+        });
+        if (!cancelled) setSpreadsheetHtml(sheets.join(''));
+      } catch {
+        if (!cancelled) setSpreadsheetError(true);
+      } finally {
+        if (!cancelled) setSpreadsheetLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [lightbox, href]);
+
   const openPreview = () => {
     if (!href) return;
     if (image) setLightbox('image');
     else if (pdf) setLightbox('pdf');
+    else if (spreadsheet) setLightbox('spreadsheet');
     else setLightbox('other');
   };
 
@@ -357,6 +399,28 @@ export function FilePreviewCard({
                       title={file.originalName}
                       src={pdfPreviewUrl}
                       className="h-[80vh] w-[min(90vw,900px)] rounded-xl bg-white"
+                    />
+                  )
+                ) : lightbox === 'spreadsheet' ? (
+                  spreadsheetLoading ? (
+                    <div className="flex h-[80vh] w-[min(90vw,900px)] items-center justify-center rounded-xl bg-white">
+                      <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                    </div>
+                  ) : spreadsheetError || !spreadsheetHtml ? (
+                    <div className="max-w-md rounded-xl border border-gray-700 bg-gray-900 p-6 text-center text-white">
+                      <p className="mb-4 text-sm">Não foi possível pré-visualizar esta planilha.</p>
+                      <a
+                        href={href}
+                        download={file.originalName}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                      >
+                        Baixar
+                      </a>
+                    </div>
+                  ) : (
+                    <div
+                      className="h-[80vh] w-[min(90vw,1100px)] overflow-auto rounded-xl bg-white p-4 text-gray-900 text-xs [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_th]:font-medium"
+                      dangerouslySetInnerHTML={{ __html: spreadsheetHtml }}
                     />
                   )
                 ) : (

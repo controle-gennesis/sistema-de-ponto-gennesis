@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CreditCard, Plus, Search, X } from 'lucide-react';
+import { CreditCard, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
@@ -19,6 +19,7 @@ import { Loading } from '@/components/ui/Loading';
 import { ListPagination } from '@/components/ui/ListPagination';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { liberaEmDoErro, useAtualizarBaseTotvs } from '@/hooks/useAtualizarBaseTotvs';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { deletePaymentCondition } from '@/lib/paymentConditions';
 import {
@@ -82,21 +83,31 @@ export default function CondicoesPagamentoPage() {
     }
   });
 
-  const { mutate: runTotvsSync } = useMutation({
+  // Consulta o TOTVS só quando o usuário pede (a base também é atualizada sozinha de madrugada e às 12:30).
+  const atualizarBase = useAtualizarBaseTotvs('condicoes-pagamento');
+  const { mutate: runTotvsSync, isPending: isSyncingTotvs } = useMutation({
     mutationFn: async () => {
-      const res = await api.post('/payment-conditions/sync-totvs');
+      atualizarBase.bloquear();
+      const res = await api.post('/payment-conditions/sync-totvs', null, { params: { force: 'true' } });
+      atualizarBase.bloquear(res.data?.liberaEm);
       return (res.data?.data || {}) as { created?: number; updated?: number };
     },
     onSuccess: (result) => {
-      if ((result.created ?? 0) > 0 || (result.updated ?? 0) > 0) {
-        queryClient.invalidateQueries({ queryKey: ['payment-conditions'] });
+      queryClient.invalidateQueries({ queryKey: ['payment-conditions'] });
+      toast.success(
+        `Base de condições de pagamento atualizada: ${result.created ?? 0} nova(s), ${result.updated ?? 0} atualizada(s).`
+      );
+    },
+    onError: (error: unknown) => {
+      const bloqueio = liberaEmDoErro(error);
+      if (bloqueio.bloqueio) {
+        atualizarBase.bloquear(bloqueio.liberaEm);
+        toast.error(bloqueio.mensagem || 'Esta base já foi atualizada há pouco. Aguarde para atualizar de novo.');
+        return;
       }
+      toast.error('Não foi possível atualizar com o TOTVS agora. Tente novamente mais tarde.');
     }
   });
-
-  useEffect(() => {
-    runTotvsSync();
-  }, [runTotvsSync]);
 
   const filtered = useMemo(() => {
     return (listData || []).filter((r) => {
@@ -332,6 +343,16 @@ export default function CondicoesPagamentoPage() {
                       </button>
                     ) : null}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => runTotvsSync()}
+                    disabled={isSyncingTotvs || atualizarBase.bloqueado}
+                    className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title={atualizarBase.dica}
+                  >
+                    <RefreshCw className={`h-4 w-4 shrink-0 ${isSyncingTotvs ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingTotvs ? 'Atualizando…' : atualizarBase.rotulo}</span>
+                  </button>
                   {canCreate && (
                   <button
                     type="button"

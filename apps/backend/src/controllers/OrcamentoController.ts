@@ -6,6 +6,7 @@ import {
   type GerarSubServicosInput
 } from '../services/OrcamentoCronogramaSubServicoService';
 import { AuthRequest } from '../middleware/auth';
+import { prisma } from '../lib/prisma';
 
 const orcamentoService = new OrcamentoService();
 const cronogramaSubServicoService = new OrcamentoCronogramaSubServicoService();
@@ -186,7 +187,67 @@ export class OrcamentoController {
       if (!centroCustoId || !orcamentoId) {
         return res.status(400).json({ message: 'centroCustoId e orcamentoId são obrigatórios' });
       }
+      // FD já lançada para aprovação (aguardando aprovação ou aprovada): ninguém exclui o orçamento.
+      const fdsLancadas = await prisma.demandSheetApproval.findMany({
+        where: { status: { in: ['WAITING_MANAGER', 'APPROVED'] } },
+        select: { id: true, anexos: true },
+      });
+      const temFdLancada = fdsLancadas.some((fd) => {
+        if (!Array.isArray(fd.anexos)) return false;
+        return (fd.anexos as Array<Record<string, unknown>>).some(
+          (a) =>
+            a?.kind === 'orcamento-ref' &&
+            String(a.centroCustoId || '') === centroCustoId &&
+            String(a.orcamentoId || '') === orcamentoId
+        );
+      });
+      let statusOrcamento = '';
+      try {
+        const index = await orcamentoService.getIndex(centroCustoId);
+        statusOrcamento = String(
+          index.orcamentos.find((o) => o.id === orcamentoId)?.statusAprovacao || ''
+        ).toLowerCase();
+      } catch {
+        /* sem índice: vale a verificação pelas FDs */
+      }
+      if (temFdLancada || statusOrcamento === 'aguardando_aprovacao' || statusOrcamento === 'aprovado') {
+        return res.status(400).json({
+          message: 'Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada para aprovação.',
+        });
+      }
+
       await orcamentoService.deleteOrcamento(centroCustoId, orcamentoId);
+
+      // Cancelar FDs pendentes/rejeitadas vinculadas a este orçamento
+      try {
+        const allFds = await prisma.demandSheetApproval.findMany({
+          where: { status: { in: ['WAITING_MANAGER', 'APPROVED', 'REJECTED'] } },
+          select: { id: true, anexos: true },
+        });
+        const idsToCancel = allFds
+          .filter((fd) => {
+            if (!Array.isArray(fd.anexos)) return false;
+            return (fd.anexos as Array<Record<string, unknown>>).some(
+              (a) =>
+                a?.kind === 'orcamento-ref' &&
+                String(a.centroCustoId || '') === centroCustoId &&
+                String(a.orcamentoId || '') === orcamentoId
+            );
+          })
+          .map((fd) => fd.id);
+        if (idsToCancel.length > 0) {
+          await prisma.demandSheetApproval.updateMany({
+            where: { id: { in: idsToCancel } },
+            data: {
+              status: 'CANCELLED',
+              managerRejectionComment: 'Cancelada por exclusão de orçamento',
+            },
+          });
+        }
+      } catch {
+        // Não impede a exclusão do orçamento
+      }
+
       return res.json({ success: true });
     } catch (err: unknown) {
       const e = err as { message?: string };

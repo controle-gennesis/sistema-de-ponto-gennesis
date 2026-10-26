@@ -198,6 +198,8 @@ export async function upsertBillingFromPleitoFaturamento(
     grossValue: number;
     netValue: number;
     issueDate: Date;
+    /** Medição faturada (código e período). */
+    medicao?: { measurementCode: string; measurementStart: Date; measurementEnd: Date };
   }
 ) {
   const existing = await tx.contractBilling.findFirst({
@@ -215,7 +217,8 @@ export async function upsertBillingFromPleitoFaturamento(
         issueDate: params.issueDate,
         grossValue: params.grossValue,
         netValue: params.netValue,
-        divSe: params.serviceOrder.trim()
+        divSe: params.serviceOrder.trim(),
+        ...(params.medicao ?? {})
       }
     });
   }
@@ -229,7 +232,8 @@ export async function upsertBillingFromPleitoFaturamento(
       serviceOrder: params.serviceOrder.trim(),
       divSe: params.serviceOrder.trim(),
       grossValue: params.grossValue,
-      netValue: params.netValue
+      netValue: params.netValue,
+      ...(params.medicao ?? {})
     }
   });
 }

@@ -4,6 +4,8 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
 import { assertContractAccess } from '../lib/contractAccess';
+import { ensureContractBillingMeasurementColumns } from '../lib/ensureProductionSchema';
+import { parseMedicaoFaturamento as parseMedicao } from '../utils/contractBillingMedicao';
 import {
   assertOsBillingAmountWithoutPleito,
   assertPleitoBillingAmount,
@@ -30,6 +32,7 @@ export class ContractBillingController {
       const { contractId } = req.params;
 
       await assertContractAccess(req, contractId);
+      await ensureContractBillingMeasurementColumns(prisma);
 
       const contract = await prisma.contract.findUnique({
         where: { id: contractId }
@@ -74,6 +77,8 @@ export class ContractBillingController {
       if (!invoiceNumber?.trim()) {
         throw createError('Número da nota fiscal é obrigatório', 400);
       }
+      const medicao = parseMedicao(req.body);
+      await ensureContractBillingMeasurementColumns(prisma);
 
       const gross = parseRequiredMoney(grossValue, 'Valor bruto');
       const net = parseRequiredMoney(netValue, 'Valor líquido');
@@ -116,7 +121,8 @@ export class ContractBillingController {
             serviceOrder: serviceOrderTrimmed,
             divSe: serviceOrderTrimmed || null,
             grossValue: gross,
-            netValue: net
+            netValue: net,
+            ...medicao
           }
         });
 
@@ -173,6 +179,15 @@ export class ContractBillingController {
         const so = String(serviceOrder).trim();
         updateData.serviceOrder = so;
         updateData.divSe = so;
+      }
+      // Medição: na edição, se vier algum campo, os três precisam estar preenchidos.
+      if (
+        req.body.measurementCode !== undefined ||
+        req.body.measurementStart !== undefined ||
+        req.body.measurementEnd !== undefined
+      ) {
+        await ensureContractBillingMeasurementColumns(prisma);
+        Object.assign(updateData, parseMedicao(req.body));
       }
       if (grossValue !== undefined) updateData.grossValue = parseRequiredMoney(grossValue, 'Valor bruto');
       if (netValue !== undefined) {

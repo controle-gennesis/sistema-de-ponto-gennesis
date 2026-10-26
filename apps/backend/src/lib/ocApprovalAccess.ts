@@ -1,4 +1,9 @@
-import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
+import {
+  OC_FLUXO_CONECTA_MODULE_KEY,
+  OC_FLUXO_TOTVS_MODULE_KEY,
+  pathToModuleKey,
+  PERMISSION_ACCESS_ACTION,
+} from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import {
@@ -45,6 +50,26 @@ async function userHasModule(userId: string, module: string): Promise<boolean> {
     where: { userId, module, action: PERMISSION_ACCESS_ACTION, allowed: true },
   });
   return !!row;
+}
+
+/**
+ * Fluxos de OC do usuário (Permissões › Suprimentos › Ordens de Compra).
+ * Admin: os dois. Sem nenhum marcado: só Conecta.
+ */
+export async function getUserOcFluxos(userId: string): Promise<{ conecta: boolean; totvs: boolean }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { employee: { select: { position: true } } },
+  });
+  if ((user?.employee?.position || '').toLowerCase() === 'administrador') {
+    return { conecta: true, totvs: true };
+  }
+  const [conecta, totvs] = await Promise.all([
+    userHasModule(userId, OC_FLUXO_CONECTA_MODULE_KEY),
+    userHasModule(userId, OC_FLUXO_TOTVS_MODULE_KEY),
+  ]);
+  if (!conecta && !totvs) return { conecta: true, totvs: false };
+  return { conecta, totvs };
 }
 
 /** Admin ou qualquer módulo de fluxo/aprovação de OC no Controle → listagem sem filtro de gestor. */

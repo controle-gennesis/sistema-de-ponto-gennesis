@@ -368,6 +368,11 @@ export function usePermissions() {
 
   const canApproveOcCompras =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
+  /** Fluxo de OC (Suprimentos › Ordens de Compra). Admin: os dois. Nenhum marcado: só Conecta. */
+  const ocFluxoAdmin = isAdministrator || !!permissionData?.isAdmin;
+  const ocFluxoTotvs = ocFluxoAdmin || can(pk('/ponto/controle/oc-fluxo-totvs'));
+  const ocFluxoConecta =
+    ocFluxoAdmin || can(pk('/ponto/controle/oc-fluxo-conecta')) || !ocFluxoTotvs;
   const canApproveOcDiretoria =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-diretoria'));
   const hasLegacyRmApproveControle =
@@ -633,6 +638,8 @@ export function usePermissions() {
     canApproveOcCompras,
     canApproveOcDiretoria,
     canApproveOcGestor,
+    ocFluxoConecta,
+    ocFluxoTotvs,
     canActOcAttachBoleto,
     canActOcPayment,
     canActOcValidateProof,

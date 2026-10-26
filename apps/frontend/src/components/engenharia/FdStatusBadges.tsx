@@ -29,7 +29,9 @@ export function FdStatusBadges({ record }: { record: FichaDemandaApprovalRecord 
 
   return (
     <span className={`${badgeBase} ${fdStatusBadgeClass(record.status)}`}>
-      {FD_STATUS_LABELS[record.status]}
+      {record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
+        ? 'FD Cancelada por exclusão de orçamento'
+        : FD_STATUS_LABELS[record.status]}
     </span>
   );
 }

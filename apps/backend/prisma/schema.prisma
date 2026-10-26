@@ -120,6 +120,7 @@ model User {
   demandSheetApprovalsAsSolicitante         DemandSheetApproval[]                @relation("DemandSheetApprovalSolicitante")
   demandSheetApprovalsManagerApproved       DemandSheetApproval[]                @relation("DemandSheetApprovalManager")
   demandSheetApprovalsPurchaseStatusUpdated DemandSheetApproval[]                @relation("DemandSheetApprovalPurchaseStatusUpdater")
+  demandSheetApprovalsPedidosEncerrados    DemandSheetApproval[]                @relation("FdPedidosEncerrados")
   materialDeliveriesCreated                 MaterialDelivery[]                   @relation("MaterialDeliveryCreator")
   materialDeliveriesReceived                MaterialDelivery[]                   @relation("MaterialDeliveryReceiver")
   fuelRefuelRequestsRequested               FuelRefuelRequest[]                  @relation("FuelRefuelRequester")
@@ -172,6 +173,8 @@ model UserTotvsCredential {
   totvsUser        String
   totvsPasswordEnc String
   linkedAt         DateTime @default(now())
+  /// O TOTVS recusou esta senha (401). Nenhum envio usa a senha até o usuário vincular de novo.
+  rejectedAt       DateTime?
   updatedAt        DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1235,6 +1238,8 @@ model StockLocation {
   name      String
   polo      String?
   filial    Int // 1 DF, 5 GO
+  /// Centro de custo do local (cadastro do Conecta; não vai para o TOTVS).
+  costCenterId String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1245,6 +1250,7 @@ model StockLocation {
   @@index([code])
   @@index([filial])
   @@index([isActive])
+  @@index([costCenterId])
   @@map("stock_locations")
 }
 
@@ -1506,6 +1512,8 @@ model DemandSheetApproval {
   dataHora                DateTime
   polo                    String
   anexos                  Json                       @default("[]")
+  /// Itens da FD já solicitados em RM (pedido parcial): [{ fdItemKey, fdItem, descricao, requestNumber, materialRequestId, requestedAt, requestedBy }]
+  itensPedidos            Json                       @default("[]")
   status                  DemandSheetApprovalStatus  @default(WAITING_MANAGER)
   createdBy               String
   managerApprovedBy       String?
@@ -1516,6 +1524,9 @@ model DemandSheetApproval {
   purchaseStatus          DemandSheetPurchaseStatus?
   purchaseStatusUpdatedBy String?
   purchaseStatusUpdatedAt DateTime?
+  pedidosEncerrados       Boolean                    @default(false)
+  pedidosEncerradosBy     String?
+  pedidosEncerradosAt     DateTime?
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
 
@@ -1524,6 +1535,7 @@ model DemandSheetApproval {
   creator               User     @relation("DemandSheetApprovalCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   managerApprover       User?    @relation("DemandSheetApprovalManager", fields: [managerApprovedBy], references: [id], onDelete: SetNull)
   purchaseStatusUpdater User?    @relation("DemandSheetApprovalPurchaseStatusUpdater", fields: [purchaseStatusUpdatedBy], references: [id], onDelete: SetNull)
+  pedidosEncerradosUser User?    @relation("FdPedidosEncerrados", fields: [pedidosEncerradosBy], references: [id], onDelete: SetNull)
 
   @@index([contratoId])
   @@index([solicitanteId])
@@ -1604,6 +1616,10 @@ model ContractBilling {
   divSe         String? // OS / SE
   grossValue    Decimal  @db.Decimal(15, 2) // Valor bruto
   netValue      Decimal  @db.Decimal(15, 2) // Valor lÃ­quido
+  /// Medição faturada: código e período (obrigatórios em lançamentos novos; antigos ficam vazios).
+  measurementCode  String?
+  measurementStart DateTime?
+  measurementEnd   DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -1652,6 +1668,8 @@ model Pleito {
   lot                String? // Lote
   divSe              String? // Div SE
   location           String? // Local
+  /// Obra da OS (cadastro de obras do contrato) — informada quando a OS é criada fora do fluxo do orçamento.
+  obra               String?
   unit               String? // Unidade
   serviceDescription String    @db.Text // DescriÃ§Ã£o do serviÃ§o
   budget             String? // OrÃ§amento (referÃªncia/texto)
@@ -1670,6 +1688,8 @@ model Pleito {
   budgetAdditives    Json?
   /// Confirmação explícita do valor do orçamento na OS (cadastro/detalhe em Contratos).
   budgetValueConfirmed Boolean @default(false)
+  /// ID do orçamento vinculado a esta OS (UUID do índice de orçamentos do centro de custo).
+  linkedOrcamentoId    String?
   pv                 String? // RVI â FEITO ou PENDENTE
   ipi                String? // RVF â FEITO ou PENDENTE
   reportsBilling     String? // CobranÃ§a laudos
@@ -2135,7 +2155,20 @@ model PurchaseOrder {
   totvsNumMovimento          String?
   totvsSentAt                DateTime?
   totvsSentBy                String?
-  amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
+  /// Histórico da OC (vai para o TOTVS em TMOVHISTORICO.HISTORICOLONGO), até 500 caracteres.
+  historico                  String?             @db.Text
+  /// OC gerada com destino TOTVS a partir do fluxo direto: não passa pela aprovação do Conecta.
+  /// Fica em "TOTVS - OC's não enviadas" até o envio dar certo; depois em "TOTVS - OC's enviadas".
+  totvsFluxoDireto           Boolean             @default(false)
+  /// Motivo da última falha de envio ao TOTVS (limpo quando o envio dá certo).
+  totvsSendError             String?             @db.Text
+  totvsSendErrorAt           DateTime?
+  /// OC reaberta para ajuste e reenvio ao TOTVS (ex.: cancelada no Fluig). Limpo ao reenviar.
+  totvsResendOpenAt          DateTime?
+  totvsResendOpenBy          String?
+  /// Movimentos TOTVS anteriores: [{ idMov, numMovimento, codColigada, sentAt, sentBy, reopenedAt, reopenedBy }]
+  totvsPreviousMovs          Json?
+  amountToPay               Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
   notes                      String?
   /// [{ url, name }] â anexos gerais na criaÃ§Ã£o da OC
   attachments                Json?

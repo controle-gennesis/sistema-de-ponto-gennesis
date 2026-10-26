@@ -25,6 +25,7 @@ import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import api from '@/lib/api';
+import { useFdMaterialRequestIds } from '@/hooks/useFdMaterialRequestIds';
 import toast from 'react-hot-toast';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import type { MaterialRequest } from '../_lib/types';
@@ -153,6 +154,7 @@ export function MaterialRequestsRmList({
   onDetails: (r: MaterialRequest) => void;
 }) {
   const queryClient = useQueryClient();
+  const fdRequestIds = useFdMaterialRequestIds();
   const [listCurrentPage, setListCurrentPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<MaterialRequest | null>(null);
@@ -480,6 +482,14 @@ export function MaterialRequestsRmList({
                           <ListRowNavigableLabel className="font-medium">
                             {formatRmListDisplayId(request.requestNumber)}
                           </ListRowNavigableLabel>
+                          {fdRequestIds.has(request.id) && (
+                            <span
+                              className="ml-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                              title="RM criada pela Ficha de Demanda"
+                            >
+                              FD
+                            </span>
+                          )}
                         </td>
                         <td className={tdTextCls}>
                           <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>

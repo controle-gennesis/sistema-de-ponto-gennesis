@@ -141,11 +141,15 @@ export function AsyncSearchSelectDropdown<T>({
     setFloatingPos(computeFloatingPos(triggerRef.current));
   }, []);
 
+  // Rolagem volta ao topo só ao abrir a lista, não a cada atualização das opções.
+  useLayoutEffect(() => {
+    if (open && listRef.current) listRef.current.scrollTop = 0;
+  }, [open]);
+
   useLayoutEffect(() => {
     if (!open) return;
 
     syncFloatingPos();
-    if (listRef.current) listRef.current.scrollTop = 0;
 
     const onScroll = (e: Event) => {
       if (panelRef.current?.contains(e.target as Node)) return;

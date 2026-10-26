@@ -13,7 +13,8 @@ import {
   Upload,
   Download,
   FileSpreadsheet,
-  CheckCircle
+  CheckCircle,
+  RefreshCw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
@@ -37,6 +38,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { liberaEmDoErro, useAtualizarBaseTotvs } from '@/hooks/useAtualizarBaseTotvs';
 import {
   SUPPLIER_IMPORT_COLUMNS,
   downloadSupplierImportTemplate,
@@ -375,23 +377,31 @@ export default function FornecedoresPage() {
     }
   });
 
-  // Ao abrir a tela, puxa novidades do TOTVS (sem duplicar) e atualiza a lista.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        await api.post('/suppliers/sync-totvs', null, { timeout: 300_000 });
-        if (!cancelled) {
-          await queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-        }
-      } catch {
-        /* sync em background — falha não bloqueia a tela */
+  // Consulta o TOTVS só quando o usuário pede (a base também é atualizada sozinha de madrugada e às 12:30).
+  const atualizarBase = useAtualizarBaseTotvs('fornecedores');
+  const { mutate: runSupplierSync, isPending: isSyncingTotvs } = useMutation({
+    mutationFn: async () => {
+      atualizarBase.bloquear();
+      const res = await api.post('/suppliers/sync-totvs', null, { params: { force: '1' }, timeout: 300_000 });
+      atualizarBase.bloquear(res.data?.liberaEm);
+      return (res.data?.data || {}) as { created?: number; updated?: number };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.success(
+        `Base de fornecedores atualizada: ${result.created ?? 0} nova(s), ${result.updated ?? 0} atualizada(s).`
+      );
+    },
+    onError: (error: unknown) => {
+      const bloqueio = liberaEmDoErro(error);
+      if (bloqueio.bloqueio) {
+        atualizarBase.bloquear(bloqueio.liberaEm);
+        toast.error(bloqueio.mensagem || 'Esta base já foi atualizada há pouco. Aguarde para atualizar de novo.');
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [queryClient]);
+      toast.error('Não foi possível atualizar com o TOTVS agora. Tente novamente mais tarde.');
+    },
+  });
 
   useEffect(() => {
     setCurrentPage(1);
@@ -768,6 +778,16 @@ export default function FornecedoresPage() {
                     {hasActiveSupplierFilters ? (
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => runSupplierSync()}
+                    disabled={isSyncingTotvs || atualizarBase.bloqueado}
+                    className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title={atualizarBase.dica}
+                  >
+                    <RefreshCw className={`h-4 w-4 shrink-0 ${isSyncingTotvs ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingTotvs ? 'Atualizando…' : atualizarBase.rotulo}</span>
                   </button>
                   {canCreate && (
                   <button

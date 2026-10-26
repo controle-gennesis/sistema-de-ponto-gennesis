@@ -90,7 +90,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   pronta: 'FD pronta',
   aguardando_aprovacao: 'Aguardando aprovação',
   aprovado: 'Aprovado',
-  em_correcao: 'Em correção',
+  em_correcao: 'Reprovada',
   reprovado: 'Reprovado',
   finalizado: 'Finalizado',
 };
@@ -135,7 +135,7 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
     case 'aprovado':
       return `${base} bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200`;
     case 'em_correcao':
-      return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
+      return `${base} bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
     case 'reprovado':
       return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
     case 'finalizado':
@@ -443,8 +443,9 @@ export default function OrcamentosPage() {
       toast.success('Orçamento excluído.');
       setDeleteTarget(null);
       await queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
-    } catch {
-      toast.error('Não foi possível excluir o orçamento.');
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(apiMsg || 'Não foi possível excluir o orçamento.');
     } finally {
       setIsDeleting(false);
     }
@@ -675,6 +676,14 @@ export default function OrcamentosPage() {
                       }}
                       onDelete={() => {
                         closeRowActionMenu();
+                        // FD já lançada para aprovação: o orçamento não pode mais ser excluído.
+                        if (
+                          rowForActionMenu.status === 'aguardando_aprovacao' ||
+                          rowForActionMenu.status === 'aprovado'
+                        ) {
+                          toast.error('Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada para aprovação.');
+                          return;
+                        }
                         setDeleteTarget(rowForActionMenu);
                       }}
                     />

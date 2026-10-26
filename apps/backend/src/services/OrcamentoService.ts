@@ -28,6 +28,8 @@ export interface OrcamentoIndexEntry {
   osCodigo?: string;
   /** Número da pasta, espelhado da meta. */
   numeroPasta?: string;
+  /** Obra informada ao iniciar/importar o orçamento, espelhada da meta. */
+  obra?: string;
   /** Progresso físico do cronograma (%), espelhado de meta.cronogramaResumo. */
   cronogramaProgressoFisico?: number;
   /** Etapas concluídas no cronograma. */
@@ -118,12 +120,14 @@ function extractListaFinanceiroFromMeta(meta: Record<string, unknown> | undefine
 }
 
 function extractOsPastaFromMeta(meta: Record<string, unknown> | undefined): {
+  obra: string;
   osCodigo: string;
   numeroPasta: string;
 } {
   const osCodigo = typeof meta?.osCodigo === 'string' ? meta.osCodigo.trim() : '';
   const numeroPasta = typeof meta?.numeroPasta === 'string' ? meta.numeroPasta.trim() : '';
-  return { osCodigo, numeroPasta };
+  const obra = typeof meta?.obra === 'string' ? meta.obra.trim() : '';
+  return { osCodigo, numeroPasta, obra };
 }
 
 function extractCronogramaResumoFromMeta(meta: Record<string, unknown> | undefined): {
@@ -479,6 +483,7 @@ export class OrcamentoService {
               : fin.totalComBdi ?? o.totalComBdi ?? 0,
           osCodigo: osPasta.osCodigo,
           numeroPasta: osPasta.numeroPasta,
+          obra: osPasta.obra,
         };
         if (
           next.bdiPercentual !== o.bdiPercentual ||
@@ -896,6 +901,7 @@ export class OrcamentoService {
               ...(finFromMeta.totalComBdi !== undefined ? { totalComBdi: finFromMeta.totalComBdi } : {}),
               osCodigo: osPastaFromMeta.osCodigo,
               numeroPasta: osPastaFromMeta.numeroPasta,
+              obra: osPastaFromMeta.obra,
               ...(cronoFromMeta.cronogramaProgressoFisico !== undefined
                 ? {
                     cronogramaProgressoFisico: cronoFromMeta.cronogramaProgressoFisico,
@@ -920,7 +926,8 @@ export class OrcamentoService {
   async updateStatusAprovacao(
     centroCustoId: string,
     orcamentoId: string,
-    statusAprovacao: string
+    statusAprovacao: string,
+    fichaDemandaApprovalId?: string
   ): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
     const existing: Partial<OrcamentoData> =
@@ -939,6 +946,7 @@ export class OrcamentoService {
         meta: {
           ...metaRaw,
           statusAprovacao,
+          ...(fichaDemandaApprovalId ? { fichaDemandaApprovalId } : {}),
         },
       },
     });
@@ -1106,6 +1114,7 @@ export class OrcamentoService {
       totalComBdi: origemNorm.totalComBdi,
       osCodigo: origemNorm.osCodigo,
       numeroPasta: origemNorm.numeroPasta,
+      obra: origemNorm.obra,
       cronogramaProgressoFisico: origemNorm.cronogramaProgressoFisico,
       cronogramaConcluido: origemNorm.cronogramaConcluido,
       cronogramaTotalEtapas: origemNorm.cronogramaTotalEtapas,

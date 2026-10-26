@@ -8,11 +8,15 @@ export type TotvsLinkStatus = {
   linked: boolean;
   totvsUser: string | null;
   linkedAt: string | null;
+  /** O TOTVS recusou a senha vinculada: o envio fica bloqueado até vincular de novo. */
+  rejectedAt: string | null;
 };
 
 export type TotvsUserCredentials = {
   user: string;
   pass: string;
+  /** Senha já recusada pelo TOTVS — não pode ser usada até vincular de novo. */
+  rejected?: boolean;
 };
 
 function newCredentialId(): string {
@@ -29,21 +33,22 @@ export class UserTotvsCredentialService {
   async getStatus(userId: string): Promise<TotvsLinkStatus> {
     await ensureUserTotvsCredentialsTable(prisma);
     const rows = await prisma.$queryRaw<
-      Array<{ totvsUser: string; linkedAt: Date | string | null }>
+      Array<{ totvsUser: string; linkedAt: Date | string | null; rejectedAt: Date | string | null }>
     >`
-      SELECT "totvsUser", "linkedAt"
+      SELECT "totvsUser", "linkedAt", "rejectedAt"
       FROM "user_totvs_credentials"
       WHERE "userId" = ${userId}
       LIMIT 1
     `;
     const row = rows[0];
     if (!row?.totvsUser) {
-      return { linked: false, totvsUser: null, linkedAt: null };
+      return { linked: false, totvsUser: null, linkedAt: null, rejectedAt: null };
     }
     return {
       linked: true,
       totvsUser: row.totvsUser,
       linkedAt: row.linkedAt ? new Date(row.linkedAt).toISOString() : null,
+      rejectedAt: row.rejectedAt ? new Date(row.rejectedAt).toISOString() : null,
     };
   }
 
@@ -63,7 +68,8 @@ export class UserTotvsCredentialService {
         "totvsUser" = EXCLUDED."totvsUser",
         "totvsPasswordEnc" = EXCLUDED."totvsPasswordEnc",
         "linkedAt" = NOW(),
-        "updatedAt" = NOW()
+        "updatedAt" = NOW(),
+        "rejectedAt" = NULL
     `;
     return this.getStatus(userId);
   }
@@ -73,7 +79,19 @@ export class UserTotvsCredentialService {
     await prisma.$executeRaw`
       DELETE FROM "user_totvs_credentials" WHERE "userId" = ${userId}
     `;
-    return { linked: false, totvsUser: null, linkedAt: null };
+    return { linked: false, totvsUser: null, linkedAt: null, rejectedAt: null };
+  }
+
+  /**
+   * O TOTVS recusou a senha vinculada (401): bloqueia o uso dela até o usuário vincular de novo.
+   * Assim cada senha errada gera no máximo uma recusa no RM — várias recusas bloqueiam o usuário lá.
+   */
+  async markRejected(userId: string): Promise<void> {
+    await ensureUserTotvsCredentialsTable(prisma);
+    await prisma.$executeRaw`
+      UPDATE "user_totvs_credentials" SET "rejectedAt" = NOW(), "updatedAt" = NOW()
+      WHERE "userId" = ${userId}
+    `;
   }
 
   /** Somente uso interno no envio da OC — nunca expor em resposta HTTP. */
@@ -81,9 +99,9 @@ export class UserTotvsCredentialService {
     if (!userId?.trim()) return null;
     await ensureUserTotvsCredentialsTable(prisma);
     const rows = await prisma.$queryRaw<
-      Array<{ totvsUser: string; totvsPasswordEnc: string }>
+      Array<{ totvsUser: string; totvsPasswordEnc: string; rejectedAt: Date | string | null }>
     >`
-      SELECT "totvsUser", "totvsPasswordEnc"
+      SELECT "totvsUser", "totvsPasswordEnc", "rejectedAt"
       FROM "user_totvs_credentials"
       WHERE "userId" = ${userId}
       LIMIT 1
@@ -93,6 +111,7 @@ export class UserTotvsCredentialService {
     return {
       user: row.totvsUser.trim(),
       pass: decryptTotvsSecret(row.totvsPasswordEnc),
+      rejected: !!row.rejectedAt,
     };
   }
 }

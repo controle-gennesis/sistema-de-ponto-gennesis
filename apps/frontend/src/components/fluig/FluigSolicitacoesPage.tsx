@@ -1484,6 +1484,11 @@ export function FluigSolicitacoesPage({
       ?? columns.find((c: string) => /^titulo_solicitacao$/i.test(c))
       ?? columns.find((c: string) => /^descricao$/i.test(c))
       ?? 'historico';
+    // G3 e G4: a lista mostra "Produtos Mobile" no lugar do histórico (se o dataset tiver a coluna).
+    const produtosMobileCol =
+      datasetId === 'DataSet_G3FollowUp' || datasetId === 'DataSet_G4FollowUp'
+        ? columns.find((c: string) => /^produtos[_\s-]*mobile$/i.test(c.trim())) ?? null
+        : null;
     const byStatus: Record<string, { label: string; rows: Record<string, unknown>[] }> = {};
     if (statusCol) {
       values.forEach((row: Record<string, unknown>) => {
@@ -1539,7 +1544,7 @@ export function FluigSolicitacoesPage({
     } else {
       statusList.sort(([, a], [, b]) => b.length - a.length);
     }
-    return { statusList, idCol, historicoCol, statusCol };
+    return { statusList, idCol, historicoCol, produtosMobileCol, statusCol };
   }
 
   const currentQuery = datasetQueries[activeTab];
@@ -1690,7 +1695,7 @@ export function FluigSolicitacoesPage({
     return formatWorkflowValorDisplay(readFluigDatasetValor(row, columns, datasetId));
   };
 
-  const { statusList: fullStatusList, idCol, historicoCol, statusCol } = useMemo(
+  const { statusList: fullStatusList, idCol, historicoCol, produtosMobileCol, statusCol } = useMemo(
     () => buildStatusList(currentValuesFilteredByFilial, currentColumns),
     [currentValuesFilteredByFilial, currentColumns, datasetId]
   );
@@ -2520,13 +2525,24 @@ export function FluigSolicitacoesPage({
               const showEtapaColumn = etapaAtual === FLUIG_TODOS_ETAPA_LABEL;
               const showLeadTimeColumn = !!movimentoDataHoraCol && !isEtapaSemLeadTime(etapaAtual);
               const getHistText = (r: Record<string, unknown>) => {
-                const val = r[historicoCol];
+                const val = r[produtosMobileCol ?? historicoCol];
                 if (val == null) return '—';
-                if (typeof val === 'object' && val !== null) {
-                  const o = val as Record<string, unknown>;
-                  return String(o.display ?? o.displayValue ?? o.value ?? val);
-                }
-                return String(val);
+                const texto =
+                  typeof val === 'object' && val !== null
+                    ? String(
+                        (val as Record<string, unknown>).display ??
+                          (val as Record<string, unknown>).displayValue ??
+                          (val as Record<string, unknown>).value ??
+                          val
+                      )
+                    : String(val);
+                if (!produtosMobileCol) return texto;
+                // Produtos Mobile vem como "ITEM A | ITEM B | ITEM C |": tira o separador sobrando no fim.
+                const produtos = texto
+                  .split('|')
+                  .map((p) => p.trim())
+                  .filter(Boolean);
+                return produtos.length ? produtos.join(' | ') : '—';
               };
               return (
                 <div className="space-y-5">
@@ -2705,7 +2721,11 @@ export function FluigSolicitacoesPage({
                       const listShowResponsavel = useEmployeeListLayout && !!responsavelCol;
                       const thPad = 'py-4';
                       const tdPad = 'py-3';
-                      const solicitacaoHeader = g5TitleDatasets.has(datasetId) ? 'Título da Solicitação' : 'Histórico';
+                      const solicitacaoHeader = produtosMobileCol
+                        ? 'Produtos Mobile'
+                        : g5TitleDatasets.has(datasetId)
+                          ? 'Título da Solicitação'
+                          : 'Histórico';
                       const emptyColSpan = useEmployeeListLayout
                         ? 4 +
                           (showEtapaColumn ? 1 : 0) +

@@ -48,10 +48,8 @@ import {
   catalogMaterialLabel,
   formatDateTime,
   materialProductCode,
-  purchaseOrderLineSubtitle,
-  rmContractDisplay
+  purchaseOrderLineSubtitle
 } from '@/app/ponto/gerenciar-materiais/_lib/display';
-import type { MaterialRequest } from '@/app/ponto/gerenciar-materiais/_lib/types';
 import { stripOsSePrefix } from '@/lib/formatOsSePasta';
 import { parseRmDemandSheetAttachments } from '@/lib/rmDemandSheetAttachments';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -82,7 +80,7 @@ import { ymdAddDays } from '@/components/oc/boletoParcelasUtils';
 import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
 import { canReturnOcItemToRm } from '@/lib/rmProcurementCoverage';
 import { isUnbRelatedLabel } from '@/lib/unbBranding';
-import { resolveOcDestinationFromCostCenter, TOTVS_OC_PAYMENT_AVISTA } from '@/lib/ocTotvsDestination';
+import { resolveOcDestinationFromCostCenter, TOTVS_FREIGHT_TYPES, TOTVS_OC_PAYMENT_AVISTA } from '@/lib/ocTotvsDestination';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   filterRowsByAllowedCostCenterIds,
@@ -123,6 +121,11 @@ import {
 import {
   purchaseOrderPhaseLabel,
 } from '@/components/oc/ocStatusLabels';
+import {
+  isOcFluxoDiretoTotvs,
+  isOcTotvsEnviada,
+  isOcTotvsNaoEnviada,
+} from '@/components/oc/ocTotvsFluxoDireto';
 import {
   type StockMovementForOcTag,
   normalizeOcNumberKey,
@@ -198,6 +201,8 @@ export interface PurchaseOrder {
   expectedDelivery?: string;
   deliveryAddress?: string | null;
   notes?: string | null;
+  /** Histórico da OC (vai para o TOTVS no histórico do movimento). */
+  historico?: string | null;
   paymentType?: string | null;
   paymentCondition?: string | null;
   paymentDetails?: string | null;
@@ -228,6 +233,14 @@ export interface PurchaseOrder {
   totvsDestination?: string | null;
   totvsIdMov?: number | null;
   totvsNumMovimento?: string | null;
+  /** OC reaberta para ajuste e reenvio ao TOTVS (ex.: cancelada no Fluig). */
+  totvsResendOpenAt?: string | null;
+  /** Fluxo direto TOTVS (sem aprovação do Conecta). */
+  totvsFluxoDireto?: boolean | null;
+  /** Motivo da última falha de envio ao TOTVS. */
+  totvsSendError?: string | null;
+  totvsSendErrorAt?: string | null;
+  totvsPreviousMovs?: Array<{ idMov: number; numMovimento?: string | null; reopenedAt?: string | null }> | null;
   totvsSentAt?: string | null;
   amountToPay?: number | string | null;
   supplier: {
@@ -252,6 +265,9 @@ export interface PurchaseOrder {
   materialRequest?: {
     id?: string;
     requestNumber: string;
+    status?: string | null;
+    createdAt?: string | null;
+    requester?: { name?: string | null } | null;
     serviceOrder?: string | null;
     description?: string | null;
     demandSheet?: string | null;
@@ -609,6 +625,33 @@ function orderGrandTotal(o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'amo
     return Number(o.amountToPay);
   }
   return Math.round(items * 100) / 100;
+}
+
+/** Situação da RM de origem exibida no Resumo da OC. */
+const RM_STATUS_LABEL_OC: Record<string, string> = {
+  PENDING: 'Pendente',
+  IN_REVIEW: 'Em correção',
+  APPROVED: 'Aprovada',
+  PARTIALLY_FULFILLED: 'Parcialmente atendida',
+  FULFILLED: 'Atendida',
+  REJECTED: 'Rejeitada',
+  CANCELLED: 'Cancelada',
+};
+
+/** Resultado de `GET /purchase-orders/:id/totvs-preflight` (conferência antes do envio). */
+type ConferenciaEnvioTotvs = {
+  ok: boolean;
+  cabecalho: string[];
+  itens: Array<{ item: number; codigo: string; descricao: string; problemas: string[] }>;
+  totalItens: number;
+};
+
+/** Interrompe o envio quando a conferência acha pendências (o modal mostra a lista). */
+class ConferenciaTotvsPendente extends Error {
+  constructor() {
+    super('Conferência do envio ao TOTVS com pendências');
+    this.name = 'ConferenciaTotvsPendente';
+  }
 }
 
 function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay' | 'items'>): number {
@@ -1588,6 +1631,16 @@ function OcOrderMaterialsTable({
   );
 }
 
+/** Status em que a OC enviada ao TOTVS pode ser reaberta para reenvio (espelha o backend). */
+const OC_TOTVS_RESEND_STATUSES = new Set<string>([
+  'DRAFT',
+  'PENDING_COMPRAS',
+  'PENDING',
+  'PENDING_DIRETORIA',
+  'IN_REVIEW',
+  'APPROVED',
+]);
+
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
   PENDING_COMPRAS: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
@@ -1617,6 +1670,8 @@ export type OcTab =
   | 'PROOF_CORRECTION'
   | 'ATTACH_NF'
   | 'FINALIZADAS'
+  | 'TOTVS_NAO_ENVIADAS'
+  | 'TOTVS_ENVIADAS'
   | 'outras';
 
 const ocListDocThCls =
@@ -2281,6 +2336,14 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
     title: 'Finalizadas',
     subtitle: 'Histórico de ordens que concluíram o fluxo'
   },
+  TOTVS_NAO_ENVIADAS: {
+    title: "TOTVS - OC's não enviadas",
+    subtitle: 'Geradas no Conecta, mas o envio ao TOTVS falhou. Ajuste a OC e envie novamente'
+  },
+  TOTVS_ENVIADAS: {
+    title: "TOTVS - OC's enviadas",
+    subtitle: 'OCs enviadas ao TOTVS (sem aprovação no Conecta)'
+  },
   outras: {
     title: 'Canceladas',
     subtitle: 'Ordens canceladas'
@@ -2506,6 +2569,8 @@ function embeddedOcEmptyMessage(
   if (tab === 'PROOF_VALIDATION') return 'Nenhuma OC aguardando validação do comprovante';
   if (tab === 'PROOF_CORRECTION') return 'Nenhuma OC em correção do comprovante';
   if (tab === 'ATTACH_NF') return 'Nenhuma OC na fase de anexar NF';
+  if (tab === 'TOTVS_NAO_ENVIADAS') return 'Nenhuma OC aguardando envio ao TOTVS';
+  if (tab === 'TOTVS_ENVIADAS') return 'Nenhuma OC enviada ao TOTVS';
   if (tab === 'compras') return 'Nenhuma ordem aguardando aprovação de compras';
   return 'Nenhuma ordem de compra nesta fase';
 }
@@ -2585,6 +2650,8 @@ export function OcPurchaseOrdersPanel({
   } | null>(null);
   const [returnItemReason, setReturnItemReason] = useState('');
   const [returnOrderToMapTarget, setReturnOrderToMapTarget] = useState<PurchaseOrder | null>(null);
+  const [totvsResendTarget, setTotvsResendTarget] = useState<PurchaseOrder | null>(null);
+  const [totvsResendConfirmed, setTotvsResendConfirmed] = useState(false);
   const [returnOrderToMapReason, setReturnOrderToMapReason] = useState('');
   const [pdfExportingId, setPdfExportingId] = useState<string | null>(null);
   const [showEditOcModal, setShowEditOcModal] = useState(false);
@@ -2931,8 +2998,18 @@ export function OcPurchaseOrdersPanel({
     !financialEntriesLoading &&
     canSubmitProofValidation;
 
+  /** Problemas encontrados na conferência antes do envio (abre o modal com a lista completa). */
+  const [conferenciaTotvs, setConferenciaTotvs] = useState<ConferenciaEnvioTotvs | null>(null);
+
   const sendToTotvsMutation = useMutation({
     mutationFn: async (id: string) => {
+      // Confere tudo no Conecta antes (sem chamar o TOTVS); só envia se não houver nenhum problema.
+      const conf = await api.get(`/purchase-orders/${id}/totvs-preflight`);
+      const data = (conf.data?.data ?? null) as ConferenciaEnvioTotvs | null;
+      if (data && !data.ok) {
+        setConferenciaTotvs(data);
+        throw new ConferenciaTotvsPendente();
+      }
       const res = await api.post(`/purchase-orders/${id}/send-to-totvs`);
       return res.data;
     },
@@ -2947,9 +3024,33 @@ export function OcPurchaseOrdersPanel({
       );
     },
     onError: (error: unknown) => {
+      if (error instanceof ConferenciaTotvsPendente) return; // o modal da conferência já mostra os problemas
       const msg =
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
         (error instanceof Error ? error.message : 'Erro ao enviar a OC ao TOTVS');
+      toast.error(msg, { duration: 8000 });
+      // Senha recusada: o botão de vínculo passa a mostrar o aviso na hora.
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders', 'totvs-link'] });
+    },
+  });
+
+  const reopenTotvsResendMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/purchase-orders/${id}/totvs-resend/open`);
+      return res.data;
+    },
+    onSuccess: (res) => {
+      const updated = (res?.data ?? res) as PurchaseOrder;
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      setSelectedOrder((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+      setTotvsResendTarget(null);
+      setTotvsResendConfirmed(false);
+      toast.success(res?.message || 'OC reaberta. Ajuste e envie novamente ao TOTVS.');
+    },
+    onError: (error: unknown) => {
+      const msg =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (error instanceof Error ? error.message : 'Erro ao reabrir a OC para reenvio');
       toast.error(msg, { duration: 8000 });
     },
   });
@@ -3856,9 +3957,16 @@ export function OcPurchaseOrdersPanel({
     showOcApprovalActions(status);
 
   const orders = useMemo(() => {
+    if (activeTab === 'TOTVS_NAO_ENVIADAS') return allOrders.filter(isOcTotvsNaoEnviada);
+    if (activeTab === 'TOTVS_ENVIADAS') return allOrders.filter(isOcTotvsEnviada);
+    // Fluxo direto TOTVS não passa pelas fases do Conecta (Canceladas inclusive).
+    const conectaOrders = allOrders.filter((o) => !isOcFluxoDiretoTotvs(o));
+    if (activeTab === 'outras') {
+      return conectaOrders.filter((o) => o.status === 'REJECTED' || o.status === 'CANCELLED');
+    }
     if (isOcApprovalTab(activeTab)) {
       return ordersForOcApprovalListPhase(
-        allOrders,
+        conectaOrders,
         activeTab,
         approvalListPhase,
         currentUserId,
@@ -3866,25 +3974,22 @@ export function OcPurchaseOrdersPanel({
       );
     }
     if (activeTab === 'IN_REVIEW') {
-      return allOrders.filter((o) => o.status === 'IN_REVIEW');
+      return conectaOrders.filter((o) => o.status === 'IN_REVIEW');
     }
     if (activeTab === 'APPROVED') {
-      return allOrders.filter((o) => o.status === 'APPROVED' && !showInAttachBoletoTab(o));
+      return conectaOrders.filter((o) => o.status === 'APPROVED' && !showInAttachBoletoTab(o));
     }
     if (activeTab === 'ATTACH_BOLETO') {
-      return allOrders.filter((o) => showInAttachBoletoTab(o));
+      return conectaOrders.filter((o) => showInAttachBoletoTab(o));
     }
     if (activeTab === 'PROOF_VALIDATION') {
-      return allOrders.filter((o) => o.status === 'PENDING_PROOF_VALIDATION');
+      return conectaOrders.filter((o) => o.status === 'PENDING_PROOF_VALIDATION');
     }
     if (activeTab === 'PROOF_CORRECTION') {
-      return allOrders.filter((o) => o.status === 'PENDING_PROOF_CORRECTION');
+      return conectaOrders.filter((o) => o.status === 'PENDING_PROOF_CORRECTION');
     }
     if (activeTab === 'ATTACH_NF') {
-      return allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT');
-    }
-    if (activeTab === 'outras') {
-      return allOrders.filter((o) => o.status === 'REJECTED' || o.status === 'CANCELLED');
+      return conectaOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT');
     }
     return allOrders;
   }, [allOrders, activeTab, gestorCostCenterIds, approvalListPhase, currentUserId]);
@@ -4086,6 +4191,57 @@ export function OcPurchaseOrdersPanel({
     (!!selectedOrder?.creator?.id && selectedOrder.creator.id === currentUserId);
   const canReturnOcToQuoteMap =
     canEditOcInReview || canReturnOcItemToRmPermission;
+
+  /** Obra informada no lançamento da FD que originou a RM da OC (mesma consulta da RM). */
+  const selectedOcRmId = selectedOrder?.materialRequestId ?? selectedOrder?.materialRequest?.id ?? '';
+  const { data: selectedOcFdAssociacao } = useQuery({
+    queryKey: ['rm-fd-association', selectedOcRmId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${selectedOcRmId}`);
+      return (res.data?.data ?? null) as {
+        obra?: string | null;
+        codFichaDemanda?: string | null;
+        contratoNome?: string | null;
+      } | null;
+    },
+    enabled: !!selectedOcRmId,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const selectedOcObra = selectedOcFdAssociacao?.obra?.trim() || '';
+  /**
+   * Contrato da OC (nome do cadastro de contratos — não confundir com o centro de custo):
+   * o da FD de origem; senão o(s) contrato(s) do centro de custo da RM.
+   */
+  const selectedOcContrato = (() => {
+    const daFd = selectedOcFdAssociacao?.contratoNome?.trim();
+    if (daFd) return daFd;
+    const cc = selectedOrder?.materialRequest?.costCenter as
+      | { contracts?: Array<{ name?: string | null }> | null }
+      | null
+      | undefined;
+    const nomes = Array.from(
+      new Set((cc?.contracts ?? []).map((c) => (c.name || '').trim()).filter(Boolean))
+    );
+    return nomes.length ? nomes.join(', ') : '—';
+  })();
+
+  /** Reabrir OC já enviada ao TOTVS (cancelada no Fluig) para ajuste e reenvio: criador ou admin. */
+  const isSelectedOcCreator =
+    !!selectedOrder?.creator?.id && selectedOrder.creator.id === currentUserId;
+  const isSelectedOcTotvsResendOpen = !!selectedOrder?.totvsResendOpenAt;
+  /** Fluxo direto TOTVS ainda não enviado: quem gerou ajusta e envia. */
+  const isSelectedOcTotvsNaoEnviada = !!selectedOrder && isOcTotvsNaoEnviada(selectedOrder);
+  const isSelectedOcTotvsEditable = isSelectedOcTotvsResendOpen || isSelectedOcTotvsNaoEnviada;
+  const canReopenTotvsResend =
+    !!selectedOrder &&
+    !!selectedOrder.totvsIdMov &&
+    ocTotvsDestinationOf(selectedOrder) === 'TOTVS' &&
+    (isSelectedOcCreator || isAdministrator) &&
+    OC_TOTVS_RESEND_STATUSES.has(selectedOrder.status) &&
+    !selectedOrder.paymentProofUrl;
+  const canSendSelectedOcToTotvs =
+    canApproveOcCompras || isAdministrator || (isSelectedOcCreator && isSelectedOcTotvsEditable);
 
   const canEditBoletoParcels =
     !!selectedOrder &&
@@ -4301,7 +4457,7 @@ export function OcPurchaseOrdersPanel({
   };
 
   const openEditOcWithOrder = (order: PurchaseOrder) => {
-    if (order.status !== 'IN_REVIEW') return;
+    if (order.status !== 'IN_REVIEW' && !order.totvsResendOpenAt && !isOcTotvsNaoEnviada(order)) return;
     if (!order.creator?.id || order.creator.id !== currentUserId) return;
 
     const formValues = buildOcFormValuesFromOrder(order, {
@@ -4387,6 +4543,7 @@ export function OcPurchaseOrdersPanel({
       stockLocationId: editOcForm.stockLocationId || null,
       totvsCodLoc: editOcForm.totvsCodLoc || null,
       notes: mergedNotes,
+      historico: editOcForm.historico.trim() || null,
       items: editOcForm.items.map((it) => ({
         materialId: it.materialId,
         quantity: Number(it.quantity),
@@ -4748,7 +4905,7 @@ export function OcPurchaseOrdersPanel({
                         Fornecedor
                       </th>
                       <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Contrato
+                        Centro de custo
                       </th>
                       <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         RM
@@ -4876,9 +5033,7 @@ export function OcPurchaseOrdersPanel({
                           {(() => {
                             const cc = formatOcListCostCenter(o.materialRequest?.costCenter);
                             return (
-                              <span className="line-clamp-2" title={cc.title}>
-                                {cc.display}
-                              </span>
+                              <span className="line-clamp-2">{cc.display}</span>
                             );
                           })()}
                         </td>
@@ -5389,6 +5544,120 @@ export function OcPurchaseOrdersPanel({
         </Modal>
       )}
 
+      {totvsResendTarget && (
+        <Modal
+          isOpen={!!totvsResendTarget}
+          onClose={() => {
+            if (reopenTotvsResendMutation.isPending) return;
+            setTotvsResendTarget(null);
+            setTotvsResendConfirmed(false);
+          }}
+          title="Reabrir OC para reenvio ao TOTVS"
+          size="md"
+          confirmBeforeClose={false}
+          elevated
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              A OC {totvsResendTarget.orderNumber} fica liberada para ajuste e para um novo envio ao
+              TOTVS, que gera um novo IdMov. O movimento atual (IdMov {totvsResendTarget.totvsIdMov}
+              {totvsResendTarget.totvsNumMovimento ? ` · ${totvsResendTarget.totvsNumMovimento}` : ''}) fica
+              no histórico da OC. O Conecta não cancela esse movimento no RM.
+            </p>
+            <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
+              <input
+                type="checkbox"
+                checked={totvsResendConfirmed}
+                onChange={(e) => setTotvsResendConfirmed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300"
+              />
+              <span>
+                Confirmo que a OC IdMov {totvsResendTarget.totvsIdMov} foi cancelada no Fluig.
+              </span>
+            </label>
+            <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setTotvsResendTarget(null);
+                  setTotvsResendConfirmed(false);
+                }}
+                disabled={reopenTotvsResendMutation.isPending}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!totvsResendConfirmed || reopenTotvsResendMutation.isPending}
+                onClick={() => reopenTotvsResendMutation.mutate(totvsResendTarget.id)}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              >
+                {reopenTotvsResendMutation.isPending ? 'Reabrindo…' : 'Reabrir para reenvio'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {conferenciaTotvs && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConferenciaTotvs(null)} />
+          <div className="relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
+            <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">OC não enviada ao TOTVS</h2>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                A conferência encontrou pendências. Corrija tudo abaixo e envie novamente — nada foi enviado ao TOTVS.
+              </p>
+            </div>
+            <div className="flex-1 space-y-4 overflow-auto px-6 py-4 text-sm">
+              {conferenciaTotvs.cabecalho.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Cabeçalho da OC (vale para todos os itens)
+                  </p>
+                  <ul className="list-disc space-y-1 pl-5 text-red-700 dark:text-red-300">
+                    {conferenciaTotvs.cabecalho.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {conferenciaTotvs.itens.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Itens ({conferenciaTotvs.itens.length} de {conferenciaTotvs.totalItens} com pendência)
+                  </p>
+                  <ul className="space-y-2">
+                    {conferenciaTotvs.itens.map((i) => (
+                      <li
+                        key={i.item}
+                        className="rounded-md border border-red-200 bg-red-50 px-3 py-2 dark:border-red-900/60 dark:bg-red-950/30"
+                      >
+                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                          Item {i.item} · {i.codigo}
+                          {i.descricao ? <span className="font-normal text-gray-600 dark:text-gray-300"> — {i.descricao}</span> : null}
+                        </p>
+                        <p className="text-xs text-red-700 dark:text-red-300">{i.problemas.join(' · ')}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end border-t border-gray-200 px-6 py-3 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setConferenciaTotvs(null)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
       {correctionTarget && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
           <div
@@ -5469,6 +5738,7 @@ export function OcPurchaseOrdersPanel({
               mode="edit"
               values={editOcForm}
               costCenterLabel={formatOcCostCenterLabel(selectedOrder.materialRequest?.costCenter)}
+                  costCenterId={selectedOrder.materialRequest?.costCenter?.id}
               stockLocationLabel={formatOcStockLocationLabel(
                 selectedOrder.stockLocation || { code: selectedOrder.totvsCodLoc }
               )}
@@ -5610,6 +5880,7 @@ export function OcPurchaseOrdersPanel({
                     parseFreight: resolveOcFreightAmountStr
                   })}
                   costCenterLabel={formatOcCostCenterLabel(selectedOrder.materialRequest?.costCenter)}
+                  costCenterId={selectedOrder.materialRequest?.costCenter?.id}
                   stockLocationLabel={formatOcStockLocationLabel(
                     selectedOrder.stockLocation || { code: selectedOrder.totvsCodLoc }
                   )}
@@ -5659,18 +5930,47 @@ export function OcPurchaseOrdersPanel({
                   const infoRows: { label: string; value: React.ReactNode; stacked?: boolean }[] = [
                     {
                       label: 'RM',
-                      value: formatRmListDisplayId(selectedOrder.materialRequest?.requestNumber)
+                      value: (() => {
+                        const rm = selectedOrder.materialRequest;
+                        if (!rm?.requestNumber) return '—';
+                        const detalhes = [
+                          rm.requester?.name ? `Solicitada por ${rm.requester.name}` : '',
+                          rm.createdAt ? `em ${formatDateTime(rm.createdAt)}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ');
+                        return (
+                          <span className="text-right">
+                            <span className="font-semibold">
+                              {formatRmListDisplayId(rm.requestNumber)}
+                            </span>
+                            <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                              ({rm.requestNumber})
+                            </span>
+                            {detalhes || rm.status ? (
+                              <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                                {detalhes}
+                                {detalhes && rm.status ? ' · ' : ''}
+                                {rm.status ? RM_STATUS_LABEL_OC[rm.status] ?? rm.status : ''}
+                              </span>
+                            ) : null}
+                          </span>
+                        );
+                      })()
                     },
                     {
                       label: 'Contrato',
-                      value: selectedOrder.materialRequest
-                        ? rmContractDisplay(selectedOrder.materialRequest as MaterialRequest)
-                        : '—'
+                      value: selectedOcContrato
+                    },
+                    {
+                      label: 'Centro de custo',
+                      value: selectedOrder.materialRequest?.costCenter?.name?.trim() || '—'
                     },
                     {
                       label: 'Ordem de serviço',
                       value: stripOsSePrefix(selectedOrder.materialRequest?.serviceOrder) || '—'
                     },
+                    ...(selectedOcObra ? [{ label: 'Obra', value: selectedOcObra }] : []),
                     {
                       label: 'Data',
                       value: formatDateTime(selectedOrder.orderDate)
@@ -5701,6 +6001,37 @@ export function OcPurchaseOrdersPanel({
                       )
                     });
                   }
+                  {
+                    const tipoFrete = (selectedOrder.freightType || '').trim().toUpperCase();
+                    const tipoFreteRow = TOTVS_FREIGHT_TYPES.find((row) => row.code === tipoFrete);
+                    infoRows.push({
+                      label: 'Tipo de frete',
+                      value: tipoFreteRow ? `${tipoFreteRow.code} – ${tipoFreteRow.label}` : tipoFrete || '—'
+                    });
+                    infoRows.push({ label: 'Valor do frete', value: formatCurrency(orderFreightValue(selectedOrder)) });
+                  }
+                  if (selectedOrder.totvsIdMov || (selectedOrder.totvsPreviousMovs || []).length > 0) {
+                    const anteriores = (selectedOrder.totvsPreviousMovs || [])
+                      .map((m) => (m.numMovimento ? `${m.idMov} (${m.numMovimento})` : String(m.idMov)))
+                      .join(', ');
+                    infoRows.push({
+                      label: 'IdMov TOTVS',
+                      value: (
+                        <span className="text-right">
+                          {selectedOrder.totvsIdMov ? (
+                            <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                              {selectedOrder.totvsIdMov}
+                            </span>
+                          ) : (
+                            <span className="text-amber-700 dark:text-amber-300">em ajuste para reenvio</span>
+                          )}
+                          {anteriores ? (
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">anteriores: {anteriores}</span>
+                          ) : null}
+                        </span>
+                      )
+                    });
+                  }
                   if (description) {
                     infoRows.push({
                       label: 'Descrição da solicitação',
@@ -5719,6 +6050,15 @@ export function OcPurchaseOrdersPanel({
                     infoRows.push({
                       label: 'Observações',
                       value: <span className="whitespace-pre-wrap leading-relaxed">{notes}</span>,
+                      stacked: true
+                    });
+                  }
+                  if (selectedOrder.historico?.trim()) {
+                    infoRows.push({
+                      label: 'Histórico',
+                      value: (
+                        <span className="whitespace-pre-wrap leading-relaxed">{selectedOrder.historico.trim()}</span>
+                      ),
                       stacked: true
                     });
                   }
@@ -6861,20 +7201,73 @@ export function OcPurchaseOrdersPanel({
             {(showListApprovalActions(selectedOrder.status) ||
               (selectedOrder.status === 'IN_REVIEW' &&
                 (canEditOcInReview || canReturnOcToQuoteMap)) ||
-              ((canApproveOcCompras || isAdministrator) &&
+              ((canSendSelectedOcToTotvs || canReopenTotvsResend) &&
                 ocTotvsDestinationOf(selectedOrder) === 'TOTVS')) && (
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 rounded-b-xl">
+            {isSelectedOcTotvsResendOpen && ocTotvsDestinationOf(selectedOrder) === 'TOTVS' ? (
+              <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+                <span className="font-medium">Em ajuste para reenvio ao TOTVS.</span>{' '}
+                {(selectedOrder.totvsPreviousMovs || []).length > 0
+                  ? `IdMov anterior: ${(selectedOrder.totvsPreviousMovs || [])
+                      .map((m) => (m.numMovimento ? `${m.idMov} (${m.numMovimento})` : String(m.idMov)))
+                      .join(', ')}.`
+                  : ''}{' '}
+                Ajuste a OC e envie novamente.
+              </div>
+            ) : null}
+            {isSelectedOcTotvsNaoEnviada ? (
+              <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-200">
+                <span className="font-medium">OC não enviada ao TOTVS.</span>{' '}
+                {selectedOrder.totvsSendError
+                  ? selectedOrder.totvsSendError
+                  : 'Ainda não houve envio com sucesso.'}{' '}
+                Ajuste o que for preciso e clique em Enviar para o TOTVS.
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
-              {(canApproveOcCompras || isAdministrator) &&
+              {isSelectedOcTotvsEditable && isSelectedOcCreator && selectedOrder.status !== 'IN_REVIEW' && (
+                <button
+                  type="button"
+                  onClick={handleOpenEditOc}
+                  className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-slate-600 text-white rounded-lg hover:bg-slate-700"
+                >
+                  Editar
+                </button>
+              )}
+              {(canSendSelectedOcToTotvs || canReopenTotvsResend) &&
               ocTotvsDestinationOf(selectedOrder) === 'TOTVS' ? (
                 selectedOrder.totvsIdMov ? (
-                  <div className="flex-1 min-w-[160px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200">
-                    Enviada ao TOTVS · IdMov {selectedOrder.totvsIdMov}
-                    {selectedOrder.totvsNumMovimento
-                      ? ` · ${selectedOrder.totvsNumMovimento}`
-                      : ''}
-                  </div>
-                ) : (
+                  <>
+                    <div className="flex-1 min-w-[160px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+                      Enviada ao TOTVS · IdMov {selectedOrder.totvsIdMov}
+                      {selectedOrder.totvsNumMovimento
+                        ? ` · ${selectedOrder.totvsNumMovimento}`
+                        : ''}
+                      {(selectedOrder.totvsPreviousMovs || []).length > 0 ? (
+                        <span className="mt-0.5 block text-xs font-normal text-emerald-700/80 dark:text-emerald-300/80">
+                          IdMov anteriores:{' '}
+                          {(selectedOrder.totvsPreviousMovs || [])
+                            .map((m) => (m.numMovimento ? `${m.idMov} (${m.numMovimento})` : String(m.idMov)))
+                            .join(', ')}
+                        </span>
+                      ) : null}
+                    </div>
+                    {canReopenTotvsResend && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTotvsResendConfirmed(false);
+                          setTotvsResendTarget(selectedOrder);
+                        }}
+                        disabled={reopenTotvsResendMutation.isPending}
+                        className="flex-1 min-w-[160px] px-3 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                      >
+                        <Undo2 className="w-4 h-4 shrink-0" />
+                        Reabrir para reenvio
+                      </button>
+                    )}
+                  </>
+                ) : canSendSelectedOcToTotvs ? (
                   <button
                     type="button"
                     onClick={() => sendToTotvsMutation.mutate(selectedOrder.id)}
@@ -6883,7 +7276,7 @@ export function OcPurchaseOrdersPanel({
                   >
                     {sendToTotvsMutation.isPending ? 'Enviando…' : 'Enviar para o TOTVS'}
                   </button>
-                )
+                ) : null
               ) : null}
               {showListApprovalActions(selectedOrder.status) && (
                 <button

@@ -4,6 +4,8 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
+import { parseMedicaoFaturamento } from '../utils/contractBillingMedicao';
+import { ensureContractBillingMeasurementColumns } from '../lib/ensureProductionSchema';
 import {
   resolvePleitoCreateCore,
   type ResolvePleitoContractContext
@@ -246,6 +248,7 @@ export class PleitoController {
         lot: b.lot?.trim() || null,
         divSe: b.divSe?.trim() || null,
         location: b.location?.trim() || null,
+        obra: b.obra?.trim() || null,
         unit: b.unit?.trim() || null,
         serviceDescription: b.serviceDescription.trim(),
         budget: b.budget?.trim() || null,
@@ -267,7 +270,8 @@ export class PleitoController {
         ipi: b.ipi?.trim() || null,
         reportsBilling: b.reportsBilling?.trim() || null,
         engineer: b.engineer?.trim() || null,
-        supervisor: b.supervisor?.trim() || null
+        supervisor: b.supervisor?.trim() || null,
+        linkedOrcamentoId: b.linkedOrcamentoId?.trim() || null
       };
 
       const row = await prisma.pleito.create({ data });
@@ -302,6 +306,7 @@ export class PleitoController {
       if (b.lot !== undefined) data.lot = b.lot?.trim() || null;
       if (b.divSe !== undefined) data.divSe = b.divSe?.trim() || null;
       if (b.location !== undefined) data.location = b.location?.trim() || null;
+      if (b.obra !== undefined) data.obra = b.obra?.trim() || null;
       if (b.unit !== undefined) data.unit = b.unit?.trim() || null;
       if (b.serviceDescription !== undefined) {
         if (!b.serviceDescription?.trim()) throw createError('Descrição do serviço é obrigatória', 400);
@@ -324,12 +329,14 @@ export class PleitoController {
           b.budgetValueConfirmed === 'true' ||
           b.budgetValueConfirmed === 1;
       }
+      if (b.linkedOrcamentoId !== undefined) data.linkedOrcamentoId = b.linkedOrcamentoId?.trim() || null;
       if (b.pv !== undefined) data.pv = b.pv?.trim() || null;
       if (b.ipi !== undefined) data.ipi = b.ipi?.trim() || null;
       if (b.reportsBilling !== undefined) data.reportsBilling = b.reportsBilling?.trim() || null;
       if (b.engineer !== undefined) data.engineer = b.engineer?.trim() || null;
       if (b.supervisor !== undefined) data.supervisor = b.supervisor?.trim() || null;
 
+      await ensureContractBillingMeasurementColumns(prisma);
       const row = await prisma.$transaction(async (tx) => {
         const updated = await tx.pleito.update({ where: { id }, data });
 
@@ -351,6 +358,11 @@ export class PleitoController {
           b.valorFaturamento != null && b.valorFaturamento !== ''
             ? Number(b.valorFaturamento)
             : 0;
+        // Faturar pelo pleito exige a medição (código + período), como o faturamento direto.
+        const medicao =
+          faturar100 || faturarRestante || faturarValor
+            ? parseMedicaoFaturamento(b as Record<string, unknown>)
+            : undefined;
 
         if (faturar100 && updated.updatedContractId) {
           if (!nextInvoice) {
@@ -372,7 +384,8 @@ export class PleitoController {
             serviceOrder,
             grossValue: pleitoTotal,
             netValue: pleitoTotal,
-            issueDate: new Date()
+            issueDate: new Date(),
+            medicao
           });
           await syncPleitoFromBillings(tx, updated.id);
         } else if (faturarRestante && updated.updatedContractId) {
@@ -392,7 +405,7 @@ export class PleitoController {
               budget: updated.budget
             },
           );
-          if (remaining <= 0.01) {
+          if (remaining < 0.005) {
             throw createError('O pleito não possui saldo apto para faturamento', 400);
           }
 
@@ -403,7 +416,8 @@ export class PleitoController {
             serviceOrder,
             grossValue: remaining,
             netValue: remaining,
-            issueDate: new Date()
+            issueDate: new Date(),
+            medicao
           });
           await syncPleitoFromBillings(tx, updated.id);
         } else if (faturarValor && updated.updatedContractId) {
@@ -438,7 +452,8 @@ export class PleitoController {
             serviceOrder,
             grossValue: valorFaturamento,
             netValue: valorFaturamento,
-            issueDate: new Date()
+            issueDate: new Date(),
+            medicao
           });
           await syncPleitoFromBillings(tx, updated.id);
         } else if (willBePaid && !wasPaid) {

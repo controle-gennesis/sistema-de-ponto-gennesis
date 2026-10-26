@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { usePermissions } from '@/hooks/usePermissions';
 import { PaymentConditionSelect, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 import {
   OC_PIX_KEY_TYPE_OPTIONS,
@@ -469,8 +470,10 @@ const mapPaymentSegmentCls = (active: boolean) =>
 
 const mapLabelCls = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
-const mapDestinationSegmentCls = (active: boolean) =>
-  `w-full cursor-default rounded-lg border px-3 py-2.5 text-center text-sm font-medium ${
+const mapDestinationSegmentCls = (active: boolean, selectable = false) =>
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium ${
+    selectable ? 'cursor-pointer transition-colors hover:border-red-400' : 'cursor-default'
+  } ${
     active
       ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-gray-50 text-gray-500 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-400'
@@ -545,6 +548,7 @@ function emptyPaymentDraft(filial = '1') {
     pixKeyType: '',
     pixKey: '',
     observations: '',
+    historico: '',
     amountToPayStr: '',
     attachments: [] as Array<{ url: string; name: string }>,
     freightType: 'S',
@@ -568,6 +572,11 @@ export default function MapaCotacaoPage() {
   const queryClient = useQueryClient();
 
   const [selectedRequestId, setSelectedRequestId] = useState<string>('');
+  /** Com os dois fluxos de OC (Conecta e TOTVS), o destino é escolhido no modal Gerar OC. */
+  const { ocFluxoConecta, ocFluxoTotvs } = usePermissions();
+  const ocDestinoLivre = ocFluxoConecta && ocFluxoTotvs;
+  const destinoOcDoFornecedor = (destinoEscolhido?: OcDestination | null): OcDestination | null =>
+    ocDestinoLivre ? destinoEscolhido ?? null : ocFluxoTotvs ? 'TOTVS' : 'CONECTA';
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<Set<string>>(new Set());
   const [freightBySupplier, setFreightBySupplier] = useState<Record<string, string>>({});
   const [unitPriceBySupplierItem, setUnitPriceBySupplierItem] = useState<Record<string, string>>({});
@@ -596,6 +605,9 @@ export default function MapaCotacaoPage() {
         pixKeyType: string;
         pixKey: string;
         observations: string;
+        historico: string;
+        /** Destino da OC (só para quem tem os dois fluxos). */
+        destino?: OcDestination | null;
         amountToPayStr: string;
         attachments: Array<{ url: string; name: string }>;
         freightType?: string;
@@ -1086,9 +1098,6 @@ export default function MapaCotacaoPage() {
         approvedRequests.find((r) => r.id === selectedRequestId)?.costCenter
     )
   );
-  const ocDestination: OcDestination | null = selectedRequestId
-    ? resolveOcDestinationFromCostCenter(selectedCostCenterName)
-    : null;
 
   const selectedRequestLabel = useMemo(() => {
     if (!selectedRequestId) return '';
@@ -1127,6 +1136,9 @@ export default function MapaCotacaoPage() {
   const generateOrdersMutation = useMutation({
     mutationFn: async (supplierId: string) => {
       if (!selectedRequest) throw new Error('Selecione uma requisição na fase RMs Aprovadas.');
+      // Destino pelo fluxo de OC do usuário: com os dois, escolha obrigatória no modal; com um, fixo nele.
+      const ocDestination = destinoOcDoFornecedor(paymentDraftBySupplier[supplierId]?.destino);
+      if (!ocDestination) throw new Error('Selecione o destino da OC (Conecta ou TOTVS).');
       if (generatedOcSupplierIds.has(supplierId)) {
         throw new Error(
           'OC já gerada para este fornecedor neste mapa. Se devolveu um item à RM, recarregue ou monte a cotação de novo.'
@@ -1208,6 +1220,7 @@ export default function MapaCotacaoPage() {
           pixKeyType: '',
           pixKey: '',
           observations: '',
+          historico: '',
           amountToPayStr: totals ? String(totals.amountToPay) : '',
           attachments: [],
           freightType: 'S',
@@ -1265,6 +1278,8 @@ export default function MapaCotacaoPage() {
             pixKeyType: paymentType === OC_TYPE_AVISTA ? draft.pixKeyType?.trim() || undefined : undefined,
             pixKey: paymentType === OC_TYPE_AVISTA ? draft.pixKey?.trim() || undefined : undefined,
             observations: draft.observations?.trim() || undefined,
+            historico: draft.historico?.trim() || undefined,
+            totvsDestination: ocDestination,
             amountToPay: totals?.amountToPay,
             attachments: draft.attachments?.length ? draft.attachments : undefined,
             freightType: draft.freightType || 'S',
@@ -1320,7 +1335,7 @@ export default function MapaCotacaoPage() {
       if (totvsErrors.length) {
         toast.success('OC gerada no Conecta.');
         toast.error(
-          `O TOTVS não concluiu o POST. Use Enviar para o TOTVS na OC. ${totvsErrors[0]}`,
+          `OC não enviada ao TOTVS — está em "TOTVS - OC's não enviadas" para ajuste e envio. ${totvsErrors[0]}`,
           { duration: 8000 }
         );
         return;
@@ -1795,62 +1810,6 @@ export default function MapaCotacaoPage() {
                   )}
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader className="border-b-0 pb-1">
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Destino da OC
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Definido pelo centro de custo da RM. Não editável por enquanto.
-                    </p>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div
-                    role="radiogroup"
-                    aria-label="Destino da OC"
-                    aria-disabled="true"
-                    className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2"
-                  >
-                    {(['CONECTA', 'TOTVS'] as const).map((option) => {
-                      const active = ocDestination === option;
-                      return (
-                        <div
-                          key={option}
-                          role="radio"
-                          aria-checked={active}
-                          aria-disabled="true"
-                          className={mapDestinationSegmentCls(active)}
-                        >
-                          {ocDestinationLabel(option)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {selectedRequestId ? (
-                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                      Centro de custo:{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {selectedCostCenterName || '—'}
-                      </span>
-                      {ocDestination ? (
-                        <>
-                          {' '}
-                          · {ocDestination === 'CONECTA'
-                            ? 'segue o fluxo no Conecta'
-                            : 'segue via POST para o TOTVS'}
-                        </>
-                      ) : null}
-                    </p>
-                  ) : (
-                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                      Selecione uma RM para ver o destino da OC.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
         </PageStack>
 
         {(() => {
@@ -1905,6 +1864,57 @@ export default function MapaCotacaoPage() {
               contentOverflowVisible
             >
               <div className="space-y-5">
+                <div>
+                  <span className={mapLabelCls}>
+                    Destino da OC{ocDestinoLivre ? <span className="text-red-600"> *</span> : null}
+                  </span>
+                  <div
+                    role="radiogroup"
+                    aria-label="Destino da OC"
+                    aria-required={ocDestinoLivre}
+                    className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+                  >
+                    {(['CONECTA', 'TOTVS'] as const).map((option) => {
+                      const active = destinoOcDoFornecedor(draft.destino) === option;
+                      const selectable = ocDestinoLivre && !isGenerating;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          disabled={!selectable}
+                          onClick={() =>
+                            setPaymentDraftBySupplier((prev) => ({
+                              ...prev,
+                              [sid]: {
+                                ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
+                                destino: option,
+                              },
+                            }))
+                          }
+                          className={mapDestinationSegmentCls(active, selectable)}
+                        >
+                          {ocDestinationLabel(option)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p
+                    className={`mt-1 text-xs ${
+                      destinoOcDoFornecedor(draft.destino)
+                        ? 'text-gray-500 dark:text-gray-400'
+                        : 'font-medium text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    {!destinoOcDoFornecedor(draft.destino)
+                      ? 'Obrigatório: escolha se a OC segue no Conecta ou vai para o TOTVS.'
+                      : destinoOcDoFornecedor(draft.destino) === 'CONECTA'
+                        ? 'Segue o fluxo de aprovação no Conecta.'
+                        : 'Enviada ao TOTVS ao gerar, sem aprovação no Conecta.'}
+                  </p>
+                </div>
+
                 <div>
                   <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
                     Itens da OC
@@ -2009,6 +2019,10 @@ export default function MapaCotacaoPage() {
 
                 <OcStockLocationField
                   value={draft.stockLocationId}
+                  costCenterId={
+                    (selectedRequestRaw?.costCenter ||
+                      approvedRequests.find((r) => r.id === selectedRequestId)?.costCenter)?.id
+                  }
                   filial={draft.totvsCodFilial || suggestedTotvsFilial}
                   labelClassName={mapLabelCls}
                   onChange={(loc) => {
@@ -2305,6 +2319,32 @@ export default function MapaCotacaoPage() {
                     placeholder="Observações gerais da OC"
                     className={`${mapFieldCls} min-h-[4rem] resize-y`}
                   />
+                </div>
+
+                <div>
+                  <label htmlFor={`map-historico-${sid}`} className={mapLabelCls}>
+                    Histórico
+                  </label>
+                  <textarea
+                    id={`map-historico-${sid}`}
+                    value={paymentDraftBySupplier[sid]?.historico ?? ''}
+                    maxLength={500}
+                    onChange={(e) => {
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
+                          historico: e.target.value.slice(0, 500),
+                        },
+                      }));
+                    }}
+                    rows={2}
+                    placeholder="Histórico da OC (vai para o TOTVS)"
+                    className={`${mapFieldCls} min-h-[4rem] resize-y`}
+                  />
+                  <p className="mt-1 text-right text-xs text-gray-500 dark:text-gray-400">
+                    {(paymentDraftBySupplier[sid]?.historico ?? '').length}/500
+                  </p>
                 </div>
 
                 <div>

@@ -283,6 +283,9 @@ export default function GerenciarMateriaisPage() {
   const [ocPixKeyType, setOcPixKeyType] = useState('');
   const [ocPixKey, setOcPixKey] = useState('');
   const [ocObservations, setOcObservations] = useState('');
+  const [ocHistorico, setOcHistorico] = useState('');
+  /** Destino da OC: obrigatório para quem tem os dois fluxos (Conecta e TOTVS). */
+  const [ocDestino, setOcDestino] = useState<'CONECTA' | 'TOTVS' | null>(null);
   const [ocBoletoSlots, setOcBoletoSlots] = useState<OcBoletoCreationSlot[]>([{ url: '', name: '' }]);
   const [ocFreteStr, setOcFreteStr] = useState('');
   const [ocFreightType, setOcFreightType] = useState('S');
@@ -340,6 +343,8 @@ export default function GerenciarMateriaisPage() {
     setOcPixKeyType('');
     setOcPixKey('');
     setOcObservations('');
+    setOcHistorico('');
+    setOcDestino(null);
     setOcBoletoSlots([{ url: '', name: '' }]);
     setOcFreteStr('');
     setOcFreightType('S');
@@ -436,7 +441,22 @@ export default function GerenciarMateriaisPage() {
   };
   const [rmCardFilter, setRmCardFilter] = useState<RmCardFilter>(DEFAULT_RM_CARD_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
-  const { isUnbUser, unbCostCenterIds, isAdministrator, isElevatedUser, canApproveMaterialRequests } = usePermissions();
+  const {
+    isUnbUser,
+    unbCostCenterIds,
+    isAdministrator,
+    isElevatedUser,
+    canApproveMaterialRequests,
+    ocFluxoConecta,
+    ocFluxoTotvs,
+  } = usePermissions();
+  const ocDestinoLivre = ocFluxoConecta && ocFluxoTotvs;
+  // Com os dois fluxos, escolha obrigatória; com um, fixo nele.
+  const ocDestinoEfetivo: 'CONECTA' | 'TOTVS' | null = ocDestinoLivre
+    ? ocDestino
+    : ocFluxoTotvs
+      ? 'TOTVS'
+      : 'CONECTA';
   const { allowedContractCostCenterIds } = useAssignedContractCostCenterIds();
   const [adminAttachmentBusy, setAdminAttachmentBusy] = useState(false);
   const [cancelItemTarget, setCancelItemTarget] = useState<{
@@ -619,6 +639,7 @@ export default function GerenciarMateriaisPage() {
       pixKeyType,
       pixKey,
       observations,
+      historico,
       freightAmount,
       freightType,
       totvsCodFilial,
@@ -639,6 +660,7 @@ export default function GerenciarMateriaisPage() {
       pixKeyType: string;
       pixKey: string;
       observations: string;
+      historico?: string;
       freightAmount: number;
       freightType?: string;
       totvsCodFilial?: string;
@@ -674,8 +696,12 @@ export default function GerenciarMateriaisPage() {
           notes: item.observation ?? item.notes
         };
       });
+      if (!ocDestinoEfetivo) {
+        throw new Error('Selecione o destino da OC (Conecta ou TOTVS).');
+      }
       const res = await api.post('/purchase-orders', {
         materialRequestId: request.id,
+        totvsDestination: ocDestinoEfetivo,
         supplierId,
         items,
         paymentType,
@@ -690,6 +716,7 @@ export default function GerenciarMateriaisPage() {
         creationBoletoInstallments:
           paymentType === OC_TYPE_BOLETO ? creationBoletoInstallments : undefined,
         notes: observations.trim() || undefined,
+        historico: historico?.trim() || undefined,
         freightAmount,
         freightType,
         totvsCodFilial,
@@ -707,6 +734,15 @@ export default function GerenciarMateriaisPage() {
       setSelectedRequest(null);
       resetOcForm();
       const idMov = data?.data?.totvsIdMov;
+      const totvsSendError = data?.data?.totvsSendError as string | undefined;
+      if (totvsSendError?.trim()) {
+        toast.success('OC gerada no Conecta.');
+        toast.error(
+          `OC não enviada ao TOTVS — está em "TOTVS - OC's não enviadas" para ajuste e envio. ${totvsSendError}`,
+          { duration: 10000 }
+        );
+        return;
+      }
       toast.success(
         idMov
           ? `Ordem de compra criada e enviada ao TOTVS. IdMov ${idMov}`
@@ -1659,6 +1695,7 @@ export default function GerenciarMateriaisPage() {
 
               <OcStockLocationField
                 value={ocStockLocationId}
+                costCenterId={selectedRequest.costCenter?.id}
                 filial={ocFilial}
                 onChange={(loc) => {
                   setOcStockLocationId(loc?.id || '');
@@ -1851,6 +1888,66 @@ export default function GerenciarMateriaisPage() {
                   placeholder="Observações gerais da OC"
                 />
               </div>
+              <div>
+                <label htmlFor="ocHistorico" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Histórico
+                </label>
+                <textarea
+                  id="ocHistorico"
+                  value={ocHistorico}
+                  onChange={(e) => setOcHistorico(e.target.value.slice(0, 500))}
+                  maxLength={500}
+                  rows={3}
+                  className={`${ocFieldCls} resize-y`}
+                  placeholder="Histórico da OC (vai para o TOTVS)"
+                />
+                <p className="mt-1 text-right text-xs text-gray-500 dark:text-gray-400">{ocHistorico.length}/500</p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Destino da OC{ocDestinoLivre ? <span className="text-red-600"> *</span> : null}
+                </span>
+                <div
+                  role="radiogroup"
+                  aria-label="Destino da OC"
+                  aria-required={ocDestinoLivre}
+                  className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+                >
+                  {(['CONECTA', 'TOTVS'] as const).map((option) => {
+                    const active = ocDestinoEfetivo === option;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        disabled={!ocDestinoLivre || createOCMutation.isPending}
+                        onClick={() => setOcDestino(option)}
+                        className={`w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium ${
+                          ocDestinoLivre ? 'cursor-pointer transition-colors hover:border-red-400' : 'cursor-default'
+                        } ${
+                          active
+                            ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
+                            : 'border-gray-300 bg-gray-50 text-gray-500 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-400'
+                        }`}
+                      >
+                        {option === 'CONECTA' ? 'OC CONECTA' : 'OC TOTVS'}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p
+                  className={`mt-1 text-xs ${
+                    ocDestinoEfetivo ? 'text-gray-500 dark:text-gray-400' : 'font-medium text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  {!ocDestinoEfetivo
+                    ? 'Selecione o destino para criar a OC.'
+                    : ocDestinoEfetivo === 'CONECTA'
+                      ? 'Segue o fluxo de aprovação no Conecta.'
+                      : 'Enviada ao TOTVS ao criar, sem aprovação no Conecta.'}
+                </p>
+              </div>
               </div>
               </div>
 
@@ -1937,6 +2034,7 @@ export default function GerenciarMateriaisPage() {
                       pixKeyType: ocPixKeyType,
                       pixKey: ocPixKey,
                       observations: ocObservations,
+                      historico: ocHistorico,
                       freightAmount: ocFreteParsed ?? 0,
                       freightType: ocFreightType,
                       totvsCodFilial: ocFilial,

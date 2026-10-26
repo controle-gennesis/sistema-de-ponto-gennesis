@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Filter, Plus, Search, Warehouse, X } from 'lucide-react';
+import { AlertCircle, Filter, Plus, RefreshCw, Search, Warehouse, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
   CadastroListEmpty,
@@ -22,8 +22,10 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { liberaEmDoErro, useAtualizarBaseTotvs } from '@/hooks/useAtualizarBaseTotvs';
 import { POLOS_LIST } from '@/constants/payrollFilters';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -42,6 +44,9 @@ interface StockLocation {
   name: string;
   polo?: string | null;
   filial: number;
+  /** Centro de custo do local (cadastro do Conecta; não entra no envio da OC ao TOTVS). */
+  costCenterId?: string | null;
+  costCenterName?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -52,6 +57,7 @@ type StockLocationForm = {
   name: string;
   polo: string;
   filial: string;
+  costCenterId: string;
   isActive: boolean;
 };
 
@@ -60,6 +66,7 @@ const emptyForm = (): StockLocationForm => ({
   name: '',
   polo: '',
   filial: '1',
+  costCenterId: '',
   isActive: true,
 });
 
@@ -124,22 +131,32 @@ export default function LocaisEstoquePage() {
     },
   });
 
-  const { mutate: runSync } = useMutation({
+  // Consulta o TOTVS só quando o usuário pede (a base também é atualizada sozinha de madrugada e às 12:30).
+  const atualizarBase = useAtualizarBaseTotvs('locais-estoque');
+  const { mutate: runSync, isPending: isSyncingTotvs } = useMutation({
     mutationFn: async () => {
-      const res = await api.post('/stock-locations/sync-totvs');
+      atualizarBase.bloquear();
+      const res = await api.post('/stock-locations/sync-totvs', null, { params: { force: 'true' } });
+      atualizarBase.bloquear(res.data?.liberaEm);
       return (res.data?.data || {}) as { created?: number; updated?: number };
     },
     onSuccess: (result) => {
-      if ((result.created ?? 0) > 0 || (result.updated ?? 0) > 0) {
-        queryClient.invalidateQueries({ queryKey: ['stock-locations-admin'] });
-        queryClient.invalidateQueries({ queryKey: ['stock-locations'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-locations-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-locations'] });
+      toast.success(
+        `Base de locais de estoque atualizada: ${result.created ?? 0} nova(s), ${result.updated ?? 0} atualizada(s).`
+      );
+    },
+    onError: (error: unknown) => {
+      const bloqueio = liberaEmDoErro(error);
+      if (bloqueio.bloqueio) {
+        atualizarBase.bloquear(bloqueio.liberaEm);
+        toast.error(bloqueio.mensagem || 'Esta base já foi atualizada há pouco. Aguarde para atualizar de novo.');
+        return;
       }
+      toast.error('Não foi possível atualizar com o TOTVS agora. Tente novamente mais tarde.');
     },
   });
-
-  useEffect(() => {
-    runSync();
-  }, [runSync]);
 
   const createMutation = useMutation({
     mutationFn: async (data: StockLocationForm) => {
@@ -148,6 +165,7 @@ export default function LocaisEstoquePage() {
         name: data.name.trim(),
         polo: data.polo.trim() || undefined,
         filial: data.filial,
+        costCenterId: data.costCenterId || null,
         isActive: data.isActive,
       });
       return res.data;
@@ -171,6 +189,7 @@ export default function LocaisEstoquePage() {
         name: data.name.trim(),
         polo: data.polo.trim() || undefined,
         filial: data.filial,
+        costCenterId: data.costCenterId || null,
         isActive: data.isActive,
       });
       return res.data;
@@ -218,6 +237,7 @@ export default function LocaisEstoquePage() {
       name: row.name,
       polo: row.polo || '',
       filial: String(row.filial === 5 ? 5 : 1),
+      costCenterId: row.costCenterId || '',
       isActive: row.isActive,
     });
     setShowForm(true);
@@ -396,6 +416,16 @@ export default function LocaisEstoquePage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => runSync()}
+                    disabled={isSyncingTotvs || atualizarBase.bloqueado}
+                    className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title={atualizarBase.dica}
+                  >
+                    <RefreshCw className={`h-4 w-4 shrink-0 ${isSyncingTotvs ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingTotvs ? 'Atualizando…' : atualizarBase.rotulo}</span>
+                  </button>
                   {canCreate && (
                     <button
                       type="button"
@@ -452,6 +482,9 @@ export default function LocaisEstoquePage() {
                           <th scope="col" className={cadastroListClasses.th}>
                             Polo
                           </th>
+                          <th scope="col" className={cadastroListClasses.th}>
+                            Centro de custo
+                          </th>
                           <th scope="col" className={cadastroListClasses.thCenter}>
                             Status
                           </th>
@@ -476,6 +509,11 @@ export default function LocaisEstoquePage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 sm:px-6">
                               <span className="text-sm text-gray-700 dark:text-gray-400">{row.polo || '-'}</span>
+                            </td>
+                            <td className="min-w-0 px-3 py-4 sm:px-6">
+                              <span className="block truncate text-sm text-gray-700 dark:text-gray-400">
+                                {row.costCenterName || '-'}
+                              </span>
                             </td>
                             <td className={cadastroListClasses.tdCenter}>
                               <span
@@ -578,6 +616,31 @@ function StockLocationFormModal({
   updateMutation: any;
 }) {
   const { requestClose, confirmUi } = useModalCloseConfirm(onClose, { isParentOpen: isOpen });
+  const { data: costCentersData, isLoading: loadingCostCenters } = useQuery({
+    queryKey: ['cost-centers', 'stock-location-form'],
+    queryFn: async () => {
+      const res = await api.get('/cost-centers', { params: { page: 1, limit: 2000, isActive: 'true' } });
+      return res.data;
+    },
+    enabled: isOpen,
+    staleTime: 5 * 60 * 1000,
+  });
+  const costCenterOptions = useMemo(() => {
+    const raw = Array.isArray(costCentersData?.data)
+      ? costCentersData.data
+      : Array.isArray(costCentersData)
+        ? costCentersData
+        : [];
+    return (raw as Array<{ id: string; code?: string | null; name?: string | null }>)
+      .filter((c) => c?.id)
+      .map((c) => ({
+        value: c.id,
+        label: (c.name || c.code || '').trim() || c.id,
+        description: c.code && c.name ? c.code : undefined,
+        searchText: [c.name, c.code].filter(Boolean).join(' '),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [costCentersData]);
 
   if (!isOpen) return null;
 
@@ -644,6 +707,24 @@ function StockLocationFormModal({
                     placeholder="Selecione"
                     emptyOptionLabel="Selecione"
                   />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Centro de custo
+                  </label>
+                  <SingleSelectSearchDropdown
+                    value={formData.costCenterId}
+                    onChange={(costCenterId) => setFormData({ ...formData, costCenterId })}
+                    options={costCenterOptions}
+                    allowEmpty
+                    emptyOptionLabel="Nenhum"
+                    placeholder={loadingCostCenters ? 'Carregando centros de custo...' : 'Selecione o centro de custo'}
+                    searchPlaceholder="Pesquisar centro de custo..."
+                    emptyOptionsMessage="Nenhum centro de custo encontrado"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Usado só no Conecta; não é enviado ao TOTVS.
+                  </p>
                 </div>
               </div>
               <div className="flex items-center">

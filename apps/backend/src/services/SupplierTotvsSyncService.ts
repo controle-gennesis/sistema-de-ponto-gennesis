@@ -1,11 +1,10 @@
-import cron from 'node-cron';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import { getTotvsRmRelatorioFinService } from './TotvsRmRelatorioFinService';
 
 const DEFAULT_PATH = '/api/framework/v1/consultaSQLServer/RealizaConsulta/FORNECEDORES/1/G';
 /** A cada 5 min — o RM não notifica novos cadastros; polling curto + upsert sem duplicar. */
-const DEFAULT_CRON = '*/5 * * * *';
 const CREATE_BATCH = 200;
 const UPDATE_BATCH = 50;
 
@@ -465,38 +464,21 @@ export function startSupplierTotvsSyncScheduler(): void {
     return;
   }
 
-  const expression = (process.env.SUPPLIER_TOTVS_SYNC_CRON || '').trim() || DEFAULT_CRON;
-  if (!cron.validate(expression)) {
-    console.error(`[supplier-totvs] cron inválido: ${expression}`);
-    return;
-  }
-
   started = true;
-  const tz = process.env.TZ || 'America/Sao_Paulo';
+  const run = () => {
+    void runSupplierTotvsSync('cron').catch(() => {
+      /* já logado */
+    });
+  };
+  agendarSincronizacaoTotvs('supplier-totvs', run);
 
-  cron.schedule(
-    expression,
-    () => {
-      void runSupplierTotvsSync('cron').catch(() => {
-        /* já logado */
-      });
-    },
-    { timezone: tz }
-  );
-
-  console.log(
-    `[supplier-totvs] agendado: "${expression}" (${tz}) — consulta FORNECEDORES no RM a cada poucos minutos`
-  );
-
-  // Sempre sincroniza no boot (local e produção) para a lista não ficar vazia.
-  if (envBool('SUPPLIER_TOTVS_SYNC_ON_BOOT', true)) {
-    const delayMs = Number(process.env.SUPPLIER_TOTVS_SYNC_BOOT_DELAY_MS || 8_000);
-    const wait = Number.isFinite(delayMs) ? delayMs : 8_000;
-    setTimeout(() => {
-      void runSupplierTotvsSync('boot').catch(() => {
-        /* já logado */
-      });
-    }, wait);
-    console.log(`[supplier-totvs] também sincroniza ~${Math.round(wait / 1000)}s após o boot`);
-  }
+  // Na subida só sincroniza se a lista ainda estiver vazia (cada deploy reinicia o servidor).
+  void prisma.supplier
+    .count()
+    .then((total) => {
+      if (total === 0) run();
+    })
+    .catch(() => {
+      /* tabela ainda não pronta — fica para o próximo horário */
+    });
 }

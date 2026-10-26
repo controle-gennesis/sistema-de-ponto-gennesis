@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Paperclip } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Download, Paperclip } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
+import { FdHistoricoPedidosSection } from '@/components/engenharia/FdHistoricoPedidosSection';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   anexosDemais,
   anexosOrdemCompra,
@@ -54,6 +56,39 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function cleanAnexoName(raw: string): string {
+  return raw.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-?/i, '');
+}
+
+async function downloadAnexo(url: string, fallbackName: string) {
+  try {
+    const resolved = resolveApiMediaUrl(url) || url;
+    const res = await fetch(resolved);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = cleanAnexoName(fallbackName);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  } catch {
+    window.open(resolveApiMediaUrl(url) || url, '_blank');
+  }
+}
+
+function FilePreviewCardIcon({ name }: { name: string }) {
+  const ext = name.split('.').pop()?.toUpperCase() || '';
+  return (
+    <div className="text-center">
+      <svg className="mx-auto h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+      </svg>
+      {ext && <span className="mt-0.5 block text-[9px] font-bold text-gray-500">{ext}</span>}
+    </div>
+  );
+}
+
 function AnexoObrigatorioPreview({
   titulo,
   anexo,
@@ -79,6 +114,7 @@ function AnexoObrigatorioPreview({
   }
   const anexoKey = anexo.id || anexo.name;
   const isPending = !anexo.url;
+
   return (
     <div className="space-y-2">
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -101,6 +137,7 @@ function AnexoObrigatorioPreview({
   );
 }
 
+
 export function FichaDemandaDetailModal({
   isOpen,
   record,
@@ -112,6 +149,23 @@ export function FichaDemandaDetailModal({
 }: Props) {
   const queryClient = useQueryClient();
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
+
+  /** Orçamento que gerou a FD (nome vem do índice de orçamentos do contrato). */
+  const orcamentoQuery = useQuery({
+    queryKey: ['fd-orcamento-origem', record?.id],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${record!.id}/orcamento`);
+      return (res.data?.data ?? null) as {
+        nome: string | null;
+        osNumeroPasta?: string | null;
+        orcamentoId: string;
+        centroCustoId: string;
+      } | null;
+    },
+    enabled: isOpen && !!record?.id,
+    staleTime: 60_000,
+    retry: false,
+  });
 
   const anexos = useMemo(() => {
     if (!record?.anexos?.length) return [];
@@ -169,6 +223,9 @@ export function FichaDemandaDetailModal({
 
   if (!record) return null;
 
+  const orcamentoDaFd = orcamentoQuery.data;
+  const temPedidosPelaFd = Array.isArray(record.itensPedidos) && record.itensPedidos.length > 0;
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalhes da Ficha de Demanda" size="xl">
       <div className="space-y-6">
@@ -193,16 +250,37 @@ export function FichaDemandaDetailModal({
           <Field label="Obra">
             <span className="uppercase">{record.obra || '—'}</span>
           </Field>
+          {orcamentoDaFd !== undefined && (
+            <div className="sm:col-span-2">
+              <Field label="OS / Nº da pasta">{orcamentoDaFd?.osNumeroPasta || '—'}</Field>
+            </div>
+          )}
+          {orcamentoDaFd !== undefined && (
+            <div className="sm:col-span-2">
+              <Field label="Orçamento de origem">
+                {orcamentoDaFd?.nome || (orcamentoDaFd ? 'Orçamento não encontrado' : 'FD sem orçamento vinculado')}
+              </Field>
+            </div>
+          )}
           <Field label="Solicitante">{record.solicitanteNome || '—'}</Field>
           <Field label="Polo">{record.polo || '—'}</Field>
-          <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
-          <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+          {/* RMs geradas pela FD aparecem nos cards do histórico; aqui só a RM informada à mão (fluxo antigo). */}
+          {!temPedidosPelaFd && (
+            <>
+              <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
+              <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+            </>
+          )}
           <Field label="Faturamento estimado">
             {formatCurrencyDisplay(record.faturamentoEstimado)}
           </Field>
           <Field label="Custo estimado">{formatCurrencyDisplay(record.custoEstimado)}</Field>
           <Field label="Data/hora">{formatDateTime(record.dataHora)}</Field>
-          <Field label="Status">{FD_STATUS_LABELS[record.status] || record.status}</Field>
+          <Field label="Status">{
+            record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
+              ? 'FD Cancelada por exclusão de orçamento'
+              : (FD_STATUS_LABELS[record.status] || record.status)
+          }</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
           <Field label="Criada em">{formatDateTime(record.createdAt)}</Field>
           {record.managerApproverNome ? (
@@ -219,6 +297,10 @@ export function FichaDemandaDetailModal({
           </div>
         </dl>
 
+        {record.status === 'APPROVED' && (
+          <FdHistoricoPedidosSection fdApprovalId={record.id} codFichaDemanda={record.codFichaDemanda} />
+        )}
+
         <div className="space-y-4">
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
@@ -233,21 +315,70 @@ export function FichaDemandaDetailModal({
                     (pendingCount ? ` · ${pendingCount} pendente(s)` : '')}
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
-              <AnexoObrigatorioPreview
-                titulo="Orçamento"
-                anexo={anexoOrcamento}
-                uploadingAnexoId={uploadingAnexoId}
-                allowPendingUpload={allowPendingUpload}
-                onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
-              />
-              <AnexoObrigatorioPreview
-                titulo="Ficha de demanda"
-                anexo={anexoFd}
-                uploadingAnexoId={uploadingAnexoId}
-                allowPendingUpload={allowPendingUpload}
-                onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
-              />
+            <div className="space-y-3 p-4">
+              {record?.orcamentoId && record?.contratoId ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.open(
+                        `/ponto/contratos/${record.contratoId}/orcamento/${record.orcamentoId}`,
+                        '_blank',
+                      )
+                    }
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 text-left transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-700">
+                      <FilePreviewCardIcon name="orcamento.xlsx" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                        Orçamento e Ficha de Demanda
+                      </p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">Clique para abrir</p>
+                    </div>
+                  </button>
+                  <div className="flex gap-2">
+                    {anexoOrcamento?.url && (
+                      <button
+                        type="button"
+                        onClick={() => downloadAnexo(anexoOrcamento.url!, anexoOrcamento.name || 'orcamento.xlsx')}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Baixar Orçamento
+                      </button>
+                    )}
+                    {anexoFd?.url && (
+                      <button
+                        type="button"
+                        onClick={() => downloadAnexo(anexoFd.url!, anexoFd.name || 'ficha-demanda.xlsx')}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Baixar Ficha de Demanda
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <AnexoObrigatorioPreview
+                    titulo="Orçamento"
+                    anexo={anexoOrcamento}
+                    uploadingAnexoId={uploadingAnexoId}
+                    allowPendingUpload={allowPendingUpload}
+                    onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
+                  />
+                  <AnexoObrigatorioPreview
+                    titulo="Ficha de demanda"
+                    anexo={anexoFd}
+                    uploadingAnexoId={uploadingAnexoId}
+                    allowPendingUpload={allowPendingUpload}
+                    onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
