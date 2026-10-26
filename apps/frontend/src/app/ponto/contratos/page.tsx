@@ -107,6 +107,23 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
+function getSituacaoContrato(startDate: string, endDate: string): { label: string; className: string } {
+  const toDay = (v: string) => {
+    const m = String(v ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12).getTime() : NaN;
+  };
+  const hoje = Date.now();
+  const ini = toDay(startDate);
+  const fim = toDay(endDate);
+  if (!Number.isNaN(ini) && hoje < ini) {
+    return { label: 'A iniciar', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' };
+  }
+  if (!Number.isNaN(fim) && hoje > fim + 24 * 60 * 60 * 1000) {
+    return { label: 'Encerrado', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' };
+  }
+  return { label: 'Vigente', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' };
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -310,7 +327,7 @@ export default function ContratosPage() {
     [router]
   );
 
-  const tableColSpan = showActionsColumn ? 7 : 6;
+  const tableColSpan = showActionsColumn ? 8 : 7;
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const costCentersList = (Array.isArray(costCenters) ? costCenters : []) as CostCenter[];
@@ -913,23 +930,26 @@ export default function ContratosPage() {
                 <table className="w-full table-fixed text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[24%] min-w-[160px]">
-                        Nome
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left w-[26%] min-w-[200px]">
+                        Contrato
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[20%]">
-                        Nº Contrato
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center w-[10%]">
+                        Início
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[16%]">
-                        Vigência
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center w-[10%]">
+                        Término
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center w-[11%]">
+                        Situação
+                      </th>
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center w-[15%]">
                         Centro de Custo
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right w-[14%]">
                         Valor + Aditivos
                       </th>
-                      <th className={`px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${showActionsColumn ? 'w-[10%]' : 'w-[14%]'}`}>
-                        Valor + Aditivos Anual
+                      <th className="px-3 sm:px-6 py-4 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right w-[14%]">
+                        Valor no Ano
                       </th>
                       {showActionsColumn && (
                         <th className={listTableRowClasses.actionTh}>
@@ -965,27 +985,51 @@ export default function ContratosPage() {
                           aria-label={`Abrir detalhes do contrato ${c.name}`}
                         >
                           <td className="min-w-0 overflow-hidden px-3 py-3 align-middle text-left sm:px-6">
+                            <div className="flex min-w-0 items-stretch gap-3">
+                              {/^#[0-9a-f]{6}$/i.test(c.defaultTituloFundo ?? '') ? (
+                                <span
+                                  aria-hidden
+                                  className="w-1.5 shrink-0 self-stretch rounded-full"
+                                  style={{ backgroundColor: c.defaultTituloFundo ?? undefined }}
+                                />
+                              ) : null}
+                              <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2">
                               <ListRowNavigableLabel className="font-medium break-words whitespace-normal">
                                 {c.name}
+                                {pendingByContractId.has(c.id) ? (
+                                  <span className="ml-2 inline-block align-middle">
+                                    <NotificationCountBadge count={1} inline />
+                                  </span>
+                                ) : null}
                               </ListRowNavigableLabel>
-                              {pendingByContractId.has(c.id) ? (
-                                <NotificationCountBadge count={1} inline />
-                              ) : null}
                             </div>
-                          </td>
-                          <td
-                            className="min-w-0 overflow-hidden px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6"
-                            title={c.number}
-                          >
-                            <span className="block break-all font-mono text-sm text-gray-900 dark:text-gray-100">
+                            <span
+                              className="mt-0.5 block break-all font-mono text-xs text-gray-500 dark:text-gray-400"
+                              title={c.number}
+                            >
                               {c.number}
                             </span>
+                              </div>
+                            </div>
                           </td>
-                          <td className="overflow-hidden px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                            <span className="block whitespace-normal">
-                              {formatDate(c.startDate)} até {formatDate(c.endDate)}
-                            </span>
+                          <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                            {formatDate(c.startDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                            {formatDate(c.endDate)}
+                          </td>
+                          <td className="px-3 py-3 text-center sm:px-6">
+                            {(() => {
+                              const sit = getSituacaoContrato(c.startDate, c.endDate);
+                              return (
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${sit.className}`}
+                                >
+                                  {sit.label}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td
                             className="min-w-0 overflow-hidden px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6"
@@ -995,22 +1039,28 @@ export default function ContratosPage() {
                               {c.costCenter?.name || c.costCenter?.code || '-'}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
+                          <td className="whitespace-nowrap px-3 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100 sm:px-6">
                             {formatCurrency(c.valuePlusAddenda)}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
+                          <td className="whitespace-nowrap px-3 py-3 text-right text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                             {(() => {
                               const rows = getValorAnualPorAno(c.valuePlusAddenda, c.startDate, c.endDate);
                               if (!rows.length) return '-';
-                              if (rows.length === 1) return formatCurrency(rows[0].value);
+                              const anoAtual = new Date().getFullYear();
+                              const atual =
+                                rows.find((r) => r.year === anoAtual) ??
+                                rows.find((r) => r.year > anoAtual) ??
+                                rows[rows.length - 1];
+                              const todos = rows.map((r) => `${r.year}: ${formatCurrency(r.value)}`).join('\n');
                               return (
-                                <div className="inline-flex flex-col items-center gap-0.5 text-xs leading-tight">
-                                  {rows.map((r) => (
-                                    <span key={r.year}>
-                                      {r.year}: {formatCurrency(r.value)}
+                                <span title={todos}>
+                                  {formatCurrency(atual.value)}
+                                  {rows.length > 1 ? (
+                                    <span className="ml-1 text-xs text-gray-400 dark:text-gray-500">
+                                      ({atual.year})
                                     </span>
-                                  ))}
-                                </div>
+                                  ) : null}
+                                </span>
                               );
                             })()}
                           </td>
