@@ -2399,6 +2399,26 @@ export function KanbanCardModal({
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="mb-3 shrink-0">
+                  <textarea
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Escrever um comentário..."
+                    rows={2}
+                    className={clsx(kanbanTextarea, 'mb-2 !min-h-0 py-2 text-sm')}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={handlePostComment}
+                    loading={postingComment}
+                    disabled={!commentText.trim()}
+                  >
+                    Comentar
+                  </Button>
+                </div>
                 <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
                   {timeline.length === 0 ? (
                     <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
@@ -2520,26 +2540,6 @@ export function KanbanCardModal({
                   )}
                 </div>
 
-                <div className="shrink-0 border-t border-gray-200 pt-3 dark:border-gray-700">
-                  <textarea
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Escrever um comentário..."
-                    rows={2}
-                    className={clsx(kanbanTextarea, 'mb-2 !min-h-0 py-2 text-sm')}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full"
-                    onClick={handlePostComment}
-                    loading={postingComment}
-                    disabled={!commentText.trim()}
-                  >
-                    Comentar
-                  </Button>
-                </div>
             </div>
           </div>
           )}
