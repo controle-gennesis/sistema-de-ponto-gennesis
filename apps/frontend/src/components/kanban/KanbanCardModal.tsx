@@ -1552,7 +1552,10 @@ export function KanbanCardModal({
       const mainRect = mainEl.getBoundingClientRect();
       const targetRect = targetEl.getBoundingClientRect();
       const measured = Math.round(targetRect.bottom - mainRect.top);
-      setCommentsPanelHeight(Math.max(280, measured));
+      // Descrição enorme (ex.: cartão importado do Trello) não pode esticar a coluna de comentários
+      // além da área visível do modal: limita à altura da coluna principal para a lista rolar.
+      const visibleMax = Math.max(280, Math.round(mainEl.clientHeight));
+      setCommentsPanelHeight(Math.min(Math.max(280, measured), visibleMax));
     };
 
     syncHeight();
