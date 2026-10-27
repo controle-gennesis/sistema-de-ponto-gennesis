@@ -76,6 +76,8 @@ router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextF
           pixKeyType?: string;
           pixKey?: string;
           observations?: string;
+          historico?: string;
+          totvsDestination?: string;
           amountToPay?: number;
           boletoAttachmentUrl?: string;
           boletoAttachmentName?: string;

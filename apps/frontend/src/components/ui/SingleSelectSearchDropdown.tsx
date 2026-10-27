@@ -362,11 +362,16 @@ export function SingleSelectSearchDropdown({
 
   useEffect(() => setMounted(true), []);
 
+  // Rolagem volta ao topo só ao abrir a lista — não quando as opções se atualizam com ela aberta
+  // (ex.: lista que chega do cache e depois da API), senão a lista "pula" enquanto o usuário rola.
+  useLayoutEffect(() => {
+    if (open && listRef.current) listRef.current.scrollTop = 0;
+  }, [open]);
+
   useLayoutEffect(() => {
     if (!open || menuInline) return;
 
     syncFloatingPos();
-    if (listRef.current) listRef.current.scrollTop = 0;
 
     const onScroll = (e: Event) => {
       if (panelRef.current?.contains(e.target as Node)) return;

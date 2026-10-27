@@ -1,4 +1,6 @@
 import axios, { AxiosError } from 'axios';
+import { observacaoParaTotvs, TOTVS_OC_OBSERVACAO_MAX } from '../lib/ocObservacaoTotvs';
+import { prisma } from '../lib/prisma';
 import https from 'https';
 import {
   TOTVS_OC_CODTMV,
@@ -7,6 +9,26 @@ import {
   totvsCodColigada,
   toTotvsUnit,
 } from '../lib/ocTotvsRm';
+
+/** O RM recusou usuário/senha (HTTP 401). Não tentar de novo: falhas repetidas bloqueiam o usuário no TOTVS. */
+export class TotvsLoginRecusadoError extends Error {
+  constructor() {
+    super(
+      'O TOTVS recusou o usuário/senha vinculado no Conecta. Envio interrompido para não bloquear o usuário no RM — confira o usuário em "Vincular usuário Totvs".'
+    );
+    this.name = 'TotvsLoginRecusadoError';
+  }
+}
+
+/** Observação para o RM: só o texto do usuário, uma linha, até 60 caracteres (limite da coluna no RM). */
+function limitarObservacao(texto: string | null | undefined): string | null {
+  const t = observacaoParaTotvs(texto);
+  if (!t) return null;
+  return t.length > TOTVS_OC_OBSERVACAO_MAX ? t.slice(0, TOTVS_OC_OBSERVACAO_MAX) : t;
+}
+
+/** Produto do RM usado para lançar o frete da OC como item (FRETE GERAL). */
+const TOTVS_OC_PRODUTO_FRETE = '14.01.0001';
 
 export type TotvsOcMovimentoItem = {
   sequencial: number;
@@ -34,6 +56,8 @@ export type TotvsOcMovimentoPayload = {
   dataEmissao: Date;
   dataEntrega?: Date | null;
   observacao?: string | null;
+  /** Histórico da OC (TMOV.HISTORICOLONGO no RM). */
+  historico?: string | null;
   bancoAgPix?: string | null;
   items: TotvsOcMovimentoItem[];
 };
@@ -64,6 +88,27 @@ function xmlEscape(value: string | number): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Decimal no XML do DataServer: o RM lê no formato pt-BR (ponto = milhar), então "0.24" vira 24.
+ * Envia com vírgula ("0,24"); inteiros saem iguais.
+ */
+function xmlDecimal(value: number): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return String(n).replace('.', ',');
+}
+
+/**
+ * Tipo de frete do Conecta (letra) → código numérico do RM (TMOV.FRETECIFOUFOB, padrão modFrete):
+ * 0 CIF, 1 FOB, 2 Terceiros, 3 Próprio Remetente, 4 Próprio Destinatário, 9 Sem frete.
+ * A letra em TIPOFRETE é ignorada pelo RM (o movimento entrava como "Sem Frete" e zerava o valor).
+ */
+const TOTVS_FRETE_CIF_OU_FOB: Record<string, number> = { C: 0, F: 1, T: 2, R: 3, D: 4, S: 9 };
+
+function freteCifOuFob(tipoFrete: string | null | undefined): number {
+  return TOTVS_FRETE_CIF_OU_FOB[String(tipoFrete || '').trim().toUpperCase()] ?? 9;
 }
 
 function decodeXmlEntities(value: string): string {
@@ -395,6 +440,8 @@ export class TotvsRmMovimentoService {
       validateStatus: () => true,
       maxRedirects: 0,
     });
+    // Senha recusada: para tudo na hora — cada nova tentativa conta como login errado e o RM bloqueia o usuário.
+    if (response.status === 401) throw new TotvsLoginRecusadoError();
     if (response.status >= 400) return null;
     return response.data;
   }
@@ -413,7 +460,8 @@ export class TotvsRmMovimentoService {
           const n = Number(row.CODCOLIGADA);
           return Number.isFinite(n) ? n : col;
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof TotvsLoginRecusadoError) throw err;
         /* lookup só leitura; se falhar, tenta a próxima coligada */
       }
     }
@@ -429,54 +477,6 @@ export class TotvsRmMovimentoService {
     this.produtoByCodigo.set(codigo.toUpperCase(), { idPrd, codigo, unidade });
   }
 
-  async resolveProduto(codigo: string): Promise<{ idPrd: number | null; codigo: string; unidade: string | null }> {
-    const wanted = (codigo || '').trim();
-    if (!wanted) return { idPrd: null, codigo: '', unidade: null };
-    const cached = this.produtoByCodigo.get(wanted.toUpperCase());
-    if (cached) return cached;
-
-    if (/^\d+$/.test(wanted)) {
-      try {
-        const raw = await this.restGetJson(
-          `/RMSRestDataServer/rest/EstPrdDataBR/${totvsCodColigada()}$_$${Number(wanted)}`
-        );
-        const row = this.pickDataRecord(raw);
-        if (row) this.rememberProduto(row);
-        const byId = this.produtoByCodigo.get(wanted.toUpperCase());
-        if (byId) return byId;
-        const idPrd = Number(row?.IDPRD);
-        if (row && Number.isFinite(idPrd) && idPrd > 0) {
-          const found = {
-            idPrd,
-            codigo: String(row.CODIGOPRD || wanted).trim() || wanted,
-            unidade:
-              String(row.CODUNDCOMPRA || row.CODUNDCONTROLE || row.CODUNDVENDA || '').trim() || null,
-          };
-          this.produtoByCodigo.set(found.codigo.toUpperCase(), found);
-          return found;
-        }
-      } catch {
-        /* busca paginada abaixo */
-      }
-    }
-
-    const pageSize = 200;
-    const maxPages = 15;
-    for (let page = 0; page < maxPages; page++) {
-      const raw = await this.restGetJson(
-        `/RMSRestDataServer/rest/EstPrdDataBR?start=${page * pageSize}&limit=${pageSize}`
-      );
-      const rec = asRecord(raw);
-      const list = Array.isArray(rec?.data) ? rec.data : [];
-      for (const item of list) {
-        if (item && typeof item === 'object') this.rememberProduto(item as Record<string, unknown>);
-      }
-      const hit = this.produtoByCodigo.get(wanted.toUpperCase());
-      if (hit) return hit;
-      if (list.length < pageSize) break;
-    }
-    return { idPrd: null, codigo: wanted, unidade: null };
-  }
 
   private async loadEstoqueLocais(): Promise<Array<{ filial: number; codigo: string; nome: string }>> {
     if (this.locRows && Date.now() - this.locRowsAt < 30 * 60 * 1000) return this.locRows;
@@ -532,7 +532,8 @@ export class TotvsRmMovimentoService {
         }
       }
       return best.codigo;
-    } catch {
+    } catch (err) {
+      if (err instanceof TotvsLoginRecusadoError) throw err;
       return '';
     }
   }
@@ -564,6 +565,7 @@ export class TotvsRmMovimentoService {
       CODCCUSTO: input.centroCusto,
       CODCPG: input.condicaoPagamento,
       TIPOFRETE: input.tipoFrete || 'S',
+      FRETECIFOUFOB: freteCifOuFob(input.tipoFrete),
       VALORFRETE: Number.isFinite(valorFrete) && valorFrete > 0 ? valorFrete : 0,
       DATAEMISSAO: `${isoDate(input.dataEmissao)}T00:00:00`,
       TITMMOV: input.items.map((item) => {
@@ -584,6 +586,8 @@ export class TotvsRmMovimentoService {
     };
     if (localEstoque) header.CODLOC = localEstoque;
     if (input.observacao) header.OBSERVACAO = input.observacao;
+    // Histórico: no RM fica direto no movimento (TMOV.HISTORICOLONGO), como nos movimentos feitos à mão.
+    if (input.historico) header.HISTORICOLONGO = input.historico;
     if (input.bancoAgPix) header.CAMPOLIVRE1 = input.bancoAgPix;
 
     return header;
@@ -608,9 +612,12 @@ export class TotvsRmMovimentoService {
       localEstoque ? ['CODLOC', localEstoque] : null,
       ['CODCPG', input.condicaoPagamento],
       ['TIPOFRETE', input.tipoFrete || 'S'],
-      ['VALORFRETE', valorFrete],
+      ['FRETECIFOUFOB', freteCifOuFob(input.tipoFrete)],
+      ['VALORFRETE', xmlDecimal(valorFrete)],
       ['DATAEMISSAO', `${isoDate(input.dataEmissao)}T00:00:00`],
       input.observacao ? ['OBSERVACAO', input.observacao] : null,
+      // Histórico: no RM fica direto no movimento (TMOV.HISTORICOLONGO), como nos movimentos feitos à mão.
+      input.historico ? ['HISTORICOLONGO', input.historico] : null,
       input.bancoAgPix ? ['CAMPOLIVRE1', input.bancoAgPix] : null,
     ]
       .filter((row): row is [string, string | number] => Boolean(row))
@@ -626,8 +633,8 @@ export class TotvsRmMovimentoService {
           item.produtoId && item.produtoId > 0 ? ['IDPRD', item.produtoId] : null,
           ['CODIGOPRD', item.produtoCodigo],
           toTotvsUnit(item.unidade) ? ['CODUND', toTotvsUnit(item.unidade)] : null,
-          ['QUANTIDADE', item.quantidade],
-          ['PRECOUNITARIO', item.precoUnitario],
+          ['QUANTIDADE', xmlDecimal(item.quantidade)],
+          ['PRECOUNITARIO', xmlDecimal(item.precoUnitario)],
           ['CODCCUSTO', input.centroCusto],
         ]
           .filter((row): row is [string, string | number] => Boolean(row))
@@ -701,6 +708,8 @@ export class TotvsRmMovimentoService {
       maxRedirects: 0,
       validateStatus: () => true,
     });
+    // Senha recusada no próprio SaveRecord: mesma trava do REST (não tentar de novo).
+    if (response.status === 401) throw new TotvsLoginRecusadoError();
     const raw = this.responseText(response.data);
     console.warn(`[TOTVS OC] SOAP SaveRecord ${response.status} len=${raw.length} :: ${sanitizeRmSnippet(raw)}`);
     if (response.status === 202 || !raw.trim()) {
@@ -804,7 +813,23 @@ export class TotvsRmMovimentoService {
     throw lastErr || new Error('TOTVS RM REST não criou o movimento 1.1.26');
   }
 
+  /**
+   * Um envio por vez: a credencial do comprador fica no serviço durante o envio, então dois envios
+   * simultâneos (de pessoas diferentes) não podem se misturar.
+   */
+  private filaEnvio: Promise<unknown> = Promise.resolve();
+
   async saveOc1126(
+    input: TotvsOcMovimentoPayload,
+    auth?: TotvsRmAuthOverride | null
+  ): Promise<TotvsOcSaveResult> {
+    const executar = () => this.saveOc1126SemFila(input, auth);
+    const resultado = this.filaEnvio.then(executar, executar);
+    this.filaEnvio = resultado.catch(() => undefined);
+    return resultado;
+  }
+
+  private async saveOc1126SemFila(
     input: TotvsOcMovimentoPayload,
     auth?: TotvsRmAuthOverride | null
   ): Promise<TotvsOcSaveResult> {
@@ -833,26 +858,55 @@ export class TotvsRmMovimentoService {
       const fornecedorColigada =
         input.fornecedorColigada ?? (await this.resolveFornecedorColigada(input.fornecedorCodigo));
       const filial = Number(input.filial) === 5 ? 5 : 1;
-      const items: TotvsOcMovimentoItem[] = [];
-      for (const item of input.items) {
-        const lookupKey =
-          item.produtoId && item.produtoId > 0 ? String(item.produtoId) : item.produtoCodigo;
-        const prd = await this.resolveProduto(lookupKey);
-        const idPrd = (item.produtoId && item.produtoId > 0 ? item.produtoId : prd.idPrd) || null;
-        if (!idPrd) {
-          throw new Error(
-            `Produto ${item.produtoCodigo} não foi encontrado no cadastro do TOTVS (IDPRD). Cadastre o identificador no Conecta.`
-          );
-        }
-        items.push({
-          ...item,
-          produtoCodigo: prd.codigo || item.produtoCodigo,
-          produtoId: idPrd,
-          unidade: toTotvsUnit(prd.unidade || item.unidade),
+      // O RM não soma TMOV.VALORFRETE no movimento 1.1.26: o frete vai como último item
+      // (produto FRETE GERAL, qtd. 1, preço = frete da OC), como os compradores já faziam à mão.
+      const valorFreteNum = Number(input.valorFrete);
+      const freteNaOc = Number.isFinite(valorFreteNum) && valorFreteNum > 0 ? valorFreteNum : 0;
+      const itensParaBuscar: TotvsOcMovimentoItem[] = [...input.items];
+      if (freteNaOc > 0) {
+        const cadastroFrete = await prisma.constructionMaterial.findFirst({
+          where: { code: TOTVS_OC_PRODUTO_FRETE },
+          select: { totvsIdPrd: true, unit: true },
+        });
+        itensParaBuscar.push({
+          sequencial: input.items.reduce((max, it) => Math.max(max, it.sequencial), 0) + 1,
+          produtoCodigo: TOTVS_OC_PRODUTO_FRETE,
+          produtoId: cadastroFrete?.totvsIdPrd ?? null,
+          descricao: 'FRETE GERAL',
+          unidade: toTotvsUnit(cadastroFrete?.unit || 'UN'),
+          quantidade: 1,
+          precoUnitario: freteNaOc,
+          centroCusto: input.centroCusto,
         });
       }
+
+      // Itens montados só com o cadastro do Conecta (IDPRD, código, unidade), sem consultar produtos
+      // no TOTVS: cada consulta extra é um login no RM, e falhas repetidas bloqueiam o usuário.
+      // Se algum item não tiver IDPRD, nada é enviado (a OC não pode ir com produto faltando).
+      const items: TotvsOcMovimentoItem[] = [];
+      const problemas: string[] = [];
+      for (const item of itensParaBuscar) {
+        const idPrd = Number(item.produtoId);
+        if (!Number.isFinite(idPrd) || idPrd <= 0) {
+          problemas.push(`${item.produtoCodigo}: sem Identificador (IDPRD) no cadastro de Materiais e Serviços`);
+          continue;
+        }
+        items.push({ ...item, produtoId: idPrd, unidade: toTotvsUnit(item.unidade) });
+      }
+      if (problemas.length) {
+        throw new Error(`OC não enviada ao TOTVS — ${problemas.join(' | ')}. Nenhum movimento foi criado.`);
+      }
       const codLoc = (input.codLoc || (await this.resolveCodLoc(filial, input.centroCustoNome)) || '').trim();
-      const resolved: TotvsOcMovimentoPayload = { ...input, fornecedorColigada, filial, items, codLoc };
+      // Frete já vai como item: VALORFRETE zerado para não contar duas vezes.
+      const resolved: TotvsOcMovimentoPayload = {
+        ...input,
+        fornecedorColigada,
+        filial,
+        items,
+        codLoc,
+        valorFrete: freteNaOc > 0 ? 0 : input.valorFrete,
+        observacao: limitarObservacao(input.observacao),
+      };
 
       console.warn(
         `[TOTVS OC] inclusão 1.1.26 user=${this.credentials().user} coligada=1 filial=${resolved.filial} loc=${resolved.codLoc || '-'} CODCFO=${resolved.fornecedorCodigo} COLCFO=${resolved.fornecedorColigada} CC=${resolved.centroCusto} CPG=${resolved.condicaoPagamento} itens=${resolved.items

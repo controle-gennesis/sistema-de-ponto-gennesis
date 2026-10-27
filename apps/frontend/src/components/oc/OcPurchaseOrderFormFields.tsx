@@ -31,6 +31,23 @@ import {
 
 export const TOTVS_OC_FILIAL_CODE = '1';
 
+/** TMOV.OBSERVACAO no RM aceita no máximo 60 caracteres. Manter igual ao backend (ocObservacaoTotvs.ts). */
+export const OC_NOTES_TOTVS_MAX = 60;
+
+/** Histórico da OC: até 500 caracteres (TOTVS: TMOVHISTORICO.HISTORICOLONGO). Manter igual ao backend. */
+export const OC_HISTORICO_MAX = 500;
+
+/** Texto que vai para o TOTVS: só o que o usuário escreveu (sem os blocos "[...]" de histórico), em uma linha. */
+export function observacaoParaTotvs(notes: string | null | undefined): string {
+  if (!notes?.trim()) return '';
+  return notes
+    .split(/\r?\n\s*\r?\n+/)
+    .filter((bloco) => !/^\[[^\]]*\]/.test(bloco.trim()))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function OcFilialField({
   value,
   onChange,
@@ -82,6 +99,8 @@ export type StockLocationOption = {
   name: string;
   filial?: number;
   polo?: string | null;
+  /** Centro de custo associado no cadastro de Locais de Estoque. */
+  costCenterId?: string | null;
 };
 
 export function formatOcCostCenterLabel(
@@ -131,8 +150,11 @@ export function OcStockLocationField({
   selectedLabel,
   labelClassName,
   required = true,
+  costCenterId,
 }: {
   value?: string | null;
+  /** Centro de custo da OC: a lista mostra só os locais associados a ele. */
+  costCenterId?: string | null;
   filial?: string | number | null;
   onChange?: (location: StockLocationOption | null) => void;
   readOnly?: boolean;
@@ -161,14 +183,23 @@ export function OcStockLocationField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filialCode, locations, selected, value]);
 
+  // Locais do centro de custo da OC + locais ainda sem centro de custo. Local associado a outro centro de
+  // custo nunca aparece. O local já escolhido (OC em edição) continua visível para não ser apagado.
+  const ccId = String(costCenterId || '').trim();
+  const visiveis = useMemo(() => {
+    const base = locations.filter((row) => !row.costCenterId || (!!ccId && row.costCenterId === ccId));
+    return selected && !base.some((row) => row.id === selected.id) ? [selected, ...base] : base;
+  }, [ccId, locations, selected]);
+  const semLocalDisponivel = locations.length > 0 && visiveis.length === 0;
+
   const options = useMemo(
     () =>
-      locations.map((row) => ({
+      visiveis.map((row) => ({
         value: row.id,
         label: formatOcStockLocationLabel(row) || row.code,
         searchText: `${row.code} ${row.name}`,
       })),
-    [locations]
+    [visiveis]
   );
 
   return (
@@ -191,6 +222,11 @@ export function OcStockLocationField({
           noFocusRing
         />
       )}
+      {!readOnly && onChange && semLocalDisponivel ? (
+        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          Nenhum local de estoque disponível para este centro de custo. Associe um local em Locais de Estoque.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -266,6 +302,8 @@ export type OcPurchaseOrderFormValues = {
   totvsCodLoc: string;
   freightAmount: string;
   notes: string;
+  /** Histórico da OC (vai para o TOTVS), até 500 caracteres. */
+  historico: string;
   items: OcFormLineItem[];
 };
 
@@ -281,6 +319,8 @@ type OcPurchaseOrderFormFieldsProps = {
   paymentConditionLabel?: string;
   correctionInfo?: OcCorrectionInfo | null;
   costCenterLabel?: string | null;
+  /** Centro de custo da OC (filtra a lista de locais de estoque). */
+  costCenterId?: string | null;
   stockLocationLabel?: string | null;
   onChange?: (patch: Partial<OcPurchaseOrderFormValues>) => void;
   onItemChange?: (index: number, patch: Partial<OcFormLineItem>) => void;
@@ -303,6 +343,7 @@ export function OcPurchaseOrderFormFields({
   paymentConditionLabel,
   correctionInfo,
   costCenterLabel,
+  costCenterId,
   stockLocationLabel,
   onChange,
   onItemChange,
@@ -461,6 +502,7 @@ export function OcPurchaseOrderFormFields({
 
       <OcStockLocationField
         value={values.stockLocationId}
+        costCenterId={costCenterId}
         filial={values.totvsCodFilial}
         selectedLabel={stockLocationLabel || formatOcStockLocationLabel({
           code: values.totvsCodLoc,
@@ -689,16 +731,56 @@ export function OcPurchaseOrderFormFields({
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Observações</label>
         {isEdit ? (
-          <textarea
-            value={values.notes}
-            onChange={(e) => onChange?.({ notes: e.target.value })}
-            rows={3}
-            className={`${ocFieldCls} resize-y`}
-            placeholder="Observações gerais da OC"
-          />
+          <>
+            <textarea
+              value={values.notes}
+              onChange={(e) => onChange?.({ notes: e.target.value })}
+              rows={3}
+              className={`${ocFieldCls} resize-y`}
+              placeholder="Observações gerais da OC (até 60 caracteres vão para o TOTVS)"
+            />
+            {(() => {
+              const total = observacaoParaTotvs(values.notes).length;
+              const excede = total > OC_NOTES_TOTVS_MAX;
+              return (
+                <p
+                  className={`mt-1 text-right text-xs ${
+                    excede ? 'font-medium text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  {excede
+                    ? `${total}/${OC_NOTES_TOTVS_MAX} — o TOTVS aceita no máximo ${OC_NOTES_TOTVS_MAX} caracteres; resuma o texto`
+                    : `${total}/${OC_NOTES_TOTVS_MAX} caracteres para o TOTVS`}
+                </p>
+              );
+            })()}
+          </>
         ) : (
           <div className={`${ocFieldReadonlyCls} whitespace-pre-wrap min-h-[4.5rem]`}>
             {values.notes?.trim() || '—'}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Histórico</label>
+        {isEdit ? (
+          <>
+            <textarea
+              value={values.historico}
+              onChange={(e) => onChange?.({ historico: e.target.value.slice(0, OC_HISTORICO_MAX) })}
+              rows={3}
+              maxLength={OC_HISTORICO_MAX}
+              className={`${ocFieldCls} resize-y`}
+              placeholder="Histórico da OC (vai para o TOTVS)"
+            />
+            <p className="mt-1 text-right text-xs text-gray-500 dark:text-gray-400">
+              {(values.historico || '').length}/{OC_HISTORICO_MAX}
+            </p>
+          </>
+        ) : (
+          <div className={`${ocFieldReadonlyCls} whitespace-pre-wrap min-h-[4.5rem]`}>
+            {values.historico?.trim() || '—'}
           </div>
         )}
       </div>
@@ -724,6 +806,7 @@ export type OcFormOrderSource = {
   } | null;
   amountToPay?: number | string | null;
   notes?: string | null;
+  historico?: string | null;
   items?: Array<{
     materialId?: string;
     material?: {
@@ -797,6 +880,7 @@ export function buildOcFormValuesFromOrder(
     totvsCodLoc: order.totvsCodLoc || order.stockLocation?.code || '',
     freightAmount: freightStored,
     notes: options?.stripCorrectionNotes ? options.stripCorrectionNotes(order.notes) : order.notes || '',
+    historico: order.historico || '',
     items
   };
 }

@@ -98,6 +98,7 @@ export function emptyForm(): Record<string, string> {
     lot: '',
     divSe: '',
     location: '',
+    obra: '',
     unit: '',
     serviceDescription: '',
     executionStatus: '',
@@ -127,6 +128,8 @@ export interface PleitoFormData {
   lot: string | null;
   divSe: string | null;
   location: string | null;
+  /** Obra da OS (cadastro de obras do contrato). */
+  obra?: string | null;
   unit: string | null;
   serviceDescription: string;
   budget: string | null;
@@ -139,6 +142,7 @@ export interface PleitoFormData {
   budgetAmount3: number | null;
   budgetAmount4: number | null;
   budgetValueConfirmed?: boolean | null;
+  linkedOrcamentoId?: string | null;
   pv: string | null;
   ipi: string | null;
   reportsBilling: string | null;
@@ -161,6 +165,7 @@ export function pleitoToForm(p: PleitoFormData): Record<string, string> {
     lot: p.lot || '',
     divSe: p.divSe || '',
     location: p.location || '',
+    obra: p.obra || '',
     unit: p.unit || '',
     serviceDescription: p.serviceDescription || '',
     executionStatus: p.executionStatus || '',
@@ -175,7 +180,8 @@ export function pleitoToForm(p: PleitoFormData): Record<string, string> {
     ipi: p.ipi || '',
     reportsBilling: p.reportsBilling || '',
     engineer: p.engineer || '',
-    supervisor: p.supervisor || ''
+    supervisor: p.supervisor || '',
+    linkedOrcamentoId: p.linkedOrcamentoId || ''
   };
 }
 
@@ -195,6 +201,7 @@ export function formToPayload(
     lot: toPayloadStr(f.lot),
     divSe: toPayloadStr(f.divSe),
     location: toPayloadStr(f.location),
+    obra: toPayloadStr(f.obra),
     unit: toPayloadStr(f.unit),
     serviceDescription: f.serviceDescription.trim(),
     budget: nBudget !== 0 ? nBudget.toFixed(2) : null,
@@ -216,7 +223,8 @@ export function formToPayload(
     ipi: toPayloadStr(f.ipi),
     reportsBilling: toPayloadStr(f.reportsBilling),
     engineer: toPayloadStr(f.engineer),
-    supervisor: toPayloadStr(f.supervisor)
+    supervisor: toPayloadStr(f.supervisor),
+    linkedOrcamentoId: toPayloadStr(f.linkedOrcamentoId)
   };
 }
 

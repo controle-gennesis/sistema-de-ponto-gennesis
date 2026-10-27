@@ -1,5 +1,5 @@
-import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
+import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import { ensureStockLocationsTable } from '../lib/ensureProductionSchema';
 import { fetchRmConsultaRows, pickRmField } from '../lib/totvsRmConsulta';
 
@@ -96,14 +96,20 @@ export async function syncStockLocationsFromTotvs(options: { force?: boolean } =
   return inFlight;
 }
 
-/** Sincroniza ao iniciar e a cada 30 minutos. */
+/** Sincroniza nos horários de `SYNC_TOTVS_HORARIOS` (e na subida só se a lista estiver vazia). */
 export function startStockLocationTotvsSyncScheduler(): void {
-  const tz = process.env.TZ || 'America/Sao_Paulo';
   const run = () => {
     void syncStockLocationsFromTotvs({ force: true }).catch((err) => {
       console.error('[stock-locations-sync] falha:', err instanceof Error ? err.message : err);
     });
   };
-  run();
-  cron.schedule('*/30 * * * *', run, { timezone: tz });
+  agendarSincronizacaoTotvs('stock-locations-sync', run);
+  void prisma.stockLocation
+    .count()
+    .then((total) => {
+      if (total === 0) run();
+    })
+    .catch(() => {
+      /* tabela ainda não pronta — o próprio sync cria; fica para o próximo horário */
+    });
 }

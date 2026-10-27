@@ -1061,6 +1061,20 @@ function SolicitarMateriaisPage() {
     }));
   };
 
+  /**
+   * Obra da OS: a do cadastro da OS; senão, a do orçamento vinculado à OS (ou das FDs dele).
+   * Só preenche o campo Obra do formulário — o restante da RM segue igual.
+   */
+  const buscarObraDaOs = async (serviceOrderId: string): Promise<string> => {
+    try {
+      const res = await api.get('/demand-sheet-approvals/obras-por-orcamento', { params: { serviceOrderId } });
+      const lista = (res.data?.data ?? []) as Array<{ obra?: string }>;
+      return [...new Set(lista.map((o) => String(o.obra || '').trim().toUpperCase()).filter(Boolean))].join(', ');
+    } catch {
+      return '';
+    }
+  };
+
   const handleNewServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
     const os = newFormServiceOrders.find((o) => o.id === serviceOrderId);
     const osDescription = (os?.serviceDescription || '').trim();
@@ -1068,14 +1082,14 @@ function SolicitarMateriaisPage() {
       ...prev,
       serviceOrderId,
       serviceOrder,
+      obra: '',
       // Mantém o CC do contrato: a OS pode ter outro id UNB e barrar a criação.
-      ...(osDescription
-        ? {
-            obra: osDescription,
-            description: osDescription,
-          }
-        : {}),
+      ...(osDescription ? { description: osDescription } : {}),
     }));
+    void buscarObraDaOs(serviceOrderId).then((obra) => {
+      if (!obra) return;
+      setFormData((prev) => (prev.serviceOrderId === serviceOrderId ? { ...prev, obra } : prev));
+    });
   };
 
   const handleNewServiceOrderClear = () => {
@@ -1089,13 +1103,13 @@ function SolicitarMateriaisPage() {
       ...prev,
       serviceOrderId,
       serviceOrder,
-      ...(osDescription
-        ? {
-            obra: osDescription,
-            description: osDescription,
-          }
-        : {}),
+      obra: '',
+      ...(osDescription ? { description: osDescription } : {}),
     }));
+    void buscarObraDaOs(serviceOrderId).then((obra) => {
+      if (!obra) return;
+      setEditFormData((prev) => (prev.serviceOrderId === serviceOrderId ? { ...prev, obra } : prev));
+    });
   };
 
   const handleEditServiceOrderClear = () => {

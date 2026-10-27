@@ -80,12 +80,12 @@ export class ApprovalNotificationController {
       let oc = 0;
       if (isAdmin || (await userHasOcComprasApprovePermission(userId))) {
         oc += await prisma.purchaseOrder.count({
-          where: { status: { in: ['PENDING_COMPRAS', 'DRAFT'] } },
+          where: { status: { in: ['PENDING_COMPRAS', 'DRAFT'] }, totvsFluxoDireto: false },
         });
       }
       if (isAdmin || (await userHasOcGestorApprovePermission(userId))) {
         const gestorScope = await getOcGestorApproverListScopeCostCenterIds(userId, isAdmin);
-        const gestorWhere: Prisma.PurchaseOrderWhereInput = { status: 'PENDING' };
+        const gestorWhere: Prisma.PurchaseOrderWhereInput = { status: 'PENDING', totvsFluxoDireto: false };
         if (gestorScope !== null) {
           gestorWhere.materialRequest = { costCenterId: { in: gestorScope } };
         }
@@ -93,7 +93,7 @@ export class ApprovalNotificationController {
       }
       if (isAdmin || (await userHasOcDiretoriaApprovePermission(userId))) {
         oc += await prisma.purchaseOrder.count({
-          where: { status: 'PENDING_DIRETORIA' },
+          where: { status: 'PENDING_DIRETORIA', totvsFluxoDireto: false },
         });
       }
 

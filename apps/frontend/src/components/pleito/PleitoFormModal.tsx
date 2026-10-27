@@ -29,6 +29,7 @@ import {
   executionStatusPillClass,
 } from '@/lib/pleitoStatusStyles';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { ObraSelectField } from '@/components/engenharia/ObraSelectField';
 import { Checkbox } from '@/components/ui/Checkbox';
 
 const OS_FORM_LABEL_CLS =
@@ -145,9 +146,15 @@ function Field({
   );
 }
 
+interface OrcamentoOption {
+  id: string;
+  nome: string;
+}
+
 interface PleitoFormModalProps {
   contractId: string;
   pleitoToEdit?: PleitoFormData & { id: string };
+  orcamentos?: OrcamentoOption[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -155,6 +162,7 @@ interface PleitoFormModalProps {
 export function PleitoFormModal({
   contractId,
   pleitoToEdit,
+  orcamentos = [],
   onClose,
   onSuccess,
 }: PleitoFormModalProps) {
@@ -338,6 +346,15 @@ export function PleitoFormModal({
                 />
                 <Field label="Local" name="location" form={form} setForm={setForm} />
                 <Field label="Unidade" name="unit" form={form} setForm={setForm} />
+                <div className="md:col-span-2">
+                  {/* OS criada fora do fluxo do orçamento: obra informada aqui. Pelo orçamento, a obra vem dele. */}
+                  <ObraSelectField
+                    contratoId={contractId}
+                    value={form.obra || ''}
+                    onChange={(obra) => setForm({ ...form, obra })}
+                    required={false}
+                  />
+                </div>
               </div>
             </OsFormSection>
 
@@ -345,6 +362,20 @@ export function PleitoFormModal({
               title="Orçamento e status"
               description="Acumulado faturado, status de faturamento (%) e pendente são calculados automaticamente conforme o faturamento cadastrado para esta OS."
             >
+              {orcamentos.length > 0 && (
+                <div className="mb-4">
+                  <label className={OS_FORM_LABEL_CLS}>Orçamento vinculado</label>
+                  <StringSingleSelectDropdown
+                    value={form.linkedOrcamentoId || ''}
+                    onChange={(v) => setForm({ ...form, linkedOrcamentoId: v })}
+                    options={labeledToSelectOptions([
+                      { value: '', label: 'Nenhum (sem vínculo)' },
+                      ...orcamentos.map((o) => ({ value: o.id, label: o.nome || o.id.slice(0, 8) })),
+                    ])}
+                    allowEmpty={false}
+                  />
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className={OS_FORM_LABEL_CLS}>Status orçamento</label>

@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import api from '@/lib/api';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
 import { OsDetailOcTab, sumOsPurchaseOrdersTotal, useOsPurchaseOrders } from '@/components/contract/OsDetailOcTab';
 import { formatOsSePasta } from '@/lib/formatOsSePasta';
@@ -44,6 +46,10 @@ export type ContractOsDetailPleito = ContractPleitoHistorico & {
   budgetAmount3?: number | null;
   budgetAmount4?: number | null;
   budgetAdditives?: { orcamentoId: string; descricao: string; valor: number }[] | null;
+  /** Orçamento vinculado à OS (as FDs geradas dele trazem a obra). */
+  linkedOrcamentoId?: string | null;
+  /** Obra informada no cadastro da OS (OS criada fora do fluxo do orçamento). */
+  obra?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   engineer?: string | null;
@@ -291,6 +297,34 @@ export function ContractOsDetailModal({
     [osPurchaseOrders]
   );
 
+  // Obra: a do orçamento da OS (e dos aditivos), informada ao iniciar/importar o orçamento.
+  const orcamentoIdsDaOs = useMemo(() => {
+    if (!pleito) return [] as string[];
+    const ids = [
+      pleito.linkedOrcamentoId,
+      ...(pleito.budgetAdditives ?? []).map((a) => a.orcamentoId),
+    ]
+      .map((id) => String(id || '').trim())
+      .filter(Boolean);
+    return [...new Set(ids)];
+  }, [pleito]);
+  const { data: obrasDaOs } = useQuery({
+    queryKey: ['os-obras-fd', pleito?.id, orcamentoIdsDaOs.join(',')],
+    queryFn: async () => {
+      // Obra do orçamento vinculado à OS (informada ao iniciar/importar); antigo sem obra usa a da FD.
+      const res = await api.get('/demand-sheet-approvals/obras-por-orcamento', {
+        params: { pleitoId: pleito?.id, ids: orcamentoIdsDaOs.join(',') },
+      });
+      return (res.data?.data ?? []) as { orcamentoId: string; codFichaDemanda: string; obra: string }[];
+    },
+    enabled: isOpen && !pleito?.obra?.trim() && orcamentoIdsDaOs.length > 0,
+    staleTime: 60_000,
+  });
+  // Obra do cadastro da OS primeiro; senão, a do orçamento vinculado (ou das FDs, para orçamento antigo).
+  const obraLabel =
+    pleito?.obra?.trim() ||
+    [...new Set((obrasDaOs ?? []).map((o) => o.obra.toUpperCase()))].join(', ');
+
   const pleitoDisplayIds = useMemo(() => buildDisplayIdMap(allPleitos), [allPleitos]);
   const billingDisplayIds = useMemo(() => buildDisplayIdMap(billings), [billings]);
 
@@ -325,6 +359,7 @@ export function ContractOsDetailModal({
 
     push('OS / SE', osLabel);
     push('Descrição do serviço', pleito.serviceDescription, true);
+    push('Obra', obraLabel || '—');
     push('Lote', pleito.lot);
     push('Local', pleito.location);
     push('Unidade', pleito.unit);

@@ -8,6 +8,7 @@ import {
   Bell,
   CalendarClock,
   CalendarRange,
+  ClipboardCheck,
   ClipboardList,
   FileCheck,
   FileText,
@@ -253,6 +254,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: FileCheck,
       });
     }
+    if (fdNotificationCounts.rejectedOwn > 0) {
+      list.push({
+        id: 'fd-reprovadas',
+        title: 'Fichas de Demanda',
+        description: 'Reprovadas — edite e reenvie',
+        count: fdNotificationCounts.rejectedOwn,
+        href: '/ponto/aprovacao-fds',
+        Icon: ClipboardCheck,
+      });
+    }
     if (canSeeFuroEstoque && pendingFuroCount > 0) {
       list.push({
         id: 'furo-estoque',
@@ -413,6 +424,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     canSeeEntregaLogistica,
     counts,
     fdNotificationCounts.pendingPurchase,
+    fdNotificationCounts.rejectedOwn,
     pendingFuroCount,
     recebimentoPendingCount,
     fuelSuppliesPendingCount,

@@ -44,6 +44,13 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { ROW_ACTION_MENU_WIDTH_PX, type RowActionMenuState, useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { computeRowActionMenuPosition } from '@/lib/computeRowActionMenuPosition';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  MEDICAO_VAZIA,
+  medicaoParaApi,
+  MedicaoFields,
+  validarMedicao,
+  type MedicaoValue,
+} from '@/components/contract/MedicaoFields';
 
 const LIST_DISPLAY_LIMIT = 10;
 
@@ -119,6 +126,8 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
   const [selectedPleitos, setSelectedPleitos] = useState<Set<string>>(new Set());
   const [showBatchNfModal, setShowBatchNfModal] = useState(false);
   const [batchInvoiceValue, setBatchInvoiceValue] = useState('');
+  /** Medição do faturamento dos pleitos selecionados (código + período). */
+  const [batchMedicao, setBatchMedicao] = useState<MedicaoValue>(MEDICAO_VAZIA);
   const [pleitoToEdit, setPleitoToEdit] = useState<ContractPleitoHistorico | null>(null);
   const [editDescription, setEditDescription] = useState('');
   const [editValorInput, setEditValorInput] = useState('');
@@ -285,6 +294,7 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     setSelectedPleitos(new Set());
     setShowBatchNfModal(false);
     setBatchInvoiceValue('');
+    setBatchMedicao(MEDICAO_VAZIA);
     setBatchPartialValue('');
   }, [contractId]);
 
@@ -297,6 +307,7 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
       faturarRestante?: boolean;
       faturarValor?: boolean;
       valorFaturamento?: number;
+      medicao?: MedicaoValue;
     }
   ) => {
     const orc = parseBudgetToNumberSafe(pleito.budget);
@@ -323,7 +334,10 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
       payload.faturarValor = true;
       payload.valorFaturamento = options.valorFaturamento;
     }
-    await api.patch(`/pleitos/${pleito.id}`, payload);
+    await api.patch(`/pleitos/${pleito.id}`, {
+      ...payload,
+      ...(options?.medicao ? medicaoParaApi(options.medicao) : {}),
+    });
   };
 
   const filteredPleitoIds = useMemo(() => filteredPleitos.map((p) => p.id), [filteredPleitos]);
@@ -383,6 +397,7 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     }
     setBatchFaturamentoMode('saldo');
     setBatchInvoiceValue('');
+    setBatchMedicao(MEDICAO_VAZIA);
     setBatchPartialValue('');
     setShowBatchNfModal(true);
   };
@@ -396,6 +411,7 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     setSelectedPleitos(new Set([pleitoId]));
     setBatchFaturamentoMode('saldo');
     setBatchInvoiceValue('');
+    setBatchMedicao(MEDICAO_VAZIA);
     setBatchPartialValue('');
     setShowBatchNfModal(true);
     closeRowActionMenu();
@@ -522,6 +538,11 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
       toast.error('Informe o número da nota fiscal.');
       return;
     }
+    const erroMedicao = validarMedicao(batchMedicao);
+    if (erroMedicao) {
+      toast.error(erroMedicao);
+      return;
+    }
 
     const isParcial = batchFaturamentoMode === 'parcial';
     if (isParcial && pleitosAptos.length !== 1) {
@@ -569,20 +590,28 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
             await patchPleitoFaturamento(pleito, invoice, billingStatus, {
               faturarValor: true,
               valorFaturamento: valorParcial,
+              medicao: batchMedicao,
             });
             return;
           }
           const billingStatus = billingStatusAfterFaturamento(pleito, billings, 'saldo');
           if (canHistoricoFaturar100(pleito, billings)) {
-            await patchPleitoFaturamento(pleito, invoice, billingStatus, { usarOrcamento100: true });
+            await patchPleitoFaturamento(pleito, invoice, billingStatus, {
+              usarOrcamento100: true,
+              medicao: batchMedicao,
+            });
           } else {
-            await patchPleitoFaturamento(pleito, invoice, billingStatus, { faturarRestante: true });
+            await patchPleitoFaturamento(pleito, invoice, billingStatus, {
+              faturarRestante: true,
+              medicao: batchMedicao,
+            });
           }
         })
       );
       await invalidateQueries();
       setShowBatchNfModal(false);
       setBatchInvoiceValue('');
+      setBatchMedicao(MEDICAO_VAZIA);
       setBatchPartialValue('');
       toast.success(
         isParcial
@@ -1111,6 +1140,12 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
               className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
             />
           </div>
+          <MedicaoFields
+            value={batchMedicao}
+            onChange={setBatchMedicao}
+            disabled={isSaving}
+            focusRingClass="focus:ring-violet-500"
+          />
           <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <Button type="button" variant="outline" onClick={() => setShowBatchNfModal(false)}>
               Cancelar

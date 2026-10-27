@@ -37,6 +37,9 @@ import {
 import {
   fdPurchaseStatusBadgeClass,
   formatCurrencyDisplay,
+  formatFichaDemandaPct,
+  pedidosStatusBadgeClass,
+  pedidosStatusLabel,
   purchaseStatusLabel,
   type DemandSheetPurchaseStatus,
   type FichaDemandaApprovalRecord,
@@ -393,6 +396,12 @@ export default function FdsAprovadasPage() {
                             Faturamento
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            FD
+                          </th>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            Pedidos
+                          </th>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status compras
                           </th>
                           <th className={`${listTableRowClasses.actionTh} text-center`}>
@@ -439,6 +448,14 @@ export default function FdsAprovadasPage() {
                             </td>
                             <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCurrencyDisplay(row.faturamentoEstimado)}
+                            </td>
+                            <td className="px-3 py-4 text-center sm:px-6">
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${pedidosStatusBadgeClass(row.pedidosStatus)}`}
+                                title={pedidosStatusLabel(row.pedidosStatus)}
+                              >
+                                {pedidosStatusLabel(row.pedidosStatus)}
+                              </span>
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <span

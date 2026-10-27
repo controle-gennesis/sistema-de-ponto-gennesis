@@ -1,5 +1,5 @@
-import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
+import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import {
   ensureConstructionMaterialTotvsAvgPaid,
   ensureConstructionMaterialTotvsIdPrd,
@@ -7,7 +7,6 @@ import {
 import { getTotvsRmRelatorioFinService } from './TotvsRmRelatorioFinService';
 
 /** A cada 6h — catálogo muda pouco; evita sobrecarregar o RM. */
-const DEFAULT_CRON = '0 */6 * * *';
 const CREATE_BATCH = 80;
 const UPDATE_BATCH = 40;
 
@@ -803,36 +802,21 @@ export function startMaterialTotvsSyncScheduler(): void {
     return;
   }
 
-  const expression = (process.env.MATERIAL_TOTVS_SYNC_CRON || '').trim() || DEFAULT_CRON;
-  if (!cron.validate(expression)) {
-    console.error(`[material-totvs] cron inválido: ${expression}`);
-    return;
-  }
-
   started = true;
-  const tz = process.env.TZ || 'America/Sao_Paulo';
+  const run = () => {
+    void runMaterialTotvsSync('cron').catch(() => {
+      /* já logado */
+    });
+  };
+  agendarSincronizacaoTotvs('material-totvs', run);
 
-  cron.schedule(
-    expression,
-    () => {
-      void runMaterialTotvsSync('cron').catch(() => {
-        /* já logado */
-      });
-    },
-    { timezone: tz }
-  );
-
-  console.log(
-    `[material-totvs] agendado: "${expression}" (${tz}) — consulta PRODUTOS no RM`
-  );
-
-  if (envBool('MATERIAL_TOTVS_SYNC_ON_BOOT', true)) {
-    const delayMs = Number(process.env.MATERIAL_TOTVS_SYNC_BOOT_DELAY_MS || 12_000);
-    const wait = Number.isFinite(delayMs) ? delayMs : 12_000;
-    setTimeout(() => {
-      void runMaterialTotvsSync('boot').catch(() => {
-        /* já logado */
-      });
-    }, wait);
-  }
+  // Na subida só sincroniza se a lista ainda estiver vazia (cada deploy reinicia o servidor).
+  void prisma.constructionMaterial
+    .count()
+    .then((total) => {
+      if (total === 0) run();
+    })
+    .catch(() => {
+      /* tabela ainda não pronta — fica para o próximo horário */
+    });
 }

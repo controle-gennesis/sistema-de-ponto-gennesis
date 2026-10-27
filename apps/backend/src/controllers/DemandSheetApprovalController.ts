@@ -6,6 +6,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { idMovsValidadosComprasG4 } from '../lib/fluigG4Validacao';
 import { createError } from '../middleware/errorHandler';
 import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_CONFLICT_MESSAGE } from '../lib/prismaConflict';
 import { AuthRequest } from '../middleware/auth';
@@ -25,6 +26,7 @@ import {
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { OrcamentoService } from '../services/OrcamentoService';
+import { MaterialRequestService } from '../services/MaterialRequestService';
 import {
   getFdApprovalNotifyUserIds,
   notifyApprovalDecisionWhatsApp,
@@ -85,14 +87,304 @@ function anexosComFichaDemandaPct(anexos: unknown, pct: number): Prisma.InputJso
   return next as Prisma.InputJsonValue;
 }
 
+/** Grava no anexo-ref do orçamento o custo real calculado na aba Ficha de demanda (espelho para a lista). */
+function anexosComCustoReal(anexos: unknown, custoReal: number): Prisma.InputJsonValue {
+  const list = Array.isArray(anexos) ? anexos : [];
+  return list.map((a) =>
+    isOrcamentoRefAnexo(a) && a && typeof a === 'object'
+      ? { ...(a as Record<string, unknown>), custoReal }
+      : a
+  ) as Prisma.InputJsonValue;
+}
+
+/** Custo real espelhado da aba Ficha de demanda (null quando a FD nunca foi aberta com custo). */
+function custoRealEspelhado(anexos: unknown): number | null {
+  if (!Array.isArray(anexos)) return null;
+  for (const a of anexos) {
+    if (!isOrcamentoRefAnexo(a)) continue;
+    const n = Number((a as { custoReal?: unknown }).custoReal);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function publicAnexos(anexos: unknown): unknown[] {
   if (!Array.isArray(anexos)) return [];
   return anexos.filter((a) => !isOrcamentoRefAnexo(a));
 }
 
+type FdItemPedido = {
+  fdItemKey: string;
+  fdItem: string;
+  descricao: string;
+  requestNumber: string;
+  materialRequestId: string;
+  requestedAt: string;
+  requestedBy: string;
+  /** Soma das quantidades dos materiais pedidos para o item nesta RM. */
+  quantidade: number;
+  /** Quantidade do item no orçamento/FD no momento do pedido. */
+  quantidadeFd: number | null;
+  /** Unidade do item na FD. */
+  unidadeFd: string;
+  /** Soma só dos materiais pedidos na unidade da FD (base do saldo). */
+  quantidadeNaUnidadeFd: number;
+  /** Materiais associados ao item neste pedido (1 item → N materiais). */
+  materiais: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+  /** Motivos de atenção para o gestor: '1:N' (vários materiais) e/ou 'unidade' (unidade diferente da FD). */
+  alertas: string[];
+};
+
+const FD_QTD_EPS = 1e-6;
+
+function parseItensPedidos(raw: unknown): FdItemPedido[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map((r) => ({
+      fdItemKey: String(r.fdItemKey || ''),
+      fdItem: String(r.fdItem || ''),
+      descricao: String(r.descricao || ''),
+      requestNumber: String(r.requestNumber || ''),
+      materialRequestId: String(r.materialRequestId || ''),
+      requestedAt: String(r.requestedAt || ''),
+      requestedBy: String(r.requestedBy || ''),
+      quantidade: Number.isFinite(Number(r.quantidade)) ? Number(r.quantidade) : 0,
+      quantidadeFd: Number.isFinite(Number(r.quantidadeFd)) && r.quantidadeFd != null ? Number(r.quantidadeFd) : null,
+      unidadeFd: String(r.unidadeFd || ''),
+      // Registros antigos não tinham este campo: a quantidade era na unidade da FD.
+      quantidadeNaUnidadeFd: Number.isFinite(Number(r.quantidadeNaUnidadeFd))
+        ? Number(r.quantidadeNaUnidadeFd)
+        : Number.isFinite(Number(r.quantidade)) ? Number(r.quantidade) : 0,
+      materiais: Array.isArray(r.materiais)
+        ? (r.materiais as Record<string, unknown>[]).map((m) => ({
+            materialId: String(m?.materialId || ''),
+            materialLabel: String(m?.materialLabel || ''),
+            quantity: Number(m?.quantity) || 0,
+            unit: String(m?.unit || ''),
+          }))
+        : [],
+      alertas: Array.isArray(r.alertas) ? (r.alertas as unknown[]).map(String) : [],
+    }))
+    .filter((r) => r.fdItemKey);
+}
+
+/**
+ * IDs de RMs que batem com a busca da lista de FDs: número da RM, número da OC ou IdMov/Nº movimento
+ * TOTVS da OC. Aceita "RM 10", "OC 10", "IdMov 65964" ou só o número. Limitado para não pesar a busca.
+ */
+async function materialRequestIdsForFdSearch(search: string): Promise<string[]> {
+  const termo = search.replace(/^\s*(rm|req|oc|id\s*mov|idmov)\s*[-:#nº°]*\s*/i, '').trim();
+  if (!termo) return [];
+  const numero = /^\d+$/.test(termo) ? Number(termo) : null;
+
+  const [rms, ocs] = await Promise.all([
+    prisma.materialRequest.findMany({
+      where: { requestNumber: { contains: termo, mode: 'insensitive' } },
+      select: { id: true },
+      take: 200,
+    }),
+    prisma.purchaseOrder.findMany({
+      where: {
+        OR: [
+          { orderNumber: { contains: termo, mode: 'insensitive' } },
+          { totvsNumMovimento: { contains: termo, mode: 'insensitive' } },
+          ...(numero !== null && numero <= 2147483647 ? [{ totvsIdMov: numero }] : []),
+        ],
+      },
+      select: {
+        materialRequestId: true,
+        items: { select: { materialRequestItem: { select: { materialRequestId: true } } } },
+      },
+      take: 200,
+    }),
+  ]);
+
+  const ids = new Set<string>(rms.map((r) => r.id));
+  for (const oc of ocs) {
+    if (oc.materialRequestId) ids.add(oc.materialRequestId);
+    for (const it of oc.items) {
+      if (it.materialRequestItem?.materialRequestId) ids.add(it.materialRequestItem.materialRequestId);
+    }
+  }
+  return [...ids].slice(0, 300);
+}
+
+type FdMaterialCustoReal = {
+  materialId: string;
+  materialLabel: string;
+  unit: string;
+  quantidade: number;
+  valorUnitario: number;
+  total: number;
+  ocs: { orderNumber: string; totvsIdMov: number }[];
+};
+
+/**
+ * Custo real dos itens da FD a partir das OCs validadas pelo compras no G4 (IdMov em Anexar Nota Fiscal
+ * ou Finalizada no espelho do Fluig; não canceladas/reprovadas).
+ * Material juntado em uma linha da RM para vários itens da FD é rateado pela quantidade pedida. Só leitura.
+ */
+type ItemOcDaRm = {
+  poItemId: string;
+  quantidade: number;
+  total: number;
+  oc: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    totvsIdMov: number | null;
+    totvsNumMovimento: string | null;
+    /** Total da OC (itens + frete). */
+    amountToPay: number;
+  };
+};
+
+/**
+ * Itens de OC por (RM, material). Liga de dois jeitos: pelo item da RM (materialRequestItemId) e,
+ * quando a OC não guardou esse vínculo (ex.: gerada pelo mapa de cotação), pela RM do cabeçalho
+ * da OC + mesmo material. Só leitura.
+ */
+async function itensOcPorRmMaterial(rmIds: string[]): Promise<Map<string, ItemOcDaRm[]>> {
+  const mapa = new Map<string, ItemOcDaRm[]>();
+  if (!rmIds.length) return mapa;
+  const ocSelect = {
+    id: true,
+    orderNumber: true,
+    status: true,
+    totvsIdMov: true,
+    totvsNumMovimento: true,
+    materialRequestId: true,
+    amountToPay: true,
+  } as const;
+  const [porItemRm, porCabecalho] = await Promise.all([
+    prisma.purchaseOrderItem.findMany({
+      where: { materialRequestItem: { materialRequestId: { in: rmIds } } },
+      select: {
+        id: true,
+        materialId: true,
+        quantity: true,
+        totalPrice: true,
+        materialRequestItem: { select: { materialRequestId: true } },
+        purchaseOrder: { select: ocSelect },
+      },
+    }),
+    prisma.purchaseOrderItem.findMany({
+      where: { materialRequestItemId: null, purchaseOrder: { materialRequestId: { in: rmIds } } },
+      select: { id: true, materialId: true, quantity: true, totalPrice: true, purchaseOrder: { select: ocSelect } },
+    }),
+  ]);
+  const adicionar = (rmId: string | null | undefined, poi: {
+    id: string;
+    materialId: string;
+    quantity: unknown;
+    totalPrice: unknown;
+    purchaseOrder: {
+      id: string;
+      orderNumber: string;
+      status: string;
+      totvsIdMov: number | null;
+      totvsNumMovimento: string | null;
+      amountToPay: unknown;
+    };
+  }) => {
+    if (!rmId) return;
+    const k = `${rmId}|${poi.materialId}`;
+    const lista = mapa.get(k) ?? [];
+    if (lista.some((x) => x.poItemId === poi.id)) return;
+    const { id, orderNumber, status, totvsIdMov, totvsNumMovimento, amountToPay } = poi.purchaseOrder;
+    lista.push({
+      poItemId: poi.id,
+      quantidade: Number(poi.quantity) || 0,
+      total: Number(poi.totalPrice) || 0,
+      oc: {
+        id,
+        orderNumber,
+        status: String(status),
+        totvsIdMov,
+        totvsNumMovimento,
+        amountToPay: Number(amountToPay) || 0,
+      },
+    });
+    mapa.set(k, lista);
+  };
+  for (const poi of porItemRm) adicionar(poi.materialRequestItem?.materialRequestId, poi);
+  for (const poi of porCabecalho) adicionar(poi.purchaseOrder.materialRequestId, poi);
+  return mapa;
+}
+
+async function calcularCustosReaisFd(
+  itensPedidosRaw: unknown
+): Promise<Record<string, { materiais: FdMaterialCustoReal[]; total: number }>> {
+  const pedidos = parseItensPedidos(itensPedidosRaw).filter((p) => p.materiais.length > 0);
+  const rmIds = [...new Set(pedidos.map((p) => p.materialRequestId).filter(Boolean))];
+  const itensOc = await itensOcPorRmMaterial(rmIds);
+  // Só entram OCs já validadas pelo compras no G4 (Anexar Nota Fiscal ou Finalizada), pelo IdMov.
+  const validadasG4 = await idMovsValidadosComprasG4();
+
+  // O que foi comprado por (RM, material), só de OCs validadas no G4.
+  type Compra = { quantidade: number; total: number; ocs: { orderNumber: string; totvsIdMov: number }[] };
+  const compraPorRmMaterial = new Map<string, Compra>();
+  for (const [k, lista] of itensOc) {
+    const compra: Compra = { quantidade: 0, total: 0, ocs: [] };
+    for (const it of lista) {
+      const po = it.oc;
+      if (po.totvsIdMov == null || po.status === 'CANCELLED' || po.status === 'REJECTED') continue;
+      if (!validadasG4.has(po.totvsIdMov)) continue;
+      compra.quantidade += it.quantidade;
+      compra.total += it.total;
+      if (!compra.ocs.some((o) => o.orderNumber === po.orderNumber)) {
+        compra.ocs.push({ orderNumber: po.orderNumber, totvsIdMov: po.totvsIdMov });
+      }
+    }
+    if (compra.quantidade > 0) compraPorRmMaterial.set(k, compra);
+  }
+
+  // Quanto cada item da FD pediu de cada material na mesma RM (base do rateio).
+  const pedidoPorRmMaterial = new Map<string, number>();
+  for (const p of pedidos) {
+    for (const m of p.materiais) {
+      const k = `${p.materialRequestId}|${m.materialId}`;
+      pedidoPorRmMaterial.set(k, (pedidoPorRmMaterial.get(k) || 0) + m.quantity);
+    }
+  }
+
+  const itens: Record<string, { materiais: FdMaterialCustoReal[]; total: number }> = {};
+  for (const p of pedidos) {
+    for (const m of p.materiais) {
+      const k = `${p.materialRequestId}|${m.materialId}`;
+      const compra = compraPorRmMaterial.get(k);
+      if (!compra) continue;
+      const pedidoTotal = pedidoPorRmMaterial.get(k) || m.quantity;
+      const fator = pedidoTotal > 0 ? m.quantity / pedidoTotal : 1;
+      const quantidade = compra.quantidade * fator;
+      const total = compra.total * fator;
+      const item = (itens[p.fdItemKey] ??= { materiais: [], total: 0 });
+      item.materiais.push({
+        materialId: m.materialId,
+        materialLabel: m.materialLabel,
+        unit: m.unit,
+        quantidade,
+        valorUnitario: quantidade > 0 ? total / quantidade : 0,
+        total,
+        ocs: compra.ocs,
+      });
+      item.total += total;
+    }
+  }
+  return itens;
+}
+
+/** RM preenchida à mão no formulário da FD (import usa "-" como vazio). */
+function hasManualRm(numMovRm: string | null | undefined): boolean {
+  const v = String(numMovRm || '').trim();
+  return v !== '' && v !== '-';
+}
+
 async function syncOrcamentoStatusFromFd(
   anexos: unknown,
-  statusAprovacao: 'aprovado' | 'em_correcao'
+  statusAprovacao: 'aprovado' | 'em_correcao',
+  fichaDemandaApprovalId?: string
 ): Promise<void> {
   const ref = extractOrcamentoRefFromAnexos(anexos);
   if (!ref) return;
@@ -100,7 +392,8 @@ async function syncOrcamentoStatusFromFd(
     await orcamentoService.updateStatusAprovacao(
       ref.centroCustoId,
       ref.orcamentoId,
-      statusAprovacao
+      statusAprovacao,
+      fichaDemandaApprovalId
     );
   } catch (err) {
     console.warn('[DemandSheetApproval] Falha ao sincronizar status do orçamento:', err);
@@ -130,8 +423,8 @@ const anexoSchema = z.object({
 });
 
 const formSchema = z.object({
-  numMovRm: z.string().min(1),
-  idMovRm: z.string().min(1),
+  numMovRm: z.string().default(''),
+  idMovRm: z.string().default(''),
   codigoPedido: z.string().min(1),
   solicitanteId: z.string().optional(),
   contratoId: z.string().min(1),
@@ -232,17 +525,34 @@ function serializeRow(row: {
   purchaseStatusUpdatedBy: string | null;
   purchaseStatusUpdatedAt: Date | null;
   purchaseCancellationNote: string | null;
+  pedidosEncerrados: boolean;
+  pedidosEncerradosBy: string | null;
+  pedidosEncerradosAt: Date | null;
+  itensPedidos: unknown;
   createdAt: Date;
   updatedAt: Date;
   solicitante?: { id: string; name: string } | null;
-  contrato?: { id: string; name: string; number: string; costCenterId?: string } | null;
+  contrato?: {
+    id: string;
+    name: string;
+    number: string;
+    costCenterId?: string;
+    costCenter?: { name: string | null } | null;
+  } | null;
   creator?: { id: string; name: string } | null;
   managerApprover?: { id: string; name: string } | null;
   purchaseStatusUpdater?: { id: string; name: string } | null;
 }) {
   const orcRef = extractOrcamentoRefFromAnexos(row.anexos);
+  const parsedItens = parseItensPedidos(row.itensPedidos);
+  const pedidosStatus: 'PENDENTE' | 'PARCIAL' | 'COMPLETO' = row.pedidosEncerrados
+    ? 'COMPLETO'
+    : parsedItens.length > 0
+      ? 'PARCIAL'
+      : 'PENDENTE';
   return {
     ...row,
+    pedidosStatus,
     faturamentoEstimado: Number(row.faturamentoEstimado),
     custoEstimado: Number(row.custoEstimado),
     dataHora: row.dataHora.toLocaleString('pt-BR'),
@@ -258,13 +568,17 @@ function serializeRow(row: {
     orcamentoId: orcRef?.orcamentoId ?? null,
     orcamentoCentroCustoId: orcRef?.centroCustoId ?? null,
     contratoCostCenterId: row.contrato?.costCenterId ?? null,
+    /** Centro de custo da FD (o do contrato) — agrupamento da lista de FDs. */
+    centroCustoNome: row.contrato?.costCenter?.name?.trim() || null,
     fichaDemandaPct: orcRef?.fichaDemandaPct ?? null,
   };
 }
 
 const includeDefault = {
   solicitante: { select: { id: true, name: true } },
-  contrato: { select: { id: true, name: true, number: true, costCenterId: true } },
+  contrato: {
+    select: { id: true, name: true, number: true, costCenterId: true, costCenter: { select: { name: true } } },
+  },
   creator: { select: { id: true, name: true } },
   managerApprover: { select: { id: true, name: true } },
   purchaseStatusUpdater: { select: { id: true, name: true } },
@@ -356,6 +670,85 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
   return { OR: or };
 }
 
+/**
+ * OS e nº da pasta de cada FD (vindos da importação do orçamento de origem), no formato "OS - Nº123".
+ * Lê o índice de orçamentos uma vez por centro de custo. Só leitura.
+ */
+async function osNumeroPastaPorFd(
+  rows: Array<{ id: string; anexos: unknown }>
+): Promise<{ os: Map<string, string>; orcamentoExiste: Map<string, boolean> }> {
+  const refPorFd = new Map<string, { centroCustoId: string; orcamentoId: string }>();
+  for (const r of rows) {
+    const ref = extractOrcamentoRefFromAnexos(r.anexos);
+    if (ref) refPorFd.set(r.id, { centroCustoId: ref.centroCustoId, orcamentoId: ref.orcamentoId });
+  }
+  const ccs = [...new Set([...refPorFd.values()].map((r) => r.centroCustoId))];
+  const osPorOrcamento = new Map<string, string>();
+  const orcamentosExistentes = new Set<string>();
+  const ccsLidos = new Set<string>();
+  await Promise.all(
+    ccs.map(async (cc) => {
+      try {
+        const index = await orcamentoService.getIndex(cc);
+        ccsLidos.add(cc);
+        for (const o of index.orcamentos) {
+          orcamentosExistentes.add(`${cc}|${o.id}`);
+          const os = String(o.osCodigo || '').trim();
+          const pasta = String(o.numeroPasta || '').trim();
+          const label = os && pasta ? `${os} - Nº${pasta}` : os || pasta;
+          if (label) osPorOrcamento.set(`${cc}|${o.id}`, label);
+        }
+      } catch {
+        /* índice indisponível: a FD fica em "Sem OS" */
+      }
+    })
+  );
+  const out = new Map<string, string>();
+  // Orçamento de origem excluído: a FD não entra nos resultados (índice lido e orçamento ausente).
+  const orcamentoExiste = new Map<string, boolean>();
+  for (const [fdId, ref] of refPorFd) {
+    const chave = `${ref.centroCustoId}|${ref.orcamentoId}`;
+    const label = osPorOrcamento.get(chave);
+    if (label) out.set(fdId, label);
+    if (ccsLidos.has(ref.centroCustoId)) orcamentoExiste.set(fdId, orcamentosExistentes.has(chave));
+  }
+  return { os: out, orcamentoExiste };
+}
+
+/**
+ * Total pago em OCs por FD: OCs das RMs da FD validadas pelo compras no G4 (Anexar Nota Fiscal ou
+ * Finalizada), cada OC uma vez, pelo total da OC. Só leitura.
+ */
+async function totalPagoOcsPorFd(rows: Array<{ id: string; itensPedidos: unknown }>): Promise<Map<string, number>> {
+  const rmsPorFd = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const rms = new Set(parseItensPedidos(r.itensPedidos).map((p) => p.materialRequestId).filter(Boolean));
+    if (rms.size) rmsPorFd.set(r.id, rms);
+  }
+  const out = new Map<string, number>();
+  if (!rmsPorFd.size) return out;
+  const todasRms = [...new Set([...rmsPorFd.values()].flatMap((s) => [...s]))];
+  const [itensOc, validadasG4] = await Promise.all([itensOcPorRmMaterial(todasRms), idMovsValidadosComprasG4()]);
+  // OCs pagas por RM (cada OC uma vez).
+  const ocsPagasPorRm = new Map<string, Map<string, number>>();
+  for (const [k, lista] of itensOc) {
+    const rmId = k.split('|')[0];
+    for (const { oc } of lista) {
+      if (oc.totvsIdMov == null || oc.status === 'CANCELLED' || oc.status === 'REJECTED') continue;
+      if (!validadasG4.has(oc.totvsIdMov)) continue;
+      const m = ocsPagasPorRm.get(rmId) ?? new Map<string, number>();
+      m.set(oc.id, oc.amountToPay);
+      ocsPagasPorRm.set(rmId, m);
+    }
+  }
+  for (const [fdId, rms] of rmsPorFd) {
+    const ocs = new Map<string, number>();
+    for (const rmId of rms) for (const [ocId, valor] of ocsPagasPorRm.get(rmId) ?? []) ocs.set(ocId, valor);
+    out.set(fdId, Math.round([...ocs.values()].reduce((a, b) => a + b, 0) * 100) / 100);
+  }
+  return out;
+}
+
 export class DemandSheetApprovalController {
   async list(req: AuthRequest, res: Response) {
     try {
@@ -377,6 +770,8 @@ export class DemandSheetApprovalController {
       }
 
       if (search) {
+        // Também encontra a FD pela RM, OC ou IdMov TOTVS gerados a partir dela (só leitura em RM/OC).
+        const rmIdsDaBusca = await materialRequestIdsForFdSearch(search);
         where.AND = [
           {
             OR: [
@@ -389,6 +784,9 @@ export class DemandSheetApprovalController {
               { ocId: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
               { solicitanteNome: { contains: search, mode: 'insensitive' } },
+              ...rmIdsDaBusca.map((rmId) => ({
+                itensPedidos: { array_contains: [{ materialRequestId: rmId }] },
+              })),
             ],
           },
         ];
@@ -400,7 +798,38 @@ export class DemandSheetApprovalController {
         orderBy: { createdAt: 'desc' },
       });
 
-      return res.json({ success: true, data: rows.map(serializeRow) });
+      // Custo real: o espelho da aba Ficha de demanda (inclui valores digitados e os vindos das OCs);
+      // sem espelho, soma as OCs enviadas ao TOTVS para os itens pedidos pela FD.
+      const custoRealPorFd = new Map<string, number>();
+      for (const r of rows) {
+        const espelho = custoRealEspelhado(r.anexos);
+        if (espelho != null) custoRealPorFd.set(r.id, espelho);
+      }
+      await Promise.all(
+        rows
+          .filter(
+            (r) => !custoRealPorFd.has(r.id) && Array.isArray(r.itensPedidos) && r.itensPedidos.length > 0
+          )
+          .map(async (r) => {
+            const itens = await calcularCustosReaisFd(r.itensPedidos);
+            custoRealPorFd.set(r.id, Object.values(itens).reduce((acc, it) => acc + it.total, 0));
+          })
+      );
+
+      // Resultado por FD para a lista em níveis (centro de custo → obra → OS → FD).
+      const [osInfo, pagoPorFd] = await Promise.all([osNumeroPastaPorFd(rows), totalPagoOcsPorFd(rows)]);
+
+      return res.json({
+        success: true,
+        data: rows.map((r) => ({
+          ...serializeRow(r),
+          custoReal: custoRealPorFd.get(r.id) ?? null,
+          osNumeroPasta: osInfo.os.get(r.id) ?? null,
+          /** false = o orçamento de origem foi excluído (FD sem dado real para o resultado). */
+          orcamentoExiste: osInfo.orcamentoExiste.get(r.id) ?? null,
+          totalPagoOcs: pagoPorFd.get(r.id) ?? 0,
+        })),
+      });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) {
@@ -472,7 +901,7 @@ export class DemandSheetApprovalController {
       if (err?.statusCode) {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
-      return res.status(500).json({ error: 'Erro ao criar ficha de demanda' });
+      return res.status(500).json({ error: `Erro ao enviar a ficha de demanda: ${(e as Error)?.message || 'erro desconhecido'}` });
     }
   }
 
@@ -484,9 +913,9 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
-      // Edição liberada enquanto aguarda aprovação e na Fila (aprovada, ainda sem status de compras).
+      // Edição liberada enquanto aguarda aprovação, quando reprovada e na Fila (aprovada, ainda sem status de compras).
       const naFila = existing.status === 'APPROVED' && !existing.purchaseStatus;
-      if (existing.status !== 'WAITING_MANAGER' && !naFila) {
+      if (existing.status !== 'WAITING_MANAGER' && existing.status !== 'REJECTED' && !naFila) {
         throw createError('A ficha só pode ser editada até a etapa Fila', 400);
       }
       if (!req.user.isAdmin && existing.createdBy !== req.user.id) {
@@ -495,6 +924,33 @@ export class DemandSheetApprovalController {
 
       const body = formSchema.parse(req.body);
       await assertLiberadoContractAccess(req, body.contratoId);
+
+      const anexos: Array<Record<string, unknown>> = Array.isArray(body.anexos)
+        ? body.anexos.map((a: Record<string, unknown>) => ({ ...a }))
+        : [];
+      const existingOrcRef = extractOrcamentoRefFromAnexos(existing.anexos);
+      if (existingOrcRef && !extractOrcamentoRefFromAnexos(anexos)) {
+        anexos.push({
+          id: ORCAMENTO_REF_KIND,
+          name: ORCAMENTO_REF_NAME,
+          kind: ORCAMENTO_REF_KIND,
+          centroCustoId: existingOrcRef.centroCustoId,
+          orcamentoId: existingOrcRef.orcamentoId,
+          fichaDemandaPct: existingOrcRef.fichaDemandaPct ?? 0,
+        });
+      }
+      const centroRef = String((req.body as Record<string, unknown>).orcamentoCentroCustoId || '').trim();
+      const orcRef = String((req.body as Record<string, unknown>).orcamentoId || '').trim();
+      if (centroRef && orcRef && !extractOrcamentoRefFromAnexos(anexos)) {
+        anexos.push({
+          id: ORCAMENTO_REF_KIND,
+          name: ORCAMENTO_REF_NAME,
+          kind: ORCAMENTO_REF_KIND,
+          centroCustoId: centroRef,
+          orcamentoId: orcRef,
+          fichaDemandaPct: 0,
+        });
+      }
 
       const row = await prisma.demandSheetApproval.update({
         where: { id },
@@ -510,7 +966,8 @@ export class DemandSheetApprovalController {
           observacao: body.observacao.trim(),
           dataHora: parseDataHora(body.dataHora),
           polo: body.polo,
-          anexos: body.anexos,
+          anexos: anexos as unknown as Prisma.InputJsonValue,
+          ...(existing.status === 'REJECTED' ? { status: 'WAITING_MANAGER', managerApprovedBy: null, managerApprovedAt: null, managerApprovalComment: null, managerRejectionReason: null, managerRejectionComment: null } : {}),
         },
         include: includeDefault,
       });
@@ -626,10 +1083,10 @@ export class DemandSheetApprovalController {
           : phase === 'APPROVED'
             ? { status: 'APPROVED' as const }
             : phase === 'REJECTED'
-              ? { status: 'REJECTED' as const }
+              ? { status: { in: ['REJECTED', 'CANCELLED'] as DemandSheetApprovalStatus[] } }
               : {
                   status: {
-                    in: ['WAITING_MANAGER', 'APPROVED', 'REJECTED'] as DemandSheetApprovalStatus[],
+                    in: ['WAITING_MANAGER', 'APPROVED', 'REJECTED', 'CANCELLED'] as DemandSheetApprovalStatus[],
                   },
                 };
 
@@ -675,7 +1132,7 @@ export class DemandSheetApprovalController {
         include: includeDefault,
       });
 
-      await syncOrcamentoStatusFromFd(updated.anexos, 'aprovado');
+      await syncOrcamentoStatusFromFd(updated.anexos, 'aprovado', updated.id);
 
       void notifyRequesterApprovedWhatsApp({
         requesterUserId: row.solicitanteId,
@@ -777,6 +1234,10 @@ export class DemandSheetApprovalController {
         where: { status: 'WAITING_MANAGER', ...managerScope },
       });
 
+      const rejectedOwn = await prisma.demandSheetApproval.count({
+        where: { status: 'REJECTED', createdBy: req.user.id },
+      });
+
       let pendingPurchase = 0;
       const canPurchase = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
       if (canPurchase) {
@@ -787,7 +1248,7 @@ export class DemandSheetApprovalController {
 
       return res.json({
         success: true,
-        data: { pendingManager, pendingPurchase },
+        data: { pendingManager, pendingPurchase, rejectedOwn },
       });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -1088,6 +1549,126 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Espelha o custo real da aba Ficha de demanda na FD (para a coluna "Custo real" da lista). */
+  async updateCustoReal(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const custoReal = Number((req.body as { custoReal?: unknown })?.custoReal);
+      if (!Number.isFinite(custoReal) || custoReal < 0) throw createError('Custo real inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id }, select: { anexos: true, status: true } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+
+      // Mesmo acesso de "ver detalhes": módulo de FDs aprovadas ou FD visível para o usuário.
+      const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!(canFdsAprovadas && row.status === 'APPROVED')) {
+        const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
+        const allowed = await prisma.demandSheetApproval.findFirst({ where: { id, ...scope }, select: { id: true } });
+        if (!allowed) throw createError('Sem permissão para atualizar esta ficha de demanda', 403);
+      }
+
+      if (!extractOrcamentoRefFromAnexos(row.anexos)) return res.json({ success: true });
+      const valor = Math.round(custoReal * 100) / 100;
+      if (custoRealEspelhado(row.anexos) === valor) return res.json({ success: true });
+
+      await prisma.demandSheetApproval.update({
+        where: { id },
+        data: { anexos: anexosComCustoReal(row.anexos, valor) },
+      });
+      return res.json({ success: true });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao atualizar custo real da ficha' });
+    }
+  }
+
+  async encerrarPedidos(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const canAccess = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!canAccess) {
+        throw createError('Sem permissão para encerrar pedidos', 403);
+      }
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (row.status !== 'APPROVED') {
+        throw createError('Somente fichas aprovadas podem ter pedidos encerrados', 400);
+      }
+      if (row.pedidosEncerrados) {
+        throw createError('Os pedidos desta FD já estão encerrados', 400);
+      }
+
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: {
+          pedidosEncerrados: true,
+          pedidosEncerradosBy: req.user.id,
+          pedidosEncerradosAt: new Date(),
+        },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao encerrar pedidos' });
+    }
+  }
+
+  async reabrirPedidos(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (!row.pedidosEncerrados) {
+        throw createError('Os pedidos desta FD não estão encerrados', 400);
+      }
+
+      if (!req.user.isAdmin) {
+        const contractAccess = await prisma.userContractPermission.findFirst({
+          where: { userId: req.user.id, contractId: row.contratoId, accessLiberado: true },
+        });
+        if (!contractAccess) {
+          throw createError('Apenas o administrador ou o gestor do contrato pode reabrir pedidos', 403);
+        }
+      }
+
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: {
+          pedidosEncerrados: false,
+          pedidosEncerradosBy: null,
+          pedidosEncerradosAt: null,
+        },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao reabrir pedidos' });
+    }
+  }
+
   async importMany(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -1359,6 +1940,568 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao enviar anexo da ficha de demanda' });
+    }
+  }
+
+  async createMaterialRequestFromFd(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const fdId = req.params.id;
+      const fd = await prisma.demandSheetApproval.findUnique({
+        where: { id: fdId },
+        include: { contrato: { select: { id: true, costCenterId: true } } },
+      });
+
+      if (!fd) throw createError('Ficha de demanda não encontrada', 404);
+      if (fd.status !== 'APPROVED') throw createError('Ficha de demanda não está aprovada', 400);
+      if (fd.pedidosEncerrados) throw createError('Os pedidos desta FD foram encerrados. Não é possível criar novos pedidos.', 400);
+
+      const itensPedidos = parseItensPedidos(fd.itensPedidos);
+      // RM informada manualmente (fluxo antigo, sem controle por item): FD inteira já pedida.
+      if (itensPedidos.length === 0 && hasManualRm(fd.numMovRm)) {
+        throw createError('Esta ficha de demanda já possui uma RM vinculada', 400);
+      }
+
+      const schema = z.object({
+        serviceOrderId: z.string().optional(),
+        items: z.array(z.object({
+          fdItemKey: z.string().min(1),
+          fdItem: z.string().default(''),
+          fdDescricao: z.string().default(''),
+          fdQuantidade: z.number().nonnegative().optional(),
+          fdUnidade: z.string().default(''),
+          materialId: z.string().min(1),
+          materialLabel: z.string().default(''),
+          quantity: z.number().positive(),
+          /** Unidade do pedido (padrão = unidade da FD; editável no modal). */
+          unit: z.string().optional(),
+          description: z.string().optional(),
+        })).min(1, 'Informe pelo menos um item'),
+      });
+
+      const body = schema.parse(req.body);
+
+      // Rascunhos antigos guardavam o ID do material de construção; a RM usa o espelho de engenharia (`CM-{id}`).
+      const idsInformados = [...new Set(body.items.map((i) => i.materialId))];
+      const engExistentes = await prisma.engineeringMaterial.findMany({
+        where: { id: { in: idsInformados } },
+        select: { id: true },
+      });
+      const idsSemEng = idsInformados.filter((id) => !engExistentes.some((e) => e.id === id));
+      if (idsSemEng.length > 0) {
+        const espelhos = await prisma.engineeringMaterial.findMany({
+          where: { sinapiCode: { in: idsSemEng.map((id) => `CM-${id}`) } },
+          select: { id: true, sinapiCode: true },
+        });
+        const engPorConstrucao = new Map(espelhos.map((e) => [e.sinapiCode.slice(3), e.id]));
+        for (const item of body.items) {
+          const engId = engPorConstrucao.get(item.materialId);
+          if (engId) item.materialId = engId;
+        }
+      }
+
+      // Agrupa os materiais por item da FD.
+      type ItemFd = {
+        fdItem: string;
+        descricao: string;
+        fdQuantidade?: number;
+        fdUnidade: string;
+        materiais: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+      };
+      const porItemFd = new Map<string, ItemFd>();
+      for (const item of body.items) {
+        const atual = porItemFd.get(item.fdItemKey) ?? {
+          fdItem: item.fdItem || item.fdItemKey,
+          descricao: item.fdDescricao,
+          fdQuantidade: item.fdQuantidade,
+          fdUnidade: item.fdUnidade.trim(),
+          materiais: [],
+        };
+        atual.materiais.push({
+          materialId: item.materialId,
+          materialLabel: item.materialLabel,
+          quantity: item.quantity,
+          unit: (item.unit || '').trim() || item.fdUnidade.trim(),
+        });
+        porItemFd.set(item.fdItemKey, atual);
+      }
+
+      // A FD pode ser pedida em partes, mas cada item é pedido de forma integral, uma única vez.
+      const jaPedidos = new Set(itensPedidos.map((p) => p.fdItemKey));
+      const repetidos = [...porItemFd.entries()].filter(([key]) => jaPedidos.has(key)).map(([, it]) => it.fdItem);
+      if (repetidos.length > 0) {
+        throw createError(`Itens da FD já solicitados em pedido anterior: ${repetidos.join(', ')}`, 409);
+      }
+
+      // Item 1:1 na unidade da FD: a quantidade tem que ser a da FD (sem pedido parcial).
+      // 1:N ou unidade alterada não dá para conferir — fica marcado para o gestor (alertas).
+      const alertasPorItem = new Map<string, string[]>();
+      for (const [key, it] of porItemFd) {
+        const alertas: string[] = [];
+        if (it.materiais.length > 1) alertas.push('1:N');
+        if (it.materiais.some((m) => m.unit !== it.fdUnidade)) alertas.push('unidade');
+        alertasPorItem.set(key, alertas);
+        if (alertas.length > 0 || it.fdQuantidade === undefined) continue;
+        if (Math.abs(it.materiais[0].quantity - it.fdQuantidade) > FD_QTD_EPS) {
+          throw createError(
+            `Item ${it.fdItem}: deve ser solicitado de forma integral (${it.fdQuantidade.toLocaleString('pt-BR')} ${it.fdUnidade}).`,
+            400
+          );
+        }
+      }
+
+
+      let resolvedServiceOrderId = body.serviceOrderId || undefined;
+      if (!resolvedServiceOrderId && fd.obra) {
+        const pleito = await prisma.pleito.findFirst({
+          where: {
+            service_orders: { costCenterId: fd.contrato.costCenterId },
+            updatedContractId: { not: null },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { serviceOrderId: true },
+        });
+        if (pleito) resolvedServiceOrderId = pleito.serviceOrderId;
+      }
+
+      const demandSheetAttachments = (Array.isArray(fd.anexos) ? fd.anexos : [])
+        .filter((a: any) => !isOrcamentoRefAnexo(a) && a?.url)
+        .map((a: any) => ({ url: String(a.url), name: String(a.name || 'Anexo') }));
+
+      // A RM (fluxo de produção, não alterar) exige material único por linha: junta o mesmo material
+      // de vários itens da FD em uma linha só, somando quantidades e juntando as observações.
+      const linhasRm = new Map<string, { quantity: number; unit: string; notes: string[] }>();
+      for (const item of body.items) {
+        const unit = (item.unit || '').trim();
+        const atual = linhasRm.get(item.materialId);
+        if (!atual) {
+          linhasRm.set(item.materialId, { quantity: item.quantity, unit, notes: item.description ? [item.description] : [] });
+          continue;
+        }
+        if (atual.unit !== unit) {
+          throw createError(
+            `O mesmo material foi associado com unidades diferentes (${atual.unit || '—'} e ${unit || '—'}). Use a mesma unidade para ele neste pedido.`,
+            400
+          );
+        }
+        atual.quantity += item.quantity;
+        if (item.description) atual.notes.push(item.description);
+      }
+
+      const materialRequestService = new MaterialRequestService();
+      const rm = await materialRequestService.createMaterialRequest({
+        requestedBy: req.user.id,
+        costCenterId: fd.contrato.costCenterId,
+        serviceOrderId: resolvedServiceOrderId,
+        serviceOrder: fd.obra || undefined,
+        obra: fd.obra || undefined,
+        description: `Pedido de material da ${fd.codFichaDemanda}`,
+        demandSheet: fd.codFichaDemanda,
+        demandSheetAttachments: demandSheetAttachments.length > 0 ? demandSheetAttachments : undefined,
+        priority: 'MEDIUM',
+        items: [...linhasRm.entries()].map(([materialId, linha]) => ({
+          materialId,
+          quantity: linha.quantity,
+          notes: linha.notes.join(' | ') || undefined,
+        })),
+      });
+
+      // Unidade escolhida no modal (padrão = unidade da FD). A RM grava a do cadastro; ajusta só os itens desta RM.
+      for (const [materialId, linha] of linhasRm) {
+        if (!linha.unit) continue;
+        try {
+          await prisma.materialRequestItem.updateMany({
+            where: { materialRequestId: rm.id, materialId, unit: { not: linha.unit } },
+            data: { unit: linha.unit },
+          });
+        } catch (err) {
+          console.warn('[DemandSheetApproval] Falha ao ajustar unidade do item da RM:', err);
+        }
+      }
+
+      const requestedAt = new Date().toISOString();
+      const novos: FdItemPedido[] = [];
+      for (const [key, it] of porItemFd) {
+        novos.push({
+          fdItemKey: key,
+          fdItem: it.fdItem,
+          descricao: it.descricao,
+          requestNumber: rm.requestNumber,
+          materialRequestId: rm.id,
+          requestedAt,
+          requestedBy: req.user.id,
+          quantidade: it.materiais.reduce((acc, m) => acc + m.quantity, 0),
+          quantidadeFd: it.fdQuantidade ?? null,
+          unidadeFd: it.fdUnidade,
+          quantidadeNaUnidadeFd: it.materiais
+            .filter((m) => m.unit === it.fdUnidade)
+            .reduce((acc, m) => acc + m.quantity, 0),
+          materiais: it.materiais,
+          alertas: alertasPorItem.get(key) ?? [],
+        });
+      }
+      const itensAtualizados = [...itensPedidos, ...novos];
+      const rmsAnteriores = itensPedidos.length > 0 ? fd.numMovRm.split(',').map((s) => s.trim()).filter(Boolean) : [];
+      const idsAnteriores = itensPedidos.length > 0 ? fd.idMovRm.split(',').map((s) => s.trim()).filter(Boolean) : [];
+
+      await prisma.demandSheetApproval.update({
+        where: { id: fdId },
+        data: {
+          itensPedidos: itensAtualizados as unknown as Prisma.InputJsonValue,
+          numMovRm: [...rmsAnteriores, rm.requestNumber].join(', '),
+          idMovRm: [...idsAnteriores, rm.id].join(', '),
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: { requestNumber: rm.requestNumber, materialRequestId: rm.id, itensPedidos: itensAtualizados },
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: e.errors[0]?.message || 'Dados inválidos' });
+      }
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: (e as Error)?.message || 'Erro ao criar requisição de material' });
+    }
+  }
+
+  /**
+   * Associação itens da FD → materiais de uma RM criada pela FD (detalhe da RM na aprovação).
+   * Retorna `null` quando a RM não veio da FD — a tela de aprovação segue igual.
+   */
+  async getFdAssociationByMaterialRequest(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const rmId = String(req.params.materialRequestId || '').trim();
+      if (!rmId) throw createError('ID inválido', 400);
+
+      const fd = await prisma.demandSheetApproval.findFirst({
+        where: { itensPedidos: { array_contains: [{ materialRequestId: rmId }] } },
+        select: { id: true, codFichaDemanda: true, obra: true, itensPedidos: true, anexos: true, contratoId: true, contrato: { select: { costCenterId: true, name: true } } },
+      });
+      if (!fd) return res.json({ success: true, data: null });
+
+      const itens = parseItensPedidos(fd.itensPedidos).filter((i) => i.materialRequestId === rmId);
+      const orcRef = extractOrcamentoRefFromAnexos(fd.anexos);
+      return res.json({
+        success: true,
+        data: {
+          fdId: fd.id,
+          codFichaDemanda: fd.codFichaDemanda,
+          obra: fd.obra,
+          itens,
+          orcamentoId: orcRef?.orcamentoId || null,
+          contratoId: fd.contratoId || null,
+          contratoNome: fd.contrato?.name || null,
+          centroCustoId: orcRef?.centroCustoId || fd.contrato?.costCenterId || null,
+        },
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao buscar associação da FD' });
+    }
+  }
+
+  /**
+   * Resumo do que já foi pedido da FD: itens, materiais e quantidades, RM e as OCs vinculadas
+   * (com IdMov do TOTVS quando já enviada). Só leitura — não altera RM nem OC.
+   */
+  async getPedidosResumo(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const fdId = String(req.params.id || '').trim();
+      const fd = await prisma.demandSheetApproval.findUnique({
+        where: { id: fdId },
+        select: { id: true, codFichaDemanda: true, itensPedidos: true },
+      });
+      if (!fd) throw createError('Ficha de demanda não encontrada', 404);
+
+      const itens = parseItensPedidos(fd.itensPedidos);
+      const rmIds = [...new Set(itens.map((i) => i.materialRequestId).filter(Boolean))];
+      const rms = rmIds.length
+        ? await prisma.materialRequest.findMany({
+            where: { id: { in: rmIds } },
+            select: {
+              id: true,
+              requestNumber: true,
+              status: true,
+              items: {
+                select: {
+                  materialId: true,
+                  quantity: true,
+                  unit: true,
+                  material: { select: { name: true, description: true } },
+                },
+              },
+            },
+          })
+        : [];
+      const rmPorId = new Map(rms.map((rm) => [rm.id, rm]));
+      const itensOc = await itensOcPorRmMaterial(rmIds);
+      // Pago = OC validada pelo compras no G4 (Anexar Nota Fiscal ou Finalizada), pelo IdMov.
+      const validadasG4 = await idMovsValidadosComprasG4();
+
+      // Quanto cada item da FD pediu de cada material na mesma RM (base do rateio do valor pago).
+      const pedidoPorRmMaterial = new Map<string, number>();
+      for (const p of itens) {
+        for (const m of p.materiais) {
+          const k = `${p.materialRequestId}|${m.materialId}`;
+          pedidoPorRmMaterial.set(k, (pedidoPorRmMaterial.get(k) || 0) + m.quantity);
+        }
+      }
+
+      const resumo = itens.map((it) => {
+        const rm = rmPorId.get(it.materialRequestId);
+        const ocsDoMaterial = (materialId: string, quantidadeItem: number) => {
+          const k = `${it.materialRequestId}|${materialId}`;
+          const linhas = itensOc.get(k) ?? [];
+          const pedidoTotal = pedidoPorRmMaterial.get(k) || 0;
+          const fator = pedidoTotal > 0 && quantidadeItem > 0 ? quantidadeItem / pedidoTotal : 1;
+          const vistos = new Set<string>();
+          return linhas
+            .map((x) => x.oc)
+            .filter((po) => (vistos.has(po.id) ? false : (vistos.add(po.id), true)))
+            .map((po) => {
+              const pago =
+                po.totvsIdMov != null &&
+                po.status !== 'CANCELLED' &&
+                po.status !== 'REJECTED' &&
+                validadasG4.has(po.totvsIdMov);
+              const valorMaterial = linhas
+                .filter((x) => x.oc.id === po.id)
+                .reduce((s, x) => s + x.total, 0);
+              return {
+                orderNumber: po.orderNumber,
+                status: po.status,
+                totvsIdMov: po.totvsIdMov,
+                totvsNumMovimento: po.totvsNumMovimento,
+                pago,
+                // Valor deste material nesta OC, rateado para o item da FD; só quando validado no G4.
+                valorPago: pago ? Math.round(valorMaterial * fator * 100) / 100 : null,
+              };
+            });
+        };
+        // Registros antigos não guardavam os materiais: usa os itens da própria RM.
+        const materiais = it.materiais.length
+          ? it.materiais
+          : (rm?.items ?? []).map((ri) => ({
+              materialId: ri.materialId,
+              materialLabel: ri.material?.name || ri.material?.description || '',
+              quantity: Number(ri.quantity),
+              unit: ri.unit,
+            }));
+        return {
+          fdItemKey: it.fdItemKey,
+          fdItem: it.fdItem,
+          descricao: it.descricao,
+          quantidadeFd: it.quantidadeFd,
+          unidadeFd: it.unidadeFd,
+          alertas: it.alertas,
+          requestedAt: it.requestedAt,
+          rm: rm
+            ? { id: rm.id, requestNumber: rm.requestNumber, status: rm.status }
+            : { id: it.materialRequestId, requestNumber: it.requestNumber, status: null },
+          materiais: materiais.map((m) => ({ ...m, ocs: ocsDoMaterial(m.materialId, m.quantity) })),
+        };
+      });
+
+      // Conferência do custo real: soma das OCs pagas (validadas no G4) da FD, cada OC uma vez, pelo total da OC.
+      const ocsPagasPorId = new Map<string, { orderNumber: string; totvsIdMov: number; valor: number }>();
+      for (const lista of itensOc.values()) {
+        for (const { oc } of lista) {
+          if (oc.totvsIdMov == null || oc.status === 'CANCELLED' || oc.status === 'REJECTED') continue;
+          if (!validadasG4.has(oc.totvsIdMov) || ocsPagasPorId.has(oc.id)) continue;
+          ocsPagasPorId.set(oc.id, { orderNumber: oc.orderNumber, totvsIdMov: oc.totvsIdMov, valor: oc.amountToPay });
+        }
+      }
+      const ocsPagas = [...ocsPagasPorId.values()].sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
+      const totalOcsPagas = Math.round(ocsPagas.reduce((s, o) => s + o.valor, 0) * 100) / 100;
+
+      return res.json({
+        success: true,
+        data: { codFichaDemanda: fd.codFichaDemanda, itens: resumo, ocsPagas, totalOcsPagas },
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao buscar resumo dos pedidos da FD' });
+    }
+  }
+
+  /**
+   * Obra da OS (detalhes da OS em Contratos): a informada ao iniciar/importar o orçamento vinculado
+   * à OS (e aos aditivos). Orçamento antigo sem obra usa a obra das FDs geradas dele. Só leitura.
+   */
+  async obrasPorOrcamento(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const pleitoId = String(req.query.pleitoId ?? '').trim();
+      const serviceOrderId = String(req.query.serviceOrderId ?? '').trim();
+      let ids = String(req.query.ids ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 50);
+      let centroCustoId = '';
+      if (pleitoId || serviceOrderId) {
+        // OS do contrato pelo id, ou a mais recente da ordem de serviço (formulário de RM).
+        const selectOs = {
+          obra: true,
+          linkedOrcamentoId: true,
+          budgetAdditives: true,
+          updatedContract: { select: { costCenterId: true } },
+        } as const;
+        const os = pleitoId
+          ? await prisma.pleito.findUnique({ where: { id: pleitoId }, select: selectOs })
+          : await prisma.pleito.findFirst({
+              where: { serviceOrderId },
+              orderBy: { createdAt: 'desc' },
+              select: selectOs,
+            });
+        // Obra informada no cadastro da OS tem prioridade.
+        const obraDaOs = String(os?.obra || '').trim();
+        if (obraDaOs) {
+          return res.json({ success: true, data: [{ orcamentoId: '', codFichaDemanda: '', obra: obraDaOs }] });
+        }
+        const aditivos = Array.isArray(os?.budgetAdditives)
+          ? (os!.budgetAdditives as Array<{ orcamentoId?: unknown }>).map((a) => String(a?.orcamentoId || ''))
+          : [];
+        ids = [...new Set([os?.linkedOrcamentoId || '', ...aditivos].map((x) => x.trim()).filter(Boolean))];
+        centroCustoId = os?.updatedContract?.costCenterId || '';
+      }
+      if (!ids.length) return res.json({ success: true, data: [] });
+
+      // Obra do próprio orçamento (índice de orçamentos do centro de custo).
+      const obraDoOrcamento = new Map<string, string>();
+      if (centroCustoId) {
+        try {
+          const index = await orcamentoService.getIndex(centroCustoId);
+          for (const o of index.orcamentos) {
+            const obra = String(o.obra || '').trim();
+            if (obra && ids.includes(o.id)) obraDoOrcamento.set(o.id, obra);
+          }
+        } catch {
+          /* sem índice: usa a obra das FDs */
+        }
+      }
+      if (ids.every((id) => obraDoOrcamento.has(id))) {
+        return res.json({
+          success: true,
+          data: ids.map((id) => ({ orcamentoId: id, codFichaDemanda: '', obra: obraDoOrcamento.get(id)! })),
+        });
+      }
+      const fds = await prisma.demandSheetApproval.findMany({
+        where: { status: { not: 'CANCELLED' } },
+        select: { codFichaDemanda: true, obra: true, anexos: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      // Orçamentos sem obra própria (antigos): obra das FDs geradas deles.
+      const wanted = new Set(ids.filter((id) => !obraDoOrcamento.has(id)));
+      const daFd = fds
+        .map((fd) => {
+          const ref = extractOrcamentoRefFromAnexos(fd.anexos);
+          return ref && wanted.has(ref.orcamentoId)
+            ? { orcamentoId: ref.orcamentoId, codFichaDemanda: fd.codFichaDemanda, obra: fd.obra?.trim() || '' }
+            : null;
+        })
+        .filter((x): x is { orcamentoId: string; codFichaDemanda: string; obra: string } => !!x && !!x.obra);
+      const data = [
+        ...[...obraDoOrcamento].map(([orcamentoId, obra]) => ({ orcamentoId, codFichaDemanda: '', obra })),
+        ...daFd,
+      ];
+      return res.json({ success: true, data });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao buscar a obra das FDs' });
+    }
+  }
+
+  /** IDs das RMs criadas pela Ficha de Demanda — usado só para exibir a etiqueta "FD" na lista de RMs. */
+  async listFdMaterialRequestIds(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const rows = await prisma.demandSheetApproval.findMany({
+        where: { NOT: { itensPedidos: { equals: [] } } },
+        select: { itensPedidos: true },
+      });
+      const ids = new Set<string>();
+      for (const row of rows) {
+        for (const it of parseItensPedidos(row.itensPedidos)) {
+          if (it.materialRequestId) ids.add(it.materialRequestId);
+        }
+      }
+      return res.json({ success: true, data: [...ids] });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao listar RMs da FD' });
+    }
+  }
+
+  /** Nome do orçamento que gerou a FD (detalhes da FD). Só leitura. */
+  async getOrcamentoDaFd(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const fd = await prisma.demandSheetApproval.findUnique({
+        where: { id: String(req.params.id || '').trim() },
+        select: { anexos: true },
+      });
+      if (!fd) throw createError('Ficha de demanda não encontrada', 404);
+
+      const ref = extractOrcamentoRefFromAnexos(fd.anexos);
+      if (!ref) return res.json({ success: true, data: null });
+
+      let nome: string | null = null;
+      let osNumeroPasta: string | null = null;
+      try {
+        const index = await orcamentoService.getIndex(ref.centroCustoId);
+        const entry = index.orcamentos.find((o) => o.id === ref.orcamentoId);
+        nome = entry?.nome ?? null;
+        // OS e nº da pasta informados na importação do orçamento (mesmo formato do orçamento: "OS - Nº123").
+        const os = String(entry?.osCodigo || '').trim();
+        const pasta = String(entry?.numeroPasta || '').trim();
+        osNumeroPasta = os && pasta ? `${os} - Nº${pasta}` : os || pasta || null;
+      } catch {
+        nome = null;
+      }
+      return res.json({
+        success: true,
+        data: { nome, osNumeroPasta, orcamentoId: ref.orcamentoId, centroCustoId: ref.centroCustoId },
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao buscar orçamento da FD' });
+    }
+  }
+
+  /**
+   * Custo real dos itens da FD a partir das OCs validadas pelo compras no G4 (Anexar Nota Fiscal ou Finalizada).
+   * Cada material do item usa a quantidade e o valor unitário da OC. Se a RM juntou o mesmo material de
+   * vários itens da FD, o que foi comprado é rateado pela quantidade pedida em cada item. Só leitura.
+   */
+  async getCustosReais(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const fd = await prisma.demandSheetApproval.findUnique({
+        where: { id: String(req.params.id || '').trim() },
+        select: { itensPedidos: true },
+      });
+      if (!fd) throw createError('Ficha de demanda não encontrada', 404);
+
+      const itens = await calcularCustosReaisFd(fd.itensPedidos);
+      return res.json({ success: true, data: { itens } });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao calcular custos reais da FD' });
     }
   }
 

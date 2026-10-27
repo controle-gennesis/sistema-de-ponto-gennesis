@@ -13,6 +13,8 @@ type TotvsLinkStatus = {
   linked: boolean;
   totvsUser: string | null;
   linkedAt: string | null;
+  /** O TOTVS recusou a senha vinculada: nenhum envio é feito até vincular de novo. */
+  rejectedAt?: string | null;
 };
 
 export function OcTotvsUserLinkButton() {
@@ -83,16 +85,27 @@ export function OcTotvsUserLinkButton() {
   };
 
   const linked = !!status?.linked;
+  const recusada = linked && !!status?.rejectedAt;
 
   return (
     <>
       <button
         type="button"
         onClick={openModal}
-        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition ${
+          recusada
+            ? 'border-red-300 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200'
+            : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'
+        }`}
       >
         <Link2 className="h-4 w-4 shrink-0" />
-        {isLoading ? '…' : linked ? 'Meu usuário Totvs vinculado' : 'Vincular meu usuário Totvs'}
+        {isLoading
+          ? '…'
+          : recusada
+            ? 'Senha Totvs recusada — vincular de novo'
+            : linked
+              ? 'Meu usuário Totvs vinculado'
+              : 'Vincular meu usuário Totvs'}
       </button>
 
       <Modal isOpen={open} onClose={closeModal} title="Vincular meu usuário Totvs" size="md">
@@ -110,7 +123,13 @@ export function OcTotvsUserLinkButton() {
             usar o login TOTVS de outra pessoa para enviar OC.
           </p>
 
-          {linked && status?.totvsUser ? (
+          {recusada ? (
+            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-200">
+              O TOTVS recusou a senha vinculada
+              {status?.rejectedAt ? ` em ${new Date(status.rejectedAt).toLocaleString('pt-BR')}` : ''}. Para não
+              bloquear seu usuário no RM, o Conecta não envia nada com ela. Informe a senha atual abaixo.
+            </p>
+          ) : linked && status?.totvsUser ? (
             <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
               Seu vínculo: <strong>{status.totvsUser}</strong>
               {status.linkedAt

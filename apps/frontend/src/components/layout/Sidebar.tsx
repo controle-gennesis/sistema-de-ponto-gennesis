@@ -89,6 +89,7 @@ import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
+import { useOrcamentoNotificationCounts } from '@/hooks/useOrcamentoNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
 import { authService } from '@/lib/auth';
@@ -586,6 +587,15 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     }
   }, [pathname, cronogramasUserId]);
   const { counts: approvalCounts } = useApprovalNotificationCounts();
+  const {
+    rejectedCount: orcamentoRejectedCount,
+    approvedCount: orcamentoApprovedCount,
+    marcarComoVistos: marcarAvisosOrcamentoVistos,
+  } = useOrcamentoNotificationCounts();
+  // Entrou em Orçamentos: os avisos atuais ficam vistos e não voltam sozinhos.
+  useEffect(() => {
+    if (pathname?.startsWith('/ponto/orcamentos')) marcarAvisosOrcamentoVistos();
+  }, [pathname, marcarAvisosOrcamentoVistos]);
   const { count: mensalReportPendingCount } = useMensalReportPendingCount(
     !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
   );
@@ -605,7 +615,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       if (aprovacoesVisible) return 0;
       return approvalCounts.rm;
     }
-    if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
+    if (href === '/ponto/aprovacao-fds') return pathname?.startsWith('/ponto/aprovacao-fds') ? 0 : fdNotificationCounts.rejectedOwn;
+    if (href === '/ponto/fds-aprovadas') return pathname?.startsWith('/ponto/fds-aprovadas') ? 0 : fdNotificationCounts.pendingPurchase;
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
     if (href === '/ponto/solicitacoes-combustivel') return fuelSuppliesPendingCount;
@@ -616,6 +627,29 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/contratos') return mensalReportPendingCount;
     if (href === '/ponto/cronogramas') return cronogramasNovosCount;
     return 0;
+  };
+
+  const navDotsForHref = (href: string): React.ReactNode => {
+    if (href !== '/ponto/orcamentos') return null;
+    // Ocultar badge quando o usuário está na página de orçamentos
+    if (pathname?.startsWith('/ponto/orcamentos')) return null;
+    // Um único badge vermelho (padrão de notificação), somando reprovados e aprovados.
+    const total = orcamentoRejectedCount + orcamentoApprovedCount;
+    if (total <= 0) return null;
+    const detalhes = [
+      orcamentoRejectedCount > 0 ? `${orcamentoRejectedCount} reprovado(s)` : '',
+      orcamentoApprovedCount > 0 ? `${orcamentoApprovedCount} aprovado(s)` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <span
+        className="ml-auto min-w-[18px] shrink-0 rounded-md bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm inline-flex h-[18px] items-center justify-center"
+        title={detalhes}
+      >
+        {total > 99 ? '99+' : total}
+      </span>
+    );
   };
 
   type SidebarNavLeaf = {
@@ -1901,6 +1935,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                       }`}
                     >
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{child.name}</span>
+                      {navDotsForHref(child.href)}
                       <NotificationCountBadge count={badgeCount} />
                     </Link>
                   </div>
@@ -1940,6 +1975,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             }`}
           />
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+          {navDotsForHref(item.href)}
           <NotificationCountBadge count={badgeCount} />
         </Link>
       </div>

@@ -499,6 +499,21 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     group: 'Ordem de Compra',
   },
   {
+    // Exibidos em Suprimentos › Ordens de Compra (não na aba Controle). Sem nenhum marcado = só Conecta.
+    key: pathToModuleKey('/ponto/controle/oc-fluxo-conecta'),
+    name: 'Fluxo de OC — Conecta',
+    href: '/ponto/controle/oc-fluxo-conecta',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-fluxo-totvs'),
+    name: 'Fluxo de OC — TOTVS',
+    href: '/ponto/controle/oc-fluxo-totvs',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
     key: pathToModuleKey('/ponto/controle/oc-devolver-item-rm'),
     name: 'Devolver item da OC à RM',
     href: '/ponto/controle/oc-devolver-item-rm',
@@ -563,6 +578,10 @@ export const DEFAULT_EMPLOYEE_ACCESS_MODULE_HREFS = [
 export const DEFAULT_EMPLOYEE_ACCESS_MODULE_KEYS = DEFAULT_EMPLOYEE_ACCESS_MODULE_HREFS.map(
   (href) => pathToModuleKey(href)
 );
+
+/** Fluxo de OC que o usuário segue/vê (Suprimentos › Ordens de Compra). */
+export const OC_FLUXO_CONECTA_MODULE_KEY = pathToModuleKey('/ponto/controle/oc-fluxo-conecta');
+export const OC_FLUXO_TOTVS_MODULE_KEY = pathToModuleKey('/ponto/controle/oc-fluxo-totvs');
 
 const keySet = new Set(PERMISSION_MODULES.map((m) => m.key));
 

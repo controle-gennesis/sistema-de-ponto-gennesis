@@ -41,10 +41,10 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import api from '@/lib/api';
+import { liberaEmDoErro, useAtualizarBaseTotvs } from '@/hooks/useAtualizarBaseTotvs';
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { isMaterialCadastroBudgetNature } from '@/lib/budgetNatureMatch';
 import * as XLSX from 'xlsx';
 import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 import { TableCheckbox } from '@/components/ui/Checkbox';
@@ -526,6 +526,7 @@ export default function MateriaisConstrucaoPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingTotvs, setIsDownloadingTotvs] = useState(false);
   const [isSyncingTotvs, setIsSyncingTotvs] = useState(false);
+  const atualizarBase = useAtualizarBaseTotvs('materiais');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
   const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
@@ -1074,8 +1075,10 @@ export default function MateriaisConstrucaoPage() {
   };
 
   const handleSyncTotvs = async () => {
+    if (atualizarBase.bloqueado) return;
     try {
       setIsSyncingTotvs(true);
+      atualizarBase.bloquear();
       const res = await api.post(
         '/construction-materials/sync-totvs?force=1',
         {},
@@ -1083,6 +1086,7 @@ export default function MateriaisConstrucaoPage() {
           timeout: 300_000,
         }
       );
+      atualizarBase.bloquear(res.data?.liberaEm);
       if (res.data?.success === false) {
         toast.error(String(res.data?.message || 'Falha ao sincronizar materiais do TOTVS'));
         return;
@@ -1103,6 +1107,12 @@ export default function MateriaisConstrucaoPage() {
       await queryClient.invalidateQueries({ queryKey: ['construction-materials-next-code'] });
       await queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
     } catch (error: unknown) {
+      const bloqueio = liberaEmDoErro(error);
+      if (bloqueio.bloqueio) {
+        atualizarBase.bloquear(bloqueio.liberaEm);
+        toast.error(bloqueio.mensagem || 'Esta base já foi atualizada há pouco. Aguarde para atualizar de novo.');
+        return;
+      }
       const err = error as {
         response?: { data?: { error?: string; message?: string } };
         message?: string;
@@ -1524,14 +1534,14 @@ export default function MateriaisConstrucaoPage() {
                   <button
                     type="button"
                     onClick={() => void handleSyncTotvs()}
-                    disabled={isSyncingTotvs}
+                    disabled={isSyncingTotvs || atualizarBase.bloqueado}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     aria-label={
                       isSyncingTotvs
                         ? 'Sincronizando materiais do TOTVS...'
                         : 'Atualizar agora com o TOTVS'
                     }
-                    title="Atualizar agora com o TOTVS (sem apagar nem duplicar)"
+                    title={atualizarBase.dica}
                   >
                     <RefreshCw
                       className={`h-4 w-4 shrink-0 ${isSyncingTotvs ? 'animate-spin' : ''}`}
@@ -2383,19 +2393,14 @@ function MaterialFormModal({
 
   const budgetNatureSelectOptions = useMemo(
     () =>
+      // Todas as naturezas cadastradas; a busca do dropdown filtra enquanto o usuário digita.
       labeledToSelectOptions(
-        budgetNatureOptions
-          .filter(
-            (bn) =>
-              isMaterialCadastroBudgetNature(bn.name) ||
-              bn.id === formData.budgetNatureId
-          )
-          .map((bn) => ({
-            value: bn.id,
-            label: formatBudgetNatureLabel(bn),
-          }))
+        budgetNatureOptions.map((bn) => ({
+          value: bn.id,
+          label: formatBudgetNatureLabel(bn),
+        }))
       ),
-    [budgetNatureOptions, formData.budgetNatureId]
+    [budgetNatureOptions]
   );
 
   useEffect(() => {

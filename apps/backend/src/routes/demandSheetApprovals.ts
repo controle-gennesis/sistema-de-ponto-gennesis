@@ -123,6 +123,21 @@ router.post(
 );
 
 router.get('/notification-counts', controller.getNotificationCounts.bind(controller));
+// Detalhe da RM na aprovação: mesma visibilidade do GET /material-requests/:id (usuário autenticado).
+// Etiqueta "FD" na lista de RMs (só IDs; o acesso às RMs continua pela rota de RMs).
+router.get('/material-request-ids', controller.listFdMaterialRequestIds.bind(controller));
+// Obra das FDs por orçamento (detalhes da OS em Contratos) — só leitura.
+router.get('/obras-por-orcamento', controller.obrasPorOrcamento.bind(controller));
+router.get(
+  '/by-material-request/:materialRequestId',
+  controller.getFdAssociationByMaterialRequest.bind(controller)
+);
+// Resumo dos itens já pedidos da FD (RM, OC e IdMov TOTVS) — só leitura.
+router.get('/:id/pedidos-resumo', controller.getPedidosResumo.bind(controller));
+// Custo real dos itens da FD a partir das OCs enviadas ao TOTVS — só leitura.
+router.get('/:id/custos-reais', controller.getCustosReais.bind(controller));
+// Nome do orçamento que gerou a FD — só leitura.
+router.get('/:id/orcamento', controller.getOrcamentoDaFd.bind(controller));
 router.get(
   '/aprovadas-compras',
   requireModuleAccess(fdsAprovadasModule),
@@ -158,11 +173,19 @@ router.post(
   controller.uploadDraftAttachment.bind(controller)
 );
 
+router.post(
+  '/:id/material-request',
+  requireAnyModuleAccess([fdModule, fdsAprovadasModule]),
+  controller.createMaterialRequestFromFd.bind(controller)
+);
+
 router.patch(
   '/:id/purchase-status',
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseStatus.bind(controller)
 );
+// Espelho do custo real da aba Ficha de demanda (acesso conferido no controller).
+router.patch('/:id/custo-real', controller.updateCustoReal.bind(controller));
 router.patch(
   '/:id/supplies-edit',
   requireModuleAccess(fdsAprovadasModule),
@@ -187,6 +210,15 @@ router.patch(
   '/:id/ficha-demanda-pct',
   requireModuleAccess(fdsAprovadasModule),
   controller.updateFichaDemandaPct.bind(controller)
+);
+router.patch(
+  '/:id/encerrar-pedidos',
+  requireModuleAccess(fdsAprovadasModule),
+  controller.encerrarPedidos.bind(controller)
+);
+router.patch(
+  '/:id/reabrir-pedidos',
+  controller.reabrirPedidos.bind(controller)
 );
 
 router.get(

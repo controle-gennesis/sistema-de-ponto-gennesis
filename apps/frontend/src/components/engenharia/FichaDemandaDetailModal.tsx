@@ -14,6 +14,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { detectOcIdFromFile } from '@/lib/extractOcId';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
+import { FdHistoricoPedidosSection } from '@/components/engenharia/FdHistoricoPedidosSection';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import {
@@ -236,6 +237,23 @@ export function FichaDemandaDetailModal({
     setScId(record?.scId || '');
     setOcId(record?.ocId || '');
   }, [record?.id, record?.scNumero, record?.scId, record?.ocId]);
+
+  /** Orçamento que gerou a FD (nome vem do índice de orçamentos do contrato). */
+  const orcamentoQuery = useQuery({
+    queryKey: ['fd-orcamento-origem', record?.id],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${record!.id}/orcamento`);
+      return (res.data?.data ?? null) as {
+        nome: string | null;
+        osNumeroPasta?: string | null;
+        orcamentoId: string;
+        centroCustoId: string;
+      } | null;
+    },
+    enabled: isOpen && !!record?.id,
+    staleTime: 60_000,
+    retry: false,
+  });
 
   const anexos = useMemo(() => {
     if (!record?.anexos?.length) return [];
@@ -549,6 +567,8 @@ export function FichaDemandaDetailModal({
       ) : null}
     </div>
   );
+  const orcamentoDaFd = orcamentoQuery.data;
+  const temPedidosPelaFd = Array.isArray(record.itensPedidos) && record.itensPedidos.length > 0;
 
   return (
     <Modal
@@ -665,10 +685,27 @@ export function FichaDemandaDetailModal({
               </Field>
             </>
           )}
+          {orcamentoDaFd !== undefined && (
+            <div className="sm:col-span-2">
+              <Field label="OS / Nº da pasta">{orcamentoDaFd?.osNumeroPasta || '—'}</Field>
+            </div>
+          )}
+          {orcamentoDaFd !== undefined && (
+            <div className="sm:col-span-2">
+              <Field label="Orçamento de origem">
+                {orcamentoDaFd?.nome || (orcamentoDaFd ? 'Orçamento não encontrado' : 'FD sem orçamento vinculado')}
+              </Field>
+            </div>
+          )}
           <Field label="Solicitante">{record.solicitanteNome || '—'}</Field>
           <Field label="Polo">{record.polo || '—'}</Field>
-          <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
-          <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+          {/* RMs geradas pela FD aparecem nos cards do histórico; aqui só a RM informada à mão (fluxo antigo). */}
+          {!temPedidosPelaFd && (
+            <>
+              <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
+              <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+            </>
+          )}
           <Field label="Nº da SC">{record.scNumero || '—'}</Field>
           <Field label="ID da SC">{record.scId || '—'}</Field>
           {record.ocId ? <Field label="ID da OC">{record.ocId}</Field> : null}
@@ -677,7 +714,11 @@ export function FichaDemandaDetailModal({
           </Field>
           <Field label="Custo estimado">{formatCurrencyDisplay(record.custoEstimado)}</Field>
           <Field label="Data/hora">{formatDateTime(record.dataHora)}</Field>
-          <Field label="Status">{FD_STATUS_LABELS[record.status] || record.status}</Field>
+          <Field label="Status">{
+            record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
+              ? 'FD Cancelada por exclusão de orçamento'
+              : (FD_STATUS_LABELS[record.status] || record.status)
+          }</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
           {record.purchaseStatus === 'CANCELLED' && record.purchaseCancellationNote ? (
             <div className="sm:col-span-2">
@@ -698,6 +739,10 @@ export function FichaDemandaDetailModal({
             <Field label="Observação">{record.observacao || '—'}</Field>
           </div>
         </dl>
+
+        {record.status === 'APPROVED' && (
+          <FdHistoricoPedidosSection fdApprovalId={record.id} codFichaDemanda={record.codFichaDemanda} />
+        )}
 
         {/* Finalizada ou cancelada: não edita mais; os dados ficam na lista acima e a OC no bloco de consulta. */}
         {allowAddOrdemCompra && isFinished ? (

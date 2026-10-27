@@ -119,6 +119,7 @@ export class ContractPleitoController {
         lot: b.lot?.trim() || null,
         divSe: b.divSe?.trim() || null,
         location: b.location?.trim() || null,
+        obra: b.obra?.trim() || null,
         unit: b.unit?.trim() || null,
         serviceDescription: b.serviceDescription.trim(),
         budget: b.budget?.trim() || null,
@@ -141,6 +142,7 @@ export class ContractPleitoController {
         reportsBilling: b.reportsBilling?.trim() || null,
         engineer: b.engineer?.trim() || null,
         supervisor: b.supervisor?.trim() || null,
+        linkedOrcamentoId: b.linkedOrcamentoId?.trim() || null,
         updatedContract: { connect: { id: contractId } }
       };
 
@@ -181,6 +183,7 @@ export class ContractPleitoController {
             lot: data.lot,
             divSe: data.divSe,
             location: data.location,
+            ...(data.obra ? { obra: data.obra } : {}),
             unit: data.unit,
             serviceDescription: data.serviceDescription,
             budget: data.budget,
@@ -325,6 +328,10 @@ export class ContractPleitoController {
       };
 
       if (existing && linkOnly && (isAditivo || mode === 'aditivo')) {
+        const orcIdLink = String(b.orcamentoId ?? '').trim() || null;
+        if (orcIdLink && !existing.linkedOrcamentoId) {
+          await prisma.pleito.update({ where: { id: existing.id }, data: { linkedOrcamentoId: orcIdLink } });
+        }
         return res.status(200).json({
           success: true,
           data: { ...serializePleito(existing), action: 'additive' as const },
@@ -333,11 +340,13 @@ export class ContractPleitoController {
       }
 
       if (existing && (mode === 'sync-base' || mode === 'revisao')) {
+        const orcIdLink = String(b.orcamentoId ?? '').trim() || null;
         const additives = parseBudgetAdditives(existing.budgetAdditives);
         const base = valor;
         const total = roundMoney(base + sumAdditives(additives));
         const row = await persistTotal(existing.id, existing.serviceOrderId, total, {
           budgetAmount1: base,
+          ...(orcIdLink ? { linkedOrcamentoId: orcIdLink } : {}),
         });
         return res.status(200).json({
           success: true,
@@ -392,6 +401,8 @@ export class ContractPleitoController {
         { allowZeroValor: true }
       );
 
+      const orcIdForLink = String(b.orcamentoId ?? '').trim() || null;
+
       const data: Prisma.PleitoCreateInput = {
         mes: core.mes,
         ano: core.ano,
@@ -408,6 +419,7 @@ export class ContractPleitoController {
         budgetAmount1: 0,
         budgetAdditives: [],
         updatedContract: { connect: { id: contractId } },
+        ...(orcIdForLink ? { linkedOrcamentoId: orcIdForLink } : {}),
       };
 
       const row = await prisma.pleito.create({ data });

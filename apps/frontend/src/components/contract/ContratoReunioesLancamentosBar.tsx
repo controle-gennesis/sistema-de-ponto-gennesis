@@ -7,6 +7,13 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import {
+  MEDICAO_VAZIA,
+  medicaoParaApi,
+  MedicaoFields,
+  validarMedicao,
+  type MedicaoValue,
+} from '@/components/contract/MedicaoFields';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
@@ -130,11 +137,13 @@ export function ContratoReunioesLancamentosBar({ contractId }: { contractId: str
     responsiblePerson: '',
   });
   const [billingForm, setBillingForm] = useState(EMPTY_BILLING);
+  const [billingMedicao, setBillingMedicao] = useState<MedicaoValue>(MEDICAO_VAZIA);
 
   const closeProduction = useCallback(() => setShowProduction(false), []);
   const closeBilling = useCallback(() => {
     setShowBillingModal(false);
     setBillingForm(EMPTY_BILLING);
+    setBillingMedicao(MEDICAO_VAZIA);
   }, []);
 
   const { requestClose: requestCloseProduction, confirmUi: productionConfirmUi } =
@@ -310,6 +319,11 @@ export function ContratoReunioesLancamentosBar({ contractId }: { contractId: str
       toast.error('Valor líquido é obrigatório');
       return;
     }
+    const erroMedicao = validarMedicao(billingMedicao);
+    if (erroMedicao) {
+      toast.error(erroMedicao);
+      return;
+    }
     if (selectedBillingPleitoSaldo != null && gross > selectedBillingPleitoSaldo + 0.01) {
       toast.error(`Valor bruto excede o saldo do pleito (${formatCurrency(selectedBillingPleitoSaldo)})`);
       return;
@@ -321,6 +335,7 @@ export function ContratoReunioesLancamentosBar({ contractId }: { contractId: str
       pleitoId: billingForm.pleitoId.trim(),
       grossValue: gross,
       netValue: net,
+      ...medicaoParaApi(billingMedicao),
     });
   };
 
@@ -503,6 +518,7 @@ export function ContratoReunioesLancamentosBar({ contractId }: { contractId: str
                   placeholder="Ex: 000123"
                 />
               </div>
+              <MedicaoFields value={billingMedicao} onChange={setBillingMedicao} />
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   OS / SE

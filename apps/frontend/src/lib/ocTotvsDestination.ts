@@ -37,7 +37,7 @@ export function isPredialConsorcioCostCenter(
 }
 
 export function ocDestinationLabel(destination: OcDestination): string {
-  return destination === 'CONECTA' ? 'OC no Conecta' : 'POST no TOTVS';
+  return destination === 'CONECTA' ? 'OC CONECTA' : 'OC TOTVS';
 }
 
 export const TOTVS_FREIGHT_TYPES = [

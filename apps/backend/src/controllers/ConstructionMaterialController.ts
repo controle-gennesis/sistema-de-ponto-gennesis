@@ -1,4 +1,5 @@
 import { Prisma, PurchaseOrderStatus } from '@prisma/client';
+import { proximaAtualizacaoManual, reservarAtualizacaoManual } from '../lib/totvsManualSyncCooldown';
 import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
@@ -1072,11 +1073,22 @@ export class ConstructionMaterialController {
   /** Sincroniza materiais do TOTVS RM (upsert por IDPRD / código / nome único). Não apaga locais. */
   async syncFromTotvs(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const espera = reservarAtualizacaoManual('materiais');
+      if (espera) {
+        res.status(429).json({
+          success: false,
+          message: espera.mensagem,
+          retryAfterSeconds: espera.segundosRestantes,
+          liberaEm: espera.liberaEm,
+        });
+        return;
+      }
       const force = String(req.query.force || '').trim() === '1';
       const result = force
         ? await runMaterialTotvsSync('manual')
         : await runMaterialTotvsSyncIfStale(60_000);
       res.json({
+        liberaEm: proximaAtualizacaoManual('materiais'),
         success: true,
         data: result ?? getMaterialTotvsSyncStatus(),
         message: result

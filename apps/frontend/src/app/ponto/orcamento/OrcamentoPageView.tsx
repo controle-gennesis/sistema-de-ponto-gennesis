@@ -54,6 +54,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { ObraSelectField } from '@/components/engenharia/ObraSelectField';
 import toast from 'react-hot-toast';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -63,6 +64,7 @@ import { BRAZIL_STATE_LABELS } from '@/lib/brazilStates';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useResizableColumns } from '@/hooks/useResizableColumns';
 import {
   formatOrcamentoRevisao,
   OrcamentoRevisaoBadge,
@@ -73,6 +75,28 @@ import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { authService } from '@/lib/auth';
 import { dispensarCronogramaNovo, registrarCronogramaNovo } from '@/lib/cronogramaNovos';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
+import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+
+/** Custo real de um item da FD vindo das OCs enviadas ao TOTVS (`/demand-sheet-approvals/:id/custos-reais`). */
+type FdCustoRealItem = {
+  total: number;
+  materiais: {
+    materialId: string;
+    materialLabel: string;
+    unit: string;
+    quantidade: number;
+    valorUnitario: number;
+    total: number;
+    ocs: { orderNumber: string; totvsIdMov: number }[];
+  }[];
+};
+import {
+  FdPedidoMaterialModal,
+  parseFdMaterialMap,
+  type FdInsumoLine,
+  type FdItemPedido,
+  type FdMaterialMap,
+} from '@/components/engenharia/FdPedidoMaterialModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import {
   currencyDigitsToFormatted,
@@ -3207,7 +3231,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   pronta: 'FD pronta',
   aguardando_aprovacao: 'Aguardando aprovação',
   aprovado: 'Aprovado',
-  em_correcao: 'Em correção',
+  em_correcao: 'Reprovada',
   reprovado: 'Reprovado',
   finalizado: 'Finalizado',
 };
@@ -3256,7 +3280,7 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
     case 'aprovado':
       return `${base} bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200`;
     case 'em_correcao':
-      return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
+      return `${base} bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
     case 'reprovado':
       return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
     case 'finalizado':
@@ -3342,6 +3366,8 @@ type OrcamentoMeta = {
   osCodigo: string;
   /** Número da pasta (campo separado). */
   numeroPasta: string;
+  /** Obra (cadastro de obras do contrato), informada ao iniciar/importar o orçamento. */
+  obra?: string;
   /** Se o orçamento é aditivo na OS vinculada. */
   isAditivo?: boolean;
   /** Pleito/OS vinculado no contrato após sync. */
@@ -3423,6 +3449,8 @@ type OrcamentoMeta = {
   gradeTravada?: boolean;
   /** Importações, fechamentos e reaberturas, com data e usuário. */
   historicoMovimentos?: OrcamentoMovimento[];
+  /** Rascunho da associação itens da FD → materiais do cadastro (1 item → N materiais). */
+  fdMaterialMap?: FdMaterialMap;
 };
 
 export type AparenciaAbaOrcamento = 'montagem' | 'memorial' | 'analitico' | 'fichaDemanda' | 'cronograma';
@@ -3963,7 +3991,7 @@ const ORCAMENTO_OS_DRAFT_VAZIO: OrcamentoOsDraft = {
 
 function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
   OrcamentoMeta,
-  'osNumeroPasta' | 'osCodigo' | 'numeroPasta' | 'isAditivo' | 'linkedPleitoId' | 'linkedContractId'
+  'osNumeroPasta' | 'osCodigo' | 'numeroPasta' | 'obra' | 'isAditivo' | 'linkedPleitoId' | 'linkedContractId'
 > {
   const osNumeroPastaLegacy = typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '';
   let osCodigo = typeof metaRaw.osCodigo === 'string' ? metaRaw.osCodigo : '';
@@ -3978,6 +4006,7 @@ function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
     osNumeroPasta,
     osCodigo,
     numeroPasta,
+    obra: typeof metaRaw.obra === 'string' ? metaRaw.obra.trim() : '',
     isAditivo: typeof metaRaw.isAditivo === 'boolean' ? metaRaw.isAditivo : undefined,
     linkedPleitoId:
       typeof metaRaw.linkedPleitoId === 'string' && metaRaw.linkedPleitoId.trim()
@@ -4334,6 +4363,11 @@ interface SessaoOrcamentoPersist {
   /** Planilha analítica: chaves = linha analítica (composição ou insumo). */
   planilhaQuantidadeCompra: Record<string, number>;
   planilhaValorUnitCompraReal: Record<string, number>;
+  /**
+   * FD: OCs validadas no G4 já aplicadas em Qtd. compra / Valor unitário real (assinatura por linha).
+   * Só reaplica quando entra OC validada nova — a edição do usuário fica até lá.
+   */
+  planilhaCompraOcAplicada?: Record<string, string>;
   planilhaTipoInsumo: Record<string, 'MO' | 'MA' | 'LO'>;
   /** Observação por composição na aba Orçamento (chave da linha). */
   observacoesPorItem?: Record<string, string>;
@@ -4713,6 +4747,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     dimensoesPorItem: {},
     planilhaQuantidadeCompra: {},
     planilhaValorUnitCompraReal: {},
+    planilhaCompraOcAplicada: {},
     planilhaTipoInsumo: {},
     observacoesPorItem: {},
     coresLinhaPorKey: {},
@@ -4821,6 +4856,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
           gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
           historicoMovimentos: parseHistoricoMovimentos(metaRaw.historicoMovimentos),
+          fdMaterialMap: parseFdMaterialMap(metaRaw.fdMaterialMap),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -4844,6 +4880,10 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
       planilhaValorUnitCompraReal:
         p.planilhaValorUnitCompraReal && typeof p.planilhaValorUnitCompraReal === 'object'
           ? p.planilhaValorUnitCompraReal
+          : {},
+      planilhaCompraOcAplicada:
+        p.planilhaCompraOcAplicada && typeof p.planilhaCompraOcAplicada === 'object'
+          ? p.planilhaCompraOcAplicada
           : {},
       planilhaTipoInsumo:
         p.planilhaTipoInsumo && typeof p.planilhaTipoInsumo === 'object'
@@ -5221,6 +5261,7 @@ function parseOrcamentoDetailRaw(d: {
         aparenciaAbas: parseAparenciaAbasOrcamento(metaRaw.aparenciaAbas),
         gradeTravada: metaRaw.gradeTravada === true ? true : undefined,
         historicoMovimentos: parseHistoricoMovimentos(metaRaw.historicoMovimentos),
+        fdMaterialMap: parseFdMaterialMap(metaRaw.fdMaterialMap),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -5247,6 +5288,10 @@ function parseOrcamentoDetailRaw(d: {
           planilhaValorUnitCompraReal:
             so.planilhaValorUnitCompraReal && typeof so.planilhaValorUnitCompraReal === 'object'
               ? so.planilhaValorUnitCompraReal
+              : {},
+          planilhaCompraOcAplicada:
+            so.planilhaCompraOcAplicada && typeof so.planilhaCompraOcAplicada === 'object'
+              ? so.planilhaCompraOcAplicada
               : {},
           planilhaTipoInsumo:
             so.planilhaTipoInsumo && typeof so.planilhaTipoInsumo === 'object'
@@ -7782,6 +7827,7 @@ export function OrcamentoPageView({
   const [dimensoesPorItem, setDimensoesPorItem] = useState<Record<string, DimensoesItem>>({});
   const [planilhaQuantidadeCompra, setPlanilhaQuantidadeCompra] = useState<Record<string, number>>({});
   const [planilhaValorUnitCompraReal, setPlanilhaValorUnitCompraReal] = useState<Record<string, number>>({});
+  const [planilhaCompraOcAplicada, setPlanilhaCompraOcAplicada] = useState<Record<string, string>>({});
   const [planilhaTipoInsumo, setPlanilhaTipoInsumo] = useState<Record<string, 'MO' | 'MA' | 'LO'>>({});
   const [fichaDemandaObservacoes, setFichaDemandaObservacoes] = useState<Record<string, string>>({});
   const dimensoesPorItemDeferred = useDeferredValue(dimensoesPorItem);
@@ -7965,11 +8011,13 @@ export function OrcamentoPageView({
   }));
   const [importPlanilhaOsCodigo, setImportPlanilhaOsCodigo] = useState('');
   const [importPlanilhaNumeroPasta, setImportPlanilhaNumeroPasta] = useState('');
+  const [importPlanilhaObra, setImportPlanilhaObra] = useState('');
   const [orcafascioOsDraft, setOrcafascioOsDraft] = useState<OrcamentoOsDraft>(() => ({
     ...ORCAMENTO_OS_DRAFT_VAZIO,
   }));
   const [orcafascioOsCodigo, setOrcafascioOsCodigo] = useState('');
   const [orcafascioNumeroPasta, setOrcafascioNumeroPasta] = useState('');
+  const [orcafascioObra, setOrcafascioObra] = useState('');
   const [reajusteOsModal, setReajusteOsModal] = useState<{
     contractId: string;
     osCodigo: string;
@@ -8651,6 +8699,16 @@ export function OrcamentoPageView({
     [importContractOptions]
   );
 
+  /** Contrato da importação em andamento (lista de obras do campo Obra). */
+  const importObraContratoId = deferContractOnImport
+    ? importContratoSelecionadoId || ''
+    : embeddedContractId || '';
+  // Trocou o contrato na importação: a obra escolhida era do contrato anterior, então limpa.
+  useEffect(() => {
+    setImportPlanilhaObra('');
+    setOrcafascioObra('');
+  }, [importObraContratoId]);
+
   const resolveImportTarget = (): { contractId: string; costCenterId: string } | null => {
     if (deferContractOnImport) {
       const opt = (importContractOptions ?? []).find((c) => c.id === importContratoSelecionadoId);
@@ -8694,6 +8752,7 @@ export function OrcamentoPageView({
     setImportPlanilhaOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setImportPlanilhaOsCodigo('');
     setImportPlanilhaNumeroPasta('');
+    setImportPlanilhaObra('');
     setImportOrcamentoModalOpen(true);
   };
 
@@ -8701,6 +8760,7 @@ export function OrcamentoPageView({
     setImportPlanilhaOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setImportPlanilhaOsCodigo('');
     setImportPlanilhaNumeroPasta('');
+    setImportPlanilhaObra('');
   };
 
   const resetOrcafascioOsDraft = () => {
@@ -8708,6 +8768,7 @@ export function OrcamentoPageView({
     setOrcafascioOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
     setOrcafascioOsCodigo('');
     setOrcafascioNumeroPasta('');
+    setOrcafascioObra('');
   };
 
   /** Contrato onde a OS deve ser sincronizada (nunca outro contrato). */
@@ -8808,6 +8869,8 @@ export function OrcamentoPageView({
   const [confirmFinalizarOrcamento, setConfirmFinalizarOrcamento] = useState(false);
   const [reabrindoOrcamento, setReabrindoOrcamento] = useState(false);
   const [confirmReabrirOrcamento, setConfirmReabrirOrcamento] = useState(false);
+  const [encerrandoPedidos, setEncerrandoPedidos] = useState(false);
+  const [reabrindoPedidos, setReabrindoPedidos] = useState(false);
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -9066,6 +9129,7 @@ export function OrcamentoPageView({
       setDimensoesPorItem(s.dimensoesPorItem);
       setPlanilhaQuantidadeCompra(s.planilhaQuantidadeCompra ?? {});
       setPlanilhaValorUnitCompraReal(s.planilhaValorUnitCompraReal ?? {});
+      setPlanilhaCompraOcAplicada(s.planilhaCompraOcAplicada ?? {});
       setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
       setObservacoesPorItem(parseObservacoesPorItem(s.observacoesPorItem));
       setCoresLinhaPorKey(parseCoresMap(s.coresLinhaPorKey));
@@ -9405,6 +9469,7 @@ export function OrcamentoPageView({
       dimensoesPorItem,
       planilhaQuantidadeCompra,
       planilhaValorUnitCompraReal,
+      planilhaCompraOcAplicada,
       planilhaTipoInsumo,
       observacoesPorItem,
       coresLinhaPorKey,
@@ -9450,6 +9515,7 @@ export function OrcamentoPageView({
     dimensoesPorItem,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
+    planilhaCompraOcAplicada,
     planilhaTipoInsumo,
     observacoesPorItem,
     coresLinhaPorKey,
@@ -9491,6 +9557,7 @@ export function OrcamentoPageView({
     dimensoesPorItem,
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
+    planilhaCompraOcAplicada,
     planilhaTipoInsumo,
     observacoesPorItem,
     coresLinhaPorKey,
@@ -9800,6 +9867,10 @@ export function OrcamentoPageView({
       toast.error('Preencha OS e Número da pasta.');
       return;
     }
+    if (!(novoOrcamentoMetaDraft.obra || '').trim()) {
+      toast.error('Informe a obra do orçamento.');
+      return;
+    }
     if (novoOrcamentoOsDraft.isAditivo === null) {
       toast.error('Informe se o orçamento é aditivo.');
       return;
@@ -9822,6 +9893,7 @@ export function OrcamentoPageView({
       osCodigo,
       numeroPasta,
       osNumeroPasta,
+      obra: (novoOrcamentoMetaDraft.obra || '').trim(),
       isAditivo: novoOrcamentoOsDraft.isAditivo === true,
       responsavelOrcamento: novoOrcamentoMetaDraft.responsavelOrcamento.trim(),
       descricao: novoOrcamentoMetaDraft.descricao.trim(),
@@ -9861,7 +9933,6 @@ export function OrcamentoPageView({
         congelado: false,
       };
       setMeta(metaInicial);
-      // salva imediatamente os metadados (preserva campos de versão do backend)
       await saveOrcamentoToApi(centroCustoId, entry.id, {
         servicos: [],
         imports: [],
@@ -9902,6 +9973,14 @@ export function OrcamentoPageView({
         });
       } catch (syncErr) {
         toast.error(syncOrcamentoOsErrorMessage(syncErr));
+        // Desfaz a criação do orçamento
+        try {
+          await api.delete(`/orcamento/${centroCustoId}/orcamentos/${entry.id}`);
+          setListaOrcamentos(prev => prev.filter(o => o.id !== entry.id));
+          setOrcamentoAtivoId(null);
+        } catch { /* ignora */ }
+        setIsCreatingOrcamento(false);
+        return;
       }
       setNovoOrcamentoMetaOpen(false);
       setNovoOrcamentoStep(1);
@@ -9952,6 +10031,12 @@ export function OrcamentoPageView({
   };
 
   const pedirExclusaoOrcamento = (id: string, nome: string) => {
+    // FD já lançada para aprovação: o orçamento não pode mais ser excluído.
+    const status = normalizarStatusAprovacaoOrcamento(listaOrcamentos.find((o) => o.id === id)?.statusAprovacao);
+    if (status === 'aguardando_aprovacao' || status === 'aprovado') {
+      toast.error('Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada para aprovação.');
+      return;
+    }
     setOrcamentoExcluirConfirm({ id, nome });
   };
 
@@ -10033,8 +10118,9 @@ export function OrcamentoPageView({
       }
       setOrcamentoExcluirConfirm(null);
       toast.success('Orçamento excluído.');
-    } catch {
-      toast.error('Não foi possível excluir o orçamento.');
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(apiMsg || 'Não foi possível excluir o orçamento.');
     } finally {
       setExcluindoOrcamento(false);
     }
@@ -10948,6 +11034,10 @@ export function OrcamentoPageView({
       toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
       return false;
     }
+    if (!importPlanilhaObra.trim()) {
+      toast.error('Informe a obra do orçamento.');
+      return false;
+    }
     const target = resolveImportTarget();
     if (!target) return false;
     const { contractId: importContractIdRaw, costCenterId: ccId } = target;
@@ -11054,6 +11144,7 @@ export function OrcamentoPageView({
         osCodigo,
         numeroPasta,
         osNumeroPasta,
+        obra: importPlanilhaObra.trim(),
         isAditivo: importPlanilhaOsDraft.isAditivo === true,
         prazoExecucaoDias: parsed.metaPlanilha.prazoExecucaoDias || '',
         responsavelOrcamento: parsed.metaPlanilha.responsavelOrcamento || '',
@@ -11125,6 +11216,11 @@ export function OrcamentoPageView({
         });
       } catch (syncErr) {
         toast.error(syncOrcamentoOsErrorMessage(syncErr));
+        try {
+          await api.delete(`/orcamento/${ccId}/orcamentos/${entry.id}`);
+        } catch { /* ignora */ }
+        setIsImportandoOrcamento(false);
+        return false;
       }
 
       const entryAtualizado = { ...entry, nome: nomeLista };
@@ -11202,6 +11298,10 @@ export function OrcamentoPageView({
     const numeroPasta = orcafascioNumeroPasta.trim();
     if (!orcamentoOsDraftValido(orcafascioOsDraft, osCodigo, numeroPasta, { exigirValor: false })) {
       toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
+      return false;
+    }
+    if (!orcafascioObra.trim()) {
+      toast.error('Informe a obra do orçamento.');
       return false;
     }
     const target = resolveImportTarget();
@@ -11344,6 +11444,7 @@ export function OrcamentoPageView({
         osCodigo,
         numeroPasta,
         osNumeroPasta,
+        obra: orcafascioObra.trim(),
         isAditivo: orcafascioOsDraft.isAditivo === true,
         orcamentoRealizadoPor: currentUserName || '',
         // BDI e desconto: o que foi digitado no modal; vazio usa o sintético do Orçafascio.
@@ -11443,6 +11544,11 @@ export function OrcamentoPageView({
         });
       } catch (syncErr) {
         toast.error(syncOrcamentoOsErrorMessage(syncErr));
+        try {
+          await api.delete(`/orcamento/${ccId}/orcamentos/${entry.id}`);
+        } catch { /* ignora */ }
+        setIsImportandoOrcamento(false);
+        return false;
       }
 
       // Já deixamos o detalhe no cache — abrir o orçamento não espera o S3 de novo.
@@ -11734,6 +11840,7 @@ export function OrcamentoPageView({
       const formulasQtdNext = remapearRegistroPorChave(formulasQuantidadePorItem, chaveParaNovaKey);
       const planilhaQtdNext = remapearRegistroPorChave(planilhaQuantidadeCompra, chaveParaNovaKey);
       const planilhaVlNext = remapearRegistroPorChave(planilhaValorUnitCompraReal, chaveParaNovaKey);
+      const planilhaOcAplicadaNext = remapearRegistroPorChave(planilhaCompraOcAplicada, chaveParaNovaKey);
       const planilhaTipoNext = remapearRegistroPorChave(planilhaTipoInsumo, chaveParaNovaKey);
       const observacoesNext = remapearRegistroPorChave(fichaDemandaObservacoes, chaveParaNovaKey);
       const observacoesOrcNext = remapearRegistroPorChave(observacoesPorItem, chaveParaNovaKey);
@@ -11776,6 +11883,7 @@ export function OrcamentoPageView({
         dimensoesPorItem: dimensoesNext,
         planilhaQuantidadeCompra: planilhaQtdNext,
         planilhaValorUnitCompraReal: planilhaVlNext,
+        planilhaCompraOcAplicada: planilhaOcAplicadaNext,
         planilhaTipoInsumo: planilhaTipoNext,
         observacoesPorItem: observacoesOrcNext,
         fichaDemandaObservacoes: observacoesNext,
@@ -13888,6 +13996,15 @@ export function OrcamentoPageView({
     { rowHeight: 48, overscan: 28, enabled: orcamentoViewTab === 'planilhaAnalitica' }
   );
 
+  const fdColResize = useResizableColumns({
+    initialWidths: [
+      104, 96, 80, 320, 56, 80, 96,
+      160, 140, 160, 140,
+      120, 140, 120, 120, 110, 130, 384,
+    ],
+    minWidth: 40,
+  });
+
   const resumoSecoesFicha = useMemo(() => {
     const empty = {
       porTitulo: new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>(),
@@ -14223,6 +14340,254 @@ export function OrcamentoPageView({
     statusAprovacaoAtivo === 'reprovado';
   const podeEnviarFdAprovacao = statusAprovacaoAtivo === 'finalizado';
 
+  // --- Pedido de material (FD aprovada sem RM) ---
+  const [fdAprovadaRecord, setFdAprovadaRecord] = useState<{
+    id: string;
+    status: string;
+    numMovRm: string;
+    idMovRm: string;
+    itensPedidos: FdItemPedido[];
+    pedidosEncerrados: boolean;
+  } | null>(null);
+  const [pedidoMaterialModalOpen, setPedidoMaterialModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (statusAprovacaoAtivo !== 'aprovado' && statusAprovacaoAtivo !== 'aguardando_aprovacao') {
+      setFdAprovadaRecord(null);
+      return;
+    }
+    let cancelled = false;
+
+    async function fetchFd() {
+      try {
+        let fdId = meta.fichaDemandaApprovalId;
+
+        // Fallback: buscar FD pelo orçamento quando fichaDemandaApprovalId não está na meta
+        if (!fdId && centroCustoId && orcamentoAtivoId) {
+          const listRes = await api.get('/demand-sheet-approvals', {
+            params: { status: 'APPROVED' },
+          });
+          const items: Array<{ id: string; orcamentoCentroCustoId?: string | null; orcamentoId?: string | null }> =
+            listRes.data?.data || listRes.data || [];
+          const match = items.find(
+            (fd) =>
+              String(fd.orcamentoCentroCustoId || '') === centroCustoId &&
+              String(fd.orcamentoId || '') === orcamentoAtivoId,
+          );
+          if (match) {
+            fdId = match.id;
+            // Autosave persiste a sessão completa (PUT parcial de `sessaoOrcamento` sobrescreveria a árvore).
+            setMeta((prev) => ({ ...prev, fichaDemandaApprovalId: fdId }));
+          }
+        }
+
+        if (!fdId) { if (!cancelled) setFdAprovadaRecord(null); return; }
+
+        const res = await api.get(`/demand-sheet-approvals/${fdId}`);
+        if (cancelled) return;
+        const d = res.data?.data || res.data;
+        if (d.status === 'REJECTED' && statusAprovacaoAtivo === 'aguardando_aprovacao') {
+          setMeta((prev) => ({ ...prev, statusAprovacao: 'em_correcao' }));
+          setFdAprovadaRecord(null);
+          return;
+        }
+        // Gestor aprovou mas a meta local ficou desatualizada (sessão em cache / autosave antigo).
+        if (d.status === 'APPROVED' && statusAprovacaoAtivo === 'aguardando_aprovacao') {
+          setMeta((prev) => ({ ...prev, statusAprovacao: 'aprovado' }));
+        }
+        setFdAprovadaRecord({
+          id: fdId!,
+          status: String(d.status || ''),
+          numMovRm: d.numMovRm || '',
+          idMovRm: d.idMovRm || '',
+          itensPedidos: Array.isArray(d.itensPedidos) ? d.itensPedidos : [],
+          pedidosEncerrados: !!d.pedidosEncerrados,
+        });
+      } catch {
+        if (!cancelled) setFdAprovadaRecord(null);
+      }
+    }
+
+    fetchFd();
+    return () => { cancelled = true; };
+  }, [statusAprovacaoAtivo, meta.fichaDemandaApprovalId, centroCustoId, orcamentoAtivoId]);
+
+  /** RM informada à mão no formulário da FD (fluxo antigo, sem controle por item) — FD inteira já pedida. */
+  const fdRmManual =
+    fdAprovadaRecord !== null &&
+    fdAprovadaRecord.itensPedidos.length === 0 &&
+    !!fdAprovadaRecord.numMovRm.trim() &&
+    fdAprovadaRecord.numMovRm.trim() !== '-';
+  const podeFazerPedidoMaterial =
+    fdAprovadaRecord !== null && fdAprovadaRecord.status === 'APPROVED' && !fdRmManual;
+
+  /** Todos os insumos da FD (MA/MO/LO), com etapa/subetapa/composição; cada linha é associada separadamente. */
+  const insumosParaPedido = useMemo<FdInsumoLine[]>(() => {
+    if (!podeFazerPedidoMaterial) return [];
+    const out: FdInsumoLine[] = [];
+    let etapa = '';
+    let subetapa = '';
+    let composicao = '';
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'tituloServico') {
+        etapa = `${l.main} ${l.servicoNome}`;
+        continue;
+      }
+      if (l.kind === 'subtituloBloco') {
+        subetapa = `${l.main}.${l.subIdx} ${l.texto}`;
+        continue;
+      }
+      if (l.kind === 'composicao') {
+        composicao = `${l.item} ${l.descricao}`;
+        continue;
+      }
+      if (l.kind !== 'insumo') continue;
+      const tipoRaw = String(planilhaTipoInsumo[l.key] ?? tipoPlanilhaInsumo(l.categoria || '')).trim().toUpperCase();
+      const tipo = tipoRaw === 'MAT' ? 'MA' : tipoRaw === '—' || tipoRaw === '-' ? '' : tipoRaw;
+      const qCompra = planilhaQuantidadeCompra[l.key];
+      out.push({
+        key: l.key,
+        item: l.item,
+        codigo: l.codigo,
+        descricao: l.descricao,
+        tipo,
+        unidade: l.und,
+        quantidade: Number.isFinite(qCompra) && qCompra > 0 ? qCompra : l.quantidadeReal,
+        etapa,
+        subetapa,
+        composicao,
+      });
+    }
+    return out;
+  }, [podeFazerPedidoMaterial, linhasAnaliticoOrcamento, planilhaTipoInsumo, planilhaQuantidadeCompra]);
+
+  /** Quantos itens da FD atual já entraram em alguma RM. */
+  const fdItensSolicitados = useMemo(() => {
+    const pedidos = new Set((fdAprovadaRecord?.itensPedidos ?? []).map((p) => p.fdItemKey));
+    return insumosParaPedido.filter((ins) => pedidos.has(ins.key)).length;
+  }, [fdAprovadaRecord, insumosParaPedido]);
+
+  // --- Custo real das OCs validadas pelo compras no G4: preenche Qtd. compra / Valor unitário real (editáveis) ---
+  // Só nas colunas da Ficha de Demanda (aba FD do orçamento ou tela da FD); a aba Orçamento não tem essas colunas.
+  const fdIdParaCustos = fichaDemandaOnly
+    ? fichaDemandaRecord?.id?.trim() || ''
+    : fdAprovadaRecord?.status === 'APPROVED'
+      ? fdAprovadaRecord.id
+      : '';
+  const { data: custosReaisOc } = useQuery({
+    queryKey: ['fd-custos-reais', fdIdParaCustos],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${fdIdParaCustos}/custos-reais`);
+      return ((res.data?.data?.itens ?? {}) as Record<string, FdCustoRealItem>);
+    },
+    enabled: !!fdIdParaCustos,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  /** Valores da OC por item da FD: 1:1 usa qtd./preço da OC; 1:N usa qtd. da FD e o custo total rateado. */
+  const compraOcPorKey = useMemo(() => {
+    const m = new Map<
+      string,
+      { quantidade: number; valorUnitario: number; item: FdCustoRealItem; assinatura: string }
+    >();
+    if (!custosReaisOc) return m;
+    const qtdFdPorKey = new Map<string, number>();
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'insumo') qtdFdPorKey.set(l.key, l.quantidadeReal);
+    }
+    for (const [key, item] of Object.entries(custosReaisOc)) {
+      if (!item.materiais.length) continue;
+      // Assinatura = OCs validadas que compõem o item; muda só quando entra OC nova.
+      const assinatura = [
+        ...new Set(item.materiais.flatMap((mat) => mat.ocs.map((oc) => String(oc.totvsIdMov)))),
+      ]
+        .sort()
+        .join(',');
+      if (item.materiais.length === 1) {
+        const mat = item.materiais[0];
+        m.set(key, { quantidade: mat.quantidade, valorUnitario: mat.valorUnitario, item, assinatura });
+      } else {
+        const qtdFd = qtdFdPorKey.get(key) || 0;
+        const quantidade = qtdFd > 0 ? qtdFd : 1;
+        m.set(key, { quantidade, valorUnitario: item.total / quantidade, item, assinatura });
+      }
+    }
+    return m;
+  }, [custosReaisOc, linhasAnaliticoOrcamento]);
+
+  // Qtd. compra / Valor unitário real estão bloqueados para edição: espelham só as OCs validadas como pagas
+  // no G4 (o autosave persiste). Linha sem OC paga fica vazia — inclusive valores antigos digitados ou
+  // preenchidos antes desta regra. Só roda com a consulta carregada, para nunca apagar por falha de rede.
+  useEffect(() => {
+    if (!fdIdParaCustos || loadingFromApi || custosReaisOc === undefined) return;
+    const arred = (n: number, casas: number) => Math.round(n * 10 ** casas) / 10 ** casas;
+    const espelhar = (prev: Record<string, number>, valor: (v: { quantidade: number; valorUnitario: number }) => number) => {
+      const next: Record<string, number> = {};
+      for (const [key, v] of compraOcPorKey) next[key] = valor(v);
+      const iguais =
+        Object.keys(prev).length === Object.keys(next).length &&
+        Object.entries(next).every(([k, n]) => prev[k] === n);
+      return iguais ? prev : next;
+    };
+    setPlanilhaQuantidadeCompra((prev) => espelhar(prev, (v) => arred(v.quantidade, 4)));
+    setPlanilhaValorUnitCompraReal((prev) => espelhar(prev, (v) => arred(v.valorUnitario, 2)));
+  }, [fdIdParaCustos, loadingFromApi, custosReaisOc, compraOcPorKey]);
+
+  // Conferência do custo real: soma das OCs pagas (validadas pelo compras no G4), cada OC pelo seu total.
+  const { data: ocsPagasFd } = useQuery({
+    // Chave própria: o modal "Itens já solicitados" guarda o resumo completo em 'fd-pedidos-resumo'.
+    queryKey: ['fd-ocs-pagas', fdIdParaCustos],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${fdIdParaCustos}/pedidos-resumo`);
+      const d = res.data?.data ?? {};
+      return {
+        ocs: (d.ocsPagas ?? []) as { orderNumber: string; totvsIdMov: number; valor: number }[],
+        total: Number(d.totalOcsPagas) || 0,
+      };
+    },
+    enabled: !!fdIdParaCustos,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  /** Custo real total da FD (Σ qtd. compra × valor unitário real dos insumos). */
+  const custoRealTotalFd = useMemo(() => {
+    let total = 0;
+    for (const row of linhasAnaliticoComManuais) {
+      if (row.kind !== 'insumo') continue;
+      const qC = planilhaQuantidadeCompra[row.key];
+      const vR = planilhaValorUnitCompraReal[row.key];
+      if (Number.isFinite(qC) && Number.isFinite(vR)) total += qC * vR;
+    }
+    return total;
+  }, [linhasAnaliticoComManuais, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
+
+  // Espelha o custo real na FD aprovada (coluna "Custo real" da lista de Fichas de Demanda).
+  const fdIdEspelhoCusto = fichaDemandaOnly
+    ? fichaDemandaRecord?.status === 'APPROVED'
+      ? fichaDemandaRecord.id
+      : ''
+    : fdAprovadaRecord?.status === 'APPROVED'
+      ? meta.fichaDemandaApprovalId || ''
+      : '';
+  const custoRealEspelhadoRef = useRef<{ fdId: string; valor: number } | null>(null);
+  useEffect(() => {
+    if (!fdIdEspelhoCusto || loadingFromApi) return;
+    const valor = Math.round(custoRealTotalFd * 100) / 100;
+    const ultimo = custoRealEspelhadoRef.current;
+    if (ultimo && ultimo.fdId === fdIdEspelhoCusto && ultimo.valor === valor) return;
+    const t = window.setTimeout(() => {
+      custoRealEspelhadoRef.current = { fdId: fdIdEspelhoCusto, valor };
+      void api
+        .patch(`/demand-sheet-approvals/${fdIdEspelhoCusto}/custo-real`, { custoReal: valor })
+        .catch(() => {
+          custoRealEspelhadoRef.current = null;
+        });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [fdIdEspelhoCusto, loadingFromApi, custoRealTotalFd]);
+
   // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
   useEffect(() => {
     if (!orcamentoAtivoId) return;
@@ -14313,6 +14678,40 @@ export function OrcamentoPageView({
     fichaDemandaRecord?.fichaDemandaPct,
     fichaDemandaProgresso.pct,
   ]);
+
+  const handleEncerrarPedidos = useCallback(async () => {
+    const fdId = fdAprovadaRecord?.id || fichaDemandaRecord?.id;
+    if (!fdId || encerrandoPedidos) return;
+    if (!window.confirm('Tem certeza que deseja encerrar os pedidos para essa FD?\n\nNão será possível criar novos pedidos de material após o encerramento.')) return;
+    setEncerrandoPedidos(true);
+    try {
+      await api.patch(`/demand-sheet-approvals/${fdId}/encerrar-pedidos`);
+      toast.success('Pedidos encerrados com sucesso');
+      window.location.reload();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Erro ao encerrar pedidos';
+      toast.error(msg);
+    } finally {
+      setEncerrandoPedidos(false);
+    }
+  }, [fdAprovadaRecord?.id, fichaDemandaRecord?.id, encerrandoPedidos]);
+
+  const handleReabrirPedidos = useCallback(async () => {
+    const fdId = fdAprovadaRecord?.id || fichaDemandaRecord?.id;
+    if (!fdId || reabrindoPedidos) return;
+    if (!window.confirm('Reabrir os pedidos para essa FD? Novos pedidos de material poderão ser criados.')) return;
+    setReabrindoPedidos(true);
+    try {
+      await api.patch(`/demand-sheet-approvals/${fdId}/reabrir-pedidos`);
+      toast.success('Pedidos reabertos com sucesso');
+      window.location.reload();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Erro ao reabrir pedidos';
+      toast.error(msg);
+    } finally {
+      setReabrindoPedidos(false);
+    }
+  }, [fdAprovadaRecord?.id, fichaDemandaRecord?.id, reabrindoPedidos]);
 
   const setQuantidadeItem = (itemKey: string, valor: number, formulaRaw?: string) => {
     if (gradeTravadaRef.current) return;
@@ -16911,12 +17310,12 @@ export function OrcamentoPageView({
       const poloInferido = inferirPoloFdDeTexto(
         `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
       );
-      const custo = resumoFinanceiro.totalComDesconto;
+      const custo = resumoFinanceiro.totalComDescontoEBdi * 0.4;
       const fat = resumoFinanceiro.totalComDescontoEBdi;
 
       setFdAprovacaoInitialForm({
         contratoId: embeddedContractId || '',
-        obra: nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || '',
+        obra: meta.obra?.trim() || nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || '',
         codigoPedido: meta.osNumeroPasta.trim() || codigoFdBase,
         codFichaDemanda: `FD-${codigoFdBase}`,
         faturamentoEstimado: formatCurrencyInput(fat),
@@ -16945,11 +17344,15 @@ export function OrcamentoPageView({
     if (!centroCustoId || !orcamentoAtivoId) return;
     setFdAprovacaoEnviando(true);
     try {
-      const res = await api.post('/demand-sheet-approvals', {
+      const existingFdId = (meta.fichaDemandaApprovalId || '').trim();
+      const payload = {
         ...formToApiPayload(form),
         orcamentoCentroCustoId: centroCustoId,
         orcamentoId: orcamentoAtivoId,
-      });
+      };
+      const res = existingFdId
+        ? await api.put(`/demand-sheet-approvals/${existingFdId}`, payload)
+        : await api.post('/demand-sheet-approvals', payload);
       const createdId = String(res.data?.data?.id || '').trim() || undefined;
       const nextMeta: OrcamentoMeta = {
         ...meta,
@@ -17743,7 +18146,11 @@ export function OrcamentoPageView({
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</dt>
-                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{FD_STATUS_LABELS[fichaDemandaRecord.status] || fichaDemandaRecord.status}</dd>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{
+                            fichaDemandaRecord.status === 'CANCELLED' && fichaDemandaRecord.managerRejectionComment?.includes('exclusão de orçamento')
+                              ? 'FD Cancelada por exclusão de orçamento'
+                              : (FD_STATUS_LABELS[fichaDemandaRecord.status] || fichaDemandaRecord.status)
+                          }</dd>
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status compras</dt>
@@ -17760,6 +18167,32 @@ export function OrcamentoPageView({
                           <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.observacao || '—'}</dd>
                         </div>
                       </dl>
+                      <div className="mt-4 flex items-center gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                        {fichaDemandaRecord.pedidosEncerrados ? (
+                          <>
+                            <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                              Pedidos encerrados
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleReabrirPedidos}
+                              disabled={reabrindoPedidos}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                            >
+                              {reabrindoPedidos ? 'Reabrindo…' : 'Reabrir pedidos'}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleEncerrarPedidos}
+                            disabled={encerrandoPedidos}
+                            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
+                          >
+                            {encerrandoPedidos ? 'Encerrando…' : 'Encerrar pedidos para essa FD'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-600 dark:text-gray-400">Dados da ficha de demanda indisponíveis.</p>
@@ -17781,10 +18214,16 @@ export function OrcamentoPageView({
                           <button
                             type="button"
                             onClick={abrirEdicaoDados}
-                            disabled={versaoCongelada}
+                            disabled={versaoCongelada || orcamentoFechado}
                             className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:pointer-events-none disabled:opacity-40"
                             aria-label="Editar dados"
-                            title={versaoCongelada ? 'Versão congelada — somente leitura' : 'Editar dados'}
+                            title={
+                              versaoCongelada
+                                ? 'Versão congelada — somente leitura'
+                                : orcamentoFechado
+                                  ? 'Orçamento finalizado. Reabra para editar.'
+                                  : 'Editar dados'
+                            }
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -17816,6 +18255,11 @@ export function OrcamentoPageView({
                           })()}
                         </div>
                       ) : null}
+                    {orcamentoFechado && !versaoCongelada ? (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                        Orçamento finalizado. Reabra para editar. Ao finalizar de novo, o valor da OS é atualizado.
+                      </div>
+                    ) : null}
                     </div>
 
                     <div className="px-4 sm:px-5 py-5 space-y-8">
@@ -17832,6 +18276,7 @@ export function OrcamentoPageView({
                           ) : (
                             <DadosCampo label="OS">{meta.osNumeroPasta || '—'}</DadosCampo>
                           )}
+                          <DadosCampo label="Obra">{meta.obra?.trim() || '—'}</DadosCampo>
                           {typeof meta.isAditivo === 'boolean' ? (
                             <DadosCampo label="Orçamento aditivo">
                               {meta.isAditivo ? 'Sim' : 'Não'}
@@ -18124,10 +18569,129 @@ export function OrcamentoPageView({
                       />
                     ) : (
                         <>
+                        {podeFazerPedidoMaterial && (() => {
+                          const encerrado = !!(fdAprovadaRecord?.pedidosEncerrados || fichaDemandaRecord?.pedidosEncerrados);
+                          const estado = encerrado
+                            ? 'todos' as const
+                            : fdItensSolicitados === 0
+                              ? 'nenhum'
+                              : fdItensSolicitados >= insumosParaPedido.length
+                                ? 'todos'
+                                : 'parcial';
+                          const cores = {
+                            nenhum: {
+                              faixa: 'border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/30',
+                              texto: 'text-green-800 dark:text-green-200',
+                              botao: 'border-green-600 bg-green-600 hover:bg-green-700 hover:border-green-700 active:bg-green-800 dark:border-green-500 dark:bg-green-600 dark:hover:bg-green-500',
+                            },
+                            parcial: {
+                              faixa: 'border-orange-300 bg-orange-50 dark:border-orange-700 dark:bg-orange-950/30',
+                              texto: 'text-orange-800 dark:text-orange-200',
+                              botao: 'border-orange-600 bg-orange-600 hover:bg-orange-700 hover:border-orange-700 active:bg-orange-800 dark:border-orange-500 dark:bg-orange-600 dark:hover:bg-orange-500',
+                            },
+                            todos: {
+                              faixa: 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30',
+                              texto: 'text-red-800 dark:text-red-200',
+                              botao: 'border-red-600 bg-red-600 cursor-not-allowed opacity-70 dark:border-red-500 dark:bg-red-600',
+                            },
+                          }[estado];
+                          return (
+                            <div className={`mx-1 mb-2 flex items-center gap-3 rounded-lg border px-4 py-2.5 ${cores.faixa}`}>
+                              <p className={`text-sm font-medium ${cores.texto}`}>
+                                {estado === 'nenhum' && 'FD aprovada — vincule os materiais para preparar o pedido de compra.'}
+                                {estado === 'parcial' &&
+                                  `Pedido parcial — ${fdItensSolicitados} de ${insumosParaPedido.length} itens da FD já solicitados.`}
+                                {estado === 'todos' && (encerrado ? 'Pedidos encerrados para esta FD.' : 'Todos os itens da FD já foram solicitados.')}
+                              </p>
+                              {!encerrado && estado !== 'nenhum' && (
+                                <button
+                                  type="button"
+                                  onClick={handleEncerrarPedidos}
+                                  disabled={encerrandoPedidos}
+                                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-600 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 hover:border-red-700 disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:hover:bg-red-500"
+                                >
+                                  <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  {encerrandoPedidos ? 'Encerrando…' : 'Encerrar pedidos'}
+                                </button>
+                              )}
+                              {encerrado && (
+                                <button
+                                  type="button"
+                                  onClick={handleReabrirPedidos}
+                                  disabled={reabrindoPedidos}
+                                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                                >
+                                  {reabrindoPedidos ? 'Reabrindo…' : 'Reabrir pedidos'}
+                                </button>
+                              )}
+                              <div className="ml-auto flex shrink-0 items-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setPedidoMaterialModalOpen(true)}
+                                  disabled={estado === 'todos' || encerrado}
+                                  title={encerrado ? 'Pedidos encerrados para esta FD' : estado === 'todos' ? 'Todos os itens da FD já foram solicitados' : undefined}
+                                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors ${cores.botao}`}
+                                >
+                                  {estado === 'todos' ? (
+                                    <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  ) : (
+                                    <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  )}
+                                  {estado === 'todos'
+                                    ? 'Pedido concluído'
+                                    : estado === 'parcial'
+                                      ? 'Continuar pedido de material'
+                                      : 'Fazer pedido de material'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {!!fdIdParaCustos && ocsPagasFd && (() => {
+                          const fmt = (n: number) =>
+                            n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
+                          const diferenca = Math.round((custoRealTotalFd - ocsPagasFd.total) * 100) / 100;
+                          const confere = Math.abs(diferenca) < 0.01;
+                          return (
+                            <div className="mx-1 mb-2 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/60">
+                              <span
+                                className="text-gray-700 dark:text-gray-300"
+                                title={
+                                  ocsPagasFd.ocs.length
+                                    ? ocsPagasFd.ocs
+                                        .map((oc) => `${oc.orderNumber} · IdMov ${oc.totvsIdMov} · ${fmt(oc.valor)}`)
+                                        .join('\n')
+                                    : 'Nenhuma OC validada pelo compras no G4 ainda'
+                                }
+                              >
+                                Total pago ({ocsPagasFd.ocs.length} OC{ocsPagasFd.ocs.length === 1 ? '' : 's'} validada
+                                {ocsPagasFd.ocs.length === 1 ? '' : 's'} no G4):{' '}
+                                <strong className="tabular-nums text-gray-900 dark:text-gray-100">{fmt(ocsPagasFd.total)}</strong>
+                              </span>
+                              <span className="text-gray-700 dark:text-gray-300">
+                                Custo real da FD:{' '}
+                                <strong className="tabular-nums text-gray-900 dark:text-gray-100">{fmt(custoRealTotalFd)}</strong>
+                              </span>
+                              <span
+                                className={`font-medium ${
+                                  confere ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'
+                                }`}
+                              >
+                                {confere ? 'Confere' : `Diferença: ${fmt(diferenca)}`}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         <div data-orc-table-viewport className={gradeTableViewportCls} style={gradeZoomStyle}>
                           <table
-                            className={`w-full min-w-[36rem] border-separate border-spacing-0 ${gradeTableCls}`}
+                            className={`border-separate border-spacing-0 ${gradeTableCls}`}
+                            style={{ tableLayout: 'fixed', width: fdColResize.widths.reduce((a, b) => a + b, 0) }}
                           >
+                            <colgroup>
+                              {fdColResize.widths.map((w, ci) => (
+                                <col key={ci} style={{ width: w }} />
+                              ))}
+                            </colgroup>
                             <thead className="border-b border-gray-200 dark:border-gray-700">
                               <tr className={gradeTableRowTrCls}>
                                 <th
@@ -18582,6 +19146,16 @@ export function OrcamentoPageView({
                                 }
                                 const qCLive = planilhaQuantidadeCompra[l.key];
                                 const vRealLive = planilhaValorUnitCompraReal[l.key];
+                                const compraOc = compraOcPorKey.get(l.key);
+                                const tituloCompraOc = compraOc
+                                  ? `Preenchido pela OC validada no G4: ${[
+                                      ...new Set(
+                                        compraOc.item.materiais.flatMap((m) =>
+                                          m.ocs.map((oc) => `OC ${formatOcListDisplayId(oc.orderNumber)} · IdMov ${oc.totvsIdMov}`),
+                                        ),
+                                      ),
+                                    ].join(', ')}`
+                                  : '';
                                 const qC = planilhaQuantidadeCompra[l.key];
                                 const vReal = planilhaValorUnitCompraReal[l.key];
                                 const vOrc = l.valorUnit;
@@ -18622,8 +19196,8 @@ export function OrcamentoPageView({
                                     ? (insumosAnaliticoManuais[l.parentKey] ?? [])[manualInsumoIdx]
                                     : null;
                                 return (
+                                  <React.Fragment key={l.key}>
                                   <tr
-                                    key={l.key}
                                     className={`bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 ${gradeTableRowTrCls}`}
                                     onContextMenuCapture={(e) => {
                                       e.preventDefault();
@@ -19089,6 +19663,44 @@ export function OrcamentoPageView({
                                       </>
                                     ) : null}
                                   </tr>
+                                  {/* 1 item da FD → N materiais: detalha cada material com qtd. e valor da OC. */}
+                                  {mostrarColunasCompraFichaDemanda && compraOc && compraOc.item.materiais.length > 1
+                                    ? compraOc.item.materiais.map((mat, mi) => (
+                                        <tr
+                                          key={`${l.key}|oc|${mat.materialId}|${mi}`}
+                                          className={`bg-blue-50/40 text-xs dark:bg-blue-950/20 ${gradeTableRowTrCls}`}
+                                        >
+                                          <td className={itemW} />
+                                          <td
+                                            colSpan={3}
+                                            className="px-3 py-1.5 text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                          >
+                                            ↳ {mat.materialLabel || 'Material'}
+                                            <span className="ml-2 text-gray-400 dark:text-gray-500">
+                                              {mat.ocs
+                                                .map((oc) => `OC ${formatOcListDisplayId(oc.orderNumber)} · IdMov ${oc.totvsIdMov}`)
+                                                .join(', ')}
+                                            </span>
+                                          </td>
+                                          <td className="border-l border-gray-200 dark:border-gray-700" />
+                                          <td className="px-2 py-1.5 text-center text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                            {mat.unit || '—'}
+                                          </td>
+                                          <td colSpan={5} className="border-l border-gray-200 dark:border-gray-700" />
+                                          <td className="px-2 py-1.5 text-center tabular-nums text-blue-700 dark:text-blue-300 border-l border-gray-200 dark:border-gray-700">
+                                            {mat.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                                          </td>
+                                          <td className={`px-2 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-300 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}>
+                                            <MoedaCelula valor={mat.valorUnitario} />
+                                          </td>
+                                          <td className="px-3 py-1.5 text-center tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                            <MoedaCelula valor={mat.total} />
+                                          </td>
+                                          <td colSpan={4} className="border-l border-gray-200 dark:border-gray-700" />
+                                        </tr>
+                                      ))
+                                    : null}
+                                  </React.Fragment>
                                 );
                               })}
                               <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={colSpanFichaDemanda} />
@@ -20493,6 +21105,43 @@ export function OrcamentoPageView({
                       </p>
                     </div>
                   ) : null}
+                  <div className="shrink-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Custo estimado (40%)
+                    </p>
+                    <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-amber-600 dark:text-amber-400 sm:text-base whitespace-nowrap">
+                      {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi * 0.4)}
+                    </p>
+                  </div>
+                  {custoRealTotalFd > 0 && (
+                    <>
+                      <div className="shrink-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Custo real
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-blue-600 dark:text-blue-400 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(custoRealTotalFd)}
+                        </p>
+                      </div>
+                      {(() => {
+                        const diferenca = resumoFinanceiro.totalComDescontoEBdi * 0.4 - custoRealTotalFd;
+                        return (
+                          <div className="shrink-0" title="Custo estimado (40%) − custo real">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              {diferenca >= 0 ? 'Economia vs estimado' : 'Acima do estimado'}
+                            </p>
+                            <p
+                              className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
+                                diferenca >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                              }`}
+                            >
+                              {formatarBRLExport(Math.abs(diferenca))}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                   {fichaDemandaOnly ? (
                     <>
                       <div
@@ -20780,11 +21429,27 @@ export function OrcamentoPageView({
         }}
         initialForm={fdAprovacaoInitialForm}
         hideContractField={Boolean(embeddedContractId)}
+        obraBloqueada={Boolean(meta.obra?.trim())}
         onSave={(form) => {
           void confirmarEnvioFichaDemandaAprovacao(form);
         }}
         isSaving={fdAprovacaoEnviando}
         title="Enviar ficha de demanda para aprovação"
+      />
+
+      <FdPedidoMaterialModal
+        isOpen={pedidoMaterialModalOpen}
+        onClose={() => setPedidoMaterialModalOpen(false)}
+        fdApprovalId={meta.fichaDemandaApprovalId || ''}
+        insumos={insumosParaPedido}
+        initialMap={meta.fdMaterialMap}
+        itensPedidos={fdAprovadaRecord?.itensPedidos ?? []}
+        onDraftChange={(map) => setMeta((prev) => ({ ...prev, fdMaterialMap: map }))}
+        serviceOrderId={undefined}
+        onSuccess={(itensPedidos) => {
+          setPedidoMaterialModalOpen(false);
+          setFdAprovadaRecord((prev) => (prev ? { ...prev, itensPedidos } : prev));
+        }}
       />
 
       {confirmFinalizarOrcamento && (
@@ -21761,6 +22426,7 @@ export function OrcamentoPageView({
                   setOrcafascioOsDraft({ ...ORCAMENTO_OS_DRAFT_VAZIO });
                   setOrcafascioOsCodigo('');
                   setOrcafascioNumeroPasta('');
+                  setOrcafascioObra('');
                   const o = (orcafascioOrcamentos ?? []).find(
                     (x) => idOrcamentoOrcafascioParaApi(x) === v || String(x.id) === v
                   );
@@ -21857,6 +22523,12 @@ export function OrcamentoPageView({
                     />
                   </div>
                 </div>
+                <ObraSelectField
+                  contratoId={importObraContratoId}
+                  value={orcafascioObra}
+                  onChange={setOrcafascioObra}
+                  disabled={isImportandoOrcamento}
+                />
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Descrição do serviço
@@ -22544,6 +23216,12 @@ export function OrcamentoPageView({
                   />
                 </div>
               </div>
+              <ObraSelectField
+                contratoId={importObraContratoId}
+                value={importPlanilhaObra}
+                onChange={setImportPlanilhaObra}
+                disabled={isImportandoOrcamento}
+              />
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Descrição do serviço
@@ -22761,6 +23439,20 @@ export function OrcamentoPageView({
                 }
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
                 placeholder="Ex: 241"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <ObraSelectField
+                contratoId={embeddedContractId || ''}
+                value={editarDadosDraft.obra || ''}
+                onChange={(obra) => setEditarDadosDraft((p) => ({ ...p, obra }))}
+                required={false}
+                disabled={statusAprovacaoAtivo === 'aguardando_aprovacao' || statusAprovacaoAtivo === 'aprovado'}
+                hint={
+                  statusAprovacaoAtivo === 'aguardando_aprovacao' || statusAprovacaoAtivo === 'aprovado'
+                    ? 'A FD já foi lançada para aprovação: a obra não pode mais ser alterada.'
+                    : undefined
+                }
               />
             </div>
             <div>
@@ -23056,6 +23748,12 @@ export function OrcamentoPageView({
                   disabled={isCreatingOrcamento}
                 />
               </div>
+              <ObraSelectField
+                contratoId={embeddedContractId || ''}
+                value={novoOrcamentoMetaDraft.obra || ''}
+                onChange={(obra) => setNovoOrcamentoMetaDraft((p) => ({ ...p, obra }))}
+                disabled={isCreatingOrcamento}
+              />
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Prazo estimado (dias)</label>
                 <input

@@ -9,6 +9,7 @@ import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 export type FdNotificationCounts = {
   pendingManager: number;
   pendingPurchase: number;
+  rejectedOwn: number;
 };
 
 export function useFdNotificationCounts() {
@@ -31,6 +32,7 @@ export function useFdNotificationCounts() {
       return {
         pendingManager: Number(data?.pendingManager ?? 0) || 0,
         pendingPurchase: Number(data?.pendingPurchase ?? 0) || 0,
+        rejectedOwn: Number(data?.rejectedOwn ?? 0) || 0,
       };
     },
     enabled,
@@ -43,6 +45,7 @@ export function useFdNotificationCounts() {
     counts: {
       pendingManager: canFetchManager ? (query.data?.pendingManager ?? 0) : 0,
       pendingPurchase: canFetchPurchase ? (query.data?.pendingPurchase ?? 0) : 0,
+      rejectedOwn: query.data?.rejectedOwn ?? 0,
     },
     isLoading: query.isLoading,
     refetch: query.refetch,

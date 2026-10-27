@@ -1,4 +1,5 @@
 import { Response, NextFunction } from 'express';
+import { proximaAtualizacaoManual, reservarAtualizacaoManual } from '../lib/totvsManualSyncCooldown';
 import { Prisma, Supplier } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
@@ -184,11 +185,22 @@ export class SupplierController {
   /** Sincroniza fornecedores do TOTVS RM (upsert por CPF/CNPJ ou código). */
   async syncFromTotvs(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const espera = reservarAtualizacaoManual('fornecedores');
+      if (espera) {
+        res.status(429).json({
+          success: false,
+          message: espera.mensagem,
+          retryAfterSeconds: espera.segundosRestantes,
+          liberaEm: espera.liberaEm,
+        });
+        return;
+      }
       const force = String(req.query.force || '').trim() === '1';
       const result = force
         ? await runSupplierTotvsSync('manual')
         : await runSupplierTotvsSyncIfStale(60_000);
       res.json({
+        liberaEm: proximaAtualizacaoManual('fornecedores'),
         success: true,
         data: result ?? getSupplierTotvsSyncStatus(),
         message: result

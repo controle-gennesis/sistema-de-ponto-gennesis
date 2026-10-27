@@ -1,8 +1,11 @@
 import type { PurchaseOrder } from './OcPurchaseOrdersPanel';
 import { showInAttachBoletoTab } from './ocPaymentBoleto';
 import type { OcTabCounts } from './OcFluxTabsNav';
+import { isOcFluxoDiretoTotvs, isOcTotvsEnviada, isOcTotvsNaoEnviada } from './ocTotvsFluxoDireto';
 
-export function computeOcTabCounts(allOrders: PurchaseOrder[]): OcTabCounts {
+export function computeOcTabCounts(orders: PurchaseOrder[]): OcTabCounts {
+  // Fluxo direto TOTVS fica fora de todas as fases do Conecta (Canceladas inclusive).
+  const allOrders = orders.filter((o) => !isOcFluxoDiretoTotvs(o));
   const compras = allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT').length;
   const gestor = allOrders.filter((o) => o.status === 'PENDING').length;
   const diretoria = allOrders.filter((o) => o.status === 'PENDING_DIRETORIA').length;
@@ -26,6 +29,8 @@ export function computeOcTabCounts(allOrders: PurchaseOrder[]): OcTabCounts {
     PROOF_VALIDATION: proofValidation,
     PROOF_CORRECTION: proofCorrection,
     ATTACH_NF: attachNf,
+    TOTVS_NAO_ENVIADAS: orders.filter(isOcTotvsNaoEnviada).length,
+    TOTVS_ENVIADAS: orders.filter(isOcTotvsEnviada).length,
     outras
   };
 }

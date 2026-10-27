@@ -55,7 +55,7 @@ const FD_PHASE_CARDS: ApprovalPhaseStatCard<FdPhaseFilter>[] = [
   },
   {
     filter: 'REJECTED',
-    label: 'Em correção',
+    label: 'Reprovadas',
     iconBg: 'bg-orange-100 dark:bg-orange-900/30',
     iconColor: 'text-orange-600 dark:text-orange-400',
     Icon: RotateCcw,
@@ -72,7 +72,7 @@ const FD_PHASE_CARDS: ApprovalPhaseStatCard<FdPhaseFilter>[] = [
 const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Aguardando aprovação' },
   { value: 'APPROVED', label: 'Aprovadas' },
-  { value: 'REJECTED', label: 'Em correção' },
+  { value: 'REJECTED', label: 'Reprovadas' },
   { value: 'ALL', label: 'Todos' },
 ]);
 
@@ -174,15 +174,18 @@ export function FdApprovalsSection() {
       return res.data;
     },
     onSuccess: () => {
-      toast.success('Ficha de demanda enviada para correção.');
+      toast.success('Ficha de demanda reprovada.');
       setDetailFd(null);
       void queryClient.invalidateQueries({ queryKey: ['approvals', 'fd'] });
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+      void queryClient.invalidateQueries({ queryKey: ['contract-orcamentos-count'] });
+      void queryClient.invalidateQueries({ queryKey: ['orcamento-notification-counts'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
-      toast.error(err.response?.data?.error || 'Erro ao enviar para correção');
+      toast.error(err.response?.data?.error || 'Erro ao reprovar');
     },
   });
 
@@ -346,7 +349,12 @@ export function FdApprovalsSection() {
                         <td className="px-3 py-4 text-center sm:px-6">
                           <ApprovalStatusBadge
                             kind={fdToApprovalStatus(r.status)}
-                            label={FD_STATUS_LABELS[r.status]}
+                            label={
+                              r.status === 'CANCELLED' &&
+                              r.managerRejectionComment?.includes('exclusão de orçamento')
+                                ? 'FD Cancelada por exclusão de orçamento'
+                                : FD_STATUS_LABELS[r.status]
+                            }
                           />
                         </td>
                         <td
@@ -435,7 +443,7 @@ export function FdApprovalsSection() {
                   className={MENU_ITEM_BORDER_CLASS}
                 >
                   <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                  <span>Enviar para correção</span>
+                  <span>Reprovar</span>
                 </button>
               </>
             ) : null}
@@ -472,7 +480,7 @@ export function FdApprovalsSection() {
                       onClick={() => rejectMutation.mutate({ id: detailFd.id })}
                       disabled={approveMutation.isPending || rejectMutation.isPending}
                     >
-                      {rejectMutation.isPending ? 'Enviando…' : 'Enviar para correção'}
+                      {rejectMutation.isPending ? 'Reprovando…' : 'Reprovar'}
                     </Button>
                     <Button
                       type="button"
