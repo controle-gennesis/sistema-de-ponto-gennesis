@@ -2936,7 +2936,12 @@ export default function ContractDetailPage() {
       can(pathToModuleKey('/ponto/fds-aprovadas')) ||
       can(pathToModuleKey('/ponto/aprovacao-fds'))
     ) {
-      itens.push({ label: 'Fichas de Demanda', href: '/ponto/fds-aprovadas', icon: ClipboardList });
+      // Duas páginas com o mesmo nome e permissões separadas: Suprimentos (fds-aprovadas) e Engenharia (aprovacao-fds).
+      const fdHref =
+        isAdministrator || can(pathToModuleKey('/ponto/fds-aprovadas'))
+          ? '/ponto/fds-aprovadas'
+          : '/ponto/aprovacao-fds';
+      itens.push({ label: 'Fichas de Demanda', href: fdHref, icon: ClipboardList });
     }
     if (
       isAdministrator ||
