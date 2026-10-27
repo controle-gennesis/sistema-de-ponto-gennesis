@@ -138,6 +138,7 @@ import {
   ArrowUpDown,
   Check,
   Archive,
+  BarChart3,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -3476,6 +3477,26 @@ function KanbanPage() {
     });
   }
 
+  // Link vindo do Dashboard de Tasks (?cardId=): abre o cartão assim que o quadro carrega.
+  const cardIdParam = searchParams?.get('cardId') ?? null;
+  const openedCardFromUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cardIdParam || openedCardFromUrlRef.current === cardIdParam || !board) return;
+    for (const col of board.columns) {
+      const found = col.cards.find((c) => c.id === cardIdParam);
+      if (!found) continue;
+      openedCardFromUrlRef.current = cardIdParam;
+      setCardModal({
+        mode: 'detail',
+        cardId: found.id,
+        columnId: col.id,
+        initialCard: found,
+        initialColumn: { title: col.title, color: col.color },
+      });
+      return;
+    }
+  }, [cardIdParam, board]);
+
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
     columnDragIdRef.current = null;
@@ -4288,6 +4309,15 @@ function KanbanPage() {
                 {hasActiveKanbanFilters && (
                   <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                 )}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push('/ponto/kanban/dashboard')}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors outline-none hover:bg-gray-50 hover:text-gray-800 focus:ring-0 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                aria-label="Abrir dashboard"
+                title="Dashboard"
+              >
+                <BarChart3 className="h-4 w-4" />
               </button>
               <div ref={boardToolsRef} className="relative shrink-0">
                 <button
