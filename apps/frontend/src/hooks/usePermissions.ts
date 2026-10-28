@@ -931,6 +931,8 @@ export function useRoutePermission(route: string) {
     '/ponto/natureza-orcamentaria': isAdministrator || canAccessModule(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || canAccessModule(pk('/ponto/formularios')),
     '/ponto/noticias': isAdministrator || canAccessModule(pk('/ponto/noticias')),
+    /** Respostas à Gennecy: só administrador. */
+    '/ponto/avaliacoes-sistema': isAdministrator,
     '/ponto/juridico/processos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos/dashboard':
       isAdministrator || can(pk('/ponto/juridico/processos-ativos')),

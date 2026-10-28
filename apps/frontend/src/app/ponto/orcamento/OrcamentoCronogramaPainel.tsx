@@ -6,6 +6,7 @@ import {
   Calendar,
   CalendarRange,
   Download,
+  FileText,
   Loader2,
   Palette
 } from 'lucide-react';
@@ -93,6 +94,7 @@ type Props = {
   /** Persiste a data de fim da obra (meta.dataEnvio) quando informada na modal. */
   onDataFimObraChange?: (dataFimIso: string) => void;
   onExport?: () => void;
+  onExportPdf?: () => void;
   /** Tela cheia: a grade rola por dentro e as ações ficam na barra de baixo. */
   telaFixa?: boolean;
   /** Aparência editável (Características do orçamento → Cronograma); sem isto vale o visual padrão. */
@@ -133,6 +135,10 @@ const stickyServicoThCls =
 const stickyItemTdCls = 'sticky left-0 z-10';
 const stickyServicoTdCls =
   'sticky left-[6.5rem] z-10 border-r border-gray-200 dark:border-gray-600';
+const stickyUnidadeThCls = 'left-[28.5rem] z-30';
+const stickyQtdThCls = 'left-[34rem] z-30 border-r border-gray-300 dark:border-gray-600';
+const stickyUnidadeTdCls = 'sticky left-[28.5rem] z-10';
+const stickyQtdTdCls = 'sticky left-[34rem] z-10 border-r border-gray-200 dark:border-gray-600';
 const thUnidadeColCls = `${thCls} w-[5.5rem] !border-l-0 px-2`;
 const thQtdColCls = `${thCls} w-[7rem] px-2`;
 const thCustoColCls = `${thCls} w-[11rem] whitespace-normal leading-tight`;
@@ -217,18 +223,28 @@ function CelulasQtdCusto({
   unidade,
   quantidade,
   custo,
-  destaque = false
+  destaque = false,
+  fixoBgCls = '',
+  fixoStyle
 }: {
   unidade?: string;
   quantidade?: number | null;
   custo?: number | null;
   destaque?: boolean;
+  /** Fundo da linha: as colunas fixas precisam de fundo próprio para cobrir a linha do tempo ao rolar. */
+  fixoBgCls?: string;
+  fixoStyle?: React.CSSProperties;
 }) {
   const peso = destaque ? 'font-semibold' : '';
   return (
     <>
-      <td className={`${tdUnidadeColCls} ${peso}`}>{unidade?.trim() || '—'}</td>
-      <td className={`${tdQtdColCls} ${peso}`}>
+      <td
+        style={fixoStyle}
+        className={`${tdUnidadeColCls} ${stickyUnidadeTdCls} ${fixoBgCls} ${peso}`}
+      >
+        {unidade?.trim() || '—'}
+      </td>
+      <td style={fixoStyle} className={`${tdQtdColCls} ${stickyQtdTdCls} ${fixoBgCls} ${peso}`}>
         {quantidade != null && Number.isFinite(quantidade) ? formatQtdCronograma(quantidade) : '—'}
       </td>
       <td className={`${tdCustoColCls} ${peso}`}>
@@ -569,6 +585,7 @@ export function OrcamentoCronogramaPainel({
   dataFimObra = '',
   onDataFimObraChange,
   onExport,
+  onExportPdf,
   telaFixa = false,
   estilosAparencia,
   onEditarAparencia
@@ -975,6 +992,17 @@ export function OrcamentoCronogramaPainel({
           <Download className="h-4 w-4 shrink-0" aria-hidden />
         </button>
       ) : null}
+      {onExportPdf ? (
+        <button
+          type="button"
+          onClick={onExportPdf}
+          className={iconBtnCls}
+          title="Exportar cronograma (.pdf)"
+          aria-label="Exportar cronograma em PDF"
+        >
+          <FileText className="h-4 w-4 shrink-0" aria-hidden />
+        </button>
+      ) : null}
       {onEditarAparencia ? (
         <button
           type="button"
@@ -1124,8 +1152,8 @@ export function OrcamentoCronogramaPainel({
                 <tr className={gradeTableRowTrCls}>
                   <th className={`${gradeThStickyCls} ${stickyItemThCls} ${thItemColCls}`}>Item</th>
                   <th className={`${gradeThStickyCls} ${stickyServicoThCls} ${thServicoColCls}`}>Serviço</th>
-                  <th className={`${gradeThStickyCls} ${thUnidadeColCls}`}>Unidade</th>
-                  <th className={`${gradeThStickyCls} ${thQtdColCls}`}>Quantidade</th>
+                  <th className={`${gradeThStickyCls} ${stickyUnidadeThCls} ${thUnidadeColCls}`}>Unidade</th>
+                  <th className={`${gradeThStickyCls} ${stickyQtdThCls} ${thQtdColCls}`}>Quantidade</th>
                   <th className={`${gradeThStickyCls} ${thCustoColCls}`}>Custo c/ BDI e desconto</th>
                   <th className={`${gradeThStickyCls} ${thDateColCls}`}>Início</th>
                   <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim</th>
@@ -1251,6 +1279,8 @@ export function OrcamentoCronogramaPainel({
                       <CelulasQtdCusto
                         custo={somaCustoComposicoes(comps)}
                         destaque
+                        fixoStyle={estilosAparencia?.servico}
+                        fixoBgCls={estilosAparencia?.servico ? '' : 'bg-sky-100 dark:bg-sky-950'}
                       />
                       <CelulasEtapaCronograma
                         resolvido={resolvido}
@@ -1304,6 +1334,8 @@ export function OrcamentoCronogramaPainel({
                           unidade={comp.unidade}
                           quantidade={comp.quantidade}
                           custo={comp.valorTotal}
+                          fixoStyle={estiloListra}
+                          fixoBgCls={bgListraTd}
                         />
                         <CelulasEtapaCronograma
                           resolvido={dados}
@@ -1379,6 +1411,8 @@ export function OrcamentoCronogramaPainel({
                         <CelulasQtdCusto
                           custo={st.composicoes.reduce((acc, comp) => acc + (comp.valorTotal ?? 0), 0)}
                           destaque
+                          fixoStyle={estilosAparencia?.subtitulo}
+                          fixoBgCls={estilosAparencia?.subtitulo ? '' : 'bg-slate-200 dark:bg-gray-900'}
                         />
                         <CelulasEtapaCronograma
                           resolvido={blocoResolvido}

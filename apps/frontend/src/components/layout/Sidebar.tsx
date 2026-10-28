@@ -822,6 +822,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator
           },
           {
+            name: 'Avaliações do sistema',
+            href: '/ponto/avaliacoes-sistema',
+            icon: Star,
+            description: 'O que as pessoas responderam à Gennecy (só administrador)',
+            permission: isAdministrator
+          },
+          {
             name: 'Solicitações Internas',
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,

@@ -1076,6 +1076,44 @@ type GestoEdicaoMemorial = {
 
 const GestoEdicaoMemorialCtx = React.createContext<GestoEdicaoMemorial | null>(null);
 
+/**
+ * Célula da memória com o orçamento travado: dá para entrar nela e ver a fórmula (só leitura).
+ * Sem foco mostra o valor; com foco mostra a fórmula. Nada é gravado.
+ */
+function CampoFormulaBloqueado({
+  valor,
+  formula,
+  className,
+  title,
+}: {
+  valor: string | undefined;
+  formula: string | undefined;
+  className?: string;
+  title?: string;
+}) {
+  const [ver, setVer] = useState(false);
+  const valorTexto = valor ?? '';
+  const formulaTexto = formula ?? '';
+  const temFormula = formulaTexto.trim().startsWith('=');
+  return (
+    <div className="relative h-full w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]">
+      <input
+        type="text"
+        readOnly
+        autoComplete="off"
+        value={ver && temFormula ? formulaTexto : valorTexto}
+        title={title ?? (temFormula ? `Fórmula: ${formulaTexto}` : 'Orçamento travado — somente leitura')}
+        className={`${className ?? ''} pointer-events-auto cursor-cell select-text !caret-transparent`}
+        onFocus={() => setVer(true)}
+        onBlur={() => setVer(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+        }}
+      />
+    </div>
+  );
+}
+
 function CampoNumeroFormula({
   value,
   segmentos,
@@ -3478,6 +3516,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           }}
         >
           {marcasCelula(idx, campo)}
+          {readOnly ? (
+            <CampoFormulaBloqueado
+              valor={formatado}
+              formula={formula}
+              className={`${inputCls} text-center`}
+            />
+          ) : (
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
@@ -3517,6 +3562,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               copiarFormulaParaBaixo(idx, campo, textoFonteCelula(draftKey, formula, formatado), ateIdx)
             }
           />
+          )}
         </td>
       );
     };
@@ -3588,6 +3634,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           }}
         >
           {marcasCelula(idx, campo)}
+          {readOnly ? (
+            <CampoFormulaBloqueado
+              valor={exibir}
+              formula={formula}
+              className={`${inputCls} text-center`}
+            />
+          ) : (
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
@@ -3620,6 +3673,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               copiarFormulaParaBaixo(idx, campo, textoFonteCelula(draftKey, formula, textoCampo), ateIdx)
             }
           />
+          )}
         </td>
       );
     };
@@ -3674,6 +3728,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           }}
         >
           {marcasCelula(idx, 'empol')}
+          {readOnly ? (
+            <CampoFormulaBloqueado
+              valor={empolFormatado}
+              formula={empolFormula}
+              className={`${inputCls} text-center`}
+            />
+          ) : (
           <CampoNumeroFormula
             type="text"
             inputMode="decimal"
@@ -3718,6 +3779,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               )
             }
           />
+          )}
         </td>
         {renderDim('N')}
         {renderCelulaAV('A', valorA, 'Área (m²)')}

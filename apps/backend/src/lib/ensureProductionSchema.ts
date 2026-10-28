@@ -148,6 +148,32 @@ async function ensureContractDefaultTituloFundo(prisma: PrismaClient): Promise<v
   `);
 }
 
+async function ensureAppFeedbackTable(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'app_feedback')) {
+    if (!(await columnExists(prisma, 'app_feedback', 'likes'))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "likes" TEXT;`);
+    }
+    return;
+  }
+  console.warn('[Schema] Tabela app_feedback ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "app_feedback" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "rating" INTEGER,
+      "likes" TEXT,
+      "comment" TEXT,
+      "page" TEXT,
+      "dismissed" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "app_feedback_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "app_feedback_userId_createdAt_idx" ON "app_feedback"("userId", "createdAt");
+  `);
+}
+
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
 
@@ -3340,6 +3366,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureContractDefaultBdiDiscount(prisma);
     await ensureContractDefaultReajustes(prisma);
     await ensureContractDefaultTituloFundo(prisma);
+    await ensureAppFeedbackTable(prisma);
     await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensurePleitoObra(prisma);

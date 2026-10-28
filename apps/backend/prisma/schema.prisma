@@ -5911,3 +5911,20 @@ model PasswordResetCode {
   @@index([userId])
   @@map("password_reset_codes")
 }
+
+/// Avaliação do sistema pedida pela Gennecy: nota de 1 a 5 e comentário. `dismissed` = a pessoa dispensou o balão.
+model AppFeedback {
+  id        String   @id @default(cuid())
+  userId    String
+  rating    Int?
+  /// O que a pessoa mais gosta no sistema (itens escolhidos, separados por vírgula).
+  likes     String?
+  comment   String?
+  /// Onde a pessoa estava quando respondeu (ex.: /ponto/kanban).
+  page      String?
+  dismissed Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("app_feedback")
+}

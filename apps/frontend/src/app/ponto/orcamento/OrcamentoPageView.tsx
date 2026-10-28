@@ -163,6 +163,11 @@ import {
 } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
+import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
+import {
+  downloadCronogramaExcel,
+  type CronogramaExcelLinha,
+} from '@/lib/exportCronogramaExcel';
 import {
   buildOrcamentoBrandedWorkbook,
   downloadOrcamentoBrandedExcel,
@@ -181,6 +186,7 @@ import {
   diasEntre,
   formatDataBr,
   normalizarCronograma,
+  sincronizarCronogramaComOrcamento,
   type CronogramaLinhaServico,
   type CronogramaLinhaSubtitulo,
   type CronogramaPersist
@@ -205,12 +211,10 @@ import {
   calcularQuantidadeLinha,
   formulaMemoriaParaExcel,
   inferirTipoUnidadePorDimensao,
-  linhaMemoriaComPadraoUm,
   linhaMedicaoEstaVazia,
   linhasMedicaoEfetivas,
   remapearFormulasDaLinha,
   volumeExibidoLinha,
-  zerarPadraoUmLinha,
   sincronizarLinhasMemoriaIncluidas,
   snapshotMemoriaIncluida,
   propagarFormulasMemoria
@@ -7427,6 +7431,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   mask,
   commitOnChange = true,
   disabled = false,
+  somenteLeitura = false,
 }: {
   id?: string;
   draftKey?: string;
@@ -7448,6 +7453,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
   mask?: (raw: string) => string;
   commitOnChange?: boolean;
   disabled?: boolean;
+  /** Orçamento travado: dá para entrar na célula e ver a fórmula, mas nada é editado nem gravado. */
+  somenteLeitura?: boolean;
 }) {
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
@@ -7531,11 +7538,22 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
+      readOnly={somenteLeitura}
       data-formula={focadoVisual && local.trimStart().startsWith('=') ? 'true' : undefined}
-      className={pintar ? `${className ?? ''} !text-transparent` : className}
+      className={`${pintar ? `${className ?? ''} !text-transparent` : className ?? ''}${
+        somenteLeitura ? ' pointer-events-auto select-text' : ''
+      }`}
       value={local}
       onFocus={() => {
         if (disabled) return;
+        if (somenteLeitura) {
+          focusedRef.current = true;
+          setFocadoVisual(true);
+          const formula = String(editOnFocusRef.current ?? '').trim();
+          if (formula) setLocal(formula);
+          onFocusExtraRef.current?.();
+          return;
+        }
         focusedRef.current = true;
         setFocadoVisual(true);
         const edit = String(editOnFocusRef.current ?? '').trim();
@@ -7547,11 +7565,15 @@ const FdCampoLocal = memo(function FdCampoLocal({
         onFocusExtraRef.current?.();
       }}
       onChange={(e) => {
-        if (disabled) return;
+        if (disabled || somenteLeitura) return;
         applyValue(e.target.value, commitOnChange ? 'live' : 'local');
       }}
       onKeyDown={(e) => {
         if (disabled) return;
+        if (somenteLeitura) {
+          if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+          return;
+        }
         if (e.key !== 'Enter') return;
         e.preventDefault();
         e.stopPropagation();
@@ -7562,6 +7584,10 @@ const FdCampoLocal = memo(function FdCampoLocal({
         setFocadoVisual(false);
         onBlurExtraRef.current?.();
         if (disabled) return;
+        if (somenteLeitura) {
+          setLocal(committedValue);
+          return;
+        }
         const raw = e.target.value;
         applyValue(raw, 'blur');
         const shown = displayAfterCommitRef.current?.(raw);
@@ -8871,6 +8897,8 @@ export function OrcamentoPageView({
   const [confirmReabrirOrcamento, setConfirmReabrirOrcamento] = useState(false);
   const [encerrandoPedidos, setEncerrandoPedidos] = useState(false);
   const [reabrindoPedidos, setReabrindoPedidos] = useState(false);
+  /** Reabrir criando a próxima revisão (padrão) ou editando a mesma versão. */
+  const [modoReabertura, setModoReabertura] = useState<'nova' | 'mesma'>('nova');
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -15859,18 +15887,20 @@ export function OrcamentoPageView({
           // Referência direta ao TOTAL do item na aba Memória (coluna K); a memória precisa ser montada antes.
           const idxMemoria = memoriaTotaisRef.current.get(rotuloMemoria);
           if (idxMemoria != null) {
-            formulas[5] = `'Memória de cálculo'!K${MEMORIA_PRIMEIRA_LINHA_DADOS + idxMemoria}`;
+            // A quantidade do orçamento tem no máximo 2 casas: sem isso o Excel puxa o total da memória
+            // com todas as casas (ex.: 0,035) ao recalcular e os totais deixam de bater com o sistema.
+            formulas[5] = `ROUND('Memória de cálculo'!K${MEMORIA_PRIMEIRA_LINHA_DADOS + idxMemoria},2)`;
           }
         }
         const puSemCalc = mo + mat;
         if (bate(puSemCalc, puSem)) formulas[8] = `G{r}+H{r}`;
         if (bate(puSem * fatorBdi, puCom)) formulas[9] = `I{r}*${fatorBdiTxt}`;
-        if (bate(r2(qtd * mo), subMo)) formulas[10] = `ROUND(F{r}*G{r},2)`;
-        if (bate(r2(qtd * mat), subMat)) formulas[11] = `ROUND(F{r}*H{r},2)`;
-        if (bate(r2(qtd * mo + qtd * mat), totSem)) formulas[12] = `ROUND(F{r}*G{r}+F{r}*H{r},2)`;
-        else if (bate(r2(qtd * puSem), totSem)) formulas[12] = `ROUND(F{r}*I{r},2)`;
+        if (bate(r2(qtd * mo), subMo)) formulas[10] = `F{r}*G{r}`;
+        if (bate(r2(qtd * mat), subMat)) formulas[11] = `F{r}*H{r}`;
+        if (bate(r2(qtd * mo + qtd * mat), totSem)) formulas[12] = `F{r}*G{r}+F{r}*H{r}`;
+        else if (bate(r2(qtd * puSem), totSem)) formulas[12] = `F{r}*I{r}`;
         if (formulas[12] && bate(r2(totSem * fatorBdi), totCom)) {
-          formulas[13] = `ROUND(M{r}*${fatorBdiTxt},2)`;
+          formulas[13] = `M{r}*${fatorBdiTxt}`;
         }
         rows.push({
           kind: 'item',
@@ -15972,7 +16002,7 @@ export function OrcamentoPageView({
         'DESCONTO',
         rf.valorDesconto,
         bate(Math.round(rf.totalBase * rf.descontoPct * 100) / 100, rf.valorDesconto)
-          ? `ROUND(N{R${orcIdx}}*M{r}/100,2)`
+          ? `N{R${orcIdx}}*M{r}/100`
           : undefined,
         pctNumero(rf.descontoPct)
       );
@@ -15984,7 +16014,7 @@ export function OrcamentoPageView({
       'BDI',
       rf.valorBdi,
       bate(Math.round(rf.totalComDesconto * rf.bdiPct * 100) / 100, rf.valorBdi)
-        ? `ROUND(N{R${baseBdiIdx}}*M{r}/100,2)`
+        ? `N{R${baseBdiIdx}}*M{r}/100`
         : undefined,
       pctNumero(rf.bdiPct)
     );
@@ -16304,42 +16334,9 @@ export function OrcamentoPageView({
     }
   }, [fichaDemandaOnly, orcamentoViewTab, statusAprovacaoAtivo]);
 
-  const memoriaTemPadraoUm = useMemo(
-    () => Object.values(dimensoesPorItem).some((dim) => dim?.linhas?.some(linhaMemoriaComPadraoUm)),
-    [dimensoesPorItem]
-  );
-
-  useEffect(() => {
-    if (loadingFromApi || gradeTravada || !memoriaTemPadraoUm) return;
-    setDimensoesPorItem((prev) => {
-      const keys: string[] = [];
-      const next = { ...prev };
-      let changed = false;
-      for (const key of Object.keys(prev)) {
-        const dim = prev[key];
-        if (!dim?.linhas?.length) continue;
-        let rowChanged = false;
-        const linhas = dim.linhas.map((ln) => {
-          const z = zerarPadraoUmLinha(ln);
-          if (z !== ln) rowChanged = true;
-          return z;
-        });
-        if (!rowChanged) continue;
-        changed = true;
-        next[key] = { ...dim, linhas };
-        keys.push(key);
-      }
-      if (!changed) return prev;
-      const vinculado = aplicarVinculosMemoria(next);
-      queueMicrotask(() => {
-        for (const key of keys) {
-          const dim = vinculado[key];
-          if (dim) syncQuantidadeOrcamentoDaMemoria(key, dim);
-        }
-      });
-      return vinculado;
-    });
-  }, [loadingFromApi, gradeTravada, memoriaTemPadraoUm, syncQuantidadeOrcamentoDaMemoria]);
+  // Antes, ao liberar a edição, as linhas em branco com o "padrão antigo" (N = 1 e % = 1) eram zeradas
+  // sozinhas e as quantidades eram recalculadas — isso mudava o valor total em relação ao que já
+  // tinha sido exportado. Agora o orçamento só muda quando a pessoa edita.
 
   useEffect(() => {
     if (loadingFromApi || gradeTravada || !memorialDisponivel || !orcamentoAtivoId) return;
@@ -16992,56 +16989,84 @@ export function OrcamentoPageView({
     toast.success('Orçamento exportado (Orçamento, Memória de cálculo e Analítico).');
   };
 
+  /** Linhas e cores do cronograma, iguais às da tela (usadas no Excel e no PDF). */
+  const montarDadosExportCronograma = () => {
+    const nomeContrato = nomeContratoExport();
+    const linhasTl = montarLinhasTimeline(linhasCronograma, cronograma).filter(
+      (row) => !row.isCabecalhoSubtitulo
+    );
+    const ap = aparenciaDaAba(meta, 'cronograma') ?? APARENCIA_CRONOGRAMA_PADRAO;
+    const linhas: CronogramaExcelLinha[] = linhasTl.map((row) => {
+      const nivel = (row.indentLevel ?? (row.isSub ? 1 : 0)) as 0 | 1 | 2;
+      const status = calcularStatusCronograma(row.dados);
+      return {
+        item: row.item ?? '',
+        label: row.label,
+        nivel,
+        cabecalhoServico: row.isCabecalhoServico,
+        unidade: row.unidade,
+        quantidade: row.quantidade,
+        custo: row.valorTotal,
+        inicio: row.dados.dataInicio,
+        fim: row.dados.dataFim,
+        inicioReal: row.dados.dataInicioReal,
+        fimReal: row.dados.dataFimReal,
+        pct:
+          row.dados.percentualExecutado != null && Number.isFinite(row.dados.percentualExecutado)
+            ? row.dados.percentualExecutado
+            : 0,
+        status,
+        statusLabel: CRONOGRAMA_STATUS_LABEL[status],
+      };
+    });
+    const aparencia = {
+      tituloFundo: ap.tituloFundo,
+      tituloTexto: ap.tituloTexto,
+      composicaoFundo: ap.composicaoFundo,
+      composicaoTexto: ap.composicaoTexto,
+      composicaoFundoAlt: ap.composicaoFundoAlt,
+      composicaoTextoAlt: ap.composicaoTextoAlt,
+      headerFundo: ap.headerFundo,
+      headerTexto: ap.headerTexto,
+      fonte: ap.fonte,
+      linhasGrade: ap.linhasGrade,
+      ocultarTitulos: ap.ocultarTitulos,
+    };
+    return { linhas, nomeContrato, aparencia };
+  };
+
+  const exportarCronogramaPdf = async () => {
+    if (linhasCronograma.length === 0) {
+      toast.error('Não há serviços no cronograma para exportar.');
+      return;
+    }
+    const { linhas, nomeContrato, aparencia } = montarDadosExportCronograma();
+    try {
+      await exportCronogramaPdf(linhas, {
+        filename:
+          nomeArquivoExportOrcamento('Cronograma', 'pdf').replace(/^Or[cç]amento\s*-\s*/i, '').trim() ||
+          'Cronograma.pdf',
+        titulo: 'Cronograma da obra',
+        contrato: nomeContrato,
+        aparencia,
+      });
+      toast.success('Cronograma exportado em PDF.');
+    } catch {
+      toast.error('Não foi possível gerar o PDF do cronograma.');
+    }
+  };
+
   const exportarCronogramaExcel = async () => {
     if (linhasCronograma.length === 0) {
       toast.error('Não há serviços no cronograma para exportar.');
       return;
     }
-    const nomeContrato = nomeContratoExport();
-    const linhasTl = montarLinhasTimeline(linhasCronograma, cronograma);
-    const rows: OrcamentoExcelRow[] = [];
-    for (const row of linhasTl) {
-      const indentLevel = row.indentLevel ?? (row.isSub ? 1 : 0);
-      const indent = '  '.repeat(indentLevel);
-      const status = calcularStatusCronograma(row.dados);
-      const dias = diasEntre(row.dados.dataInicio, row.dados.dataFim);
-      const pct =
-        row.dados.percentualExecutado != null && Number.isFinite(row.dados.percentualExecutado)
-          ? Math.round(row.dados.percentualExecutado)
-          : 0;
-      rows.push({
-        kind: indentLevel === 0 ? 'subtitulo' : 'item',
-        values: [
-          `${indent}${row.label}`,
-          formatDataBr(row.dados.dataInicio),
-          formatDataBr(row.dados.dataFim),
-          formatDataBr(row.dados.dataInicioReal),
-          formatDataBr(row.dados.dataFimReal),
-          dias ?? '',
-          pct,
-          CRONOGRAMA_STATUS_LABEL[status],
-        ],
-      });
-    }
-    await downloadOrcamentoBrandedExcel(
-      [{
-        name: 'Cronograma',
-        title: 'Cronograma da obra',
-        subtitle: 'Datas planejadas e reais, avanço físico e status das etapas',
-        columns: [
-          { header: 'Serviço', width: 48 },
-          { header: 'Início Plan.', width: 14, align: 'center' },
-          { header: 'Fim Plan.', width: 14, align: 'center' },
-          { header: 'Início Real', width: 14, align: 'center' },
-          { header: 'Fim Real', width: 14, align: 'center' },
-          { header: 'Dias', width: 8, align: 'center', format: 'int' },
-          { header: '% Exec.', width: 10, format: 'percent' },
-          { header: 'Status', width: 16, align: 'center' },
-        ],
-        rows,
-      }],
-      nomeArquivoExportOrcamento('Cronograma', 'xlsx'),
-      { contrato: nomeContrato, aparencia: aparenciaMontagem },
+    const { linhas, nomeContrato, aparencia } = montarDadosExportCronograma();
+    await downloadCronogramaExcel(
+      linhas,
+      nomeArquivoExportOrcamento('Cronograma', 'xlsx').replace(/^Or[cç]amento\s*-\s*/i, '').trim() ||
+        'Cronograma.xlsx',
+      { contrato: nomeContrato, titulo: 'Cronograma da obra', aparencia }
     );
     toast.success('Cronograma exportado com sucesso.');
   };
@@ -17130,8 +17155,17 @@ export function OrcamentoPageView({
       'fechamento',
       currentUserName
     );
-    const nextSessao: SessaoOrcamentoPersist = { ...sessaoRef.current, meta: nextMeta };
+    // O cronograma já existia (revisão ou reabertura)? Então ele é acertado com o orçamento, não refeito.
+    const cronogramaJaExistia =
+      Boolean(meta.origemVersaoId) || Object.keys(cronograma.porItem ?? {}).length > 0;
+    const sync = sincronizarCronogramaComOrcamento(cronograma, linhasCronograma);
+    const nextSessao: SessaoOrcamentoPersist = {
+      ...sessaoRef.current,
+      meta: nextMeta,
+      cronograma: sync.cronograma,
+    };
     setMeta(nextMeta);
+    if (sync.cronograma !== cronograma) setCronograma(sync.cronograma);
     sessaoRef.current = nextSessao;
     try {
       await saveOrcamentoToApi(
@@ -17160,7 +17194,22 @@ export function OrcamentoPageView({
       }
       void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
       void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
-      toast.success('Orçamento finalizado. O cronograma foi criado e o valor foi gravado na OS.');
+      toast.success(
+        cronogramaJaExistia
+          ? 'Orçamento finalizado. O cronograma foi atualizado e o valor foi gravado na OS.'
+          : 'Orçamento finalizado. O cronograma foi criado e o valor foi gravado na OS.'
+      );
+      if (sync.removidosComAndamento.length > 0) {
+        const n = sync.removidosComAndamento.length;
+        toast(
+          `${n} ${n === 1 ? 'item saiu' : 'itens saíram'} do orçamento e ${
+            n === 1 ? 'tinha' : 'tinham'
+          } andamento no cronograma: ${sync.removidosComAndamento.slice(0, 6).join(', ')}${
+            n > 6 ? '…' : ''
+          }. O andamento ${n === 1 ? 'dele foi removido' : 'deles foi removido'} do cronograma desta revisão.`,
+          { icon: '⚠️', duration: 12000 }
+        );
+      }
     } catch {
       setMeta(prevMeta);
       sessaoRef.current = prevSessao;
@@ -17180,6 +17229,46 @@ export function OrcamentoPageView({
     if (statusAprovacaoAtivo !== 'finalizado' || reabrindoOrcamento) return;
     setReabrindoOrcamento(true);
     const origemId = orcamentoAtivoId;
+
+    // Mesma versão (só administrador): reabre direto, sem criar revisão e sem mexer no cronograma.
+    if (modoReabertura === 'mesma') {
+      try {
+        const sessao = sessaoRef.current ?? sessaoVazia();
+        const nextMeta = anexarMovimentoOrcamento(
+          { ...meta, statusAprovacao: 'rascunho', gradeTravada: undefined },
+          'reabertura',
+          currentUserName
+        );
+        const nextSessao: SessaoOrcamentoPersist = { ...sessao, meta: nextMeta };
+        await saveOrcamentoToApi(
+          centroCustoId,
+          origemId,
+          montarPayloadSalvarOrcamento(servicos, imports, nextSessao)
+        );
+        setListaOrcamentos((prev) =>
+          prev.map((o) =>
+            o.id === origemId
+              ? { ...o, statusAprovacao: 'rascunho', updatedAt: new Date().toISOString() }
+              : o
+          )
+        );
+        orcamentosListaCache.delete(centroCustoId);
+        sessaoRef.current = nextSessao;
+        setMeta(nextMeta);
+        void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+        void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
+        toast.success(
+          `Orçamento reaberto na mesma versão (${formatOrcamentoRevisao(versaoNumero)}). O cronograma e o valor na OS só mudam quando você finalizar de novo.`
+        );
+      } catch {
+        toast.error('Não foi possível reabrir o orçamento.');
+      } finally {
+        setReabrindoOrcamento(false);
+        setConfirmReabrirOrcamento(false);
+      }
+      return;
+    }
+
     try {
       const sessao = sessaoRef.current ?? sessaoVazia();
       await saveOrcamentoToApi(
@@ -17204,9 +17293,10 @@ export function OrcamentoPageView({
         'reabertura',
         currentUserName
       );
+      // O cronograma é mantido: datas e andamento seguem, e ele é acertado com o orçamento ao finalizar.
       const nextSessao: SessaoOrcamentoPersist = {
         ...sessaoRef.current,
-        cronograma: cronogramaVazio(),
+        cronograma,
         meta: nextMeta,
       };
       await saveOrcamentoToApi(
@@ -17221,16 +17311,11 @@ export function OrcamentoPageView({
         return [entry, ...marked.filter((o) => o.id !== entry.id)];
       });
       orcamentosListaCache.delete(centroCustoId);
-      const userId = authService.getUser()?.id || '';
-      const contractId = resolveContractIdForOsSync() || '';
-      if (userId) {
-        registrarCronogramaNovo(userId, { contractId, orcamentoId: entry.id });
-      }
       void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
       void queryClient.invalidateQueries({ queryKey: ['cronogramas-todos'] });
       setConfirmReabrirOrcamento(false);
       toast.success(
-        `Revisão ${formatOrcamentoRevisao(versaoNova)} criada, com cronograma novo. ${formatOrcamentoRevisao(versaoNumero)} ficou congelada.`
+        `Revisão ${formatOrcamentoRevisao(versaoNova)} criada. O cronograma foi mantido e será atualizado quando você finalizar. ${formatOrcamentoRevisao(versaoNumero)} ficou congelada.`
       );
       // A nova revisão já está no cache (gravada acima) e tem a mesma árvore de serviços; nesse caso o carregamento
       // não reaplica a sessão. Sem isto a tela ficava com o meta antigo (finalizado/travado, revisão anterior) e o
@@ -19868,6 +19953,7 @@ export function OrcamentoPageView({
                         setMeta((m) => ({ ...m, dataEnvio }))
                       }
                       onExport={exportarCronogramaExcel}
+                      onExportPdf={exportarCronogramaPdf}
                       telaFixa={cronogramaOnly}
                       estilosAparencia={(() => {
                         const ap = aparenciaDaAba(meta, 'cronograma') ?? APARENCIA_CRONOGRAMA_PADRAO;
@@ -20556,7 +20642,7 @@ export function OrcamentoPageView({
                                             }
                                             editValueOnFocus={formulasQuantidadePorItem[row.key]}
                                             commitOnChange={false}
-                                            disabled={gradeTravada}
+                                            somenteLeitura={gradeTravada}
                                             displayAfterCommit={raw => {
                                               const t = String(raw ?? '').trim();
                                               if (!t) return '';
@@ -20583,10 +20669,10 @@ export function OrcamentoPageView({
                                             inputMode="decimal"
                                             placeholder="0"
                                             title={
-                                              gradeTravada
-                                                ? 'Orçamento travado — não é possível editar'
-                                                : formulasQuantidadePorItem[row.key]
-                                                  ? `Fórmula: ${formulasQuantidadePorItem[row.key]}`
+                                              formulasQuantidadePorItem[row.key]
+                                                ? `Fórmula: ${formulasQuantidadePorItem[row.key]}`
+                                                : gradeTravada
+                                                  ? 'Orçamento travado — somente leitura'
                                                   : 'Quantidade do orçamento (editar aqui não altera a memória de cálculo)'
                                             }
                                             className={`${inputGradeCls} text-center tabular-nums`}
@@ -20712,7 +20798,7 @@ export function OrcamentoPageView({
                                             }
                                             overlayClassName={`text-right text-sm tabular-nums ${colDef.strong ? 'font-semibold' : ''}`}
                                             commitOnChange={false}
-                                            disabled={gradeTravada}
+                                            somenteLeitura={gradeTravada}
                                             mask={(raw) =>
                                               String(raw ?? '').trimStart().startsWith('=')
                                                 ? raw
@@ -21247,7 +21333,10 @@ export function OrcamentoPageView({
                     orcamentoFechado && !versaoCongelada ? (
                       <button
                         type="button"
-                        onClick={() => setConfirmReabrirOrcamento(true)}
+                        onClick={() => {
+                          setModoReabertura('nova');
+                          setConfirmReabrirOrcamento(true);
+                        }}
                         disabled={reabrindoOrcamento}
                         className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-600 bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700 hover:border-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
                         title="Reabrir orçamento para editar"
@@ -21509,16 +21598,64 @@ export function OrcamentoPageView({
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
               <Unlock className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
             </div>
-            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Reabrir orçamento?
+            <h3 className="mb-1 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Reabrir orçamento
             </h3>
-            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
-              A revisão{' '}
-              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero)}</span> fica
-              congelada como foi finalizada. A edição abre em{' '}
-              <span className="font-semibold">{formatOrcamentoRevisao(versaoNumero + 1)}</span>.
-              O valor na OS permanece até você finalizar de novo.
+            <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+              Como você quer editar o orçamento finalizado?
             </p>
+            <div className="mb-6 space-y-2.5">
+              {(
+                [
+                  {
+                    modo: 'nova' as const,
+                    titulo: `Criar a revisão ${formatOrcamentoRevisao(versaoNumero + 1)}`,
+                    texto: `A ${formatOrcamentoRevisao(versaoNumero)} fica congelada como foi finalizada. O cronograma é mantido e acertado com o orçamento quando você finalizar de novo. O valor na OS permanece até lá.`,
+                    liberado: true,
+                  },
+                  {
+                    modo: 'mesma' as const,
+                    titulo: `Editar a mesma versão (${formatOrcamentoRevisao(versaoNumero)})`,
+                    texto:
+                      'Não cria revisão: a edição acontece direto nesta versão. O cronograma e o valor na OS só mudam quando você finalizar de novo.',
+                    liberado: true,
+                  },
+                ]
+              )
+                .filter((op) => op.liberado)
+                .map((op) => (
+                  <button
+                    key={op.modo}
+                    type="button"
+                    onClick={() => setModoReabertura(op.modo)}
+                    disabled={reabrindoOrcamento}
+                    className={`w-full rounded-lg border-2 p-3 text-left transition-colors ${
+                      modoReabertura === op.modo
+                        ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
+                        : 'border-gray-200 hover:border-gray-300 dark:border-gray-600 dark:hover:border-gray-500'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      <span
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                          modoReabertura === op.modo
+                            ? 'border-amber-600'
+                            : 'border-gray-400 dark:border-gray-500'
+                        }`}
+                        aria-hidden
+                      >
+                        {modoReabertura === op.modo ? (
+                          <span className="h-2 w-2 rounded-full bg-amber-600" />
+                        ) : null}
+                      </span>
+                      {op.titulo}
+                    </span>
+                    <span className="mt-1 block pl-6 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+                      {op.texto}
+                    </span>
+                  </button>
+                ))}
+            </div>
             <div className="flex items-center justify-center space-x-3">
               <button
                 type="button"
@@ -21534,7 +21671,11 @@ export function OrcamentoPageView({
                 disabled={reabrindoOrcamento}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
               >
-                {reabrindoOrcamento ? 'Reabrindo...' : 'Reabrir'}
+                {reabrindoOrcamento
+                  ? 'Reabrindo...'
+                  : modoReabertura === 'mesma'
+                    ? 'Reabrir esta versão'
+                    : 'Criar revisão'}
               </button>
             </div>
           </div>

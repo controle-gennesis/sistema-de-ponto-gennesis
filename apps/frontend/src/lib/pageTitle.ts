@@ -14,6 +14,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     href: '/ponto/relatorios-fotograficos',
   },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
+  '/ponto/avaliacoes-sistema': { title: 'Avaliações do sistema', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },
   '/ponto/gerenciar-solicitacoes-gerais': {
     title: 'Gerenciar Solicitações',

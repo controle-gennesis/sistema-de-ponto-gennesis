@@ -163,6 +163,7 @@ import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
 import { realtimeChangeNotifier } from './middleware/realtimeChangeNotifier';
 import pushTokensRoutes from './routes/pushTokens';
+import appFeedbackRoutes from './routes/appFeedback';
 import appVersionRoutes from './routes/appVersion';
 
 ensureNfeSecretsFromEnv();
@@ -517,6 +518,7 @@ app.use('/api/caixinha', caixinhaRoutes);
 app.use('/api/training', trainingRoutes);
 app.use('/api/approvals', approvalsRoutes);
 app.use('/api/push-tokens', pushTokensRoutes);
+app.use('/api/app-feedback', appFeedbackRoutes);
 // Rotas explícitas de licitações (garantem checklist mesmo se o router interno estiver desatualizado)
 app.get('/api/licitacoes/checklist-template', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.getChecklistTemplate(req as AuthRequest, res, next)
