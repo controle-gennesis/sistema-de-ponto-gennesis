@@ -3,7 +3,11 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { authenticate, requireAdministrator, type AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { DIAS_ANTES_DA_PRIMEIRA_PERGUNTA, DIAS_ENTRE_PERGUNTAS } from '../lib/appFeedbackRules';
+import {
+  DIAS_ANTES_DA_PRIMEIRA_PERGUNTA,
+  DIAS_ENTRE_PERGUNTAS,
+  findUserByWhatsAppPhone,
+} from '../lib/appFeedbackRules';
 
 const router = Router();
 
@@ -129,12 +133,23 @@ router.get('/admin', requireAdministrator, async (req: AuthRequest, res, next) =
       }
     }
 
+    // Respostas do WhatsApp antigas ficaram sem usuário: acha a pessoa pelo celular do cadastro.
+    const pessoaPorTelefone = new Map<string, { name: string; email: string } | null>();
+    for (const r of respostas) {
+      if (r.userName || !r.phone || pessoaPorTelefone.has(r.phone)) continue;
+      const pessoa = await findUserByWhatsAppPhone(r.phone);
+      pessoaPorTelefone.set(r.phone, pessoa ? { name: pessoa.name, email: pessoa.email } : null);
+    }
+
     const itens = respostas
       .filter((r) => !filtraNota || r.rating === nota)
       .map((r) => ({
         id: r.id,
-        userName: r.userName || (r.phone ? `WhatsApp ${r.phone}` : 'Usuário removido'),
-        userEmail: r.userEmail || '',
+        userName:
+          r.userName ||
+          (r.phone ? pessoaPorTelefone.get(r.phone)?.name : null) ||
+          (r.phone ? `WhatsApp ${r.phone}` : 'Usuário removido'),
+        userEmail: r.userEmail || (r.phone ? pessoaPorTelefone.get(r.phone)?.email : '') || '',
         source: r.source || 'SISTEMA',
         rating: r.rating as number,
         likes: (r.likes ?? '').split(',').map((x) => x.trim()).filter(Boolean),

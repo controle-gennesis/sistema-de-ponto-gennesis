@@ -19,27 +19,49 @@ export const FEEDBACK_LIKE_OPTIONS = [
 
 const DIA_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Telefone sem DDI e sem o 9 extra do celular (o WhatsApp às vezes entrega o número sem ele),
+ * para comparar "62 99947-4836" com "556299474836".
+ */
+function chaveTelefone(value: string | null | undefined): string {
+  let d = String(value || '').replace(/\D/g, '');
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  if (d.length === 11 && d[2] === '9') d = d.slice(0, 2) + d.slice(3);
+  return d;
+}
+
 /** Pessoa dona do número de WhatsApp (pelo celular do cadastro do funcionário), se houver. */
 export async function findUserByWhatsAppPhone(
   phone: string,
-): Promise<{ id: string; createdAt: Date; isAdmin: boolean } | null> {
+): Promise<{ id: string; name: string; email: string; createdAt: Date; isAdmin: boolean } | null> {
   const digits = String(phone || '').replace(/\D/g, '');
   if (digits.length < 10) return null;
+  const chave = chaveTelefone(digits);
   const rows = await prisma.$queryRaw<
-    Array<{ id: string; createdAt: Date; position: string | null }>
+    Array<{
+      id: string;
+      name: string;
+      email: string;
+      createdAt: Date;
+      position: string | null;
+      phone: string | null;
+    }>
   >`
-    SELECT u."id", u."createdAt", e."position"
+    SELECT u."id", u."name", u."email", u."createdAt", e."position", e."phone"
     FROM "employees" e
     JOIN "users" u ON u."id" = e."userId"
     WHERE e."phone" IS NOT NULL
-      AND RIGHT(REGEXP_REPLACE(e."phone", '\\D', '', 'g'), 11) = RIGHT(${digits}, 11)
-    LIMIT 2
+      AND RIGHT(REGEXP_REPLACE(e."phone", '\\D', '', 'g'), 8) = RIGHT(${digits}, 8)
+    LIMIT 20
   `;
+  const iguais = rows.filter((r) => chaveTelefone(r.phone) === chave);
   // Número repetido em mais de um cadastro: não dá para saber quem é.
-  if (rows.length !== 1) return null;
-  const r = rows[0];
+  if (new Set(iguais.map((r) => r.id)).size !== 1) return null;
+  const r = iguais[0];
   return {
     id: r.id,
+    name: r.name,
+    email: r.email,
     createdAt: r.createdAt,
     isAdmin: (r.position || '').trim().toLowerCase() === 'administrador',
   };
