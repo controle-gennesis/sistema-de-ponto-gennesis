@@ -20,6 +20,7 @@ import api from '@/lib/api';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   TOOL_RENTAL_DEMAND_OPTIONS,
+  TOOL_RENTAL_PERMANENT_END,
   TOOL_RENTAL_PRIORITY_OPTIONS,
   type ToolRentalDemandType,
   type ToolRentalPriority,
@@ -47,6 +48,8 @@ type FormState = {
   equipamentos: FormEquipamentoRow[];
   periodoInicio: string;
   periodoFim: string;
+  /** Compra sem data limite (o item fica para sempre). */
+  permanente: boolean;
   fdAttachments: ReceiptAnexo[];
 };
 
@@ -66,6 +69,7 @@ const EMPTY_FORM = (): FormState => ({
   equipamentos: [EMPTY_EQUIPAMENTO_ROW()],
   periodoInicio: '',
   periodoFim: '',
+  permanente: false,
   fdAttachments: [],
 });
 
@@ -171,7 +175,7 @@ export function NovaSolicitacaoFerramentaModal({
         demandType: payload.demandType,
         equipamentos,
         periodoInicio: payload.periodoInicio,
-        periodoFim: payload.periodoFim,
+        periodoFim: payload.demandType === 'COMPRA' && payload.permanente ? TOOL_RENTAL_PERMANENT_END : payload.periodoFim,
         ...(payload.demandType === 'NOVA_LOCACAO'
           ? {
               fdAttachments: payload.fdAttachments.map((anexo) => ({
@@ -246,7 +250,9 @@ export function NovaSolicitacaoFerramentaModal({
       return toast.error('Informe ao menos um equipamento com quantidade');
     }
     if (!form.periodoInicio) return toast.error('Informe a data de início');
-    if (!form.periodoFim) return toast.error('Informe a data de fim');
+    if (!(form.demandType === 'COMPRA' && form.permanente) && !form.periodoFim) {
+      return toast.error('Informe a data de fim');
+    }
     if (form.demandType === 'NOVA_LOCACAO' && form.fdAttachments.length === 0) {
       return toast.error('Anexe a FD na primeira locação');
     }
@@ -281,7 +287,11 @@ export function NovaSolicitacaoFerramentaModal({
               <StringSingleSelectDropdown
                 value={form.demandType}
                 onChange={(demandType) =>
-                  setForm((f) => ({ ...f, demandType: demandType as ToolRentalDemandType }))
+                  setForm((f) => ({
+                    ...f,
+                    demandType: demandType as ToolRentalDemandType,
+                    permanente: demandType === 'COMPRA',
+                  }))
                 }
                 options={TOOL_RENTAL_DEMAND_OPTIONS.map((opt) => ({
                   value: opt.value,
@@ -434,12 +444,35 @@ export function NovaSolicitacaoFerramentaModal({
                 {form.demandType === 'COMPRA' ? 'Necessário até' : 'Data de fim'}
                 {requiredMark}
               </label>
-              <DatePickerField
-                value={form.periodoFim}
-                onChange={(periodoFim) => setForm((f) => ({ ...f, periodoFim }))}
-                placeholder="dd/mm/aaaa"
-                noFocusRing
-              />
+              {form.demandType === 'COMPRA' && form.permanente ? (
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, permanente: false }))}
+                  className="flex h-10 w-full items-center justify-between rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-700 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300"
+                  title="Clique para informar uma data limite"
+                >
+                  <span>Permanente (sem data limite)</span>
+                  <span className="text-xs font-normal underline">Definir data</span>
+                </button>
+              ) : (
+                <>
+                  <DatePickerField
+                    value={form.periodoFim}
+                    onChange={(periodoFim) => setForm((f) => ({ ...f, periodoFim }))}
+                    placeholder="dd/mm/aaaa"
+                    noFocusRing
+                  />
+                  {form.demandType === 'COMPRA' ? (
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, permanente: true, periodoFim: '' }))}
+                      className="mt-1.5 text-xs font-medium text-red-700 underline dark:text-red-300"
+                    >
+                      Deixar permanente (sem data limite)
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 

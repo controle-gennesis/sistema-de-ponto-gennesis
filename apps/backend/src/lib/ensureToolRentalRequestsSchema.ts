@@ -197,6 +197,13 @@ export async function ensureToolRentalRequestsSchema(prisma: PrismaClient): Prom
     WHERE "status" = 'AWAITING_RECEIPT';
   `);
 
+  // Renovação não espera recebimento: as já encaminhadas passam direto para Finalizada
+  await prisma.$executeRawUnsafe(`
+    UPDATE "tool_rental_requests"
+    SET "receivedAt" = COALESCE("suppliesApprovedAt", "updatedAt")
+    WHERE "demandType" = 'RENOVACAO' AND "status" = 'COMPLETED' AND "receivedAt" IS NULL;
+  `);
+
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "tool_rental_requests"
     ADD COLUMN IF NOT EXISTS "contractId" TEXT REFERENCES "contracts"("id") ON DELETE SET NULL;

@@ -64,6 +64,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import {
   formatToolRentalDemand,
+  isToolRentalPermanentEnd,
   formatToolRentalInUsePeriodHint,
   formatToolRentalLogistics,
   formatToolRentalPriority,
@@ -188,6 +189,7 @@ const fieldCls = FORM_FIELD_INPUT_CLS;
 
 function formatDateOnly(value: string | null | undefined): string {
   if (!value) return '—';
+  if (isToolRentalPermanentEnd(value)) return 'Permanente';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
   return format(d, 'dd/MM/yyyy', { locale: ptBR });
@@ -289,6 +291,7 @@ function SolicitarLocacoesFerramentasPage() {
           page,
           limit: 20,
           status: STATUS_CARDS.find((c) => c.filter === statusFilter)?.query,
+          receipt: statusFilter === 'AWAITING_RECEIPT' ? 'pending' : undefined,
           contractId: contractFilter || undefined,
         },
       });
