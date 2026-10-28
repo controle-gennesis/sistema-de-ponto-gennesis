@@ -1261,7 +1261,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
-            name: 'Solicitação de Ferramentas',
+            name: 'Pedidos de Ferramentas',
             href: '/ponto/solicitar-ferramentas',
             icon: Wrench,
             description: 'Solicitar locação, renovação, devolução ou compra de equipamentos',

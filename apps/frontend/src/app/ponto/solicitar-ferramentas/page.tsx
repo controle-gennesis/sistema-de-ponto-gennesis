@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -247,6 +248,9 @@ function SolicitarLocacoesFerramentasPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  // Vem de ?contrato= quando a pessoa chega pelo atalho do contrato.
+  const searchParams = useSearchParams();
+  const [contractFilter, setContractFilter] = useState((searchParams?.get('contrato') || '').trim());
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [selected, setSelected] = useState<ToolRentalRequest | null>(null);
@@ -278,7 +282,7 @@ function SolicitarLocacoesFerramentasPage() {
   const [uploadingFd, setUploadingFd] = useState(false);
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['tool-rental-requests', searchTerm, page, statusFilter],
+    queryKey: ['tool-rental-requests', searchTerm, page, statusFilter, contractFilter],
     queryFn: async () => {
       const res = await api.get('/tool-rental-requests', {
         params: {
@@ -286,6 +290,7 @@ function SolicitarLocacoesFerramentasPage() {
           page,
           limit: 20,
           status: STATUS_CARDS.find((c) => c.filter === statusFilter)?.query,
+          contractId: contractFilter || undefined,
         },
       });
       return res.data;
@@ -301,6 +306,17 @@ function SolicitarLocacoesFerramentasPage() {
   });
 
   const [supplierLabel, setSupplierLabel] = useState('');
+
+  const { data: contractFilterInfo } = useQuery({
+    queryKey: ['tool-rental-contract-filter', contractFilter],
+    enabled: Boolean(contractFilter),
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const res = await api.get(`/contracts/${contractFilter}`);
+      const c = res.data?.data ?? res.data ?? {};
+      return { name: String(c.name || c.number || '').trim() };
+    },
+  });
 
   const { data: contractsRes, isLoading: loadingContracts } = useQuery({
     queryKey: ['contracts-for-tool-rental', allowedContractIds.join(',')],
@@ -709,7 +725,7 @@ function SolicitarLocacoesFerramentasPage() {
   } = useRowActionMenu(rows);
 
   const openForm = () => {
-    setForm(EMPTY_FORM());
+    setForm({ ...EMPTY_FORM(), contractId: contractFilter });
     setSupplierLabel('');
     setShowForm(true);
   };
@@ -743,9 +759,28 @@ function SolicitarLocacoesFerramentasPage() {
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
       <PageStack>
           <ListPageHeader
-            title="Solicitação de Ferramentas"
+            title="Pedidos de Ferramentas"
             description="Solicite e acompanhe ferramentas e equipamentos."
           />
+
+        {contractFilter ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              Contrato: {contractFilterInfo?.name || '…'}
+              <button
+                type="button"
+                onClick={() => {
+                  setContractFilter('');
+                  setPage(1);
+                }}
+                className="rounded-full p-0.5 hover:bg-red-100 dark:hover:bg-red-900/40"
+                aria-label="Remover filtro de contrato"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </span>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
           {STATUS_CARDS.map((card) => (
@@ -1269,7 +1304,7 @@ function SolicitarLocacoesFerramentasPage() {
       <Modal
         isOpen={showForm}
         onClose={() => !createMutation.isPending && setShowForm(false)}
-        title="Solicitação de Ferramentas"
+        title="Pedidos de Ferramentas"
         size="xl"
       >
         <div className="space-y-4">

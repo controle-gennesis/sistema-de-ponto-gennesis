@@ -30,6 +30,7 @@ export default function KanbanSheet({
   title,
   subtitle,
   icon: Icon,
+  overlay,
   children,
 }: {
   visible: boolean;
@@ -37,6 +38,8 @@ export default function KanbanSheet({
   title: string;
   subtitle?: string;
   icon?: IconType;
+  /** Camadas por cima da folha (ex.: motivo de recusa), dentro do mesmo Modal. */
+  overlay?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const { isDark } = useTheme();
@@ -196,6 +199,7 @@ export default function KanbanSheet({
           {/* Continua o branco da folha para baixo: nada da tela de trás aparece abaixo dela. */}
           <View pointerEvents="none" style={styles.fill} />
         </Animated.View>
+        {overlay}
         {/* O Modal cobre o toast do App: este fica por cima, no topo da tela. */}
         <AppToastHost />
       </View>

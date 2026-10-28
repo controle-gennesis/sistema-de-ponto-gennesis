@@ -505,8 +505,11 @@ export class ToolRentalRequestController {
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const { search, page = 1, limit = 20, status, scope } = req.query;
+      const { search, page = 1, limit = 20, status, scope, contractId } = req.query;
       const where: Record<string, unknown> = {};
+      if (typeof contractId === 'string' && contractId.trim()) {
+        where.contractId = contractId.trim();
+      }
 
       const statusFilter = parseStatusFilter(status);
       if (statusFilter?.length === 1) {

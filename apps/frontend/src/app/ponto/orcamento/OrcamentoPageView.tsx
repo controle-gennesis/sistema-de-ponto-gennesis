@@ -12713,9 +12713,7 @@ export function OrcamentoPageView({
         } else {
           qtd = qtdSintetico ?? 0;
         }
-        // Quantidade do orçamento sempre com no máximo 2 casas (igual ao Orçafascio): a mesma
-        // quantidade vale na tela, nos totais e na exportação.
-        qtd = Math.round((qtd + Number.EPSILON) * 100) / 100;
+        // A quantidade entra nos cálculos com todas as casas (ex.: 0,0585); a tela só mostra 2 casas.
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao, qtd);
         const valoresManuais = moMatManualPorItem[itemKey];
@@ -15887,9 +15885,7 @@ export function OrcamentoPageView({
           // Referência direta ao TOTAL do item na aba Memória (coluna K); a memória precisa ser montada antes.
           const idxMemoria = memoriaTotaisRef.current.get(rotuloMemoria);
           if (idxMemoria != null) {
-            // A quantidade do orçamento tem no máximo 2 casas: sem isso o Excel puxa o total da memória
-            // com todas as casas (ex.: 0,035) ao recalcular e os totais deixam de bater com o sistema.
-            formulas[5] = `ROUND('Memória de cálculo'!K${MEMORIA_PRIMEIRA_LINHA_DADOS + idxMemoria},2)`;
+            formulas[5] = `'Memória de cálculo'!K${MEMORIA_PRIMEIRA_LINHA_DADOS + idxMemoria}`;
           }
         }
         const puSemCalc = mo + mat;
@@ -20637,7 +20633,7 @@ export function OrcamentoPageView({
                                                 ? ''
                                                 : row.quantidade.toLocaleString('pt-BR', {
                                                     minimumFractionDigits: 2,
-                                                    maximumFractionDigits: 4
+                                                    maximumFractionDigits: 2
                                                   })
                                             }
                                             editValueOnFocus={formulasQuantidadePorItem[row.key]}
@@ -20653,7 +20649,7 @@ export function OrcamentoPageView({
                                                 ? ''
                                                 : v.toLocaleString('pt-BR', {
                                                     minimumFractionDigits: 2,
-                                                    maximumFractionDigits: 4
+                                                    maximumFractionDigits: 2
                                                   });
                                             }}
                                             onCommit={raw => {
