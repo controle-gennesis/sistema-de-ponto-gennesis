@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import type { LucideIcon } from 'lucide-react';
 import {
   CheckCircle2,
+  ChevronRight,
   ClipboardCheck,
   ClipboardList,
   Edit,
@@ -47,7 +48,6 @@ import {
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
-import { ListPagination } from '@/components/ui/ListPagination';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -142,7 +142,102 @@ const CARD_ORDER: CardFilter[] = [
   'FINISHED',
   'CANCELLED',
 ];
-const ITEMS_PER_PAGE = 20;
+
+/** Resultado somado de um nível (FD, OS, obra ou centro de custo). */
+type ResultadoFd = { faturamento: number; custoEstimado: number; custoReal: number; pagoOcs: number };
+
+/** FD cancelada não entra nas somas (aparece só para consulta). */
+function fdCancelada(r: FichaDemandaApprovalRecord): boolean {
+  return r.status === 'CANCELLED' || r.purchaseStatus === 'CANCELLED';
+}
+
+function somarResultado(rows: FichaDemandaApprovalRecord[]): ResultadoFd {
+  return rows.reduce<ResultadoFd>(
+    (acc, r) =>
+      fdCancelada(r)
+        ? acc
+        : {
+            faturamento: acc.faturamento + (Number(r.faturamentoEstimado) || 0),
+            custoEstimado: acc.custoEstimado + (Number(r.custoEstimado) || 0),
+            custoReal: acc.custoReal + (Number(r.custoReal) || 0),
+            pagoOcs: acc.pagoOcs + (Number(r.totalPagoOcs) || 0),
+          },
+    { faturamento: 0, custoEstimado: 0, custoReal: 0, pagoOcs: 0 }
+  );
+}
+
+type NivelOs = { key: string; label: string; rows: FichaDemandaApprovalRecord[]; resultado: ResultadoFd };
+type NivelObra = { key: string; label: string; oss: NivelOs[]; total: number; resultado: ResultadoFd };
+type NivelCc = { key: string; label: string; obras: NivelObra[]; total: number; resultado: ResultadoFd };
+
+const SEM_CC = 'Sem centro de custo';
+const SEM_OBRA = 'Sem obra';
+const SEM_OS = 'Sem OS';
+
+const porNome = (a: { label: string }, b: { label: string }) =>
+  a.label.localeCompare(b.label, 'pt-BR', { numeric: true, sensitivity: 'base' });
+
+/** Centro de custo → obra → OS/pasta → FDs, em ordem alfabética, com o resultado somado em cada nível. */
+function agruparFds(rows: FichaDemandaApprovalRecord[]): NivelCc[] {
+  const ccs = new Map<string, Map<string, Map<string, FichaDemandaApprovalRecord[]>>>();
+  for (const r of rows) {
+    const cc = r.centroCustoNome?.trim() || SEM_CC;
+    const obra = r.obra?.trim().toUpperCase() || SEM_OBRA;
+    const os = r.osNumeroPasta?.trim() || SEM_OS;
+    const obras = ccs.get(cc) ?? new Map<string, Map<string, FichaDemandaApprovalRecord[]>>();
+    const oss = obras.get(obra) ?? new Map<string, FichaDemandaApprovalRecord[]>();
+    oss.set(os, [...(oss.get(os) ?? []), r]);
+    obras.set(obra, oss);
+    ccs.set(cc, obras);
+  }
+  return [...ccs]
+    .map(([cc, obras]) => {
+      const niveisObra = [...obras]
+        .map(([obra, oss]) => {
+          const niveisOs = [...oss]
+            .map(([os, fds]) => ({ key: `${cc}|${obra}|${os}`, label: os, rows: fds, resultado: somarResultado(fds) }))
+            .sort(porNome);
+          const todas = niveisOs.flatMap((o) => o.rows);
+          return { key: `${cc}|${obra}`, label: obra, oss: niveisOs, total: todas.length, resultado: somarResultado(todas) };
+        })
+        .sort(porNome);
+      const todas = niveisObra.flatMap((o) => o.oss.flatMap((x) => x.rows));
+      return { key: cc, label: cc, obras: niveisObra, total: todas.length, resultado: somarResultado(todas) };
+    })
+    .sort(porNome);
+}
+
+/**
+ * Colunas fixas do resultado: as quatro de valor e a de Ação têm a mesma largura em todos os níveis
+ * (geral, centro de custo, obra, OS) e na tabela das FDs, para os valores ficarem alinhados.
+ */
+const COL_VALOR = 'w-[11rem] min-w-[11rem] max-w-[11rem] px-3 text-right';
+const COL_ACAO = 'w-16 min-w-[4rem] max-w-[4rem]';
+
+/** Resultado do nível: faturamento estimado, custo estimado (40%), custo real e total pago em OCs. */
+function ResultadoNivel({ resultado }: { resultado: ResultadoFd }) {
+  const acimaEstimado = resultado.custoReal > resultado.custoEstimado && resultado.custoReal > 0;
+  const item = (rotulo: string, valor: number, cls = 'text-gray-900 dark:text-gray-100') => (
+    <div className={COL_VALOR}>
+      <p className="whitespace-nowrap text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{rotulo}</p>
+      <p className={`text-sm font-semibold tabular-nums ${cls}`}>{formatCurrencyDisplay(valor)}</p>
+    </div>
+  );
+  return (
+    <div className="flex shrink-0 items-center self-end lg:self-auto">
+      {item('Faturamento estimado', resultado.faturamento)}
+      {item('Custo estimado (40%)', resultado.custoEstimado, 'text-amber-600 dark:text-amber-400')}
+      {item(
+        'Custo real',
+        resultado.custoReal,
+        acimaEstimado ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+      )}
+      {item('Pago em OCs', resultado.pagoOcs, 'text-emerald-700 dark:text-emerald-400')}
+      {/* Mesma largura da coluna Ação da tabela das FDs. */}
+      <div className={COL_ACAO} aria-hidden />
+    </div>
+  );
+}
 
 export default function AprovacaoFdsPage() {
   const router = useRouter();
@@ -153,7 +248,8 @@ export default function AprovacaoFdsPage() {
   const [statusFilter, setStatusFilter] = useState<CardFilter>('ALL');
   const [contratoFilter, setContratoFilter] = useState(contratoFiltro || 'ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  /** Níveis abertos (centro de custo, obra e OS), pela chave do nível. */
+  const [abertos, setAbertos] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editingRecord, setEditingRecord] = useState<FichaDemandaApprovalRecord | null>(null);
@@ -211,7 +307,8 @@ export default function AprovacaoFdsPage() {
   );
   const hasActiveFilter = contratoFilter !== 'ALL';
 
-  const allRecords = useMemo(() => listData || [], [listData]);
+  // Só informação real: FD cujo orçamento de origem foi excluído não aparece na página.
+  const allRecords = useMemo(() => (listData || []).filter((r) => r.orcamentoExiste !== false), [listData]);
   const statusCounts = useMemo(
     () =>
       Object.fromEntries(
@@ -226,24 +323,23 @@ export default function AprovacaoFdsPage() {
   const listHeader = CARD_STYLE[statusFilter];
   const ListHeaderIcon = listHeader.Icon;
   const totalFiltered = records.length;
-  const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedRows = records.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
-  const endItem = Math.min(startIndex + ITEMS_PER_PAGE, totalFiltered);
   const isListEmpty = !loadingList && totalFiltered === 0;
+  const niveis = useMemo(() => agruparFds(records), [records]);
+  const resultadoGeral = useMemo(() => somarResultado(records), [records]);
+  // Com busca, abre todos os níveis até as FDs encontradas.
+  const buscando = searchTerm.trim() !== '';
+  const estaAberto = (key: string) => buscando || abertos.has(key);
+  const alternar = (key: string) =>
+    setAbertos((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const rowForActionMenu = rowActionMenu
     ? records.find((r) => r.id === rowActionMenu.rowId) ?? null
     : null;
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter, contratoFilter]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
 
   useEffect(() => {
     if (!rowActionMenu) return;
@@ -484,138 +580,248 @@ export default function AprovacaoFdsPage() {
                 </div>
               ) : (
                 <>
-                  <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                    <span>
-                      Mostrando {startItem} a {endItem} de {totalFiltered}{' '}
-                      {totalFiltered === 1 ? 'ficha' : 'fichas'}
+                  <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 py-3 pl-4 pr-0 dark:border-gray-700 dark:bg-gray-900/40 lg:flex-row lg:items-center lg:justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      <strong>Resultado geral</strong> · {totalFiltered} {totalFiltered === 1 ? 'ficha' : 'fichas'}
                     </span>
-                    <span>
-                      Página {currentPage} de {totalPages}
-                    </span>
+                    <ResultadoNivel resultado={resultadoGeral} />
                   </div>
-                  <div className="table-scroll">
-                    <table className="w-full text-sm">
-                      <thead className="border-b border-gray-200 dark:border-gray-700">
-                        <tr>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            ID
-                          </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Código da FD
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            ID / Nº Mov.
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Pedido
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Contrato
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Solicitante
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Polo
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Status
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Faturamento
-                          </th>
-                          <th className={`${listTableRowClasses.actionTh} text-center`}>
-                            Ação
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                        {paginatedRows.map((row) => (
-                          <tr
-                            key={row.id}
-                            onClick={() => openDetail(row)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                openDetail(row);
-                              }
-                            }}
-                            tabIndex={0}
-                            role="button"
-                            className={getListTableRowClassName(true, listTableRowClasses.tr)}
-                          >
-                            <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.displayNumber ?? '—'}
-                            </td>
-                            <td className="px-3 py-4 text-left sm:px-6">
-                              <ListRowNavigableLabel className="text-sm font-medium">
-                                {row.codFichaDemanda}
-                              </ListRowNavigableLabel>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
-                              <p className="text-gray-900 dark:text-gray-100">
-                                {row.idMovRm?.trim() || '—'}
-                              </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
-                                {row.numMovRm?.trim() || '—'}
-                              </p>
-                            </td>
-                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.codigoPedido}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.contratoNome}
-                            </td>
-                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.solicitanteNome}
-                            </td>
-                            <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.polo}
-                            </td>
-                            <td className="px-3 py-4 text-center sm:px-6">
-                              <FdStatusBadges record={row} />
-                            </td>
-                            <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
-                              {formatCurrencyDisplay(row.faturamentoEstimado)}
-                            </td>
-                            <td
-                              className={`${listTableRowClasses.actionTd} text-center`}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div className="flex justify-center">
+                  <div className="space-y-2">
+                    {niveis.map((cc) => (
+                      <div key={cc.key} className="rounded-lg border border-gray-200 dark:border-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => alternar(cc.key)}
+                          aria-expanded={estaAberto(cc.key)}
+                          className="flex w-full flex-col gap-2 rounded-lg py-3 pl-4 pr-0 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${estaAberto(cc.key) ? 'rotate-90' : ''}`}
+                            />
+                            <span className="truncate text-base font-semibold uppercase text-gray-900 dark:text-gray-100">
+                              {cc.label}
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{cc.obras.length} {cc.obras.length === 1 ? 'obra' : 'obras'} · {cc.total}{' '}
+                              {cc.total === 1 ? 'FD' : 'FDs'}</span>
+                          </span>
+                          <ResultadoNivel resultado={cc.resultado} />
+                        </button>
+                        {estaAberto(cc.key) && (
+                          <div className="space-y-2 border-t border-gray-200 py-3 pl-3 pr-0 dark:border-gray-700 sm:pl-8">
+                            {cc.obras.map((obra) => (
+                              <div key={obra.key} className="rounded-l-lg border border-r-0 border-gray-200 dark:border-gray-700">
                                 <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                    setRowActionMenu((prev) => {
-                                      if (prev?.rowId === row.id) return null;
-                                      let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
-                                      left = Math.max(
-                                        8,
-                                        Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
-                                      );
-                                      return { rowId: row.id, top: rect.bottom + 4, left };
-                                    });
-                                  }}
-                                  className={rowActionMenuButtonClass(rowActionMenu?.rowId === row.id)}
-                                  aria-label="Menu de ações"
-                                >
-                                  <MoreVertical className="h-4 w-4" />
-                                </button>
+                          type="button"
+                          onClick={() => alternar(obra.key)}
+                          aria-expanded={estaAberto(obra.key)}
+                          className="flex w-full flex-col gap-2 rounded-lg py-2.5 pl-4 pr-0 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${estaAberto(obra.key) ? 'rotate-90' : ''}`}
+                            />
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              Obra
+                            </span>
+                            <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              {obra.label}
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{obra.oss.length} {obra.oss.length === 1 ? 'OS' : 'OSs'} · {obra.total}{' '}
+                              {obra.total === 1 ? 'FD' : 'FDs'}</span>
+                          </span>
+                          <ResultadoNivel resultado={obra.resultado} />
+                        </button>
+                                {estaAberto(obra.key) && (
+                                  <div className="space-y-2 border-t border-gray-200 py-3 pl-3 pr-0 dark:border-gray-700 sm:pl-8">
+                                    {obra.oss.map((os) => (
+                                      <div key={os.key} className="rounded-l-lg border border-r-0 border-gray-200 dark:border-gray-700">
+                                        <button
+                          type="button"
+                          onClick={() => alternar(os.key)}
+                          aria-expanded={estaAberto(os.key)}
+                          className="flex w-full flex-col gap-2 rounded-lg py-2.5 pl-4 pr-0 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${estaAberto(os.key) ? 'rotate-90' : ''}`}
+                            />
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              OS
+                            </span>
+                            <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              {os.label}
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{os.rows.length} {os.rows.length === 1 ? 'FD' : 'FDs'}</span>
+                          </span>
+                          <ResultadoNivel resultado={os.resultado} />
+                        </button>
+                                        {estaAberto(os.key) && (
+                                          <div className="table-scroll border-t border-gray-200 dark:border-gray-700">
+                                            <table className="w-full text-sm">
+                                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                                      <tr>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          ID
+                                        </th>
+                                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Código da FD
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          ID / Nº Mov.
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Pedido
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Contrato
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Solicitante
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Polo
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Status
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
+                                          Faturamento estimado
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
+                                          Custo estimado (40%)
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="Custo real da FD (espelho da Ficha de Demanda)">
+                                          Custo real
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="OCs pagas (validadas pelo compras no G4), pelo total de cada OC">
+                                          Pago em OCs
+                                        </th>
+                                        <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
+                                          Ação
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                              <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                                {os.rows.map((row) => (
+                                        <tr
+                                          key={row.id}
+                                          onClick={() => openDetail(row)}
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                              event.preventDefault();
+                                              openDetail(row);
+                                            }
+                                          }}
+                                          tabIndex={0}
+                                          role="button"
+                                          className={getListTableRowClassName(true, listTableRowClasses.tr)}
+                                        >
+                                          <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.displayNumber ?? '—'}
+                                          </td>
+                                          <td className="px-3 py-4 text-left sm:px-6">
+                                            <ListRowNavigableLabel className="text-sm font-medium">
+                                              {row.codFichaDemanda}
+                                            </ListRowNavigableLabel>
+                                          </td>
+                                          <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
+                                            <p className="text-gray-900 dark:text-gray-100">
+                                              {row.idMovRm?.trim() || '—'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                              {row.numMovRm?.trim() || '—'}
+                                            </p>
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.codigoPedido}
+                                          </td>
+                                          <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.contratoNome}
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.solicitanteNome}
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.polo}
+                                          </td>
+                                          <td className="px-3 py-4 text-center sm:px-6">
+                                            <FdStatusBadges record={row} />
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-gray-900 dark:text-gray-100`}>
+                                            {formatCurrencyDisplay(row.faturamentoEstimado)}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-amber-600 dark:text-amber-400`}>
+                                            {formatCurrencyDisplay(row.custoEstimado)}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
+                                            {row.custoReal != null && row.custoReal > 0 ? (
+                                              <span
+                                                className={
+                                                  row.custoReal > Number(row.custoEstimado)
+                                                    ? 'font-medium text-red-600 dark:text-red-400'
+                                                    : 'font-medium text-blue-600 dark:text-blue-400'
+                                                }
+                                              >
+                                                {formatCurrencyDisplay(row.custoReal)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
+                                            {row.totalPagoOcs ? (
+                                              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                                                {formatCurrencyDisplay(row.totalPagoOcs)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td
+                                            className={`${listTableRowClasses.actionTd} ${COL_ACAO} !px-0 text-center`}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <div className="flex justify-center">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                                  setRowActionMenu((prev) => {
+                                                    if (prev?.rowId === row.id) return null;
+                                                    let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+                                                    left = Math.max(
+                                                      8,
+                                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
+                                                    );
+                                                    return { rowId: row.id, top: rect.bottom + 4, left };
+                                                  });
+                                                }}
+                                                className={rowActionMenuButtonClass(rowActionMenu?.rowId === row.id)}
+                                                aria-label="Menu de ações"
+                                              >
+                                                <MoreVertical className="h-4 w-4" />
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-
-                  <ListPagination
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={setCurrentPage}
-                  />
 
                   {rowActionMenu && rowForActionMenu && (
                     <ActionMenuOverlay
