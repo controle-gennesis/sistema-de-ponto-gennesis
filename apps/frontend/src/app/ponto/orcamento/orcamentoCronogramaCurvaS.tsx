@@ -26,6 +26,8 @@ type Props = {
   hoje?: Date;
   /** Remove borda/padding de seção embutida (uso em modal). */
   inModal?: boolean;
+  /** Ocupa toda a altura disponível do contêiner (aba Gráficos). */
+  preencher?: boolean;
 };
 
 function tooltipFormatter(value: unknown, name: unknown) {
@@ -40,7 +42,8 @@ export function CronogramaCurvaSPanel({
   dataInicioObra,
   dataFimObra,
   hoje = new Date(),
-  inModal = false
+  inModal = false,
+  preencher = false
 }: Props) {
   const pontos = useMemo(
     () => calcularCurvaSCronograma(linhas, cronograma, dataInicioObra, dataFimObra),
@@ -60,14 +63,16 @@ export function CronogramaCurvaSPanel({
     primeiroIso && ultimoIso && hojeIso >= primeiroIso && hojeIso <= ultimoIso
   );
 
-  const shellCls = inModal
+  const shellCls = preencher
+    ? 'flex h-full min-h-[28rem] flex-col px-1 py-1'
+    : inModal
     ? 'px-1 py-1'
     : 'border-t border-gray-200/80 px-4 py-4 dark:border-gray-700/80 sm:px-5';
 
   if (pontos.length < 2) {
     return (
       <div className={shellCls}>
-        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Curva S — avanço físico</h4>
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Evolução da obra</h4>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Defina o prazo da obra e as datas plan/real das etapas para exibir a curva acumulada.
         </p>
@@ -80,10 +85,10 @@ export function CronogramaCurvaSPanel({
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            Curva S — avanço físico acumulado
+            Evolução da obra
           </h4>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            % ponderado pelo valor das etapas · planejado (tracejado) vs real (sólido)
+            Comparativo entre o planejado e o realizado ao longo do tempo
           </p>
         </div>
         <div className="flex flex-wrap gap-3 text-xs tabular-nums text-gray-600 dark:text-gray-400">
@@ -102,7 +107,15 @@ export function CronogramaCurvaSPanel({
         </div>
       </div>
 
-      <div className={inModal ? 'h-[320px] w-full sm:h-[380px]' : 'h-[220px] w-full'}>
+      <div
+        className={
+          preencher
+            ? 'min-h-[24rem] w-full flex-1'
+            : inModal
+              ? 'h-[320px] w-full sm:h-[380px]'
+              : 'h-[220px] w-full'
+        }
+      >
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={pontos as CronogramaCurvaSPonto[]} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />

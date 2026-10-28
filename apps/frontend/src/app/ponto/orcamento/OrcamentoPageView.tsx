@@ -14417,6 +14417,12 @@ export function OrcamentoPageView({
           setFdAprovadaRecord(null);
           return;
         }
+        // FD cancelada: o orçamento não pode ficar preso em «aguardando/aprovado» sem poder finalizar.
+        if (d.status === 'CANCELLED') {
+          setMeta((prev) => ({ ...prev, statusAprovacao: 'em_correcao' }));
+          setFdAprovadaRecord(null);
+          return;
+        }
         // Gestor aprovou mas a meta local ficou desatualizada (sessão em cache / autosave antigo).
         if (d.status === 'APPROVED' && statusAprovacaoAtivo === 'aguardando_aprovacao') {
           setMeta((prev) => ({ ...prev, statusAprovacao: 'aprovado' }));
@@ -14429,8 +14435,13 @@ export function OrcamentoPageView({
           itensPedidos: Array.isArray(d.itensPedidos) ? d.itensPedidos : [],
           pedidosEncerrados: !!d.pedidosEncerrados,
         });
-      } catch {
-        if (!cancelled) setFdAprovadaRecord(null);
+      } catch (err: any) {
+        if (cancelled) return;
+        // FD apagada: libera o orçamento para corrigir e finalizar de novo.
+        if (err?.response?.status === 404) {
+          setMeta((prev) => ({ ...prev, statusAprovacao: 'em_correcao' }));
+        }
+        setFdAprovadaRecord(null);
       }
     }
 
@@ -18237,6 +18248,15 @@ export function OrcamentoPageView({
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status compras</dt>
                           <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{purchaseStatusLabel(fichaDemandaRecord.purchaseStatus)}</dd>
                         </div>
+                        {fichaDemandaRecord.purchaseStatus === 'CANCELLED' && fichaDemandaRecord.purchaseStatusUpdaterNome ? (
+                          <div className="min-w-0">
+                            <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Cancelada por</dt>
+                            <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                              {fichaDemandaRecord.purchaseStatusUpdaterNome}
+                              {fichaDemandaRecord.purchaseStatusUpdatedAt ? ` · ${fichaDemandaRecord.purchaseStatusUpdatedAt}` : ''}
+                            </dd>
+                          </div>
+                        ) : null}
                         {fichaDemandaRecord.purchaseStatus === 'CANCELLED' && fichaDemandaRecord.purchaseCancellationNote ? (
                           <div className="min-w-0 sm:col-span-2 lg:col-span-3">
                             <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Observação do cancelamento</dt>
