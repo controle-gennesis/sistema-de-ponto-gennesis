@@ -74,10 +74,13 @@ export function NovaSolicitacaoFerramentaModal({
   isOpen,
   onClose,
   initialContractId = '',
+  allContracts = false,
 }: {
   isOpen: boolean;
   onClose: () => void;
   initialContractId?: string;
+  /** Mostra todos os contratos (Suprimentos); senão só os liberados para a pessoa. */
+  allContracts?: boolean;
 }) {
   const queryClient = useQueryClient();
   const { allowedContractIds, isAdministrator } = usePermissions();
@@ -94,9 +97,11 @@ export function NovaSolicitacaoFerramentaModal({
   }, [isOpen, initialContractId]);
 
   const { data: contractsRes, isLoading: loadingContracts } = useQuery({
-    queryKey: ['contracts-for-tool-rental', allowedContractIds.join(',')],
+    queryKey: ['contracts-for-tool-rental', allContracts, allowedContractIds.join(',')],
     queryFn: async () => {
-      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      const res = await api.get('/contracts', {
+        params: { limit: 200, page: 1, ...(allContracts ? { todosSuprimentos: 1 } : {}) },
+      });
       return res.data;
     },
     enabled: showForm,
@@ -104,10 +109,10 @@ export function NovaSolicitacaoFerramentaModal({
 
   const contracts = useMemo(() => {
     const rows = (contractsRes?.data ?? []) as ContractOption[];
-    if (isAdministrator) return rows;
+    if (isAdministrator || allContracts) return rows;
     // Só contratos liberados para a pessoa
     return rows.filter((c) => allowedContractIdSet.has(c.id));
-  }, [contractsRes?.data, isAdministrator, allowedContractIdSet]);
+  }, [contractsRes?.data, isAdministrator, allContracts, allowedContractIdSet]);
 
   const { data: obras = [], isLoading: loadingObras } = useQuery({
     queryKey: ['tool-rental-obras', form.contractId],

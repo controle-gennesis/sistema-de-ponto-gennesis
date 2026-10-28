@@ -9,7 +9,10 @@ import {
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { assertUserHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
+import {
+  assertUserHasToolRentalSuppliesAccess,
+  userHasToolRentalSuppliesAccess,
+} from '../lib/toolRentalSuppliesAccess';
 import {
   assertLiberadoContractAccess,
   getLiberadoContractAccessForUser,
@@ -653,7 +656,10 @@ export class ToolRentalRequestController {
       const polo = poloRaw === 'GO' || poloRaw === 'DF' ? poloRaw : 'DF';
 
       const contractId = requireString(body.contractId, 'Contrato');
-      await assertLiberadoContractAccess(req, contractId);
+      // Quem tem a tela do Suprimentos enxerga todos os contratos ao abrir uma solicitação.
+      if (!(await userHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin))) {
+        await assertLiberadoContractAccess(req, contractId);
+      }
       const contractRow = await prisma.contract.findUnique({
         where: { id: contractId },
         select: { id: true, name: true },

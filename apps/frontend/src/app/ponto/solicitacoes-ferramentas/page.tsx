@@ -1418,7 +1418,11 @@ function SolicitacoesFerramentasPage() {
           </div>
         </Modal>
 
-        <NovaSolicitacaoFerramentaModal isOpen={showNewForm} onClose={() => setShowNewForm(false)} />
+        <NovaSolicitacaoFerramentaModal
+          isOpen={showNewForm}
+          onClose={() => setShowNewForm(false)}
+          allContracts
+        />
       </PageStack>
     </MainLayout>
   );
