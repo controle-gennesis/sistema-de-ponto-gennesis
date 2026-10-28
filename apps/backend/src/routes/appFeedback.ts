@@ -16,6 +16,8 @@ const DIAS_ENTRE_PERGUNTAS = 90;
 /** A Gennecy deve aparecer para esta pessoa agora? */
 router.get('/status', async (req: AuthRequest, res, next) => {
   try {
+    // Administradores não são convidados a avaliar (o preview com ?gennecy=1 continua funcionando).
+    if (req.user!.isAdmin) return res.json({ success: true, data: { show: false } });
     const userId = req.user!.id;
     const rows = await prisma.$queryRaw<Array<{ criado: Date; ultimo: Date | null }>>`
       SELECT u."createdAt" AS criado,
