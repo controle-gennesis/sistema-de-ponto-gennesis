@@ -226,10 +226,38 @@ export class ContractController {
         prisma.contract.count({ where })
       ]);
 
+      // Aditivos e ajustes do valor anual ficam em tabelas próprias: a lista mostra o valor já com eles.
+      const contractIds = contracts.map((c) => c.id);
+      const [addendaSums, annualAdjustments] =
+        contractIds.length === 0
+          ? [[], []]
+          : await Promise.all([
+              prisma.contractAddendum.groupBy({
+                by: ['contractId'],
+                where: { contractId: { in: contractIds } },
+                _sum: { amount: true }
+              }),
+              prisma.contractAnnualValue.findMany({
+                where: { contractId: { in: contractIds }, budgetAdjustmentDelta: { not: null } },
+                select: { contractId: true, year: true, budgetAdjustmentDelta: true }
+              })
+            ]);
+      const addendaTotalByContract = new Map(
+        addendaSums.map((r) => [r.contractId, Number(r._sum.amount ?? 0)])
+      );
+      const adjustmentsByContract = new Map<string, Array<{ year: number; delta: number }>>();
+      for (const r of annualAdjustments) {
+        const list = adjustmentsByContract.get(r.contractId) ?? [];
+        list.push({ year: r.year, delta: Number(r.budgetAdjustmentDelta) });
+        adjustmentsByContract.set(r.contractId, list);
+      }
+
       // Converter Decimal para número na resposta
       const contractsWithNumbers = contracts.map((c) => ({
         ...c,
-        valuePlusAddenda: c.valuePlusAddenda ? Number(c.valuePlusAddenda) : 0
+        valuePlusAddenda: c.valuePlusAddenda ? Number(c.valuePlusAddenda) : 0,
+        addendaTotal: addendaTotalByContract.get(c.id) ?? 0,
+        annualAdjustments: adjustmentsByContract.get(c.id) ?? []
       }));
 
       return res.json({

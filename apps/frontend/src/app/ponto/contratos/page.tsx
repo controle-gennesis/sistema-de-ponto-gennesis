@@ -68,6 +68,10 @@ interface Contract {
   costCenterId: string;
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
+  /** Soma dos aditivos do contrato (tabela própria; a lista mostra o valor já com eles). */
+  addendaTotal?: number;
+  /** Ajuste do valor anual por ano (botão «Valor anual» da página do contrato). */
+  annualAdjustments?: Array<{ year: number; delta: number }>;
   allowBillingImportWithoutOsPleito?: boolean;
   orcafascioClientId?: string | null;
   defaultBdiPercent?: number | string | null;
@@ -1063,11 +1067,25 @@ export default function ContratosPage() {
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100 sm:px-6">
-                            {formatCurrency(c.valuePlusAddenda)}
+                            <span
+                              title={
+                                (c.addendaTotal ?? 0) !== 0
+                                  ? `Valor base: ${formatCurrency(c.valuePlusAddenda)}\nAditivos: ${formatCurrency(c.addendaTotal ?? 0)}`
+                                  : undefined
+                              }
+                            >
+                              {formatCurrency(c.valuePlusAddenda + (c.addendaTotal ?? 0))}
+                            </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3 text-right text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                             {(() => {
-                              const rows = getValorAnualPorAno(c.valuePlusAddenda, c.startDate, c.endDate);
+                              // Base proporcional (valor + aditivos) mais o ajuste lançado para cada ano.
+                              const ajustePorAno = new Map((c.annualAdjustments ?? []).map((a) => [a.year, a.delta]));
+                              const rows = getValorAnualPorAno(
+                                c.valuePlusAddenda + (c.addendaTotal ?? 0),
+                                c.startDate,
+                                c.endDate
+                              ).map((r) => ({ ...r, value: r.value + (ajustePorAno.get(r.year) ?? 0) }));
                               if (!rows.length) return '-';
                               const anoAtual = new Date().getFullYear();
                               const atual =
