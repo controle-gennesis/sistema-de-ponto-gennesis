@@ -175,6 +175,8 @@ export interface FichaDemandaApprovalRecord {
   ocId?: string | null;
   codigoPedido: string;
   solicitanteId: string;
+  /** Número sequencial automático da lista (1, 2, 3…). */
+  displayNumber?: number | null;
   solicitanteNome: string;
   contratoId: string;
   contratoNome: string;

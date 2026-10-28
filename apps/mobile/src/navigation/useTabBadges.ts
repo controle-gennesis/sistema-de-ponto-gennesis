@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from '../hooks/usePermissions';
 import { useNotifications } from '../notifications/NotificationsContext';
-import { fetchApprovalNotificationCounts } from '../services/approvals';
+import { approvalsPendingTotal, fetchApprovalNotificationCounts } from '../services/approvals';
 
 export type TabBadgeRoute = 'Home' | 'Combustivel' | 'Reservas' | 'DpRequests' | 'GestaoOs';
 
@@ -23,7 +23,6 @@ export function useTabBadges(): Record<TabBadgeRoute, TabBadgeValue> {
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
     canApproveOc,
     canApproveEmpreiteiroDaily,
   } = usePermissions();
@@ -32,7 +31,6 @@ export function useTabBadges(): Record<TabBadgeRoute, TabBadgeValue> {
     canAccessDpApproverPages ||
     canApproveFuel ||
     canApproveFd ||
-    canApproveMaterialRequests ||
     canApproveOc ||
     canApproveEmpreiteiroDaily;
 
@@ -43,7 +41,7 @@ export function useTabBadges(): Record<TabBadgeRoute, TabBadgeValue> {
     queryFn: fetchApprovalNotificationCounts,
     refetchInterval: 60_000,
   });
-  const pending = Number(countsQuery.data?.total || 0);
+  const pending = approvalsPendingTotal(countsQuery.data);
 
   return {
     Home: pending > 0 ? (pending > 99 ? '99+' : String(pending)) : undefined,

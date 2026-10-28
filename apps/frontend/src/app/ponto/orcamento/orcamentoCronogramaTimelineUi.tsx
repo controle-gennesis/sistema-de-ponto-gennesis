@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Divide } from 'lucide-react';
 import {
   isoDiaCronograma,
   repartirUsoPorDiasCronograma,
@@ -46,8 +47,10 @@ function formatQtdEditor(n: number): string {
 function usoDaComposicao(qtdUsada: number, qtdOrcada: number, custo: number) {
   if (!(qtdOrcada > 0)) return { percentual: 0, valorUsado: 0 };
   const razao = qtdUsada / qtdOrcada;
+  // Soma dos dias que fecha a quantidade orçada (a menos de ruído de ponto flutuante) vale exatamente 100%.
+  const fechou = Math.abs(razao - 1) < 1e-9;
   return {
-    percentual: Math.min(100, Math.max(0, razao * 100)),
+    percentual: fechou ? 100 : Math.min(100, Math.max(0, razao * 100)),
     valorUsado: razao * custo
   };
 }
@@ -77,6 +80,9 @@ export function TimelineEtapaEditor({
   const custo = row.valorTotal ?? 0;
   const medeQuantidade = qtdOrcada > 0;
   const [textosDia, setTextosDia] = useState<Record<string, string>>({});
+  const [focoIso, setFocoIso] = useState<string | null>(null);
+  // Texto da quantidade orçada para inserir em fórmulas (vírgula decimal, sem separador de milhar).
+  const qtdOrcadaTexto = String(Math.round(qtdOrcada * 10000) / 10000).replace('.', ',');
   const formulasSalvas = row.dados.formulasQuantidadePorDia;
   const inicioPrazo = parseDataIso(datasReais ? row.dados.dataInicioReal : row.dados.dataInicio);
   const fimPrazo = parseDataIso(datasReais ? row.dados.dataFimReal : row.dados.dataFim);
@@ -122,6 +128,32 @@ export function TimelineEtapaEditor({
     });
   };
 
+  /** Reparte a quantidade orçada igualmente pelos dias do prazo; a sobra de arredondamento vai para o último dia. */
+  const dividirIgualmente = () => {
+    const n = diasPrazo.length;
+    if (n === 0 || !(qtdOrcada > 0)) return;
+    if (temMapa && !window.confirm('Substituir as quantidades já lançadas pela divisão igual entre os dias?')) {
+      return;
+    }
+    const fator = 10 ** 4;
+    const porDia = Math.floor((qtdOrcada / n) * fator) / fator;
+    const mapa: Record<string, number> = {};
+    let acumulado = 0;
+    diasPrazo.forEach((dia, i) => {
+      const qtd = i === n - 1 ? Math.round((qtdOrcada - acumulado) * fator) / fator : porDia;
+      acumulado += qtd;
+      if (qtd > 0) mapa[isoDiaCronograma(dia.data)] = qtd;
+    });
+    const soma = Object.values(mapa).reduce((acc, qtd) => acc + qtd, 0);
+    setTextosDia({});
+    onPatchDados(row, {
+      quantidadesPorDia: Object.keys(mapa).length > 0 ? mapa : undefined,
+      formulasQuantidadePorDia: undefined,
+      quantidadeExecutada: soma > 0 ? soma : undefined,
+      percentualExecutado: soma > 0 ? usoDaComposicao(soma, qtdOrcada, custo).percentual : undefined
+    });
+  };
+
   return (
     <Modal
       isOpen
@@ -159,10 +191,23 @@ export function TimelineEtapaEditor({
         </div>
         {medeQuantidade ? (
           <div className="space-y-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Orçada: {formatQtdEditor(qtdOrcada)}
-              {row.unidade ? ` ${row.unidade}` : ''}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Orçada: {formatQtdEditor(qtdOrcada)}
+                {row.unidade ? ` ${row.unidade}` : ''}
+              </p>
+              {diasPrazo.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={dividirIgualmente}
+                  title="Reparte a quantidade e o valor igualmente por todos os dias do prazo"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                >
+                  <Divide className="h-3.5 w-3.5" aria-hidden />
+                  Dividir igualmente
+                </button>
+              ) : null}
+            </div>
             {diasPrazo.map((dia) => {
               const iso = isoDiaCronograma(dia.data);
               const texto = textoDoDia(iso);
@@ -174,7 +219,7 @@ export function TimelineEtapaEditor({
                     {dia.data.toLocaleDateString('pt-BR')}
                   </p>
                   <div className="grid grid-cols-3 gap-3">
-                    <label className="block min-w-0">
+                    <label className="relative block min-w-0">
                       <span className={editorLabelCls}>Quantidade</span>
                       <input
                         type="text"
@@ -182,12 +227,14 @@ export function TimelineEtapaEditor({
                         value={texto}
                         onChange={(e) => aplicarQuantidadeDia(iso, e.target.value)}
                         onFocus={() => {
+                          setFocoIso(iso);
                           const f = formulasSalvas?.[iso];
                           if (f && !Object.prototype.hasOwnProperty.call(textosDia, iso)) {
                             setTextosDia((prev) => ({ ...prev, [iso]: f }));
                           }
                         }}
                         onBlur={() => {
+                          setFocoIso((atual) => (atual === iso ? null : atual));
                           // Sai da edição: mostra o resultado (a fórmula continua salva); fórmula inválida volta ao último valor.
                           setTextosDia((prev) => {
                             const { [iso]: _descartado, ...resto } = prev;
@@ -198,6 +245,27 @@ export function TimelineEtapaEditor({
                         className={editorInputCls}
                         aria-label={`Quantidade em ${dia.data.toLocaleDateString('pt-BR')} — ${row.label}`}
                       />
+                      {focoIso === iso && /^=.*[=+\-*/(;]$|^=$/.test(texto.trim()) ? (
+                        <div className="absolute left-0 top-full z-20 mt-1 w-max min-w-full rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-600 dark:bg-gray-800">
+                          <button
+                            type="button"
+                            // mouseDown (e não click) para o campo não perder o foco antes de inserir.
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              aplicarQuantidadeDia(iso, `${texto.trim()}${qtdOrcadaTexto}`);
+                            }}
+                            className="flex w-full items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-red-50 dark:hover:bg-red-950/30"
+                          >
+                            <span className="font-semibold text-gray-800 dark:text-gray-100">
+                              Quantidade do orçamento
+                            </span>
+                            <span className="tabular-nums text-gray-500 dark:text-gray-400">
+                              {formatQtdEditor(qtdOrcada)}
+                              {row.unidade ? ` ${row.unidade}` : ''}
+                            </span>
+                          </button>
+                        </div>
+                      ) : null}
                     </label>
                     <div className="min-w-0">
                       <p className={editorLabelCls}>Valor usado</p>

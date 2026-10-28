@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BadgeCheck, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { usePermissions } from '../hooks/usePermissions';
-import { fetchApprovalNotificationCounts } from '../services/approvals';
+import { approvalsPendingTotal, fetchApprovalNotificationCounts } from '../services/approvals';
 import ApprovalsSheet from './ApprovalsSheet';
 
 export default function HomeAprovacoesCard() {
@@ -15,7 +15,6 @@ export default function HomeAprovacoesCard() {
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
     canApproveOc,
     canApproveEmpreiteiroDaily,
     isLoading: permissionsLoading,
@@ -25,7 +24,6 @@ export default function HomeAprovacoesCard() {
     canAccessDpApproverPages ||
     canApproveFuel ||
     canApproveFd ||
-    canApproveMaterialRequests ||
     canApproveOc ||
     canApproveEmpreiteiroDaily;
 
@@ -39,7 +37,7 @@ export default function HomeAprovacoesCard() {
   });
 
   const data = countsQuery.data;
-  const total = Number(data?.total || 0);
+  const total = approvalsPendingTotal(data);
   const hasPending = total > 0;
 
 

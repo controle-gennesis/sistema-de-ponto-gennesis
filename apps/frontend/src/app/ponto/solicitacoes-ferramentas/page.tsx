@@ -29,6 +29,7 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { Bloco } from '@/components/ferramentas/Bloco';
+import { NovaSolicitacaoFerramentaModal } from '@/components/ferramentas/NovaSolicitacaoFerramentaModal';
 import { detectOcIdFromFile } from '@/lib/extractOcId';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import {
@@ -256,6 +257,7 @@ function SolicitacoesFerramentasPage() {
   const user = authService.getUser();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [showNewForm, setShowNewForm] = useState(false);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [selected, setSelected] = useState<ToolRentalRequest | null>(null);
@@ -692,6 +694,14 @@ function SolicitacoesFerramentasPage() {
                     className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNewForm(true)}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Nova Solicitação</span>
+                </button>
               </div>
             </div>
           </CardHeader>
@@ -1407,6 +1417,12 @@ function SolicitacoesFerramentasPage() {
             </div>
           </div>
         </Modal>
+
+        <NovaSolicitacaoFerramentaModal
+          isOpen={showNewForm}
+          onClose={() => setShowNewForm(false)}
+          allContracts
+        />
       </PageStack>
     </MainLayout>
   );

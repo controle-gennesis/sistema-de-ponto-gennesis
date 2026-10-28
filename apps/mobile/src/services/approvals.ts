@@ -34,6 +34,7 @@ export type FdApprovalRow = {
   id: string;
   status: string;
   createdAt?: string;
+  displayNumber?: number | null;
   codFichaDemanda?: string | null;
   codigoPedido?: string | null;
   solicitanteNome?: string | null;
@@ -96,6 +97,14 @@ export type MedicaoApprovalRow = {
 
 function phaseQuery(phase: ApprovalPhase): string {
   return `phase=${encodeURIComponent(phase)}`;
+}
+
+/** Pendentes que aparecem na folha de Aprovações (RM, OC e Medições seguem só pela web). */
+export function approvalsPendingTotal(counts?: Partial<ApprovalNotificationCounts> | null): number {
+  if (!counts) return 0;
+  return (
+    Number(counts.dp || 0) + Number(counts.fd || 0) + Number(counts.fuel || 0)
+  );
 }
 
 export async function fetchApprovalNotificationCounts(): Promise<ApprovalNotificationCounts> {

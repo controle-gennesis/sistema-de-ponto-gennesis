@@ -32,6 +32,7 @@ import {
   Filter,
   MoreVertical,
   Upload,
+  ImagePlus,
   Wallet,
   AlertTriangle,
   TrendingDown,
@@ -2952,32 +2953,31 @@ export default function ContractDetailPage() {
     if (canAccessCronogramasModulo) {
       itens.push({ label: 'Cronogramas', href: `/ponto/cronogramas/${contractId}`, icon: CalendarRange });
     }
+    const filtroContrato = `?contrato=${encodeURIComponent(contractId)}`;
     if (canAccessOrcamento) {
-      itens.push({ label: 'Orçamentos', href: '/ponto/orcamento', icon: Calculator });
+      itens.push({ label: 'Orçamentos', href: `/ponto/orcamentos${filtroContrato}`, icon: Calculator });
     }
-    if (
-      isAdministrator ||
-      can(pathToModuleKey('/ponto/fds-aprovadas')) ||
-      can(pathToModuleKey('/ponto/aprovacao-fds'))
-    ) {
-      // Duas páginas com o mesmo nome e permissões separadas: Suprimentos (fds-aprovadas) e Engenharia (aprovacao-fds).
-      const fdHref =
-        isAdministrator || can(pathToModuleKey('/ponto/fds-aprovadas'))
-          ? '/ponto/fds-aprovadas'
-          : '/ponto/aprovacao-fds';
-      itens.push({ label: 'Fichas de Demanda', href: fdHref, icon: ClipboardList });
+    if (isAdministrator || can(pathToModuleKey('/ponto/aprovacao-fds'))) {
+      itens.push({
+        label: 'Fichas de Demanda',
+        href: `/ponto/aprovacao-fds${filtroContrato}`,
+        icon: ClipboardList,
+      });
     }
-    if (
-      isAdministrator ||
-      can(pathToModuleKey('/ponto/solicitacoes-ferramentas')) ||
-      can(pathToModuleKey('/ponto/solicitar-ferramentas'))
-    ) {
+    if (isAdministrator || can(pathToModuleKey('/ponto/relatorios-fotograficos'))) {
+      itens.push({
+        label: 'Relatórios Fotográficos',
+        href: `/ponto/relatorios-fotograficos${filtroContrato}`,
+        icon: ImagePlus,
+      });
+    }
+    if (isAdministrator || can(pathToModuleKey('/ponto/caixinha'))) {
+      itens.push({ label: 'Caixinha', href: `/ponto/caixinha${filtroContrato}`, icon: Wallet });
+    }
+    if (isAdministrator || can(pathToModuleKey('/ponto/solicitar-ferramentas'))) {
       itens.push({
         label: 'Pedidos de ferramentas',
-        href:
-          isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-ferramentas'))
-            ? '/ponto/solicitacoes-ferramentas'
-            : '/ponto/solicitar-ferramentas',
+        href: `/ponto/solicitar-ferramentas${filtroContrato}`,
         icon: Wrench,
       });
     }

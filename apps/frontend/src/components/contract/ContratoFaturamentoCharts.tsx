@@ -1235,18 +1235,17 @@ function AtalhoKpiCard({
   href,
   badgeCount = 0,
   actionLabel = 'Abrir',
-  atalhos = [],
 }: ContratoResumoKpi) {
   return (
     <Card
       className={`${cadastroListClasses.card} relative overflow-hidden ${
         badgeCount > 0
-          ? 'bg-red-50/40 dark:bg-red-950/10'
-          : 'bg-emerald-50/40 dark:bg-emerald-950/10'
+          ? '!bg-red-50/40 dark:!bg-red-950/10'
+          : '!bg-emerald-50/40 dark:!bg-emerald-950/10'
       }`}
     >
-      <CardContent className="flex items-center justify-between gap-6 p-4 sm:p-5">
-        <div className="flex min-w-0 flex-col gap-3">
+      <CardContent className="flex h-full items-stretch justify-between gap-6 p-4 sm:p-5">
+        <div className="flex min-w-0 flex-col justify-between gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
@@ -1275,17 +1274,7 @@ function AtalhoKpiCard({
                 />
               </Link>
             ) : null}
-            {atalhos.map(({ label, href: to, icon: Icon }) => (
-              <Link
-                key={label}
-                href={to}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-              >
-                {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden /> : null}
-                {label}
-              </Link>
-            ))}
-            {!href && atalhos.length === 0 ? (
+            {!href ? (
               <span className="text-sm font-medium text-gray-400 dark:text-gray-500">Sem acesso</span>
             ) : null}
           </div>
@@ -1295,6 +1284,37 @@ function AtalhoKpiCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Blocos de atalho (só ícone e nome), à direita do card de Reuniões. */
+function AtalhoBlocos({ atalhos }: { atalhos: NonNullable<ContratoResumoKpi['atalhos']> }) {
+  if (atalhos.length === 0) return null;
+  return (
+    <div
+      className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-4 lg:[grid-template-columns:repeat(var(--atalho-cols),9rem)]"
+      style={{ '--atalho-cols': Math.ceil(atalhos.length / 2) } as React.CSSProperties}
+    >
+      {atalhos.map(({ label, href: to, icon: Icon }, idx) => (
+        <Link
+          key={label}
+          href={to}
+          className={`${cadastroListClasses.card} ${
+            // Quantidade ímpar: o último bloco cresce para o lado e preenche a linha de baixo.
+            idx === atalhos.length - 1 && atalhos.length > 1 && atalhos.length % 2 === 1
+              ? 'lg:col-span-2'
+              : ''
+          } group flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-3 text-center transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800`}
+        >
+          {Icon ? (
+            <span className="rounded-lg bg-red-100 p-2 text-red-600 transition-colors group-hover:bg-red-600 group-hover:text-white dark:bg-red-900/30 dark:text-red-400">
+              <Icon className="h-5 w-5" aria-hidden />
+            </span>
+          ) : null}
+          <span className="text-xs font-semibold leading-tight text-gray-800 dark:text-gray-100">{label}</span>
+        </Link>
+      ))}
+    </div>
   );
 }
 
@@ -1426,8 +1446,11 @@ export function ContratoFaturamentoCharts({
         <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {resumoKpis.map((kpi) =>
             kpi.variant === 'atalho' ? (
-              <div key={kpi.title} className="col-span-full">
-                <AtalhoKpiCard {...kpi} />
+              <div key={kpi.title} className="col-span-full flex flex-col gap-4 lg:flex-row lg:items-stretch">
+                <div className="min-w-0 flex-1 [&>*]:h-full">
+                  <AtalhoKpiCard {...kpi} />
+                </div>
+                <AtalhoBlocos atalhos={kpi.atalhos ?? []} />
               </div>
             ) : (
               <KpiStatCard key={kpi.title} {...kpi} />

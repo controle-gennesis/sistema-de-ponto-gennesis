@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   FlatList,
   Pressable,
@@ -19,7 +18,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BadgeCheck,
   CalendarDays,
-  ChevronRight,
   ClipboardList,
   Fuel,
   MailPlus,
@@ -27,7 +25,6 @@ import {
   Ruler,
   ShoppingCart,
   Wallet,
-  X,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -58,6 +55,7 @@ import {
   type ApprovalTabId,
 } from '../lib/approvalsHome';
 import ApprovalActionSheet from './approvals/ApprovalActionSheet';
+import KanbanSheet from './KanbanSheet';
 
 type Props = {
   visible: boolean;
@@ -69,7 +67,6 @@ function itemRefCode(item: ApprovalListItemWithTab): string {
     displayNumber?: string | number | null;
     codFichaDemanda?: string | null;
   };
-  if (item.tab === 'fd' && raw?.codFichaDemanda?.trim()) return raw.codFichaDemanda.trim();
   if (raw?.displayNumber != null && String(raw.displayNumber).trim() !== '') {
     return `#${raw.displayNumber}`;
   }
@@ -115,10 +112,8 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
   const { height: windowHeight } = useWindowDimensions();
   const queryClient = useQueryClient();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const listMaxHeight = Math.max(
-    180,
-    windowHeight * 0.92 - 120 - Math.max(insets.bottom, 16),
-  );
+  // Folha no padrão da "Esqueceu a senha": a lista ocupa o que sobra abaixo do ícone e do título.
+  const listMaxHeight = Math.max(180, windowHeight * 0.92 - 200 - insets.bottom);
   const canDismissRef = useRef(false);
   const [busy, setBusy] = useState<{ id: string; action: 'approve' | 'reject' } | null>(
     null,
@@ -130,7 +125,6 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
     canApproveOc,
     canApproveOcCompras,
     canApproveOcDiretoria,
@@ -143,17 +137,12 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     if (canAccessDpApproverPages) list.push('dp');
     if (canApproveFuel) list.push('fuel');
     if (canApproveFd) list.push('fd');
-    if (canApproveMaterialRequests) list.push('rm');
-    if (canApproveOc) list.push('oc');
-    if (canApproveEmpreiteiroDaily) list.push('medicao');
+    // RM, OC e Medições não aparecem nesta folha: seguem só pela web.
     return list;
   }, [
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
-    canApproveOc,
-    canApproveEmpreiteiroDaily,
   ]);
 
   const ocFlags = useMemo(
@@ -327,297 +316,235 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     setRejectReason('');
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent
-      statusBarTranslucent
-      onRequestClose={
-        rejectTarget || selected
-          ? () => {
-              if (rejectTarget) closeReject();
-              else setSelected(null);
-            }
-          : onClose
-      }
-    >
-      <View style={layout.root}>
-        <Pressable
-          style={layout.backdrop}
-          onPress={() => {
-            if (rejectTarget || selected) return;
-            requestClose();
-          }}
-        />
+  const subtitle =
+    listQuery.isLoading
+      ? 'Carregando…'
+      : items.length === 0
+        ? 'Tudo em dia! Quando houver algo para você aprovar, aparece aqui.'
+        : `${items.length} pendente${items.length === 1 ? '' : 's'}`;
 
-        <View style={layout.sheetWrap} pointerEvents="box-none">
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: colors.card,
-                paddingBottom: Math.max(insets.bottom, 16),
-              },
-            ]}
+  const overlays = (
+    <>
+      {rejectTarget ? (
+        <View style={layout.layerOverlay}>
+          <Pressable style={layout.layerBackdrop} onPress={closeReject} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={layout.layerCenter}
+            pointerEvents="box-none"
           >
-            <View style={styles.handleWrap}>
-              <View
+            <View style={[styles.rejectSheet, { backgroundColor: colors.card }]}>
+              <View style={styles.rejectHeader}>
+                <Text style={[styles.rejectTitle, { color: colors.text }]}>Motivo da recusa</Text>
+                <Text style={[styles.rejectId, { color: colors.text }]}>
+                  {itemRefCode(rejectTarget)}
+                </Text>
+              </View>
+              <Text style={[styles.rejectHint, { color: colors.textSecondary }]} numberOfLines={2}>
+                {rejectTarget.title}
+              </Text>
+              <TextInput
+                value={rejectReason}
+                onChangeText={setRejectReason}
+                placeholder="Descreva o motivo para o solicitante"
+                placeholderTextColor={colors.textSecondary}
                 style={[
-                  styles.handle,
+                  styles.rejectInput,
                   {
-                    backgroundColor: isDark
-                      ? 'rgba(255,255,255,0.22)'
-                      : 'rgba(15,23,42,0.18)',
+                    color: colors.text,
+                    borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.1)',
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
                   },
                 ]}
+                multiline
+                textAlignVertical="top"
+                autoFocus
               />
-            </View>
-
-            <View style={styles.header}>
-              <View style={styles.headerText}>
-                <Text style={[styles.title, { color: colors.text }]}>Aprovações</Text>
-                <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {Number(counts.total || 0) === 0
-                    ? 'Nada pendente no momento'
-                    : `${counts.total} pendente${counts.total === 1 ? '' : 's'}`}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={8}>
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={items}
-              keyExtractor={(item) => item.id}
-              style={[styles.list, { maxHeight: listMaxHeight }]}
-              contentContainerStyle={
-                items.length === 0 ? styles.emptyWrap : styles.listContent
-              }
-              showsVerticalScrollIndicator={false}
-              ListEmptyComponent={
-                listQuery.isLoading ? (
-                  <View style={styles.loadingWrap}>
-                    <ActivityIndicator color={colors.primary} />
-                  </View>
-                ) : (
-                  <View style={styles.empty}>
-                    <View
-                      style={[
-                        styles.emptyIcon,
-                        { backgroundColor: isDark ? colors.surface : colors.background },
-                      ]}
-                    >
-                      <BadgeCheck size={22} color={colors.textSecondary} strokeWidth={2} />
-                    </View>
-                    <Text style={[styles.emptyTitle, { color: colors.text }]}>Tudo em dia</Text>
-                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                      Não há solicitações pendentes no momento.
-                    </Text>
-                  </View>
-                )
-              }
-              renderItem={({ item }) => {
-                const itemBusy = busy?.id === item.id;
-                const approving = itemBusy && busy?.action === 'approve';
-                const rejecting = itemBusy && busy?.action === 'reject';
-                const TypeIcon = APPROVAL_TYPE_ICONS[item.tab] || ClipboardList;
-                const person =
-                  item.person && item.person !== item.title ? item.person : null;
-                const place =
-                  item.place &&
-                  item.place !== item.title &&
-                  item.place !== item.person
-                    ? item.place
-                    : !person && item.subtitle && item.subtitle !== item.title
-                      ? item.subtitle
-                      : item.place && item.place !== item.title
-                        ? item.place
-                        : null;
-                const showUrgency =
-                  item.urgencyTone === 'high' || item.urgencyTone === 'urgent';
-                return (
-                  <View style={styles.item}>
-                    <TouchableOpacity
-                      style={styles.itemBody}
-                      onPress={() => setSelected(item)}
-                      activeOpacity={0.75}
-                      disabled={itemBusy}
-                    >
-                      <View style={styles.itemRefRow}>
-                        <Text style={styles.itemRef}>{itemRefCode(item)}</Text>
-                        {showUrgency ? (
-                          <View
-                            style={[
-                              styles.urgencyChip,
-                              item.urgencyTone === 'urgent'
-                                ? styles.urgencyUrgent
-                                : styles.urgencyHigh,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.urgencyChipText,
-                                item.urgencyTone === 'urgent'
-                                  ? styles.urgencyUrgentText
-                                  : styles.urgencyHighText,
-                              ]}
-                            >
-                              {item.urgencyLabel}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      <View style={styles.typeChip} accessibilityLabel={item.categoryLabel}>
-                        <TypeIcon size={13} color={colors.primary} strokeWidth={2.2} />
-                        <Text style={styles.typeChipText}>{item.categoryLabel}</Text>
-                      </View>
-                      <Text style={styles.itemTitle} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      {person ? (
-                        <Text style={styles.itemPerson} numberOfLines={1}>
-                          {person}
-                        </Text>
-                      ) : null}
-                      {place ? (
-                        <Text style={styles.itemPlace} numberOfLines={2}>
-                          {place}
-                        </Text>
-                      ) : null}
-                      <View style={styles.itemFooter}>
-                        <View style={styles.metaLine}>
-                          <CalendarDays
-                            size={13}
-                            color={isDark ? 'rgba(255,255,255,0.38)' : 'rgba(15,23,42,0.4)'}
-                            strokeWidth={2.2}
-                          />
-                          <Text style={styles.itemMeta}>{itemDateLabel(item)}</Text>
-                        </View>
-                        <View style={styles.detailHint}>
-                          <Text style={styles.detailHintText}>Detalhes</Text>
-                          <ChevronRight
-                            size={14}
-                            color={colors.primary}
-                            strokeWidth={2.4}
-                          />
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    <View style={styles.itemDivider} />
-
-                    <View style={styles.itemActions}>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, styles.rejectBtn]}
-                        onPress={() => openRejectModal(item)}
-                        activeOpacity={0.8}
-                        disabled={itemBusy}
-                      >
-                        {rejecting ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.rejectBtnText}>Recusar</Text>
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, styles.approveBtn]}
-                        onPress={() => onApprove(item)}
-                        activeOpacity={0.8}
-                        disabled={itemBusy}
-                      >
-                        {approving ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.approveBtnText}>Aprovar</Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              }}
-            />
-          </View>
-        </View>
-
-        {/* Overlays na mesma Modal — por cima da lista, sem Modal aninhada */}
-        {rejectTarget ? (
-          <View style={layout.layerOverlay}>
-            <Pressable style={layout.layerBackdrop} onPress={closeReject} />
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={layout.layerCenter}
-              pointerEvents="box-none"
-            >
-              <View style={[styles.rejectSheet, { backgroundColor: colors.card }]}>
-                <View style={styles.rejectHeader}>
-                  <Text style={[styles.rejectTitle, { color: colors.text }]}>Motivo da recusa</Text>
-                  <Text style={[styles.rejectId, { color: colors.text }]}>
-                    {itemRefCode(rejectTarget)}
-                  </Text>
-                </View>
-                <Text style={[styles.rejectHint, { color: colors.textSecondary }]} numberOfLines={2}>
-                  {rejectTarget.title}
-                </Text>
-                <TextInput
-                  value={rejectReason}
-                  onChangeText={setRejectReason}
-                  placeholder="Descreva o motivo para o solicitante"
-                  placeholderTextColor={colors.textSecondary}
+              <View style={styles.rejectActions}>
+                <TouchableOpacity
                   style={[
-                    styles.rejectInput,
+                    styles.rejectCancelBtn,
                     {
-                      color: colors.text,
                       borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.1)',
-                      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)',
                     },
                   ]}
-                  multiline
-                  textAlignVertical="top"
-                  autoFocus
-                />
-                <View style={styles.rejectActions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.rejectCancelBtn,
-                      {
-                        borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.1)',
-                      },
-                    ]}
-                    onPress={closeReject}
-                    disabled={quickAction.isPending}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.rejectCancelText, { color: colors.text }]}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.rejectConfirmBtn}
-                    onPress={submitReject}
-                    disabled={quickAction.isPending}
-                    activeOpacity={0.8}
-                  >
-                    {quickAction.isPending ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.rejectConfirmText}>Confirmar recusa</Text>
-                    )}
-                  </TouchableOpacity>
+                  onPress={closeReject}
+                  disabled={quickAction.isPending}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.rejectCancelText, { color: colors.text }]}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.rejectConfirmBtn}
+                  onPress={submitReject}
+                  disabled={quickAction.isPending}
+                  activeOpacity={0.8}
+                >
+                  {quickAction.isPending ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.rejectConfirmText}>Confirmar recusa</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      ) : null}
+
+      <ApprovalActionSheet
+        visible={!!selected}
+        tab={selected?.tab ?? null}
+        item={selectedForSheet}
+        onClose={() => setSelected(null)}
+        embedded
+      />
+    </>
+  );
+
+  return (
+    <KanbanSheet
+      visible={visible}
+      onClose={() => {
+        if (rejectTarget) closeReject();
+        else if (selected) setSelected(null);
+        else requestClose();
+      }}
+      title="Aprovações"
+      subtitle={subtitle}
+      icon={BadgeCheck}
+      overlay={overlays}
+    >
+    <FlatList
+      data={items}
+      keyExtractor={(item) => item.id}
+      style={[styles.list, { maxHeight: listMaxHeight }]}
+      contentContainerStyle={
+        items.length === 0 ? styles.emptyWrap : styles.listContent
+      }
+      showsVerticalScrollIndicator={false}
+      ListEmptyComponent={
+        listQuery.isLoading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <View />
+        )
+      }
+      renderItem={({ item }) => {
+        const itemBusy = busy?.id === item.id;
+        const approving = itemBusy && busy?.action === 'approve';
+        const rejecting = itemBusy && busy?.action === 'reject';
+        const TypeIcon = APPROVAL_TYPE_ICONS[item.tab] || ClipboardList;
+        const person =
+          item.person && item.person !== item.title ? item.person : null;
+        const place =
+          item.place &&
+          item.place !== item.title &&
+          item.place !== item.person
+            ? item.place
+            : !person && item.subtitle && item.subtitle !== item.title
+              ? item.subtitle
+              : item.place && item.place !== item.title
+                ? item.place
+                : null;
+        const showUrgency =
+          item.urgencyTone === 'high' || item.urgencyTone === 'urgent';
+        return (
+          <View style={styles.item}>
+            {showUrgency ? (
+              <View
+                style={[
+                  styles.urgencyChip,
+                  styles.urgencyCorner,
+                  item.urgencyTone === 'urgent' ? styles.urgencyUrgent : styles.urgencyHigh,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.urgencyChipText,
+                    item.urgencyTone === 'urgent'
+                      ? styles.urgencyUrgentText
+                      : styles.urgencyHighText,
+                  ]}
+                >
+                  {item.urgencyLabel}
+                </Text>
+              </View>
+            ) : null}
+            <TouchableOpacity
+              style={styles.itemBody}
+              onPress={() => setSelected(item)}
+              activeOpacity={0.75}
+              disabled={itemBusy}
+              accessibilityLabel="Ver detalhes"
+            >
+              <View style={styles.itemRefRow}>
+                <Text style={styles.itemRef} numberOfLines={2}>{itemRefCode(item)}</Text>
+              </View>
+              <View style={styles.typeChip} accessibilityLabel={item.categoryLabel}>
+                <TypeIcon size={13} color={colors.primary} strokeWidth={2.2} />
+                <Text style={styles.typeChipText}>{item.categoryLabel}</Text>
+              </View>
+              <Text style={styles.itemTitle} numberOfLines={2}>
+                {item.title}
+              </Text>
+              {person ? (
+                <Text style={styles.itemPerson} numberOfLines={1}>
+                  {person}
+                </Text>
+              ) : null}
+              {place ? (
+                <Text style={styles.itemPlace} numberOfLines={2}>
+                  {place}
+                </Text>
+              ) : null}
+              <View style={styles.itemFooter}>
+                <View style={styles.metaLine}>
+                  <CalendarDays
+                    size={13}
+                    color={isDark ? 'rgba(255,255,255,0.38)' : 'rgba(15,23,42,0.4)'}
+                    strokeWidth={2.2}
+                  />
+                  <Text style={styles.itemMeta}>{itemDateLabel(item)}</Text>
                 </View>
               </View>
-            </KeyboardAvoidingView>
-          </View>
-        ) : null}
+            </TouchableOpacity>
 
-        <ApprovalActionSheet
-          visible={!!selected}
-          tab={selected?.tab ?? null}
-          item={selectedForSheet}
-          onClose={() => setSelected(null)}
-          embedded
-        />
-      </View>
-    </Modal>
+            <View style={styles.itemDivider} />
+
+            <View style={styles.itemActions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.rejectBtn]}
+                onPress={() => openRejectModal(item)}
+                activeOpacity={0.8}
+                disabled={itemBusy}
+              >
+                {rejecting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.rejectBtnText}>Recusar</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.approveBtn]}
+                onPress={() => onApprove(item)}
+                activeOpacity={0.8}
+                disabled={itemBusy}
+              >
+                {approving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.approveBtnText}>Aprovar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+      }}
+    />
+    </KanbanSheet>
   );
 }
 
@@ -697,7 +624,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     list: { flexGrow: 0 },
     listContent: { gap: 12, paddingBottom: 4, paddingTop: 2 },
-    emptyWrap: { justifyContent: 'center', paddingVertical: 48 },
+    emptyWrap: { paddingBottom: 4 },
     loadingWrap: { paddingVertical: 48, alignItems: 'center' },
     empty: { alignItems: 'center', paddingHorizontal: 28 },
     emptyIcon: {
@@ -767,6 +694,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       letterSpacing: 0.1,
       color: colors.primary,
     },
+    urgencyCorner: {
+      position: 'absolute',
+      top: 10,
+      right: 12,
+      zIndex: 1,
+    },
     urgencyChip: {
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -817,27 +750,16 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     itemFooter: {
       marginTop: 4,
-      flexDirection: 'row',
+      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 12,
-      flexWrap: 'wrap',
+      gap: 6,
     },
     itemMeta: {
       fontSize: 12,
       fontWeight: '500',
       fontVariant: ['tabular-nums'],
       color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(15,23,42,0.4)',
-    },
-    detailHint: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 1,
-    },
-    detailHintText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.primary,
     },
     itemDivider: {
       height: StyleSheet.hairlineWidth,

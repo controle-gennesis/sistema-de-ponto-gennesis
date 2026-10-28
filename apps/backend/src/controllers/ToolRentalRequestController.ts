@@ -9,7 +9,10 @@ import {
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { assertUserHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
+import {
+  assertUserHasToolRentalSuppliesAccess,
+  userHasToolRentalSuppliesAccess,
+} from '../lib/toolRentalSuppliesAccess';
 import {
   assertLiberadoContractAccess,
   getLiberadoContractAccessForUser,
@@ -505,8 +508,11 @@ export class ToolRentalRequestController {
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const { search, page = 1, limit = 20, status, scope } = req.query;
+      const { search, page = 1, limit = 20, status, scope, contractId } = req.query;
       const where: Record<string, unknown> = {};
+      if (typeof contractId === 'string' && contractId.trim()) {
+        where.contractId = contractId.trim();
+      }
 
       const statusFilter = parseStatusFilter(status);
       if (statusFilter?.length === 1) {
@@ -650,7 +656,10 @@ export class ToolRentalRequestController {
       const polo = poloRaw === 'GO' || poloRaw === 'DF' ? poloRaw : 'DF';
 
       const contractId = requireString(body.contractId, 'Contrato');
-      await assertLiberadoContractAccess(req, contractId);
+      // Quem tem a tela do Suprimentos enxerga todos os contratos ao abrir uma solicitação.
+      if (!(await userHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin))) {
+        await assertLiberadoContractAccess(req, contractId);
+      }
       const contractRow = await prisma.contract.findUnique({
         where: { id: contractId },
         select: { id: true, name: true },

@@ -36,6 +36,7 @@ import { bootAuthenticatedPageReveal } from '@/lib/pageReveal';
 import { ImpersonationBanner } from './ImpersonationBanner';
 import { ProfileSetupGate } from './ProfileSetupGate';
 import { ScheduledNewsGate } from './ScheduledNewsGate';
+import { GennecyFeedback } from './GennecyFeedback';
 import { EMPREITEIROS_PATH, isEmpreiteiroAllowedPath } from '@/lib/postLoginPath';
 
 export { useIsInsideMainLayoutShell } from './MainLayoutShellContext';
@@ -300,6 +301,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
           />
           <ScheduledNewsGate userId={user?.id} />
           <ProfileSetupGate />
+          <GennecyFeedback userId={user?.id} />
         </div>
       </NativeCallProvider>
     </MainLayoutShellContext.Provider>

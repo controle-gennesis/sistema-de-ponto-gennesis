@@ -1521,6 +1521,8 @@ enum DemandSheetPurchaseStatus {
 /// Ficha de demanda (FD) — aprovação via Controle (Aprovar Fichas de Demanda + contratos liberados).
 model DemandSheetApproval {
   id                      String                     @id @default(cuid())
+  /// Número sequencial exibido na lista (1, 2, 3…).
+  displayNumber           Int?                       @unique
   /// ID legado da planilha (ID_FICHA_DEMANDA)
   externalId              String?                    @unique
   numMovRm                String
@@ -5667,7 +5669,8 @@ model OcsBoletoPixExtra {
   @@map("ocs_boleto_pix_extras")
 }
 
-// ============================================================
+// =====================================================}
+
 // Central de Treinamentos
 // ============================================================
 
@@ -5962,4 +5965,26 @@ model BoletoControlManager {
   updatedAt      DateTime @updatedAt
 
   @@map("boleto_control_managers")
+}
+
+/// Avaliação do sistema pedida pela Gennecy: nota de 1 a 5 e comentário. `dismissed` = a pessoa dispensou o balão.
+model AppFeedback {
+  id        String   @id @default(cuid())
+  /// Nulo quando a resposta veio do WhatsApp e o número não foi ligado a um usuário.
+  userId    String?
+  /// Onde a pergunta foi feita: SISTEMA (balão da Gennecy) ou WHATSAPP (chatbot).
+  source    String   @default("SISTEMA")
+  /// Telefone de quem respondeu pelo WhatsApp.
+  phone     String?
+  rating    Int?
+  /// O que a pessoa mais gosta no sistema (itens escolhidos, separados por vírgula).
+  likes     String?
+  comment   String?
+  /// Onde a pessoa estava quando respondeu (ex.: /ponto/kanban).
+  page      String?
+  dismissed Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("app_feedback")
 }

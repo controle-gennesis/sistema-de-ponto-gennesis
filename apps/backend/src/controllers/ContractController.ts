@@ -15,6 +15,7 @@ import {
   getOrcamentoContractIdsForUser,
   userCanAccessGastosOperacionais
 } from '../lib/contractAccess';
+import { userHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
 import { totvsRmContractLookupCodes } from '../lib/totvsRmContractCostCenterCode';
 import { fetchControleGeralFinancialSummary } from '../services/ControleGeralFinancialService';
@@ -162,7 +163,14 @@ export class ContractController {
       if (!req.user) throw createError('Não autenticado', 401);
       // Lista operacional: contratos Liberado (sem exigir módulo Contratos).
       // A ficha sensível continua protegida por getContractAccessForUser / assertContractAccess.
-      const liberado = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+      // Pedidos de Ferramentas (Suprimentos): quem tem a tela vê todos os contratos.
+      const todosParaSuprimentos =
+        String(req.query.todosSuprimentos || '') === '1' &&
+        (await userHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin));
+      const liberado: Awaited<ReturnType<typeof getLiberadoContractAccessForUser>> =
+        todosParaSuprimentos
+          ? { filter: 'all' }
+          : await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
       const orcamentoIds = await getOrcamentoContractIdsForUser(req.user.id, req.user.isAdmin);
       if (
         liberado.filter === 'none' &&

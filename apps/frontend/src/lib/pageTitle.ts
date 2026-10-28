@@ -23,6 +23,7 @@ const EXTRA_PAGE_TITLES: Record<
     href: '/ponto/financeiro/dashboard-boletos',
   },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
+  '/ponto/avaliacoes-sistema': { title: 'Avaliações do Sistema', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },
   '/ponto/gerenciar-solicitacoes-gerais': {
     title: 'Gerenciar Solicitações',

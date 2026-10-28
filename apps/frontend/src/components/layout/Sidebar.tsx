@@ -823,6 +823,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator
           },
           {
+            name: 'Avaliações do Sistema',
+            href: '/ponto/avaliacoes-sistema',
+            icon: Star,
+            description: 'O que as pessoas responderam à Gennecy (só administrador)',
+            permission: isAdministrator
+          },
+          {
             name: 'Solicitações Internas',
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
@@ -1262,7 +1269,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
-            name: 'Solicitação de Ferramentas',
+            name: 'Pedidos de Ferramentas',
             href: '/ponto/solicitar-ferramentas',
             icon: Wrench,
             description: 'Solicitar locação, renovação, devolução ou compra de equipamentos',

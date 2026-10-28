@@ -619,8 +619,10 @@ export async function importDemandSheets(params: {
           });
           updated += 1;
         } else {
+          const agg = await prisma.demandSheetApproval.aggregate({ _max: { displayNumber: true } });
           await prisma.demandSheetApproval.create({
             data: {
+              displayNumber: (agg._max.displayNumber ?? 0) + 1,
               externalId,
               ...baseData,
               anexos,

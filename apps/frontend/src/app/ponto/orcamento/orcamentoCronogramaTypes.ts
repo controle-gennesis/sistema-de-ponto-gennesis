@@ -334,7 +334,8 @@ export function calcularStatusCronograma(
   hoje: Date = new Date()
 ): CronogramaStatus {
   const pct = data?.percentualExecutado ?? 0;
-  if (pct >= 100) return 'concluido';
+  // Tolerância para sobra de ponto flutuante (ex.: 99,99999999 após somar as quantidades dos dias).
+  if (pct >= 100 - 1e-6) return 'concluido';
   const fim = parseDataIso(data?.dataFim);
   const hojeMeio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 12, 0, 0, 0);
   if (fim && hojeMeio > fim && pct < 100) return 'atrasado';
@@ -546,18 +547,14 @@ export function mesmoTituloSubtituloCronograma(servicoNome: string, subtituloNom
   );
 }
 
-/** Subtítulos que devem aparecer como faixa no cronograma (mesma regra da aba Orçamento). */
+/**
+ * O cronograma não mostra faixas de subtítulo: as composições aparecem direto sob o serviço,
+ * mesmo quando o orçamento tem subtítulos com nome diferente do serviço.
+ */
 export function listarSubtitulosVisiveisCronograma(
-  linha: CronogramaLinhaServico
+  _linha: CronogramaLinhaServico
 ): CronogramaLinhaSubtitulo[] {
-  const blocos = linha.subtitulos ?? [];
-  if (blocos.length === 0) return [];
-  if (blocos.length === 1 && mesmoTituloSubtituloCronograma(linha.servicoNome, blocos[0]!.subtituloNome)) {
-    return [];
-  }
-  return blocos.filter(
-    (st) => !mesmoTituloSubtituloCronograma(linha.servicoNome, st.subtituloNome)
-  );
+  return [];
 }
 
 export function cronogramaUsaHierarquiaSubtitulos(linha: CronogramaLinhaServico): boolean {
@@ -605,6 +602,55 @@ export function agregarDadosComposicoes(
     dataFimReal: maxFimReal,
     percentualExecutado: itens.length > 0 ? somaPct / itens.length : undefined
   };
+}
+
+export type CronogramaSincronizado = {
+  cronograma: CronogramaPersist;
+  /** Itens que saíram do orçamento (com ou sem andamento). */
+  removidos: number;
+  /** Códigos (chave da composição) dos que saíram e já tinham datas reais ou % executado. */
+  removidosComAndamento: string[];
+};
+
+function itemCronogramaTemAndamento(item: CronogramaItemData | undefined): boolean {
+  if (!item) return false;
+  return (
+    (item.percentualExecutado ?? 0) > 0 ||
+    Boolean(item.dataInicioReal) ||
+    Boolean(item.dataFimReal) ||
+    (item.quantidadeExecutada ?? 0) > 0
+  );
+}
+
+/**
+ * Acerta o cronograma com o orçamento atual: o que continua mantém datas e andamento, o que saiu do
+ * orçamento sai do cronograma e o que entrou usa as datas do serviço (ou da obra) até ser ajustado.
+ * Valores, quantidades e unidades já vêm do orçamento na hora, então só é preciso limpar o que sobrou.
+ */
+export function sincronizarCronogramaComOrcamento(
+  cronograma: CronogramaPersist,
+  linhas: CronogramaLinhaServico[]
+): CronogramaSincronizado {
+  const validas = new Set<string>();
+  for (const linha of linhas) {
+    for (const { blocoKey, comp } of listarComposicoesCronogramaLinha(linha)) {
+      validas.add(itemKeyComposicaoCronograma(blocoKey, comp.chave));
+    }
+  }
+  const porItem = { ...(cronograma.porItem ?? {}) };
+  const removidosComAndamento: string[] = [];
+  let removidos = 0;
+  for (const key of Object.keys(porItem)) {
+    // Só chaves de composição ("bloco|chave"); as demais (serviço, subserviço) não são tocadas.
+    if (!key.includes('|') || validas.has(key)) continue;
+    if (itemCronogramaTemAndamento(porItem[key])) {
+      removidosComAndamento.push(key.slice(key.indexOf('|') + 1));
+    }
+    delete porItem[key];
+    removidos += 1;
+  }
+  if (removidos === 0) return { cronograma, removidos: 0, removidosComAndamento: [] };
+  return { cronograma: { ...cronograma, porItem }, removidos, removidosComAndamento };
 }
 
 export function itemKeyComposicaoCronograma(blocoKey: string, chave: string): string {

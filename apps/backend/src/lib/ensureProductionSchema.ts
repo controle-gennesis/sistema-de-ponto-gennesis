@@ -148,6 +148,40 @@ async function ensureContractDefaultTituloFundo(prisma: PrismaClient): Promise<v
   `);
 }
 
+async function ensureAppFeedbackTable(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'app_feedback')) {
+    if (!(await columnExists(prisma, 'app_feedback', 'likes'))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "likes" TEXT;`);
+    }
+    if (!(await columnExists(prisma, 'app_feedback', 'source'))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'SISTEMA';`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "phone" TEXT;`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ALTER COLUMN "userId" DROP NOT NULL;`);
+      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "app_feedback_phone_createdAt_idx" ON "app_feedback"("phone", "createdAt");`);
+    }
+    return;
+  }
+  console.warn('[Schema] Tabela app_feedback ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "app_feedback" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT,
+      "source" TEXT NOT NULL DEFAULT 'SISTEMA',
+      "phone" TEXT,
+      "rating" INTEGER,
+      "likes" TEXT,
+      "comment" TEXT,
+      "page" TEXT,
+      "dismissed" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "app_feedback_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "app_feedback_userId_createdAt_idx" ON "app_feedback"("userId", "createdAt");
+  `);
+}
+
 async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
 
@@ -377,6 +411,31 @@ async function ensureDemandSheetItensPedidos(prisma: PrismaClient): Promise<void
   console.warn('[Schema] Coluna demand_sheet_approvals.itensPedidos ausente — adicionando.');
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "itensPedidos" JSONB NOT NULL DEFAULT '[]';
+  `);
+}
+
+async function ensureDemandSheetDisplayNumber(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'demand_sheet_approvals'))) return;
+  if (!(await columnExists(prisma, 'demand_sheet_approvals', 'displayNumber'))) {
+    console.warn('[Schema] Coluna demand_sheet_approvals.displayNumber ausente — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "displayNumber" INTEGER;
+    `);
+  }
+  // Numera as fichas que ainda não têm número, na ordem de criação (seguro rodar de novo).
+  await prisma.$executeRawUnsafe(`
+    UPDATE "demand_sheet_approvals" d
+    SET "displayNumber" = r.rn + COALESCE((SELECT MAX("displayNumber") FROM "demand_sheet_approvals"), 0)
+    FROM (
+      SELECT "id", ROW_NUMBER() OVER (ORDER BY "createdAt", "id") AS rn
+      FROM "demand_sheet_approvals"
+      WHERE "displayNumber" IS NULL
+    ) r
+    WHERE d."id" = r."id";
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "demand_sheet_approvals_displayNumber_key"
+    ON "demand_sheet_approvals"("displayNumber");
   `);
 }
 
@@ -3340,6 +3399,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureContractDefaultBdiDiscount(prisma);
     await ensureContractDefaultReajustes(prisma);
     await ensureContractDefaultTituloFundo(prisma);
+    await ensureAppFeedbackTable(prisma);
     await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensurePleitoObra(prisma);
@@ -3352,6 +3412,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureEspelhoNfMirrorApprovalColumns(prisma);
     await ensureEspelhoNfMirrorFinalizationColumns(prisma);
     await ensureDemandSheetItensPedidos(prisma);
+    await ensureDemandSheetDisplayNumber(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, FileImage, Filter, Plus, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -82,7 +82,8 @@ export default function RelatoriosFotograficosPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [contratoFiltro, setContratoFiltro] = useState('');
+  const searchParams = useSearchParams();
+  const [contratoFiltro, setContratoFiltro] = useState((searchParams?.get('contrato') || '').trim());
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [novoContractId, setNovoContractId] = useState('');

@@ -220,7 +220,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   {
     key: pathToModuleKey('/ponto/solicitar-ferramentas'),
-    name: 'Solicitação de Ferramentas',
+    name: 'Pedidos de Ferramentas',
     href: '/ponto/solicitar-ferramentas',
     category: 'Engenharia',
   },
