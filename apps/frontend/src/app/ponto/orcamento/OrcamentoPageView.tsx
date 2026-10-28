@@ -19601,22 +19601,20 @@ export function OrcamentoPageView({
                                       ref={refTextoFd(l.key, 'qc')}
                                       className={`${classeDestaqueFd(l.key, 'qc')} p-0 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <FdCampoLocal
-                                        draftKey={`fd-qtd:${l.key}`}
-                                        committedValue={
-                                          qCLive !== undefined
-                                            ? qCLive.toLocaleString('pt-BR', {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 4,
-                                              })
-                                            : ''
-                                        }
-                                        onCommit={(raw) => commitPlanilhaQtdCompra(l.key, raw)}
-                                        commitOnChange
-                                        title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
-                                        inputMode="decimal"
-                                        className={`${inputGradeCls} text-center tabular-nums`}
-                                      />
+                                      {/* Bloqueado para edição: vem só das OCs validadas como pagas no G4. */}
+                                      <span
+                                        className="block px-2 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100"
+                                        title={compraOc ? tituloCompraOc : 'Preenchido quando a OC for validada pelo compras no G4'}
+                                      >
+                                        {qCLive !== undefined ? (
+                                          qCLive.toLocaleString('pt-BR', {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 4,
+                                          })
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500">—</span>
+                                        )}
+                                      </span>
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
@@ -19627,23 +19625,19 @@ export function OrcamentoPageView({
                                         <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
                                           R$
                                         </span>
-                                        <FdCampoLocal
-                                          draftKey={`fd-vl:${l.key}`}
-                                          committedValue={
-                                            vRealLive !== undefined
-                                              ? vRealLive.toLocaleString('pt-BR', {
-                                                  minimumFractionDigits: 2,
-                                                  maximumFractionDigits: 2,
-                                                })
-                                              : ''
-                                          }
-                                          onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
-                                          commitOnChange
-                                          mask={currencyDigitsToFormatted}
-                                          title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                          inputMode="numeric"
-                                          className={`${inputGradeMoedaCls} text-right`}
-                                        />
+                                        <span
+                                          className="flex-1 px-1 py-2.5 text-right text-sm tabular-nums text-gray-900 dark:text-gray-100"
+                                          title={compraOc ? tituloCompraOc : 'Preenchido quando a OC for validada pelo compras no G4'}
+                                        >
+                                          {vRealLive !== undefined ? (
+                                            vRealLive.toLocaleString('pt-BR', {
+                                              minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2,
+                                            })
+                                          ) : (
+                                            <span className="text-gray-400 dark:text-gray-500">—</span>
+                                          )}
+                                        </span>
                                       </div>
                                     </td>
                                     <td
