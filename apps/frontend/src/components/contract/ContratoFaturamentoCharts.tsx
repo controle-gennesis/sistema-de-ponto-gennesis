@@ -1291,12 +1291,20 @@ function AtalhoKpiCard({
 function AtalhoBlocos({ atalhos }: { atalhos: NonNullable<ContratoResumoKpi['atalhos']> }) {
   if (atalhos.length === 0) return null;
   return (
-    <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-4 lg:auto-cols-[9rem] lg:grid-flow-col lg:grid-cols-none lg:grid-rows-2">
-      {atalhos.map(({ label, href: to, icon: Icon }) => (
+    <div
+      className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-4 lg:[grid-template-columns:repeat(var(--atalho-cols),9rem)]"
+      style={{ '--atalho-cols': Math.ceil(atalhos.length / 2) } as React.CSSProperties}
+    >
+      {atalhos.map(({ label, href: to, icon: Icon }, idx) => (
         <Link
           key={label}
           href={to}
-          className={`${cadastroListClasses.card} group flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-3 text-center transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800`}
+          className={`${cadastroListClasses.card} ${
+            // Quantidade ímpar: o último bloco cresce para o lado e preenche a linha de baixo.
+            idx === atalhos.length - 1 && atalhos.length > 1 && atalhos.length % 2 === 1
+              ? 'lg:col-span-2'
+              : ''
+          } group flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-3 text-center transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800`}
         >
           {Icon ? (
             <span className="rounded-lg bg-red-100 p-2 text-red-600 transition-colors group-hover:bg-red-600 group-hover:text-white dark:bg-red-900/30 dark:text-red-400">
