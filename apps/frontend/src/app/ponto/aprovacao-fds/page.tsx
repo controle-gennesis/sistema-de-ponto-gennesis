@@ -497,6 +497,9 @@ export default function AprovacaoFdsPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            ID
+                          </th>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Código da FD
                           </th>
@@ -541,6 +544,9 @@ export default function AprovacaoFdsPage() {
                             role="button"
                             className={getListTableRowClassName(true, listTableRowClasses.tr)}
                           >
+                            <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                              {row.displayNumber ?? '—'}
+                            </td>
                             <td className="px-3 py-4 text-left sm:px-6">
                               <ListRowNavigableLabel className="text-sm font-medium">
                                 {row.codFichaDemanda}

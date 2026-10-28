@@ -18,7 +18,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BadgeCheck,
   CalendarDays,
-  ChevronRight,
   ClipboardList,
   Fuel,
   MailPlus,
@@ -68,7 +67,6 @@ function itemRefCode(item: ApprovalListItemWithTab): string {
     displayNumber?: string | number | null;
     codFichaDemanda?: string | null;
   };
-  if (item.tab === 'fd' && raw?.codFichaDemanda?.trim()) return raw.codFichaDemanda.trim();
   if (raw?.displayNumber != null && String(raw.displayNumber).trim() !== '') {
     return `#${raw.displayNumber}`;
   }
@@ -127,7 +125,6 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
     canApproveOc,
     canApproveOcCompras,
     canApproveOcDiretoria,
@@ -140,14 +137,12 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     if (canAccessDpApproverPages) list.push('dp');
     if (canApproveFuel) list.push('fuel');
     if (canApproveFd) list.push('fd');
-    if (canApproveMaterialRequests) list.push('rm');
-    // OC e Medições não aparecem nesta folha: seguem só pela web.
+    // RM, OC e Medições não aparecem nesta folha: seguem só pela web.
     return list;
   }, [
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
-    canApproveMaterialRequests,
   ]);
 
   const ocFlags = useMemo(
@@ -325,7 +320,7 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     listQuery.isLoading
       ? 'Carregando…'
       : items.length === 0
-        ? 'Nada pendente no momento'
+        ? 'Tudo em dia! Quando houver algo para você aprovar, aparece aqui.'
         : `${items.length} pendente${items.length === 1 ? '' : 's'}`;
 
   const overlays = (
@@ -434,20 +429,7 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
-          <View style={styles.empty}>
-            <View
-              style={[
-                styles.emptyIcon,
-                { backgroundColor: isDark ? colors.surface : colors.background },
-              ]}
-            >
-              <BadgeCheck size={22} color={colors.textSecondary} strokeWidth={2} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>Tudo em dia</Text>
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Não há solicitações pendentes no momento.
-            </Text>
-          </View>
+          <View />
         )
       }
       renderItem={({ item }) => {
@@ -471,35 +453,35 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
           item.urgencyTone === 'high' || item.urgencyTone === 'urgent';
         return (
           <View style={styles.item}>
+            {showUrgency ? (
+              <View
+                style={[
+                  styles.urgencyChip,
+                  styles.urgencyCorner,
+                  item.urgencyTone === 'urgent' ? styles.urgencyUrgent : styles.urgencyHigh,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.urgencyChipText,
+                    item.urgencyTone === 'urgent'
+                      ? styles.urgencyUrgentText
+                      : styles.urgencyHighText,
+                  ]}
+                >
+                  {item.urgencyLabel}
+                </Text>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={styles.itemBody}
               onPress={() => setSelected(item)}
               activeOpacity={0.75}
               disabled={itemBusy}
+              accessibilityLabel="Ver detalhes"
             >
               <View style={styles.itemRefRow}>
                 <Text style={styles.itemRef} numberOfLines={2}>{itemRefCode(item)}</Text>
-                {showUrgency ? (
-                  <View
-                    style={[
-                      styles.urgencyChip,
-                      item.urgencyTone === 'urgent'
-                        ? styles.urgencyUrgent
-                        : styles.urgencyHigh,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.urgencyChipText,
-                        item.urgencyTone === 'urgent'
-                          ? styles.urgencyUrgentText
-                          : styles.urgencyHighText,
-                      ]}
-                    >
-                      {item.urgencyLabel}
-                    </Text>
-                  </View>
-                ) : null}
               </View>
               <View style={styles.typeChip} accessibilityLabel={item.categoryLabel}>
                 <TypeIcon size={13} color={colors.primary} strokeWidth={2.2} />
@@ -526,14 +508,6 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
                     strokeWidth={2.2}
                   />
                   <Text style={styles.itemMeta}>{itemDateLabel(item)}</Text>
-                </View>
-                <View style={styles.detailHint}>
-                  <Text style={styles.detailHintText}>Detalhes</Text>
-                  <ChevronRight
-                    size={14}
-                    color={colors.primary}
-                    strokeWidth={2.4}
-                  />
                 </View>
               </View>
             </TouchableOpacity>
@@ -650,7 +624,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     list: { flexGrow: 0 },
     listContent: { gap: 12, paddingBottom: 4, paddingTop: 2 },
-    emptyWrap: { justifyContent: 'center', paddingVertical: 48 },
+    emptyWrap: { paddingBottom: 4 },
     loadingWrap: { paddingVertical: 48, alignItems: 'center' },
     empty: { alignItems: 'center', paddingHorizontal: 28 },
     emptyIcon: {
@@ -720,6 +694,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       letterSpacing: 0.1,
       color: colors.primary,
     },
+    urgencyCorner: {
+      position: 'absolute',
+      top: 10,
+      right: 12,
+      zIndex: 1,
+    },
     urgencyChip: {
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -770,27 +750,16 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     itemFooter: {
       marginTop: 4,
-      flexDirection: 'row',
+      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 12,
-      flexWrap: 'wrap',
+      gap: 6,
     },
     itemMeta: {
       fontSize: 12,
       fontWeight: '500',
       fontVariant: ['tabular-nums'],
       color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(15,23,42,0.4)',
-    },
-    detailHint: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 1,
-    },
-    detailHintText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.primary,
     },
     itemDivider: {
       height: StyleSheet.hairlineWidth,

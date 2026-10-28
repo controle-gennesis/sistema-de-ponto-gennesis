@@ -650,6 +650,12 @@ async function userCanAccessFdsAprovadasModule(userId: string, isAdmin: boolean)
   return !!perm;
 }
 
+/** Próximo número sequencial da lista de fichas (1, 2, 3…). */
+export async function nextFdDisplayNumber(): Promise<number> {
+  const agg = await prisma.demandSheetApproval.aggregate({ _max: { displayNumber: true } });
+  return (agg._max.displayNumber ?? 0) + 1;
+}
+
 /** Escopo da página Fichas de Demanda: próprias + contratos Liberados. Aprovar FD não lista aqui. */
 async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prisma.DemandSheetApprovalWhereInput> {
   if (isAdmin) return {};
@@ -870,6 +876,7 @@ export class DemandSheetApprovalController {
 
       const row = await prisma.demandSheetApproval.create({
         data: {
+          displayNumber: await nextFdDisplayNumber(),
           numMovRm: body.numMovRm.trim(),
           idMovRm: body.idMovRm.trim(),
           codigoPedido: body.codigoPedido.trim(),
@@ -919,7 +926,24 @@ export class DemandSheetApprovalController {
         throw createError('A ficha só pode ser editada até a etapa Fila', 400);
       }
       if (!req.user.isAdmin && existing.createdBy !== req.user.id) {
-        throw createError('Sem permissão para editar esta ficha', 403);
+        // Quem enxerga a ficha também pode editá-la (mesmo escopo da leitura em getById).
+        const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, false);
+        let podeVer = canFdsAprovadas && existing.status === 'APPROVED';
+        if (!podeVer) {
+          const scope = await listWhereForUser(req.user.id, false);
+          podeVer = !!(await prisma.demandSheetApproval.findFirst({
+            where: { id, ...scope },
+            select: { id: true },
+          }));
+        }
+        if (!podeVer && existing.status === 'WAITING_MANAGER') {
+          const managerScope = await getFdManagerApprovalVisibilityWhere(req.user.id, false);
+          podeVer = !!(await prisma.demandSheetApproval.findFirst({
+            where: { id, status: 'WAITING_MANAGER', ...managerScope },
+            select: { id: true },
+          }));
+        }
+        if (!podeVer) throw createError('Sem permissão para editar esta ficha', 403);
       }
 
       const body = formSchema.parse(req.body);

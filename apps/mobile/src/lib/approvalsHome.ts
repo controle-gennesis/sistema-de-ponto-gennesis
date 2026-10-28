@@ -40,7 +40,7 @@ export type ApprovalListItemWithTab = ApprovalListItem & {
 const APPROVAL_TAB_LABELS: Record<ApprovalTabId, string> = {
   dp: 'Solicitações Internas',
   fuel: 'Combustível',
-  fd: 'FD',
+  fd: 'Fichas de Demanda',
   rm: 'RM',
   oc: 'OC',
   medicao: 'Medições',
@@ -139,7 +139,8 @@ export async function fetchPendingApprovalsForTab(
         id: row.id,
         title: codigo || 'Ficha de demanda',
         person: solicitante,
-        place: [contrato, obra].filter(Boolean).join(' · ') || null,
+        // Contrato em cima e a obra embaixo.
+        place: [contrato, obra].filter(Boolean).join('\n') || null,
         subtitle: obra || contrato || solicitante || '—',
         meta: `${formatApprovalMoney(Number(row.faturamentoEstimado))} · ${formatApprovalDate(row.createdAt)}`,
         statusLabel: 'Pendente',

@@ -406,6 +406,31 @@ async function ensureDemandSheetItensPedidos(prisma: PrismaClient): Promise<void
   `);
 }
 
+async function ensureDemandSheetDisplayNumber(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'demand_sheet_approvals'))) return;
+  if (!(await columnExists(prisma, 'demand_sheet_approvals', 'displayNumber'))) {
+    console.warn('[Schema] Coluna demand_sheet_approvals.displayNumber ausente — adicionando.');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "displayNumber" INTEGER;
+    `);
+  }
+  // Numera as fichas que ainda não têm número, na ordem de criação (seguro rodar de novo).
+  await prisma.$executeRawUnsafe(`
+    UPDATE "demand_sheet_approvals" d
+    SET "displayNumber" = r.rn + COALESCE((SELECT MAX("displayNumber") FROM "demand_sheet_approvals"), 0)
+    FROM (
+      SELECT "id", ROW_NUMBER() OVER (ORDER BY "createdAt", "id") AS rn
+      FROM "demand_sheet_approvals"
+      WHERE "displayNumber" IS NULL
+    ) r
+    WHERE d."id" = r."id";
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "demand_sheet_approvals_displayNumber_key"
+    ON "demand_sheet_approvals"("displayNumber");
+  `);
+}
+
 async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'demand_sheet_approvals'))) {
     console.warn('[Schema] Tabela demand_sheet_approvals ausente — criando.');
@@ -3379,6 +3404,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureEspelhoNfMirrorApprovalColumns(prisma);
     await ensureEspelhoNfMirrorFinalizationColumns(prisma);
     await ensureDemandSheetItensPedidos(prisma);
+    await ensureDemandSheetDisplayNumber(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
     await ensurePurchaseOrderTotvsFields(prisma);
