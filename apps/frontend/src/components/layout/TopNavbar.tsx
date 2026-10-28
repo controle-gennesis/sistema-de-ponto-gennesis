@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import {
+  ArrowLeft,
   Camera,
   ChevronRight,
   Loader2,
@@ -128,6 +129,11 @@ function ThemeToggle({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
   );
 }
 
+/** Páginas que são um desdobramento de outra: seta de voltar antes do breadcrumb. */
+const BACK_LINKS: Record<string, { href: string; label: string }> = {
+  '/ponto/financeiro/dashboard-boletos': { href: '/ponto/financeiro/controle-boletos', label: 'Voltar para Controle de Boletos' },
+};
+
 export function TopNavbar({
   userName,
   onLogout,
@@ -155,6 +161,7 @@ export function TopNavbar({
     setProfileReady(true);
   }, []);
 
+  const backLink = pathname ? BACK_LINKS[pathname.replace(/\/+$/, '')] : undefined;
   const breadcrumbs = appendBreadcrumbEntity(
     resolveBreadcrumbs(pathname ?? '/'),
     breadcrumbEntities,
@@ -273,6 +280,16 @@ export function TopNavbar({
 
         {/* Breadcrumb — no mobile só o último item */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {backLink ? (
+            <Link
+              href={backLink.href}
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              aria-label={backLink.label}
+              title={backLink.label}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          ) : null}
           <nav aria-label="Breadcrumb" className="min-w-0 max-w-full flex-1">
             <ol className="flex min-w-0 items-center gap-1 overflow-hidden text-sm">
               {breadcrumbs.length === 0 ? (

@@ -941,6 +941,10 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || can(pk('/ponto/financeiro/controle-financeiro')),
+    '/ponto/financeiro/controle-boletos':
+      isAdministrator || can(pk('/ponto/financeiro/controle-boletos')),
+    '/ponto/financeiro/dashboard-boletos':
+      isAdministrator || can(pk('/ponto/financeiro/controle-boletos')),
     '/ponto/financeiro/receitas': isAdministrator || can(pk('/ponto/financeiro/receitas')),
     '/ponto/financeiro/espelhos-aprovados':
       isAdministrator || can(pk('/ponto/financeiro/espelhos-aprovados')),

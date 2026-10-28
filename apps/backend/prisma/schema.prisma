@@ -5911,3 +5911,55 @@ model PasswordResetCode {
   @@index([userId])
   @@map("password_reset_codes")
 }
+
+/// Controle de Boletos (Financeiro): linhas importadas da planilha ou lançadas à mão.
+model BoletoControlEntry {
+  id                       String    @id @default(cuid())
+  /// POLO DF, POLO GO, CONFEA…
+  polo                     String?
+  supplierName             String?
+  costCenterName           String?
+  /// Nº da OC no TOTVS (ex.: 15622)
+  ocNumber                 String?
+  /// ID do movimento no TOTVS (ex.: 68726)
+  idMov                    String?
+  value                    Decimal?  @db.Decimal(15, 2)
+  nfNumber                 String?
+  nfEmissionDate           DateTime? @db.Date
+  /// Texto livre (ex.: BOLETO 28 DIAS, BOLETO 1/2 28/56 DIAS)
+  paymentCondition         String?
+  dueDate                  DateTime? @db.Date
+  /// PAGO | A_VENCER | VENCIDO (a tela mostra VENCIDO sozinho quando o vencimento passa e não está PAGO)
+  status                   String    @default("A_VENCER")
+  notes                    String?
+  contractManager          String?
+  technicalConfirmed       Boolean   @default(false)
+  technicalConfirmedAt     DateTime?
+  technicalConfirmedByName String?
+  /// Chave da linha na importação (evita duplicar ao importar a mesma planilha de novo)
+  importKey                String?   @unique
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  createdBy                String?
+  updatedBy                String?
+
+  @@index([dueDate])
+  @@index([status])
+  @@index([polo])
+  @@index([supplierName])
+  @@index([ocNumber])
+  @@index([costCenterName])
+  @@map("boleto_control_entries")
+}
+
+/// Controle de Boletos: gestor do contrato de cada centro de custo (o gestor do boleto vem daqui).
+model BoletoControlManager {
+  id             String   @id @default(cuid())
+  /// Nome oficial do centro de custo (igual ao cadastro de centros de custo)
+  costCenterName String   @unique
+  managerName    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("boleto_control_managers")
+}

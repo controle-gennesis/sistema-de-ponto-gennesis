@@ -26,6 +26,7 @@ import {
   ImagePlus,
   CalendarDays,
   FileSpreadsheet,
+  Banknote,
   BookText,
   BookPlus,
   BookImage,
@@ -1046,6 +1047,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: ClipboardList,
             description: 'Controle de Material/Serviço Aplicado por mês e ano',
             permission: isAdministrator || can(pk('/ponto/financeiro/controle-financeiro'))
+          },
+          {
+            name: 'Controle de Boletos',
+            href: '/ponto/financeiro/controle-boletos',
+            icon: Banknote,
+            description: 'Boletos por fornecedor, vencimento e confirmação de pagamento',
+            permission: isAdministrator || can(pk('/ponto/financeiro/controle-boletos'))
           },
           {
             name: 'Receitas',

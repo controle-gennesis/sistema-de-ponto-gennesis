@@ -132,6 +132,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   // Financeiro
   { key: pathToModuleKey('/ponto/financeiro/controle-financeiro'), name: 'Controle Financeiro', href: '/ponto/financeiro/controle-financeiro', category: 'Financeiro' },
+  { key: pathToModuleKey('/ponto/financeiro/controle-boletos'), name: 'Controle de Boletos', href: '/ponto/financeiro/controle-boletos', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/receitas'), name: 'Receitas', href: '/ponto/financeiro/receitas', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/espelhos-aprovados'), name: 'Espelhos de NF', href: '/ponto/financeiro/espelhos-aprovados', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Balanço Financeiro', href: '/ponto/financeiro/analise-extrato', category: 'Métricas' },

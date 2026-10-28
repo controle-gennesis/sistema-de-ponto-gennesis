@@ -3,7 +3,10 @@ import { PERMISSION_MODULES } from '@sistema-ponto/permission-modules';
 export const APP_TITLE = 'Gennesis Conecta';
 
 /** Rotas que não estão em PERMISSION_MODULES ou usam href diferente no menu. */
-const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href?: string }> = {
+const EXTRA_PAGE_TITLES: Record<
+  string,
+  { title: string; category?: string; href?: string; parent?: { label: string; href: string } }
+> = {
   '/ponto/home': { title: 'Início' },
   '/ponto/agenda': { title: 'Agenda', category: 'Principal' },
   '/ponto/cronogramas': { title: 'Cronogramas', category: 'Engenharia', href: '/ponto/cronogramas' },
@@ -12,6 +15,12 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     title: 'Relatórios Fotográficos',
     category: 'Engenharia',
     href: '/ponto/relatorios-fotograficos',
+  },
+  '/ponto/financeiro/dashboard-boletos': {
+    title: 'Dashboard Boletos',
+    category: 'Financeiro',
+    parent: { label: 'Controle de Boletos', href: '/ponto/financeiro/controle-boletos' },
+    href: '/ponto/financeiro/dashboard-boletos',
   },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },
@@ -152,7 +161,11 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
   const extra = EXTRA_PAGE_TITLES[path];
   if (extra) {
     if (extra.category) {
-      return [{ label: extra.category }, { label: extra.title, href: extra.href ?? path }];
+      return [
+        { label: extra.category },
+        ...(extra.parent ? [{ label: extra.parent.label, href: extra.parent.href }] : []),
+        { label: extra.title, href: extra.href ?? path },
+      ];
     }
     return [{ label: extra.title, href: path }];
   }
