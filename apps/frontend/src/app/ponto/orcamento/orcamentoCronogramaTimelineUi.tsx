@@ -80,6 +80,9 @@ export function TimelineEtapaEditor({
   const custo = row.valorTotal ?? 0;
   const medeQuantidade = qtdOrcada > 0;
   const [textosDia, setTextosDia] = useState<Record<string, string>>({});
+  const [focoIso, setFocoIso] = useState<string | null>(null);
+  // Texto da quantidade orçada para inserir em fórmulas (vírgula decimal, sem separador de milhar).
+  const qtdOrcadaTexto = String(Math.round(qtdOrcada * 10000) / 10000).replace('.', ',');
   const formulasSalvas = row.dados.formulasQuantidadePorDia;
   const inicioPrazo = parseDataIso(datasReais ? row.dados.dataInicioReal : row.dados.dataInicio);
   const fimPrazo = parseDataIso(datasReais ? row.dados.dataFimReal : row.dados.dataFim);
@@ -216,7 +219,7 @@ export function TimelineEtapaEditor({
                     {dia.data.toLocaleDateString('pt-BR')}
                   </p>
                   <div className="grid grid-cols-3 gap-3">
-                    <label className="block min-w-0">
+                    <label className="relative block min-w-0">
                       <span className={editorLabelCls}>Quantidade</span>
                       <input
                         type="text"
@@ -224,12 +227,14 @@ export function TimelineEtapaEditor({
                         value={texto}
                         onChange={(e) => aplicarQuantidadeDia(iso, e.target.value)}
                         onFocus={() => {
+                          setFocoIso(iso);
                           const f = formulasSalvas?.[iso];
                           if (f && !Object.prototype.hasOwnProperty.call(textosDia, iso)) {
                             setTextosDia((prev) => ({ ...prev, [iso]: f }));
                           }
                         }}
                         onBlur={() => {
+                          setFocoIso((atual) => (atual === iso ? null : atual));
                           // Sai da edição: mostra o resultado (a fórmula continua salva); fórmula inválida volta ao último valor.
                           setTextosDia((prev) => {
                             const { [iso]: _descartado, ...resto } = prev;
@@ -240,6 +245,27 @@ export function TimelineEtapaEditor({
                         className={editorInputCls}
                         aria-label={`Quantidade em ${dia.data.toLocaleDateString('pt-BR')} — ${row.label}`}
                       />
+                      {focoIso === iso && /^=.*[=+\-*/(;]$|^=$/.test(texto.trim()) ? (
+                        <div className="absolute left-0 top-full z-20 mt-1 w-max min-w-full rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-600 dark:bg-gray-800">
+                          <button
+                            type="button"
+                            // mouseDown (e não click) para o campo não perder o foco antes de inserir.
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              aplicarQuantidadeDia(iso, `${texto.trim()}${qtdOrcadaTexto}`);
+                            }}
+                            className="flex w-full items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-red-50 dark:hover:bg-red-950/30"
+                          >
+                            <span className="font-semibold text-gray-800 dark:text-gray-100">
+                              Quantidade do orçamento
+                            </span>
+                            <span className="tabular-nums text-gray-500 dark:text-gray-400">
+                              {formatQtdEditor(qtdOrcada)}
+                              {row.unidade ? ` ${row.unidade}` : ''}
+                            </span>
+                          </button>
+                        </div>
+                      ) : null}
                     </label>
                     <div className="min-w-0">
                       <p className={editorLabelCls}>Valor usado</p>
