@@ -18,6 +18,7 @@ type AvaliacaoItem = {
   id: string;
   userName: string;
   userEmail: string;
+  source?: string;
   rating: number;
   likes: string[];
   comment: string;
@@ -297,6 +298,11 @@ function AvaliacoesConteudo() {
                     </p>
                   ) : null}
                   <p className="mt-1 text-xs text-gray-400">{formatarDataHora(a.createdAt)}</p>
+                  {a.source === 'WHATSAPP' ? (
+                    <span className="mt-1.5 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      WhatsApp
+                    </span>
+                  ) : null}
                 </div>
                 <div className="min-w-0 flex-1 space-y-2">
                   <Estrelas nota={a.rating} tamanho="h-5 w-5" />
@@ -362,7 +368,7 @@ export default function AvaliacoesSistemaPage() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Avaliações do sistema"
+            title="Avaliações do Sistema"
             description="O que as pessoas responderam à Gennecy: nota, o que mais curtem e comentários."
           />
           <AvaliacoesConteudo />

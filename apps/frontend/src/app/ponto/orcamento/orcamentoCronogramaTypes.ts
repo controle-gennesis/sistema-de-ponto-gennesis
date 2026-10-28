@@ -334,7 +334,8 @@ export function calcularStatusCronograma(
   hoje: Date = new Date()
 ): CronogramaStatus {
   const pct = data?.percentualExecutado ?? 0;
-  if (pct >= 100) return 'concluido';
+  // Tolerância para sobra de ponto flutuante (ex.: 99,99999999 após somar as quantidades dos dias).
+  if (pct >= 100 - 1e-6) return 'concluido';
   const fim = parseDataIso(data?.dataFim);
   const hojeMeio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 12, 0, 0, 0);
   if (fim && hojeMeio > fim && pct < 100) return 'atrasado';

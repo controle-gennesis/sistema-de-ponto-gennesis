@@ -153,13 +153,21 @@ async function ensureAppFeedbackTable(prisma: PrismaClient): Promise<void> {
     if (!(await columnExists(prisma, 'app_feedback', 'likes'))) {
       await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "likes" TEXT;`);
     }
+    if (!(await columnExists(prisma, 'app_feedback', 'source'))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'SISTEMA';`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ADD COLUMN IF NOT EXISTS "phone" TEXT;`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE "app_feedback" ALTER COLUMN "userId" DROP NOT NULL;`);
+      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "app_feedback_phone_createdAt_idx" ON "app_feedback"("phone", "createdAt");`);
+    }
     return;
   }
   console.warn('[Schema] Tabela app_feedback ausente — criando.');
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "app_feedback" (
       "id" TEXT NOT NULL,
-      "userId" TEXT NOT NULL,
+      "userId" TEXT,
+      "source" TEXT NOT NULL DEFAULT 'SISTEMA',
+      "phone" TEXT,
       "rating" INTEGER,
       "likes" TEXT,
       "comment" TEXT,

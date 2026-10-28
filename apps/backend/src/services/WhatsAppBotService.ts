@@ -4,6 +4,8 @@ import { metaWhatsApp } from './MetaWhatsAppService';
 import { processWhatsAppFuelFlow } from './WhatsAppFuelFlowHandler';
 import { processWhatsAppFuelRefuelReportFlow } from './WhatsAppFuelRefuelReportFlowHandler';
 import { processWhatsAppSupportFlow } from './WhatsAppSupportFlowHandler';
+import { feedbackInviteAction, processWhatsAppFeedbackFlow } from './WhatsAppFeedbackFlowHandler';
+import { registerWhatsAppFeedbackAsk, shouldAskWhatsAppFeedback } from '../lib/appFeedbackRules';
 import { processWhatsAppVehicleReservationFlow } from './WhatsAppVehicleReservationFlowHandler';
 import { processWhatsAppVehicleReservationReturnFlow } from './WhatsAppVehicleReservationReturnFlowHandler';
 import * as fs from 'fs';
@@ -64,7 +66,11 @@ type FlowStatus =
   | 'VRR_ASK_PHOTO'
   | 'VRR_ASK_OBSERVATIONS'
   | 'VRR_CONFIRM'
-  | 'VRR_COMPLETE';
+  | 'VRR_COMPLETE'
+  | 'FEEDBACK_INVITE'
+  | 'FEEDBACK_RATING'
+  | 'FEEDBACK_LIKES'
+  | 'FEEDBACK_COMMENT';
 
 type FaqItem = { id: string; question: string; answer: string; label?: string };
 type FaqTopic = { id: string; title: string; items: FaqItem[]; label?: string };
@@ -1070,8 +1076,30 @@ export class WhatsAppBotService {
       endConversation,
     });
 
+    const feedbackResult = await processWhatsAppFeedbackFlow({
+      textRaw,
+      content,
+      flowStatus: normalizedFlowStatus,
+      payload: newPayload,
+      isMenuRequest,
+      isEndRequest,
+      resetToMenu,
+      endConversation,
+    });
+
     let skipDefaultSwitch = false;
-    if (fuelReportResult) {
+    if (feedbackResult) {
+      sendAction = feedbackResult.sendAction;
+      newStatus = feedbackResult.newStatus as FlowStatus;
+      newPayload = feedbackResult.newPayload;
+      if (feedbackResult.newConversationStatus) {
+        newConversationStatus = feedbackResult.newConversationStatus;
+      }
+      if (feedbackResult.clearPayload) {
+        Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+      }
+      skipDefaultSwitch = true;
+    } else if (fuelReportResult) {
       sendAction = fuelReportResult.sendAction;
       newStatus = fuelReportResult.newStatus as FlowStatus;
       newPayload = fuelReportResult.newPayload;
@@ -1710,6 +1738,41 @@ export class WhatsAppBotService {
         sendAction.buttonText,
         sendAction.sections
       );
+    }
+
+    // Atendimento concluído: convida para avaliar o sistema (no máximo a cada 90 dias, nunca para
+    // administradores). A conversa continua aberta para receber a resposta, ainda dentro das 24h.
+    const acabouDeConcluir =
+      /_COMPLETE$/.test(String(newStatus)) && !/_COMPLETE$/.test(String(flowStatusBefore));
+    if (acabouDeConcluir && !skipInactivityTimeout) {
+      try {
+        if (await shouldAskWhatsAppFeedback(phone)) {
+          const feedbackId = await registerWhatsAppFeedbackAsk(phone);
+          const invite = feedbackInviteAction();
+          await prisma.whatsAppConversation.update({
+            where: { id: conversation.id },
+            data: {
+              flowStatus: 'FEEDBACK_INVITE',
+              currentStep: 'FEEDBACK_INVITE',
+              payload: { feedbackId } as Prisma.InputJsonValue,
+              status: 'PENDING'
+            } as any
+          });
+          newConversationStatus = 'PENDING';
+          await prisma.whatsAppMessage.create({
+            data: {
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: invite.type === 'buttons' ? invite.body : ''
+            }
+          });
+          if (invite.type === 'buttons') {
+            await metaWhatsApp.sendButtons(phone, invite.body, invite.buttons);
+          }
+        }
+      } catch (e) {
+        console.error('[WhatsAppBotService] Falha ao convidar para avaliação:', e);
+      }
     }
 
     // Se a conversa continuar em andamento (PENDING), agendar encerrar por inatividade.

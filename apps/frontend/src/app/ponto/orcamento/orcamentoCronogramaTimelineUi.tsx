@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Divide } from 'lucide-react';
 import {
   isoDiaCronograma,
   repartirUsoPorDiasCronograma,
@@ -46,8 +47,10 @@ function formatQtdEditor(n: number): string {
 function usoDaComposicao(qtdUsada: number, qtdOrcada: number, custo: number) {
   if (!(qtdOrcada > 0)) return { percentual: 0, valorUsado: 0 };
   const razao = qtdUsada / qtdOrcada;
+  // Soma dos dias que fecha a quantidade orçada (a menos de ruído de ponto flutuante) vale exatamente 100%.
+  const fechou = Math.abs(razao - 1) < 1e-9;
   return {
-    percentual: Math.min(100, Math.max(0, razao * 100)),
+    percentual: fechou ? 100 : Math.min(100, Math.max(0, razao * 100)),
     valorUsado: razao * custo
   };
 }
@@ -122,6 +125,32 @@ export function TimelineEtapaEditor({
     });
   };
 
+  /** Reparte a quantidade orçada igualmente pelos dias do prazo; a sobra de arredondamento vai para o último dia. */
+  const dividirIgualmente = () => {
+    const n = diasPrazo.length;
+    if (n === 0 || !(qtdOrcada > 0)) return;
+    if (temMapa && !window.confirm('Substituir as quantidades já lançadas pela divisão igual entre os dias?')) {
+      return;
+    }
+    const fator = 10 ** 4;
+    const porDia = Math.floor((qtdOrcada / n) * fator) / fator;
+    const mapa: Record<string, number> = {};
+    let acumulado = 0;
+    diasPrazo.forEach((dia, i) => {
+      const qtd = i === n - 1 ? Math.round((qtdOrcada - acumulado) * fator) / fator : porDia;
+      acumulado += qtd;
+      if (qtd > 0) mapa[isoDiaCronograma(dia.data)] = qtd;
+    });
+    const soma = Object.values(mapa).reduce((acc, qtd) => acc + qtd, 0);
+    setTextosDia({});
+    onPatchDados(row, {
+      quantidadesPorDia: Object.keys(mapa).length > 0 ? mapa : undefined,
+      formulasQuantidadePorDia: undefined,
+      quantidadeExecutada: soma > 0 ? soma : undefined,
+      percentualExecutado: soma > 0 ? usoDaComposicao(soma, qtdOrcada, custo).percentual : undefined
+    });
+  };
+
   return (
     <Modal
       isOpen
@@ -159,10 +188,23 @@ export function TimelineEtapaEditor({
         </div>
         {medeQuantidade ? (
           <div className="space-y-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Orçada: {formatQtdEditor(qtdOrcada)}
-              {row.unidade ? ` ${row.unidade}` : ''}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Orçada: {formatQtdEditor(qtdOrcada)}
+                {row.unidade ? ` ${row.unidade}` : ''}
+              </p>
+              {diasPrazo.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={dividirIgualmente}
+                  title="Reparte a quantidade e o valor igualmente por todos os dias do prazo"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                >
+                  <Divide className="h-3.5 w-3.5" aria-hidden />
+                  Dividir igualmente
+                </button>
+              ) : null}
+            </div>
             {diasPrazo.map((dia) => {
               const iso = isoDiaCronograma(dia.data);
               const texto = textoDoDia(iso);

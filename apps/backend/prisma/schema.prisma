@@ -5917,7 +5917,12 @@ model PasswordResetCode {
 /// Avaliação do sistema pedida pela Gennecy: nota de 1 a 5 e comentário. `dismissed` = a pessoa dispensou o balão.
 model AppFeedback {
   id        String   @id @default(cuid())
-  userId    String
+  /// Nulo quando a resposta veio do WhatsApp e o número não foi ligado a um usuário.
+  userId    String?
+  /// Onde a pergunta foi feita: SISTEMA (balão da Gennecy) ou WHATSAPP (chatbot).
+  source    String   @default("SISTEMA")
+  /// Telefone de quem respondeu pelo WhatsApp.
+  phone     String?
   rating    Int?
   /// O que a pessoa mais gosta no sistema (itens escolhidos, separados por vírgula).
   likes     String?

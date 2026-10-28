@@ -822,7 +822,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator
           },
           {
-            name: 'Avaliações do sistema',
+            name: 'Avaliações do Sistema',
             href: '/ponto/avaliacoes-sistema',
             icon: Star,
             description: 'O que as pessoas responderam à Gennecy (só administrador)',

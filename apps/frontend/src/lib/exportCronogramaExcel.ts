@@ -74,10 +74,10 @@ const COL = {
   status: 12,
 } as const;
 const COLUNAS_TABELA = 12;
-const LINHAS_TITULO = 3;
-const LINHA_HEADER_1 = 4;
-const LINHA_HEADER_2 = 5;
-const PRIMEIRA_LINHA_DADOS = 6;
+// Sem linhas de título: o cabeçalho da tabela é a primeira linha da planilha.
+const LINHA_HEADER_1 = 1;
+const LINHA_HEADER_2 = 2;
+const PRIMEIRA_LINHA_DADOS = 3;
 
 function hexToArgb(hex: string | undefined, fallback: string): string {
   if (!hex) return fallback;
@@ -147,7 +147,7 @@ export async function buildCronogramaExcel(
   workbook.created = new Date();
   workbook.modified = new Date();
 
-  // ---- linha do tempo: diária em obras curtas, semanal nas longas
+  // ---- linha do tempo: dia a dia (semanal só em obras muito longas)
   const datas: number[] = [];
   for (const l of linhas) {
     for (const iso of [l.inicio, l.fim, l.inicioReal, l.fimReal]) {
@@ -161,7 +161,8 @@ export async function buildCronogramaExcel(
   const iniMs = temTimeline ? Math.min(...datas) : 0;
   const fimMs = temTimeline ? Math.max(...datas) : 0;
   const totalDias = temTimeline ? Math.round((fimMs - iniMs) / DIA_MS) + 1 : 0;
-  const passo = totalDias > 70 ? 7 : 1;
+  // Um dia por coluna (como na visão "Obra"); só obras muito longas (> 520 dias) caem para semanas.
+  const passo = totalDias > 520 ? 7 : 1;
   const nColsTimeline = temTimeline ? Math.min(520, Math.ceil(totalDias / passo)) : 0;
   const primeiraColTimeline = COLUNAS_TABELA + 1;
   const ultimaColTimeline = COLUNAS_TABELA + nColsTimeline;
@@ -195,26 +196,6 @@ export async function buildCronogramaExcel(
   for (let c = primeiraColTimeline; c <= ultimaColTimeline; c++) {
     sheet.getColumn(c).width = passo === 1 ? 3.2 : 5.2;
   }
-
-  // ---- título
-  const ultimaColunaTitulo = Math.max(COLUNAS_TABELA, ultimaColTimeline > 0 ? Math.min(ultimaColTimeline, COLUNAS_TABELA + 12) : COLUNAS_TABELA);
-  sheet.mergeCells(1, 1, 1, COLUNAS_TABELA);
-  const titulo = sheet.getCell(1, 1);
-  titulo.value = (opts.titulo || 'Cronograma da obra').toUpperCase();
-  titulo.font = { name: fonte, size: 16, bold: true, color: { argb: TEXTO } };
-  titulo.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-  sheet.getRow(1).height = 30;
-
-  sheet.mergeCells(2, 1, 2, COLUNAS_TABELA);
-  const sub = sheet.getCell(2, 1);
-  sub.value =
-    (opts.contrato ? `${opts.contrato} · ` : '') +
-    'Barra cinza = planejado · barra colorida = realizado (a cor acompanha o status)';
-  sub.font = { name: fonte, size: 10, italic: true, color: { argb: CINZA_TEXTO } };
-  sub.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-  sheet.getRow(2).height = 18;
-  sheet.getRow(LINHAS_TITULO).height = 8;
-  void ultimaColunaTitulo;
 
   // ---- cabeçalho (2 linhas: a tabela mescla as duas; a linha do tempo tem mês e dia)
   const titulosColunas = [

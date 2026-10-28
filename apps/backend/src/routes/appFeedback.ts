@@ -3,15 +3,11 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { authenticate, requireAdministrator, type AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { DIAS_ANTES_DA_PRIMEIRA_PERGUNTA, DIAS_ENTRE_PERGUNTAS } from '../lib/appFeedbackRules';
 
 const router = Router();
 
 router.use(authenticate);
-
-/** Dias de uso (desde o cadastro) antes de a Gennecy perguntar pela primeira vez. */
-const DIAS_ANTES_DA_PRIMEIRA_PERGUNTA = 3;
-/** Depois de responder ou dispensar, só volta a perguntar depois deste prazo. */
-const DIAS_ENTRE_PERGUNTAS = 90;
 
 /** A Gennecy deve aparecer para esta pessoa agora? */
 router.get('/status', async (req: AuthRequest, res, next) => {
@@ -101,6 +97,8 @@ router.get('/admin', requireAdministrator, async (req: AuthRequest, res, next) =
         userId: string;
         userName: string | null;
         userEmail: string | null;
+        source: string;
+        phone: string | null;
         rating: number | null;
         likes: string | null;
         comment: string | null;
@@ -110,6 +108,7 @@ router.get('/admin', requireAdministrator, async (req: AuthRequest, res, next) =
       }>
     >`
       SELECT f."id", f."userId", u."name" AS "userName", u."email" AS "userEmail",
+             f."source", f."phone",
              f."rating", f."likes", f."comment", f."page", f."dismissed", f."createdAt"
       FROM "app_feedback" f
       LEFT JOIN "users" u ON u."id" = f."userId"
@@ -134,8 +133,9 @@ router.get('/admin', requireAdministrator, async (req: AuthRequest, res, next) =
       .filter((r) => !filtraNota || r.rating === nota)
       .map((r) => ({
         id: r.id,
-        userName: r.userName || 'Usuário removido',
+        userName: r.userName || (r.phone ? `WhatsApp ${r.phone}` : 'Usuário removido'),
         userEmail: r.userEmail || '',
+        source: r.source || 'SISTEMA',
         rating: r.rating as number,
         likes: (r.likes ?? '').split(',').map((x) => x.trim()).filter(Boolean),
         comment: r.comment || '',

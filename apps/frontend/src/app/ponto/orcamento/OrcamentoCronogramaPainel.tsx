@@ -121,6 +121,8 @@ const tdCls =
   'h-[2.75rem] px-2 py-0 text-sm leading-none text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-600 align-middle';
 /** Item 6.5 + Serviço 22 + Unidade 5.5 + Quantidade 7 + Custo 11 + Início 9 + Fim 9 + Dias 4 + Executado 6.5 + Status 7. */
 const COLUNAS_FIXAS_REM = 87.5;
+/** A coluna Status só aparece na aba Real (no Planejado ela confunde: mede a execução, não o plano). */
+const COLUNA_STATUS_REM = 7;
 const tdItemColCls =
   'min-h-[2.75rem] w-[6.5rem] max-w-[6.5rem] min-w-0 px-2 py-2.5 text-center text-xs font-medium tabular-nums border-l-0 align-middle whitespace-normal break-words text-gray-700 dark:text-gray-300';
 const thItemColCls =
@@ -141,10 +143,10 @@ const stickyUnidadeTdCls = 'sticky left-[28.5rem] z-10';
 const stickyQtdTdCls = 'sticky left-[34rem] z-10 border-r border-gray-200 dark:border-gray-600';
 const thUnidadeColCls = `${thCls} w-[5.5rem] !border-l-0 px-2`;
 const thQtdColCls = `${thCls} w-[7rem] px-2`;
-const thCustoColCls = `${thCls} w-[11rem] whitespace-normal leading-tight`;
+const thCustoColCls = `${thCls} !border-l-0 w-[11rem] whitespace-normal leading-tight`;
 const tdUnidadeColCls = `${tdCls} w-[5.5rem] !border-l-0 px-2 text-center`;
 const tdQtdColCls = `${tdCls} w-[7rem] px-2 text-center tabular-nums`;
-const tdCustoColCls = `${tdCls} w-[11rem] px-2 tabular-nums`;
+const tdCustoColCls = `${tdCls} !border-l-0 w-[11rem] px-2 tabular-nums`;
 const thDateColCls = `${thCls} w-[9rem]`;
 const thDiasColCls = `${thCls} w-[4rem]`;
 const thStatusColCls = `${thCls} w-[7rem]`;
@@ -347,15 +349,17 @@ function CelulasEtapaCronograma({
             : '0%'}
         </span>
       </td>
-      <td className={`${tdCls} w-[7rem] text-center`}>
-        <span
-          data-cor-propria={corStatusPropria ? true : undefined}
-          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
-          title={observacao || undefined}
-        >
-          {CRONOGRAMA_STATUS_LABEL[status]}
-        </span>
-      </td>
+      {modo === 'real' ? (
+        <td className={`${tdCls} w-[7rem] text-center`}>
+          <span
+            data-cor-propria={corStatusPropria ? true : undefined}
+            className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
+            title={observacao || undefined}
+          >
+            {CRONOGRAMA_STATUS_LABEL[status]}
+          </span>
+        </td>
+      ) : null}
     </>
   );
 }
@@ -403,7 +407,7 @@ function CelulaLinhaTimeline({
   const desvio = linha ? calcularDesvioTimeline(linha.dados) : null;
   const mostrarBarraPlan = modo === 'plan' && Boolean(barPlan && barPlan.widthPx > 0);
   const mostrarBarraReal = modo === 'real' && Boolean(barReal && barReal.widthPx > 0);
-  /** Na aba Real, o planejado aparece como referência: faixa fina sob a barra real (ou barra tracejada se ainda não há real). */
+  /** Na aba Real, o planejado aparece como referência: contorno tracejado que abraça a barra real (ou barra tracejada se ainda não há real). */
   const mostrarPlanejadoNoReal = modo === 'real' && Boolean(barPlan && barPlan.widthPx > 0);
   const iniValor = modo === 'real' ? iniReal : iniPlan;
   const fimValor = modo === 'real' ? fimReal : fimPlan;
@@ -501,7 +505,7 @@ function CelulaLinhaTimeline({
           <div
             className={`pointer-events-none absolute z-[1] rounded-sm border border-dashed border-gray-500/70 dark:border-gray-400/60 ${
               mostrarBarraReal
-                ? 'bottom-1 h-[6px] bg-gray-400/35 dark:bg-gray-500/35'
+                ? 'top-1 bottom-1 bg-gray-400/[0.08] dark:bg-gray-500/10'
                 : 'top-1 bottom-1 bg-gray-400/[0.06] dark:bg-gray-500/10'
             }`}
             style={{ left: barPlan.leftPx, width: barPlan.widthPx }}
@@ -517,7 +521,7 @@ function CelulaLinhaTimeline({
               linha.editavel
                 ? 'cursor-pointer hover:brightness-110 dark:hover:brightness-125'
                 : 'pointer-events-none'
-            } top-1 ${mostrarPlanejadoNoReal ? 'bottom-3' : 'bottom-1'}`}
+            } ${mostrarPlanejadoNoReal ? 'top-2 bottom-2' : 'top-1 bottom-1'}`}
             style={{ left: barReal.leftPx, width: barReal.widthPx }}
             title={`Real: ${formatDataBr(linha.dados.dataInicioReal)} → ${formatDataBr(linha.dados.dataFimReal)} · ${pct}%${
               desvio?.temDesvio ? ` · desvio fim: ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? '—'}` : ''
@@ -529,11 +533,6 @@ function CelulaLinhaTimeline({
                 className={`absolute inset-y-0 left-0 rounded-sm ${statusBarCls(status)}`}
                 style={{ width: `${pct}%`, minWidth: pct > 0 ? 3 : undefined }}
               />
-              {pct > 0 ? (
-                <span className="pointer-events-none absolute left-1 top-1/2 z-[1] -translate-y-1/2 whitespace-nowrap text-[9px] font-semibold tabular-nums leading-none text-white drop-shadow-[0_0_3px_rgba(0,0,0,0.85)]">
-                  {pct}%
-                </span>
-              ) : null}
             </div>
           </button>
         ) : linha?.editavel && (modo === 'plan' ? !mostrarBarraPlan : !mostrarBarraReal) ? (
@@ -665,18 +664,21 @@ export function OrcamentoCronogramaPainel({
     return () => obs.disconnect();
   }, [timelineRange, telaFixa]);
 
+  const colunasFixasRem =
+    abaCronograma === 'real' ? COLUNAS_FIXAS_REM : COLUNAS_FIXAS_REM - COLUNA_STATUS_REM;
+
   const timelineLayout = useMemo(() => {
     if (!timelineRange || timelineRange.colunas.length === 0) return null;
     const rootPx =
       typeof document !== 'undefined'
         ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
         : 16;
-    const colunasFixasPx = COLUNAS_FIXAS_REM * rootPx;
+    const colunasFixasPx = colunasFixasRem * rootPx;
     const disponivel = larguraViewport > colunasFixasPx + 48 ? larguraViewport - colunasFixasPx : 0;
     const larguraMinima = timelineRange.colunas.length * TIMELINE_LARGURA_DIA_MIN_PX;
     const largura = Math.max(timelineRange.larguraTotalPx, larguraMinima, Math.floor(disponivel));
     return { largura, diaPx: largura / timelineRange.colunas.length };
-  }, [timelineRange, larguraViewport]);
+  }, [timelineRange, larguraViewport, colunasFixasRem]);
 
   const patchServico = (servicoKey: string, patch: Partial<CronogramaItemData>) => {
     const prev = cronograma.porServico[servicoKey] ?? {};
@@ -1130,7 +1132,7 @@ export function OrcamentoCronogramaPainel({
               }`}
               style={{
                 ...(timelineLayout
-                  ? { width: `calc(${COLUNAS_FIXAS_REM}rem + ${timelineLayout.largura}px)` }
+                  ? { width: `calc(${colunasFixasRem}rem + ${timelineLayout.largura}px)` }
                   : { width: '100%' }),
                 fontFamily: estilosAparencia?.fonte,
               }}
@@ -1159,7 +1161,9 @@ export function OrcamentoCronogramaPainel({
                   <th className={`${gradeThStickyCls} ${thDateColCls}`}>Fim</th>
                   <th className={`${gradeThStickyCls} ${thDiasColCls}`}>Dias</th>
                   <th className={`${gradeThStickyCls} ${thPctColCls}`}>Executado</th>
-                  <th className={`${gradeThStickyCls} ${thStatusColCls}`}>Status</th>
+                  {modoFolha === 'real' ? (
+                    <th className={`${gradeThStickyCls} ${thStatusColCls}`}>Status</th>
+                  ) : null}
                   <th
                     className={`${gradeThStickyCls} border-l border-gray-300 p-0 align-bottom dark:border-gray-600`}
                     style={
@@ -1441,7 +1445,7 @@ export function OrcamentoCronogramaPainel({
               <div
                 className="pointer-events-none absolute top-0 bottom-0 z-[1] w-px bg-red-500"
                 style={{
-                  left: `calc(${COLUNAS_FIXAS_REM}rem + ${(hojeMarcador.leftPct / 100) * timelineLayout.largura}px)`
+                  left: `calc(${colunasFixasRem}rem + ${(hojeMarcador.leftPct / 100) * timelineLayout.largura}px)`
                 }}
                 aria-hidden
               />
