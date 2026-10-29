@@ -648,7 +648,7 @@ function SolicitacoesFerramentasPage() {
       },
       {
         filter: 'AWAITING_RECEIPT',
-        label: 'Aguardando recebimento',
+        label: 'Recebimento',
         value: summaryData?.awaitingReceipt ?? 0,
       },
       { filter: 'COMPLETED', label: 'Finalizadas', value: summaryData?.completed ?? 0 },
