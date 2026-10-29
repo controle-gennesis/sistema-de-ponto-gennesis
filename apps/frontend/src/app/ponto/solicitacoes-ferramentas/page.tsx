@@ -764,6 +764,8 @@ function SolicitacoesFerramentasPage() {
                     <tr>
                       <th className={cadastroListClasses.th}>ID</th>
                       <th className={cadastroListClasses.th}>Solicitação</th>
+                      <th className={cadastroListClasses.thCenter}>Solicitante</th>
+                      <th className={cadastroListClasses.thCenter}>Contrato / Obra</th>
                       <th className={cadastroListClasses.thCenter}>Tipo</th>
                       <th className={cadastroListClasses.thCenter}>Polo</th>
                       <th className={cadastroListClasses.thCenter}>Prioridade</th>
@@ -788,6 +790,15 @@ function SolicitacoesFerramentasPage() {
                           <p className="truncate font-medium text-gray-900 dark:text-gray-100">
                             {row.titulo}
                           </p>
+                        </td>
+                        <td className={cadastroListClasses.tdCenter}>
+                          {row.createdBy?.name || '—'}
+                        </td>
+                        <td className={cadastroListClasses.tdCenter}>
+                          <p className="font-medium text-gray-900 dark:text-gray-100">
+                            {row.contrato || '—'}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{row.obra || '—'}</p>
                         </td>
                         <td className={cadastroListClasses.tdCenter}>
                           {formatToolRentalDemand(row.demandType)}
