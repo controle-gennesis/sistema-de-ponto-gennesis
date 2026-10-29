@@ -14022,11 +14022,14 @@ export function OrcamentoPageView({
     { rowHeight: 48, overscan: 28, enabled: orcamentoViewTab === 'planilhaAnalitica' }
   );
 
+  /** Aba Ficha de demanda (dentro do orçamento ou na tela própria): a barra de baixo mostra só os custos. */
+  const naFichaDemanda = fichaDemandaOnly || orcamentoViewTab === 'planilhaAnalitica';
+
   const fdColResize = useResizableColumns({
     initialWidths: [
       104, 96, 80, 320, 56, 80, 104,
-      184, 140, 216, 160,
-      140, 150, 120, 176, 124, 150, 384,
+      216, 160, 248, 184,
+      176, 168, 144, 208, 160, 184, 384,
     ],
     minWidth: 40,
   });
@@ -21137,7 +21140,7 @@ export function OrcamentoPageView({
                 <div className="flex min-w-0 shrink-0 flex-wrap items-end gap-x-5 gap-y-1 sm:gap-x-8">
                   {subtitulosAdicionados.length > 0 ? (
                     <>
-                  {(resumoFinanceiro.descontoPct > 0 || resumoFinanceiro.bdiPct > 0) && (
+                  {!naFichaDemanda && (resumoFinanceiro.descontoPct > 0 || resumoFinanceiro.bdiPct > 0) && (
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Orçamento
@@ -21147,7 +21150,7 @@ export function OrcamentoPageView({
                     </p>
                   </div>
                   )}
-                  {resumoFinanceiro.descontoPct > 0 && (
+                  {!naFichaDemanda && resumoFinanceiro.descontoPct > 0 && (
                     <>
                       <div className="shrink-0">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -21170,7 +21173,7 @@ export function OrcamentoPageView({
                       </div>
                     </>
                   )}
-                  {resumoFinanceiro.bdiPct > 0 && (
+                  {!naFichaDemanda && resumoFinanceiro.bdiPct > 0 && (
                     <div className="shrink-0">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         {`BDI (${(resumoFinanceiro.bdiPct * 100).toLocaleString('pt-BR', {
@@ -21183,6 +21186,7 @@ export function OrcamentoPageView({
                       </p>
                     </div>
                   )}
+                  {!naFichaDemanda && (
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Total geral
@@ -21191,6 +21195,7 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
                     </p>
                   </div>
+                  )}
                   {composicaoNaBarra ? (
                     <div className="shrink-0" title="Valor da composição selecionada, já com quantidade, BDI e desconto">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -21201,41 +21206,45 @@ export function OrcamentoPageView({
                       </p>
                     </div>
                   ) : null}
-                  <div className="shrink-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Custo estimado (40%)
-                    </p>
-                    <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-amber-600 dark:text-amber-400 sm:text-base whitespace-nowrap">
-                      {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi * 0.4)}
-                    </p>
-                  </div>
-                  {custoRealTotalFd > 0 && (
+                  {naFichaDemanda && (
                     <>
                       <div className="shrink-0">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                          Custo real
+                          Custo estimado (40%)
                         </p>
-                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-blue-600 dark:text-blue-400 sm:text-base whitespace-nowrap">
-                          {formatarBRLExport(custoRealTotalFd)}
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-amber-600 dark:text-amber-400 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi * 0.4)}
                         </p>
                       </div>
-                      {(() => {
-                        const diferenca = resumoFinanceiro.totalComDescontoEBdi * 0.4 - custoRealTotalFd;
-                        return (
-                          <div className="shrink-0" title="Custo estimado (40%) − custo real">
+                      {custoRealTotalFd > 0 && (
+                        <>
+                          <div className="shrink-0">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                              {diferenca >= 0 ? 'Economia vs estimado' : 'Acima do estimado'}
+                              Custo real
                             </p>
-                            <p
-                              className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
-                                diferenca >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                              }`}
-                            >
-                              {formatarBRLExport(Math.abs(diferenca))}
+                            <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-blue-600 dark:text-blue-400 sm:text-base whitespace-nowrap">
+                              {formatarBRLExport(custoRealTotalFd)}
                             </p>
                           </div>
-                        );
-                      })()}
+                          {(() => {
+                            const diferenca = resumoFinanceiro.totalComDescontoEBdi * 0.4 - custoRealTotalFd;
+                            return (
+                              <div className="shrink-0" title="Custo estimado (40%) − custo real">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  {diferenca >= 0 ? 'Economia vs estimado' : 'Acima do estimado'}
+                                </p>
+                                <p
+                                  className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
+                                    diferenca >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                                  }`}
+                                >
+                                  {formatarBRLExport(Math.abs(diferenca))}
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
                     </>
                   )}
                   {fichaDemandaOnly ? (
