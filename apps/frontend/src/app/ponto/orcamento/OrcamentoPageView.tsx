@@ -14024,9 +14024,9 @@ export function OrcamentoPageView({
 
   const fdColResize = useResizableColumns({
     initialWidths: [
-      104, 96, 80, 320, 56, 80, 96,
-      160, 140, 160, 140,
-      120, 140, 120, 120, 110, 130, 384,
+      104, 96, 80, 320, 56, 80, 104,
+      184, 140, 216, 160,
+      140, 150, 120, 176, 124, 150, 384,
     ],
     minWidth: 40,
   });
