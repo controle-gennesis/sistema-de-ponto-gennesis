@@ -180,7 +180,11 @@ export class ControleAnuidadeController {
       const [rows, pagos, emAberta, vencidas, venceHoje] = await Promise.all([
         prisma.controleAnuidade.findMany({
           where,
-          orderBy: [{ dataVencimento: 'asc' }, { profissional: 'asc' }],
+          orderBy: [
+            { pagosPelo: { sort: 'asc', nulls: 'last' } },
+            { profissional: 'asc' },
+            { dataVencimento: 'asc' },
+          ],
         }),
         prisma.controleAnuidade.count({
           where: { AND: [searchWhere, { status: 'PAGO' }] },
