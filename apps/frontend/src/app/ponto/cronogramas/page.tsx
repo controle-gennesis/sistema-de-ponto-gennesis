@@ -3,20 +3,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarRange, Filter, Search, X } from 'lucide-react';
+import { AlertTriangle, CalendarRange, CheckCircle, Filter, Layers, PlayCircle, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
-import { formatOrcamentoRevisao } from '@/components/orcamento/OrcamentoRevisaoBadge';
+import { OrcamentoRevisaoBadge } from '@/components/orcamento/OrcamentoRevisaoBadge';
 import { sincronizarCronogramasRecentes } from '@/lib/cronogramaNovos';
 import { authService } from '@/lib/auth';
 import {
@@ -37,6 +38,7 @@ type OrcamentoListaRow = {
   updatedAt: string;
   statusAprovacao?: string;
   versao?: number;
+  familiaId?: string;
   cronogramaProgressoFisico?: number;
   cronogramaConcluido?: number;
   cronogramaTotalEtapas?: number;
@@ -50,6 +52,8 @@ type CronogramaListItem = {
   nome: string;
   codigo: string;
   updatedAt: string;
+  familiaId: string;
+  revisao: number;
   progressoFisico?: number;
   concluido?: number;
   totalEtapas?: number;
@@ -57,6 +61,50 @@ type CronogramaListItem = {
 };
 
 const ITEMS_PER_PAGE = 20;
+
+type StatusCard = 'all' | 'andamento' | 'atrasados' | 'concluidos';
+
+const STATUS_LIST_HEADER: Record<
+  StatusCard,
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Cronogramas',
+    subtitle: 'Todos os orçamentos com cronograma dos seus contratos',
+    Icon: Layers,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  andamento: {
+    title: 'Em andamento',
+    subtitle: 'Cronogramas com obra iniciada e ainda não concluída',
+    Icon: PlayCircle,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  atrasados: {
+    title: 'Com etapas atrasadas',
+    subtitle: 'Cronogramas com pelo menos uma etapa atrasada',
+    Icon: AlertTriangle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+  concluidos: {
+    title: 'Concluídos',
+    subtitle: 'Cronogramas com 100% de progresso',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+};
+
+function matchesStatusCard(item: { progressoFisico?: number; atrasado?: number }, card: StatusCard): boolean {
+  const pct = item.progressoFisico ?? 0;
+  if (card === 'andamento') return pct > 0 && pct < 100;
+  if (card === 'atrasados') return (item.atrasado ?? 0) > 0;
+  if (card === 'concluidos') return pct >= 100;
+  return true;
+}
 
 function codigoFromNomeOrcamento(nome: string): string {
   const m = String(nome || '').match(/\(([^)]+)\)\s*$/);
@@ -84,6 +132,7 @@ export default function CronogramasPage() {
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [statusCard, setStatusCard] = useState<StatusCard>('all');
   const { canAccessContract, isAdministrator, isLoading: loadingPermissions } = usePermissions();
 
   useEffect(() => {
@@ -146,6 +195,7 @@ export default function CronogramasPage() {
   const { data: cronogramasData, isLoading: loadingOrcamentos } = useQuery({
     queryKey: [
       'cronogramas-todos',
+      'v2',
       contractsLiberados.map((c) => c.id).sort().join(','),
     ],
     queryFn: async () => {
@@ -176,9 +226,11 @@ export default function CronogramasPage() {
               contractId: c.id,
               contractName: (c.name || c.number || c.id).trim(),
               orcamentoId: o.id,
-              nome: `${nomeBase} · ${formatOrcamentoRevisao(revisao)}`,
+              nome: nomeBase,
               codigo: codigoFromNomeOrcamento(o.nome),
               updatedAt: o.updatedAt || '',
+              familiaId: (o.familiaId || '').trim() || o.id,
+              revisao,
               progressoFisico:
                 typeof o.cronogramaProgressoFisico === 'number' && Number.isFinite(o.cronogramaProgressoFisico)
                   ? o.cronogramaProgressoFisico
@@ -200,10 +252,17 @@ export default function CronogramasPage() {
           );
         })
       );
-      const items: CronogramaListItem[] = [];
+      // Um cronograma por orçamento: das revisões da mesma família fica só a mais recente.
+      const maisRecentePorFamilia = new Map<string, CronogramaListItem>();
       for (const r of settled) {
-        if (r.status === 'fulfilled') items.push(...r.value);
+        if (r.status !== 'fulfilled') continue;
+        for (const item of r.value) {
+          const key = `${item.contractId}|${item.familiaId}`;
+          const atual = maisRecentePorFamilia.get(key);
+          if (!atual || item.revisao > atual.revisao) maisRecentePorFamilia.set(key, item);
+        }
       }
+      const items: CronogramaListItem[] = [...maisRecentePorFamilia.values()];
       items.sort((a, b) => {
         const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
         const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
@@ -220,18 +279,42 @@ export default function CronogramasPage() {
     sincronizarCronogramasRecentes(userId, cronogramasData);
   }, [cronogramasData]);
 
+  const stats = useMemo(() => {
+    const list = (Array.isArray(cronogramasData) ? cronogramasData : []).filter(
+      (o) => !contratoFiltro || o.contractId === contratoFiltro
+    );
+    return {
+      total: list.length,
+      andamento: list.filter((o) => matchesStatusCard(o, 'andamento')).length,
+      atrasados: list.filter((o) => matchesStatusCard(o, 'atrasados')).length,
+      concluidos: list.filter((o) => matchesStatusCard(o, 'concluidos')).length,
+    };
+  }, [cronogramasData, contratoFiltro]);
+
+  const listHeader = STATUS_LIST_HEADER[statusCard];
+  const ListHeaderIcon = listHeader.Icon;
+
+  // Numeração em sequência (o mais recente tem o maior número), mantida ao filtrar/buscar.
+  const numeroPorOrcamento = useMemo(() => {
+    const list = Array.isArray(cronogramasData) ? cronogramasData : [];
+    const map = new Map<string, number>();
+    list.forEach((o, i) => map.set(o.orcamentoId, list.length - i));
+    return map;
+  }, [cronogramasData]);
+
   const cronogramas = useMemo(() => {
     const list = Array.isArray(cronogramasData) ? cronogramasData : [];
     const q = searchTerm.trim().toLowerCase();
     return list.filter((o) => {
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
+      if (!matchesStatusCard(o, statusCard)) return false;
       if (!q) return true;
       const nome = (o.nome || '').toLowerCase();
       const codigo = (o.codigo || '').toLowerCase();
       const contrato = (o.contractName || '').toLowerCase();
       return nome.includes(q) || codigo.includes(q) || contrato.includes(q);
     });
-  }, [cronogramasData, searchTerm, contratoFiltro]);
+  }, [cronogramasData, searchTerm, contratoFiltro, statusCard]);
 
   const totalFiltered = cronogramas.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
@@ -262,20 +345,69 @@ export default function CronogramasPage() {
             description="Cronogramas dos orçamentos dos contratos liberados para você."
           />
 
+          <div className={pageStatCardsGridClass}>
+            <FilterStatCard
+              label="Total"
+              count={stats.total}
+              icon={Layers}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              isActive={statusCard === 'all'}
+              onClick={() => {
+                setStatusCard('all');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Em andamento"
+              count={stats.andamento}
+              icon={PlayCircle}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+              isActive={statusCard === 'andamento'}
+              onClick={() => {
+                setStatusCard('andamento');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Atrasados"
+              count={stats.atrasados}
+              icon={AlertTriangle}
+              iconBg="bg-red-100 dark:bg-red-900/30"
+              iconColor="text-red-600 dark:text-red-400"
+              isActive={statusCard === 'atrasados'}
+              onClick={() => {
+                setStatusCard('atrasados');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Concluídos"
+              count={stats.concluidos}
+              icon={CheckCircle}
+              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+              iconColor="text-emerald-600 dark:text-emerald-400"
+              isActive={statusCard === 'concluidos'}
+              onClick={() => {
+                setStatusCard('concluidos');
+                setCurrentPage(1);
+              }}
+            />
+          </div>
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <CalendarRange className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Cronogramas
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Todos os orçamentos com cronograma dos seus contratos
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -345,11 +477,17 @@ export default function CronogramasPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
+                          <th className="w-[1%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            ID
+                          </th>
                           <th className="w-[10%] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Código
                           </th>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Orçamento
+                          </th>
+                          <th className="w-[8%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                            Revisão
                           </th>
                           <th className="w-[16%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
@@ -378,6 +516,9 @@ export default function CronogramasPage() {
                             className={getListTableRowClassName(true)}
                             aria-label={`Abrir cronograma de ${o.nome}`}
                           >
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                              {numeroPorOrcamento.get(o.orcamentoId) ?? '—'}
+                            </td>
                             <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCadastroListId(o.codigo || null)}
                             </td>
@@ -385,6 +526,9 @@ export default function CronogramasPage() {
                               <ListRowNavigableLabel className="block whitespace-normal break-words font-medium">
                                 {o.nome}
                               </ListRowNavigableLabel>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-center sm:px-4">
+                              <OrcamentoRevisaoBadge versao={o.revisao} size="sm" />
                             </td>
                             <td className="max-w-0 px-3 py-3 text-center sm:px-6">
                               <span className="block truncate text-sm text-gray-700 dark:text-gray-300">

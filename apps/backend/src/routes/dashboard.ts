@@ -768,7 +768,7 @@ router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next
       },
       {
         id: 'medical-certificates',
-        name: 'Registrar Ausência',
+        name: 'Enviar Atestado',
         description: 'Enviar e acompanhar atestados médicos e ausências',
         icon: 'BookPlus',
         href: '/ponto/atestados',
@@ -777,7 +777,7 @@ router.get('/modules', authorize('EMPLOYEE'), async (req: AuthRequest, res, next
       },
       {
         id: 'manage-medical-certificates',
-        name: 'Gerenciar Ausências',
+        name: 'Gerenciar Atestados',
         description: 'Aprovar e gerenciar todas as ausências dos funcionários',
         icon: 'BookText',
         href: '/ponto/gerenciar-atestados',

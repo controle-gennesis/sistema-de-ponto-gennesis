@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Filter, Plus, Search, Upload, X } from 'lucide-react';
+import { CheckCircle, Calculator, Clock, FileEdit, Filter, Layers, Plus, Search, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -11,9 +11,10 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   RowActionMenuCell,
@@ -84,6 +85,54 @@ type OrcamentoListItem = {
 };
 
 const ITEMS_PER_PAGE = 20;
+
+type StatusCard = 'all' | 'elaboracao' | 'aguardando' | 'finalizados';
+
+const STATUS_CARD_MATCH: Record<StatusCard, OrcamentoStatusAprovacao[] | null> = {
+  all: null,
+  elaboracao: ['rascunho', 'pronta', 'em_correcao', 'reprovado'],
+  aguardando: ['aguardando_aprovacao'],
+  finalizados: ['aprovado', 'finalizado'],
+};
+
+const STATUS_LIST_HEADER: Record<
+  StatusCard,
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Orçamentos',
+    subtitle: 'Crie, edite e exclua os orçamentos dos seus contratos',
+    Icon: Layers,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  elaboracao: {
+    title: 'Em elaboração',
+    subtitle: 'Orçamentos em rascunho, FD pronta ou em correção',
+    Icon: FileEdit,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  aguardando: {
+    title: 'Aguardando aprovação',
+    subtitle: 'Orçamentos enviados e ainda sem aprovação',
+    Icon: Clock,
+    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
+    iconColor: 'text-indigo-600 dark:text-indigo-400',
+  },
+  finalizados: {
+    title: 'Finalizados',
+    subtitle: 'Orçamentos aprovados ou finalizados',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+};
+
+function matchesStatusCard(status: OrcamentoStatusAprovacao, card: StatusCard): boolean {
+  const allowed = STATUS_CARD_MATCH[card];
+  return !allowed || allowed.includes(status);
+}
 
 const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   rascunho: 'Rascunho',
@@ -175,6 +224,7 @@ export default function OrcamentosPage() {
   const [actionContratoId, setActionContratoId] = useState('');
   const [importShellOpen, setImportShellOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [statusCard, setStatusCard] = useState<StatusCard>('all');
   const [deleteTarget, setDeleteTarget] = useState<OrcamentoListItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const {
@@ -348,7 +398,7 @@ export default function OrcamentosPage() {
   }, [orcamentosData, contratoFiltro]);
 
   /** Uma linha por família — só a revisão atual (maior número). */
-  const orcamentos = useMemo(() => {
+  const familiasAtuais = useMemo(() => {
     const rows: OrcamentoListItem[] = [];
     for (const versoes of revisoesPorFamilia.values()) {
       const atual = versoes[0];
@@ -361,6 +411,31 @@ export default function OrcamentosPage() {
     });
     return rows;
   }, [revisoesPorFamilia]);
+
+  const orcamentos = useMemo(() => {
+    const idsBusca = new Set(orcamentosFiltrados.map((o) => o.id));
+    return familiasAtuais.filter((o) => idsBusca.has(o.id) && matchesStatusCard(o.status, statusCard));
+  }, [familiasAtuais, orcamentosFiltrados, statusCard]);
+
+  const stats = useMemo(
+    () => ({
+      total: familiasAtuais.length,
+      elaboracao: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'elaboracao')).length,
+      aguardando: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'aguardando')).length,
+      finalizados: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'finalizados')).length,
+    }),
+    [familiasAtuais]
+  );
+
+  // Numeração em sequência (o mais recente tem o maior número), mantida ao filtrar/buscar.
+  const numeroPorOrcamento = useMemo(() => {
+    const map = new Map<string, number>();
+    familiasAtuais.forEach((o, i) => map.set(o.id, familiasAtuais.length - i));
+    return map;
+  }, [familiasAtuais]);
+
+  const listHeader = STATUS_LIST_HEADER[statusCard];
+  const ListHeaderIcon = listHeader.Icon;
 
   const totalFiltered = orcamentos.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
@@ -474,20 +549,69 @@ export default function OrcamentosPage() {
             description="Orçamentos dos contratos liberados para você."
           />
 
+          <div className={pageStatCardsGridClass}>
+            <FilterStatCard
+              label="Total"
+              count={stats.total}
+              icon={Layers}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              isActive={statusCard === 'all'}
+              onClick={() => {
+                setStatusCard('all');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Em elaboração"
+              count={stats.elaboracao}
+              icon={FileEdit}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+              isActive={statusCard === 'elaboracao'}
+              onClick={() => {
+                setStatusCard('elaboracao');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Aguardando aprovação"
+              count={stats.aguardando}
+              icon={Clock}
+              iconBg="bg-indigo-100 dark:bg-indigo-900/30"
+              iconColor="text-indigo-600 dark:text-indigo-400"
+              isActive={statusCard === 'aguardando'}
+              onClick={() => {
+                setStatusCard('aguardando');
+                setCurrentPage(1);
+              }}
+            />
+            <FilterStatCard
+              label="Finalizados"
+              count={stats.finalizados}
+              icon={CheckCircle}
+              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+              iconColor="text-emerald-600 dark:text-emerald-400"
+              isActive={statusCard === 'finalizados'}
+              onClick={() => {
+                setStatusCard('finalizados');
+                setCurrentPage(1);
+              }}
+            />
+          </div>
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <Calculator className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Orçamentos
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Crie, edite e exclua os orçamentos dos seus contratos
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -579,6 +703,9 @@ export default function OrcamentosPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
+                          <th className="w-[1%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            ID
+                          </th>
                           <th className="w-[9%] whitespace-nowrap px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             OS
                           </th>
@@ -617,6 +744,9 @@ export default function OrcamentosPage() {
                             className={getListTableRowClassName(true)}
                             aria-label={`Abrir orçamento ${o.nome} ${formatOrcamentoRevisao(o.versao)}`}
                           >
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                              {numeroPorOrcamento.get(o.id) ?? '—'}
+                            </td>
                             <td className="whitespace-nowrap px-3 py-3 text-sm text-gray-900 dark:text-gray-100 sm:px-4">
                               {o.osCodigo || '—'}
                             </td>

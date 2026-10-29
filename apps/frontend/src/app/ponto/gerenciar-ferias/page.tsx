@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
@@ -21,19 +21,35 @@ import {
   XCircle, 
   Users,
   AlertTriangle,
-  Eye,
   Check,
-  X,
-  Search
+  X
 } from 'lucide-react';
 import { Vacation, ComplianceReport } from '@/types';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ExpandableListSearch } from '@/components/ui/ExpandableListSearch';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { ListPagination } from '@/components/ui/ListPagination';
 
 function GerenciarFeriasPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selectedTab, setSelectedTab] = useState<'pending' | 'all' | 'compliance'>('pending');
+  const [pendingPage, setPendingPage] = useState(1);
+  const [allPage, setAllPage] = useState(1);
+  const PAGE_SIZE = 10;
+  const totalPagesOf = (n: number) => Math.max(1, Math.ceil(n / PAGE_SIZE));
+  const paginate = <T,>(items: T[], page: number): T[] => {
+    const safe = Math.min(page, totalPagesOf(items.length));
+    return items.slice((safe - 1) * PAGE_SIZE, safe * PAGE_SIZE);
+  };
+  const pageRange = (total: number, page: number) => {
+    const safe = Math.min(page, totalPagesOf(total));
+    return { start: total === 0 ? 0 : (safe - 1) * PAGE_SIZE + 1, end: Math.min(safe * PAGE_SIZE, total) };
+  };
   const [showExpiringModal, setShowExpiringModal] = useState(false);
   const [searchExpiring, setSearchExpiring] = useState('');
   const [showExpiredModal, setShowExpiredModal] = useState(false);
@@ -207,102 +223,48 @@ function GerenciarFeriasPageContent() {
         router.push('/auth/login');
       }}
     >
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gestão de Férias</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-            Gerencie as solicitações de férias dos funcionários
-          </p>
-        </div>
+      <PageStack>
+        <ListPageHeader
+          title="Gestão de Férias"
+          description="Gerencie as solicitações de férias dos funcionários"
+        />
 
         {/* Cards de Estatísticas */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {loadingPending ? '...' : pendingVacationsList.length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Aprovadas</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {loadingAll ? '...' : allVacationsList.filter(v => v.status === 'APPROVED').length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
-                <div className="flex items-center flex-1 min-w-[120px] pr-2">
-                  <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex-shrink-0">
-                    <AlertTriangle className="w-6 h-6 text-orange-600 dark:text-orange-400" />
-                  </div>
-                  <div className="ml-3 flex-1 overflow-hidden">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 leading-tight break-normal">Vencendo</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {expiringList.length}
-                    </p>
-                  </div>
-                </div>
-                {expiringList.length > 0 && (
-                  <button
-                    onClick={() => setShowExpiringModal(true)}
-                    className="p-2 sm:p-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex-shrink-0 mt-1 sm:mt-0"
-                    title="Ver lista"
-                  >
-                    <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
-                <div className="flex items-center flex-1 min-w-[120px] pr-2">
-                  <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
-                    <XCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div className="ml-3 flex-1 overflow-hidden">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 leading-tight break-normal">Vencidas</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {loadingCompliance ? '...' : (compliance?.expiredVacations?.length || 0)}
-                    </p>
-                  </div>
-                </div>
-                {compliance?.expiredVacations && compliance.expiredVacations.length > 0 && (
-                  <button
-                    onClick={() => setShowExpiredModal(true)}
-                    className="p-2 sm:p-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex-shrink-0 mt-1 sm:mt-0"
-                    title="Ver lista"
-                  >
-                    <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+        <div className={pageStatCardsGridClass}>
+          <FilterStatCard
+            label="Pendentes"
+            count={loadingPending ? '...' : pendingVacationsList.length}
+            icon={Clock}
+            iconBg="bg-yellow-100 dark:bg-yellow-900/30"
+            iconColor="text-yellow-600 dark:text-yellow-400"
+          />
+          <FilterStatCard
+            label="Aprovadas"
+            count={loadingAll ? '...' : allVacationsList.filter(v => v.status === 'APPROVED').length}
+            icon={CheckCircle}
+            iconBg="bg-green-100 dark:bg-green-900/30"
+            iconColor="text-green-600 dark:text-green-400"
+          />
+          <FilterStatCard
+            label="Vencendo"
+            count={expiringList.length}
+            icon={AlertTriangle}
+            iconBg="bg-orange-100 dark:bg-orange-900/30"
+            iconColor="text-orange-600 dark:text-orange-400"
+            onClick={expiringList.length > 0 ? () => setShowExpiringModal(true) : undefined}
+          />
+          <FilterStatCard
+            label="Vencidas"
+            count={loadingCompliance ? '...' : (compliance?.expiredVacations?.length || 0)}
+            icon={XCircle}
+            iconBg="bg-red-100 dark:bg-red-900/30"
+            iconColor="text-red-600 dark:text-red-400"
+            onClick={
+              compliance?.expiredVacations && compliance.expiredVacations.length > 0
+                ? () => setShowExpiredModal(true)
+                : undefined
+            }
+          />
         </div>
 
         {/* Tabs */}
@@ -332,113 +294,148 @@ function GerenciarFeriasPageContent() {
 
         {/* Conteúdo das Tabs */}
         {selectedTab === 'pending' && (
-          <Card>
-            <CardHeader>
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações Pendentes</h2>
             </CardHeader>
-            <CardContent>
+            <CardContent className={cadastroListClasses.cardContent}>
               {loadingPending ? (
                 <CadastroListLoading message="Carregando solicitações..." />
               ) : pendingVacationsList.length === 0 ? (
-                <div className="text-center py-8">
-                  <CheckCircle className="w-12 h-12 text-green-400 dark:text-green-500 mx-auto mb-4" />
-                  <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação pendente</p>
-                </div>
+                <CadastroListEmpty icon={CheckCircle} title="Nenhuma solicitação pendente" />
               ) : (
-                <div className="space-y-4">
-                  {pendingVacationsList.map((vacation) => (
-                    <div
-                      key={vacation.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          {getStatusIcon(vacation.status)}
-                          <div>
-                            <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                              {vacation.user.name} - {vacation.employee.department}
-                            </h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                              {getTypeText(vacation.type)} • {vacation.days} dias •{' '}
-                              {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
-                              {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
-                            </p>
-                            {vacation.reason && (
-                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                <strong>Motivo:</strong> {vacation.reason}
-                              </p>
-                            )}
+                <>
+                  <div className={cadastroListClasses.listSummary}>
+                    <span>
+                      Mostrando {pageRange(pendingVacationsList.length, pendingPage).start} a {pageRange(pendingVacationsList.length, pendingPage).end} de {pendingVacationsList.length}{' '}
+                      {pendingVacationsList.length === 1 ? 'solicitação' : 'solicitações'}
+                    </span>
+                    <span>
+                      Página {Math.min(pendingPage, totalPagesOf(pendingVacationsList.length))} de {totalPagesOf(pendingVacationsList.length)}
+                    </span>
+                  </div>
+                  <div className={cadastroListClasses.tableScroll}>
+                    <table className={cadastroListClasses.table}>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className={cadastroListClasses.th}>Funcionário</th>
+                          <th className={cadastroListClasses.thCenter}>Setor</th>
+                          <th className={cadastroListClasses.thCenter}>Tipo</th>
+                          <th className={cadastroListClasses.thCenter}>Período</th>
+                          <th className={cadastroListClasses.thCenter}>Dias</th>
+                          
+                          <th className={cadastroListClasses.th}>Motivo</th>
+                          <th className={cadastroListClasses.thCenter}>Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                        {paginate(pendingVacationsList, pendingPage).map((vacation) => (
+                          <tr key={vacation.id} className={getListTableRowClassName(false)}>
+                            <td className={cadastroListClasses.td}>
+                              <div className="flex items-center gap-2">
+                                {getStatusIcon(vacation.status)}
+                                <span className="font-medium">{vacation.user.name}</span>
+                              </div>
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>{vacation.employee.department}</td>
+                            <td className={cadastroListClasses.tdCenter}>{getTypeText(vacation.type)}</td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              {new Date(vacation.startDate).toLocaleDateString('pt-BR')} - {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>{vacation.days}</td>
+
+                            <td className={cadastroListClasses.tdMuted}>{vacation.reason || '—'}</td>
+                        <td className="px-2 py-3 text-center sm:px-6 sm:py-4">
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApprove(vacation.id)}
+                              disabled={approveVacationMutation.isPending}
+                              className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Aprovar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleReject(vacation.id)}
+                              disabled={rejectVacationMutation.isPending}
+                              className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Rejeitar
+                            </Button>
                           </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            onClick={() => handleApprove(vacation.id)}
-                            disabled={approveVacationMutation.isPending}
-                            className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
-                          >
-                            <Check className="w-4 h-4 mr-1" />
-                            Aprovar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleReject(vacation.id)}
-                            disabled={rejectVacationMutation.isPending}
-                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500"
-                          >
-                            <X className="w-4 h-4 mr-1" />
-                            Rejeitar
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                        </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ListPagination
+                    currentPage={Math.min(pendingPage, totalPagesOf(pendingVacationsList.length))}
+                    totalPages={totalPagesOf(pendingVacationsList.length)}
+                    onPageChange={setPendingPage}
+                  />
+                </>
               )}
             </CardContent>
           </Card>
         )}
 
         {selectedTab === 'all' && (
-          <Card>
-            <CardHeader>
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Todas as Férias</h2>
             </CardHeader>
-            <CardContent>
+            <CardContent className={cadastroListClasses.cardContent}>
               {loadingAll ? (
                 <CadastroListLoading message="Carregando férias..." />
               ) : allVacationsList.length === 0 ? (
-                <div className="text-center py-8">
-                  <Calendar className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                  <p className="text-gray-600 dark:text-gray-400">Nenhuma férias encontrada</p>
-                </div>
+                <CadastroListEmpty icon={Calendar} title="Nenhuma férias encontrada" />
               ) : (
-                <div className="space-y-4">
-                  {allVacationsList.map((vacation) => (
-                    <div
-                      key={vacation.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          {getStatusIcon(vacation.status)}
-                          <div>
-                            <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                              {vacation.user.name} - {vacation.employee.department}
-                            </h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                              {getTypeText(vacation.type)} • {vacation.days} dias •{' '}
-                              {new Date(vacation.startDate).toLocaleDateString('pt-BR')} -{' '}
-                              {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
-                            </p>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              Solicitado em: {new Date(vacation.createdAt).toLocaleDateString('pt-BR')}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
+                <>
+                  <div className={cadastroListClasses.listSummary}>
+                    <span>
+                      Mostrando {pageRange(allVacationsList.length, allPage).start} a {pageRange(allVacationsList.length, allPage).end} de {allVacationsList.length}{' '}
+                      {allVacationsList.length === 1 ? 'solicitação' : 'solicitações'}
+                    </span>
+                    <span>
+                      Página {Math.min(allPage, totalPagesOf(allVacationsList.length))} de {totalPagesOf(allVacationsList.length)}
+                    </span>
+                  </div>
+                  <div className={cadastroListClasses.tableScroll}>
+                    <table className={cadastroListClasses.table}>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className={cadastroListClasses.th}>Funcionário</th>
+                          <th className={cadastroListClasses.thCenter}>Setor</th>
+                          <th className={cadastroListClasses.thCenter}>Tipo</th>
+                          <th className={cadastroListClasses.thCenter}>Período</th>
+                          <th className={cadastroListClasses.thCenter}>Dias</th>
+                          <th className={cadastroListClasses.thCenter}>Status</th>
+                          
+                          <th className={cadastroListClasses.thCenter}>Solicitado em</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                        {paginate(allVacationsList, allPage).map((vacation) => (
+                          <tr key={vacation.id} className={getListTableRowClassName(false)}>
+                            <td className={cadastroListClasses.td}>
+                              <div className="flex items-center gap-2">
+                                {getStatusIcon(vacation.status)}
+                                <span className="font-medium">{vacation.user.name}</span>
+                              </div>
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>{vacation.employee.department}</td>
+                            <td className={cadastroListClasses.tdCenter}>{getTypeText(vacation.type)}</td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              {new Date(vacation.startDate).toLocaleDateString('pt-BR')} - {new Date(vacation.endDate).toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>{vacation.days}</td>
+                        <td className="px-2 py-3 text-center sm:px-6 sm:py-4">
+                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                             vacation.status === 'PENDING' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' :
                             vacation.status === 'APPROVED' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
                             vacation.status === 'REJECTED' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' :
@@ -446,11 +443,22 @@ function GerenciarFeriasPageContent() {
                           }`}>
                             {getStatusText(vacation.status)}
                           </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                        </td>
+                            
+                        <td className={cadastroListClasses.tdCenter}>
+                          {new Date(vacation.createdAt).toLocaleDateString('pt-BR')}
+                        </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ListPagination
+                    currentPage={Math.min(allPage, totalPagesOf(allVacationsList.length))}
+                    totalPages={totalPagesOf(allVacationsList.length)}
+                    onPageChange={setAllPage}
+                  />
+                </>
               )}
             </CardContent>
           </Card>
@@ -459,11 +467,11 @@ function GerenciarFeriasPageContent() {
         {selectedTab === 'compliance' && (
           <div className="space-y-6">
             {/* Relatório de Conformidade */}
-            <Card>
-              <CardHeader>
+            <Card className={cadastroListClasses.card}>
+              <CardHeader className={cadastroListClasses.cardHeader}>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Relatório de Conformidade</h2>
               </CardHeader>
-              <CardContent>
+              <CardContent className={cadastroListClasses.cardContent}>
                 {loadingCompliance ? (
                   <CadastroListLoading message="Carregando relatório..." />
                 ) : compliance ? (
@@ -493,7 +501,7 @@ function GerenciarFeriasPageContent() {
                 <CardHeader>
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Férias Vencendo</h2>
                 </CardHeader>
-                <CardContent>
+                <CardContent className={cadastroListClasses.cardContent}>
                   <div className="space-y-4">
                     {expiringList.map((item: any) => (
                       <div
@@ -520,7 +528,7 @@ function GerenciarFeriasPageContent() {
             )}
           </div>
         )}
-      </div>
+      </PageStack>
 
       {/* Modal de Funcionários com Férias Vencendo */}
       {showExpiringModal && (
@@ -546,16 +554,12 @@ function GerenciarFeriasPageContent() {
             </div>
             {/* Barra de pesquisa */}
             <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar por nome, departamento..."
-                  value={searchExpiring}
-                  onChange={(e) => setSearchExpiring(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                />
-              </div>
+              <ExpandableListSearch
+                value={searchExpiring}
+                onChange={setSearchExpiring}
+                placeholder="Pesquisar por nome, departamento..."
+                aria-label="Pesquisar por nome ou departamento"
+              />
             </div>
             <div className="overflow-y-auto p-6">
               {(() => {
@@ -626,16 +630,12 @@ function GerenciarFeriasPageContent() {
             </div>
             {/* Barra de pesquisa */}
             <div className="px-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar por nome, departamento..."
-                  value={searchExpired}
-                  onChange={(e) => setSearchExpired(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                />
-              </div>
+              <ExpandableListSearch
+                value={searchExpired}
+                onChange={setSearchExpired}
+                placeholder="Pesquisar por nome, departamento..."
+                aria-label="Pesquisar por nome ou departamento"
+              />
             </div>
             <div className="overflow-y-auto p-6">
               {(() => {

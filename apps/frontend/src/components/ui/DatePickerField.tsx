@@ -29,6 +29,10 @@ export type DatePickerFieldProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Menor data selecionável (yyyy-mm-dd); dias anteriores ficam desabilitados. */
+  min?: string;
+  /** Maior data selecionável (yyyy-mm-dd); dias posteriores ficam desabilitados. */
+  max?: string;
   /** `form` = altura alinhada aos inputs do formulário; `table` = célula da grade */
   size?: 'form' | 'table';
   /** `field` = caixa com borda; `inline` = só texto + ícone (tabela) */
@@ -70,6 +74,8 @@ export function DatePickerField({
   onChange,
   placeholder = 'dd/mm/aaaa',
   disabled = false,
+  min,
+  max,
   size = 'form',
   appearance = 'field',
   hideIcon = false,
@@ -285,12 +291,14 @@ export function DatePickerField({
               const ymd = toYmd(new Date(year, month, day, 12, 0, 0, 0));
               const selected = value === ymd;
               const isToday = ymd === todayYmd;
+              const blocked = (Boolean(min) && ymd < (min as string)) || (Boolean(max) && ymd > (max as string));
               return (
                 <button
                   key={day}
                   type="button"
+                  disabled={blocked}
                   onClick={() => pickDay(day)}
-                  className={datePickerDayButtonCls(selected, isToday)}
+                  className={clsx(datePickerDayButtonCls(selected, isToday), blocked && 'cursor-not-allowed opacity-35 hover:bg-transparent')}
                 >
                   {day}
                 </button>

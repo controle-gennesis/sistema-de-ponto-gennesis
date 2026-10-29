@@ -385,6 +385,9 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/solicitar-combustivel',
       '/ponto/entrega-logistica',
       '/ponto/central-de-ajuda',
+      '/ponto/ferias',
+      '/ponto/solicitacoes',
+      '/ponto/atestados',
     ].some((p) => h === p)
   ) {
     return 'Principal';
@@ -393,14 +396,11 @@ function inferCategoryFromHref(href: string): string {
     [
       '/ponto/funcionarios',
       '/ponto/folha-pagamento',
-      '/ponto/atestados',
       '/ponto/gerenciar-atestados',
-      '/ponto/solicitacoes',
       '/ponto/gerenciar-solicitacoes',
       '/ponto/gerenciar-solicitacoes-dp',
       '/ponto/dp-contabilidade',
       '/ponto/conversas-whatsapp',
-      '/ponto/ferias',
       '/ponto/gerenciar-ferias',
       '/ponto/gerenciar-feriados',
       '/ponto/banco-horas',

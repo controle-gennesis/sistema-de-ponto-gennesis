@@ -22,11 +22,20 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
@@ -36,7 +45,6 @@ import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface PointCorrectionRequest {
   id: string;
@@ -116,6 +124,44 @@ const formatTime = (timeString: string) => {
   return timeString.substring(0, 5); // HH:MM
 };
 
+const STATUS_LIST_HEADER: Record<
+  'all' | 'PENDING' | 'APPROVED' | 'REJECTED',
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Todas as solicitações',
+    subtitle: 'Todas as alterações de ponto registradas',
+    Icon: FileText,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  PENDING: {
+    title: 'Solicitações pendentes',
+    subtitle: 'Alterações de ponto aguardando análise',
+    Icon: Clock,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  APPROVED: {
+    title: 'Solicitações aprovadas',
+    subtitle: 'Alterações de ponto já aprovadas',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  REJECTED: {
+    title: 'Solicitações rejeitadas',
+    subtitle: 'Alterações de ponto que foram rejeitadas',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+function listHeaderFor(tab: string) {
+  return STATUS_LIST_HEADER[tab as keyof typeof STATUS_LIST_HEADER] ?? STATUS_LIST_HEADER.all;
+}
+
 export default function GerenciarSolicitacoesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -127,7 +173,8 @@ export default function GerenciarSolicitacoesPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionComment, setRejectionComment] = useState('');
   const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
     search: '',
     department: '',
@@ -169,6 +216,9 @@ export default function GerenciarSolicitacoesPage() {
   const allRequests = requestsData?.data || requestsData || [];
 
   // Calcular estatísticas
+  const listHeader = listHeaderFor(activeStatusTab);
+  const ListHeaderIcon = listHeader.Icon;
+
   const stats = {
     total: allRequests.length,
     pending: allRequests.filter((r: PointCorrectionRequest) => r.status === 'PENDING').length,
@@ -220,6 +270,11 @@ export default function GerenciarSolicitacoesPage() {
 
     return true;
   });
+
+  const PAGE_SIZE = 10;
+  const listRange = getCadastroListRange(page, PAGE_SIZE, filteredRequests.length);
+  const currentPage = Math.min(page, listRange.totalPages);
+  const pagedRequests = filteredRequests.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Contar solicitações por status
   const statusCounts = {
@@ -402,70 +457,50 @@ export default function GerenciarSolicitacoesPage() {
         userName={user.name} 
         onLogout={handleLogout}
       >
-        <div className="space-y-6">
-        {/* Cabeçalho */}
-        <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Alterações de Ponto</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Aprove ou rejeite solicitações de correção de ponto</p>
-        </div>
+        <PageStack>
+        <ListPageHeader
+          title="Gerenciar Alterações de Ponto"
+          description="Aprove ou rejeite solicitações de correção de ponto"
+        />
 
         {/* Estatísticas */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
-                  <Users className="h-5 w-5 sm:h-6 sm:w-6 text-red-600 dark:text-red-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Registros</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.total}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center justify-center">
-                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.pending}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Aprovados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.approved}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-                  <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Rejeitados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.rejected}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className={pageStatCardsGridClass}>
+          <FilterStatCard
+            label="Todas"
+            count={stats.total}
+            icon={Users}
+            iconBg="bg-blue-100 dark:bg-blue-900/30"
+            iconColor="text-blue-600 dark:text-blue-400"
+            isActive={activeStatusTab === 'all'}
+            onClick={() => setActiveStatusTab('all')}
+          />
+          <FilterStatCard
+            label="Pendentes"
+            count={stats.pending}
+            icon={Clock}
+            iconBg="bg-amber-100 dark:bg-amber-900/30"
+            iconColor="text-amber-600 dark:text-amber-400"
+            isActive={activeStatusTab === 'PENDING'}
+            onClick={() => setActiveStatusTab('PENDING')}
+          />
+          <FilterStatCard
+            label="Aprovados"
+            count={stats.approved}
+            icon={CheckCircle}
+            iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+            iconColor="text-emerald-600 dark:text-emerald-400"
+            isActive={activeStatusTab === 'APPROVED'}
+            onClick={() => setActiveStatusTab('APPROVED')}
+          />
+          <FilterStatCard
+            label="Rejeitados"
+            count={stats.rejected}
+            icon={XCircle}
+            iconBg="bg-red-100 dark:bg-red-900/30"
+            iconColor="text-red-600 dark:text-red-400"
+            isActive={activeStatusTab === 'REJECTED'}
+            onClick={() => setActiveStatusTab('REJECTED')}
+          />
         </div>
 
         {/* Lista de Solicitações */}
@@ -473,12 +508,12 @@ export default function GerenciarSolicitacoesPage() {
           <CardHeader className={cadastroListClasses.cardHeader}>
             <div className={cadastroListClasses.cardHeaderRow}>
               <div className={cadastroListClasses.cardHeaderIconRow}>
-                <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                  <FileText className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                  <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações de Correção</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Lista de todas as solicitações registradas</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{listHeader.title}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                 </div>
               </div>
               <div className={cadastroListClasses.cardToolbar}>
@@ -496,14 +531,14 @@ export default function GerenciarSolicitacoesPage() {
                   <div className={cadastroListClasses.filterIconButtonWrap}>
                     <button
                       type="button"
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                      onClick={() => setIsFiltersOpen(true)}
                       className={`${cadastroListClasses.filterIconButton} transition-colors ${
-                        showAdvancedFilters || hasAdvancedFilters
+                        hasAdvancedFilters
                           ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                       }`}
-                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
-                      aria-label="Filtros avançados"
+                      title="Filtros"
+                      aria-label="Abrir filtros"
                     >
                       <Filter className="h-4 w-4" />
                       {hasAdvancedFilters ? (
@@ -512,82 +547,8 @@ export default function GerenciarSolicitacoesPage() {
                     </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-900/30"
-                  title="Limpar todos os filtros"
-                  aria-label="Limpar filtros"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
               </div>
             </div>
-
-            {showAdvancedFilters && (
-              <div className="mt-3 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700/30 sm:p-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros avançados</h4>
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Setor
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={filters.department}
-                      onChange={handleDepartmentChange}
-                      options={DEPARTMENTS_LIST}
-                      emptyOptionLabel="Todos os setores"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Cargo
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={filters.position}
-                      onChange={handlePositionChange}
-                      options={CARGOS_LIST}
-                      emptyOptionLabel="Todos os cargos"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Empresa
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={filters.company}
-                      onChange={handleCompanyChange}
-                      options={COMPANIES_LIST}
-                      emptyOptionLabel="Todas as empresas"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Mês
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={String(filters.month)}
-                      onChange={handleMonthChange}
-                      options={monthFilterSelectOptions}
-                      allowEmpty={false}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Ano
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={String(filters.year)}
-                      onChange={handleYearChange}
-                      options={yearFilterSelectOptions}
-                      allowEmpty={false}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </CardHeader>
           <CardContent className={cadastroListClasses.cardContent}>
             <div className="space-y-4">
@@ -614,362 +575,410 @@ export default function GerenciarSolicitacoesPage() {
               </AppUnderlineTabList>
 
               {/* Lista de solicitações */}
-              <div className="space-y-3">
               {loadingRequests ? (
                 <CadastroListLoading message="Carregando solicitações..." />
               ) : filteredRequests.length === 0 ? (
-                <Card>
-                  <CardContent className="p-6 text-center">
-                  <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                      Nenhuma solicitação encontrada
-                    </h3>
-                    <p className="text-gray-500 dark:text-gray-400">
-                    {activeStatusTab !== 'all' 
+                <CadastroListEmpty
+                  icon={FileText}
+                  title="Nenhuma solicitação encontrada"
+                  hint={
+                    activeStatusTab !== 'all'
                       ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
                       : (filters.search || filters.department || filters.position || filters.company)
                         ? 'Nenhum registro encontrado com os filtros selecionados.'
-                        : 'Nenhuma solicitação encontrada.'}
-                  </p>
-                  </CardContent>
-                </Card>
+                        : 'Nenhuma solicitação encontrada.'
+                  }
+                />
               ) : (
-                filteredRequests.map((request: PointCorrectionRequest) => {
-                  const statusInfo = getStatusInfo(request.status);
-                  const StatusIcon = statusInfo.icon;
-
-                  return (
-                    <div
-                      key={request.id}
-                      onClick={() => setSelectedRequest(request)}
-                      className={`${getListTableRowClassName(true)} rounded-lg`}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedRequest(request);
-                        }
-                      }}
-                    >
-                    <Card className="hover:shadow-md transition-all duration-200 h-full">
-                      <CardContent className="p-4">
-                        {/* Header compacto */}
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                              <ListRowNavigableLabel className="truncate text-base font-semibold">
-                                  {request.title}
-                              </ListRowNavigableLabel>
-                              <Badge className={`${statusInfo.color} shrink-0 text-xs`}>
-                                  <StatusIcon className="w-3 h-3 mr-1" />
-                                  {statusInfo.label}
-                                </Badge>
-                              </div>
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                              <User className="w-3 h-3 inline mr-1" />
-                                {request.employee.user.name} - {request.employee.position} de {request.employee.department}
-                              </p>
-                            {request.justification && (
-                              <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
-                                {request.justification}
-                              </p>
-                            )}
-                                </div>
-                          <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                            {request.status === 'PENDING' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedRequest(request);
-                                    setShowApprovalModal(true);
-                                  }}
-                                  disabled={approveMutation.isPending}
-                                  className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800 text-white h-8 px-2"
-                                  title="Aprovar"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedRequest(request);
-                                    setShowRejectionModal(true);
-                                  }}
-                                  disabled={rejectMutation.isPending}
-                                  className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 border-red-500 dark:border-red-500 h-8 px-2"
-                                  title="Rejeitar"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                </Button>
-                              </>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
+                <>
+                  <CadastroListSummary
+                    startItem={listRange.startItem}
+                    endItem={listRange.endItem}
+                    total={filteredRequests.length}
+                    itemLabel="solicitação"
+                    itemLabelPlural="solicitações"
+                    currentPage={currentPage}
+                    totalPages={listRange.totalPages}
+                  />
+                  <div className="table-scroll">
+                    <table className={cadastroListClasses.table}>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className={cadastroListClasses.th}>Solicitação</th>
+                          <th className={cadastroListClasses.th}>Colaborador</th>
+                          <th className={cadastroListClasses.thCenter}>Original</th>
+                          <th className={cadastroListClasses.thCenter}>Corrigido</th>
+                          <th className={cadastroListClasses.thCenter}>Registrada em</th>
+                          <th className={cadastroListClasses.thCenter}>Status</th>
+                          <th className={cadastroListClasses.thCenter}>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        {pagedRequests.map((request: PointCorrectionRequest) => {
+                          const statusInfo = getStatusInfo(request.status);
+                          const StatusIcon = statusInfo.icon;
+                          return (
+                            <tr
+                              key={request.id}
+                              className={getListTableRowClassName(true)}
                               onClick={() => setSelectedRequest(request)}
-                              className="shrink-0 h-8 px-2"
-                              title="Ver detalhes"
                             >
-                              <Eye className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Comparação compacta */}
-                        <div className="grid grid-cols-2 gap-2 mb-3">
-                          {/* Original */}
-                          <div className="p-2.5 rounded border-l-2 border-red-500 dark:border-red-400 bg-red-50/50 dark:bg-red-900/10">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
-                                {formatDate(request.originalDate)} {formatTime(request.originalTime)}
-                              </p>
-                              <p className="text-xs text-gray-600 dark:text-gray-400">
-                                {getTypeLabel(request.originalType)}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Corrigido */}
-                          <div className="p-2.5 rounded border-l-2 border-green-500 dark:border-green-400 bg-green-50/50 dark:bg-green-900/10">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
-                                {formatDate(request.correctedDate)} {formatTime(request.correctedTime)}
-                              </p>
-                              <p className="text-xs text-gray-600 dark:text-gray-400">
-                                {getTypeLabel(request.correctedType)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Footer compacto */}
-                        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-                          <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                            <Calendar className="w-3 h-3" />
-                            <span>{formatDate(request.createdAt)}</span>
-                          </div>
-                          {request.approvedAt && (
-                            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                              <Clock className="w-3 h-3" />
-                              <span>Aprovado {formatDate(request.approvedAt)}</span>
-                            </div>
-                          )}
-                          {request.comments.length > 0 && (
-                            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                              <MessageSquare className="w-3 h-3" />
-                              <span>{request.comments.length} comentário(s)</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Motivo da rejeição compacto */}
-                        {request.rejectionReason && request.status === 'REJECTED' && (
-                          <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border-l-2 border-red-500 dark:border-red-400 rounded-r">
-                            <p className="text-xs text-red-700 dark:text-red-300">
-                              <span className="font-semibold">Rejeição:</span> {request.rejectionReason}
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                    </div>
-                  );
-                })
+                              <td className={cadastroListClasses.tdTruncate}>
+                                <ListRowNavigableLabel className="font-medium">
+                                  {request.title}
+                                </ListRowNavigableLabel>
+                                {request.justification ? (
+                                  <p className="line-clamp-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {request.justification}
+                                  </p>
+                                ) : null}
+                                {request.rejectionReason && request.status === 'REJECTED' ? (
+                                  <p className="text-xs text-red-600 dark:text-red-400">
+                                    Rejeição: {request.rejectionReason}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className={cadastroListClasses.td}>
+                                <p className="font-medium text-gray-900 dark:text-gray-100">
+                                  {request.employee.user.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {request.employee.position} · {request.employee.department}
+                                </p>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <p>{formatDate(request.originalDate)} {formatTime(request.originalTime)}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {getTypeLabel(request.originalType)}
+                                </p>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <p>{formatDate(request.correctedDate)} {formatTime(request.correctedTime)}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {getTypeLabel(request.correctedType)}
+                                </p>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                {formatDate(request.createdAt)}
+                                {request.comments.length > 0 ? (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {request.comments.length} comentário(s)
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${statusInfo.color}`}
+                                >
+                                  <StatusIcon className="h-3 w-3" />
+                                  {statusInfo.label}
+                                </span>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter} onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-center gap-1">
+                                  {request.status === 'PENDING' && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        onClick={() => {
+                                          setSelectedRequest(request);
+                                          setShowApprovalModal(true);
+                                        }}
+                                        disabled={approveMutation.isPending}
+                                        className="h-8 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800"
+                                        title="Aprovar"
+                                      >
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setSelectedRequest(request);
+                                          setShowRejectionModal(true);
+                                        }}
+                                        disabled={rejectMutation.isPending}
+                                        className="h-8 border-red-500 px-2 text-red-600 hover:text-red-700 dark:border-red-500 dark:text-red-400 dark:hover:text-red-500"
+                                        title="Rejeitar"
+                                      >
+                                        <XCircle className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setSelectedRequest(request)}
+                                    className="h-8 shrink-0 px-2"
+                                    title="Ver detalhes"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ListPagination
+                    currentPage={currentPage}
+                    totalPages={listRange.totalPages}
+                    onPageChange={setPage}
+                  />
+                </>
               )}
-              </div>
             </div>
           </CardContent>
         </Card>
 
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Gerenciar Alterações de Ponto"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Setor</label>
+              <StringSingleSelectDropdown
+                value={filters.department}
+                onChange={handleDepartmentChange}
+                options={DEPARTMENTS_LIST}
+                emptyOptionLabel="Todos os setores"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Cargo</label>
+              <StringSingleSelectDropdown
+                value={filters.position}
+                onChange={handlePositionChange}
+                options={CARGOS_LIST}
+                emptyOptionLabel="Todos os cargos"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
+              <StringSingleSelectDropdown
+                value={filters.company}
+                onChange={handleCompanyChange}
+                options={COMPANIES_LIST}
+                emptyOptionLabel="Todas as empresas"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Mês</label>
+              <StringSingleSelectDropdown
+                value={String(filters.month)}
+                onChange={handleMonthChange}
+                options={monthFilterSelectOptions}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Ano</label>
+              <StringSingleSelectDropdown
+                value={String(filters.year)}
+                onChange={handleYearChange}
+                options={yearFilterSelectOptions}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersOpen(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </Modal>
+
         {/* Modal de detalhes */}
-        {selectedRequest && !showApprovalModal && !showRejectionModal && (
-          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedRequest(null)} />
-            <div className="relative w-full max-w-3xl bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden max-h-[90vh]">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Detalhes da Solicitação
-                </h3>
-                <button
-                  onClick={() => setSelectedRequest(null)}
-                  className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-                >
-                  <XCircle className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6 space-y-6">
-                <div>
-                <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">{selectedRequest.title}</h4>
+        <Modal
+          isOpen={!!selectedRequest && !showApprovalModal && !showRejectionModal}
+          onClose={() => setSelectedRequest(null)}
+          title="Detalhes da Solicitação"
+          size="xl"
+        >
+          {selectedRequest && (
+            <div className="space-y-6">
+              <div>
+                <h4 className="mb-2 font-medium text-gray-900 dark:text-gray-100">{selectedRequest.title}</h4>
               </div>
 
               <div>
-                <h5 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Justificativa:</h5>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                    {selectedRequest.justification}
+                <h5 className="mb-2 font-medium text-gray-900 dark:text-gray-100">Justificativa:</h5>
+                <p className="rounded bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                  {selectedRequest.justification}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded bg-red-50 p-3 dark:bg-red-900/30">
+                  <h6 className="mb-2 font-medium text-red-800 dark:text-red-300">Dados Originais</h6>
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    {formatDate(selectedRequest.originalDate)} às {formatTime(selectedRequest.originalTime)}
+                  </p>
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {getTypeLabel(selectedRequest.originalType)}
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded">
-                    <h6 className="font-medium text-red-800 dark:text-red-300 mb-2">Dados Originais</h6>
-                    <p className="text-sm text-red-700 dark:text-red-300">
-                      {formatDate(selectedRequest.originalDate)} às {formatTime(selectedRequest.originalTime)}
-                    </p>
-                    <p className="text-xs text-red-600 dark:text-red-400">
-                      {getTypeLabel(selectedRequest.originalType)}
-                    </p>
-                  </div>
+                <div className="rounded bg-green-50 p-3 dark:bg-green-900/30">
+                  <h6 className="mb-2 font-medium text-green-800 dark:text-green-300">Dados Corrigidos</h6>
+                  <p className="text-sm text-green-700 dark:text-green-300">
+                    {formatDate(selectedRequest.correctedDate)} às {formatTime(selectedRequest.correctedTime)}
+                  </p>
+                  <p className="text-xs text-green-600 dark:text-green-400">
+                    {getTypeLabel(selectedRequest.correctedType)}
+                  </p>
+                </div>
+              </div>
 
-                  <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded">
-                    <h6 className="font-medium text-green-800 dark:text-green-300 mb-2">Dados Corrigidos</h6>
-                    <p className="text-sm text-green-700 dark:text-green-300">
-                      {formatDate(selectedRequest.correctedDate)} às {formatTime(selectedRequest.correctedTime)}
-                    </p>
-                    <p className="text-xs text-green-600 dark:text-green-400">
-                      {getTypeLabel(selectedRequest.correctedType)}
-                    </p>
+              {selectedRequest.comments.length > 0 && (
+                <div>
+                  <h6 className="mb-3 font-medium text-gray-900 dark:text-gray-100">Comentários:</h6>
+                  <div className="space-y-2">
+                    {selectedRequest.comments.map((comment) => (
+                      <div key={comment.id} className="rounded bg-gray-50 p-3 dark:bg-gray-700">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.user.name}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{formatDate(comment.createdAt)}</span>
+                          {comment.isInternal && (
+                            <Badge size="sm" className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                              Interno
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{comment.comment}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
-
-                {selectedRequest.comments.length > 0 && (
-                  <div>
-                    <h6 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Comentários:</h6>
-                    <div className="space-y-2">
-                      {selectedRequest.comments.map((comment) => (
-                        <div key={comment.id} className="p-3 bg-gray-50 dark:bg-gray-700 rounded">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.user.name}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">{formatDate(comment.createdAt)}</span>
-                            {comment.isInternal && (
-                              <Badge size="sm" className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
-                                Interno
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">{comment.comment}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-          </AppModalOverlay>
-        )}
+          )}
+        </Modal>
 
         {/* Modal de aprovação */}
-        {showApprovalModal && selectedRequest && (
-          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40" onClick={() => {
-              setShowApprovalModal(false);
-              setSelectedRequest(null);
-            }} />
-            <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Aprovar Solicitação</h3>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Comentário de Aprovação *
-                  </label>
-                  <textarea
-                    value={approvalComment}
-                    onChange={(e) => setApprovalComment(e.target.value)}
-                    placeholder="Digite um comentário sobre a aprovação..."
-                    className={FORM_FIELD_TEXTAREA_CLS}
-                    rows={3}
-                  />
-                </div>
-              </div>
-              
-              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowApprovalModal(false);
-                    setSelectedRequest(null);
-                  }}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleApprove}
-                  disabled={approveMutation.isPending || !approvalComment.trim()}
-                  className="bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800"
-                >
-                  {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
-                </Button>
-              </div>
+        <Modal
+          isOpen={showApprovalModal && !!selectedRequest}
+          onClose={() => {
+            setShowApprovalModal(false);
+            setSelectedRequest(null);
+          }}
+          title="Aprovar Solicitação"
+          size="md"
+          footer={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowApprovalModal(false);
+                  setSelectedRequest(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleApprove}
+                disabled={approveMutation.isPending || !approvalComment.trim()}
+                className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800"
+              >
+                {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Comentário de Aprovação *
+              </label>
+              <textarea
+                value={approvalComment}
+                onChange={(e) => setApprovalComment(e.target.value)}
+                placeholder="Digite um comentário sobre a aprovação..."
+                className={FORM_FIELD_TEXTAREA_CLS}
+                rows={3}
+              />
             </div>
-          </AppModalOverlay>
-        )}
+          </div>
+        </Modal>
 
         {/* Modal de rejeição */}
-        {showRejectionModal && selectedRequest && (
-          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40" onClick={() => {
-              setShowRejectionModal(false);
-              setSelectedRequest(null);
-            }} />
-            <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Rejeitar Solicitação</h3>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Motivo da Rejeição *
-                  </label>
-                  <Input
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    placeholder="Ex: Dados inconsistentes"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Comentário *
-                  </label>
-                  <textarea
-                    value={rejectionComment}
-                    onChange={(e) => setRejectionComment(e.target.value)}
-                    placeholder="Explique o motivo da rejeição..."
-                    className={FORM_FIELD_TEXTAREA_CLS}
-                    rows={3}
-                  />
-                </div>
-              </div>
-              
-              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowRejectionModal(false);
-                    setSelectedRequest(null);
-                  }}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleReject}
-                  disabled={rejectMutation.isPending || !rejectionReason.trim() || !rejectionComment.trim()}
-                  className="bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800"
-                >
-                  {rejectMutation.isPending ? 'Rejeitando...' : 'Rejeitar'}
-                </Button>
-              </div>
+        <Modal
+          isOpen={showRejectionModal && !!selectedRequest}
+          onClose={() => {
+            setShowRejectionModal(false);
+            setSelectedRequest(null);
+          }}
+          title="Rejeitar Solicitação"
+          size="md"
+          footer={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowRejectionModal(false);
+                  setSelectedRequest(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleReject}
+                disabled={rejectMutation.isPending || !rejectionReason.trim() || !rejectionComment.trim()}
+                className="bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
+              >
+                {rejectMutation.isPending ? 'Rejeitando...' : 'Rejeitar'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Motivo da Rejeição *
+              </label>
+              <Input
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Ex: Dados inconsistentes"
+              />
             </div>
-          </AppModalOverlay>
-        )}
-      </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Comentário *
+              </label>
+              <textarea
+                value={rejectionComment}
+                onChange={(e) => setRejectionComment(e.target.value)}
+                placeholder="Explique o motivo da rejeição..."
+                className={FORM_FIELD_TEXTAREA_CLS}
+                rows={3}
+              />
+            </div>
+          </div>
+        </Modal>
+      </PageStack>
     </MainLayout>
     </ProtectedRoute>
   );
