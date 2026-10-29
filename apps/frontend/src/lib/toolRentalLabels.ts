@@ -117,12 +117,20 @@ export function resolveToolRentalDisplayStatus(
   return status;
 }
 
+/** Compra sem data limite: o item fica para sempre, então o fim do período é uma data-marco bem distante. */
+export const TOOL_RENTAL_PERMANENT_END = '2099-12-31';
+
+export function isToolRentalPermanentEnd(value: string | null | undefined): boolean {
+  return Boolean(value) && String(value).slice(0, 4) >= '2099';
+}
+
 /** Texto auxiliar de prazo quando status (display) é Em uso. */
 export function formatToolRentalInUsePeriodHint(periodoFim?: string | null): {
   text: string;
   tone: 'ok' | 'today' | 'overdue';
 } | null {
   if (!periodoFim) return null;
+  if (isToolRentalPermanentEnd(periodoFim)) return null;
   const end = new Date(periodoFim);
   if (Number.isNaN(end.getTime())) return null;
   const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());

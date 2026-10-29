@@ -293,6 +293,9 @@ export function FdApprovalsSection() {
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                        ID
+                      </th>
                       <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Código da FD
                       </th>
@@ -323,6 +326,9 @@ export function FdApprovalsSection() {
                         className={getListTableRowClassName(true)}
                         onClick={() => setDetailFd(r)}
                       >
+                        <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                          {r.displayNumber ?? '—'}
+                        </td>
                         <td className="px-3 py-4 text-left sm:px-6">
                           <ListRowNavigableLabel className="text-sm font-medium">
                             {r.codFichaDemanda}
@@ -353,7 +359,9 @@ export function FdApprovalsSection() {
                               r.status === 'CANCELLED' &&
                               r.managerRejectionComment?.includes('exclusão de orçamento')
                                 ? 'FD Cancelada por exclusão de orçamento'
-                                : FD_STATUS_LABELS[r.status]
+                                : r.status === 'WAITING_MANAGER'
+                                  ? 'Pendente'
+                                  : FD_STATUS_LABELS[r.status]
                             }
                           />
                         </td>

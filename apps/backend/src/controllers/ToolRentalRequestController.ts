@@ -382,9 +382,21 @@ export class ToolRentalRequestController {
       const quotation = byStatus[ToolRentalRequestStatus.QUOTATION] ?? 0;
       const awaitingPayment = byStatus[ToolRentalRequestStatus.AWAITING_PAYMENT] ?? 0;
       const inUse = byStatus[ToolRentalRequestStatus.IN_USE] ?? 0;
-      const completed = byStatus[ToolRentalRequestStatus.COMPLETED] ?? 0;
-      // Legado: pedidos antigos em AWAITING_RECEIPT contam como aguardando recebimento no fluxo
-      const legacyAwaitingReceipt = byStatus[ToolRentalRequestStatus.AWAITING_RECEIPT] ?? 0;
+      // Aguardando recebimento = encaminhada ao recebimento e ainda sem confirmação; o resto é finalizada.
+      const awaitingReceipt = await prisma.toolRentalRequest.count({
+        where: {
+          status: {
+            in: [ToolRentalRequestStatus.COMPLETED, ToolRentalRequestStatus.AWAITING_RECEIPT],
+          },
+          receivedAt: null,
+        },
+      });
+      const completed = Math.max(
+        0,
+        (byStatus[ToolRentalRequestStatus.COMPLETED] ?? 0) +
+          (byStatus[ToolRentalRequestStatus.AWAITING_RECEIPT] ?? 0) -
+          awaitingReceipt,
+      );
       const rejected = byStatus[ToolRentalRequestStatus.REJECTED] ?? 0;
       const cancelled = byStatus[ToolRentalRequestStatus.CANCELLED] ?? 0;
 
@@ -397,7 +409,7 @@ export class ToolRentalRequestController {
           inUse,
           pending: open + quotation + awaitingPayment,
           completed,
-          awaitingReceipt: legacyAwaitingReceipt,
+          awaitingReceipt,
           rejected,
           cancelled,
           total,
@@ -488,6 +500,15 @@ export class ToolRentalRequestController {
         total += row._count._all;
       }
       const n = (...keys: string[]) => keys.reduce((acc, k) => acc + (byStatus[k] ?? 0), 0);
+      const awaitingReceipt = await prisma.toolRentalRequest.count({
+        where: {
+          ...where,
+          status: {
+            in: [ToolRentalRequestStatus.COMPLETED, ToolRentalRequestStatus.AWAITING_RECEIPT],
+          },
+          receivedAt: null,
+        },
+      });
       res.json({
         success: true,
         data: {
@@ -495,7 +516,7 @@ export class ToolRentalRequestController {
           open: n('OPEN'),
           quotation: n('QUOTATION'),
           awaitingPayment: n('AWAITING_PAYMENT'),
-          awaitingReceipt: n('COMPLETED', 'AWAITING_RECEIPT'),
+          awaitingReceipt,
           inUse: n('IN_USE'),
           cancelled: n('CANCELLED', 'REJECTED'),
         },
@@ -508,7 +529,7 @@ export class ToolRentalRequestController {
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const { search, page = 1, limit = 20, status, scope, contractId } = req.query;
+      const { search, page = 1, limit = 20, status, scope, contractId, receipt } = req.query;
       const where: Record<string, unknown> = {};
       if (typeof contractId === 'string' && contractId.trim()) {
         where.contractId = contractId.trim();
@@ -520,6 +541,10 @@ export class ToolRentalRequestController {
       } else if (statusFilter && statusFilter.length > 1) {
         where.status = { in: statusFilter };
       }
+      // Recebimento: pendente (aguardando confirmação) ou concluído.
+      const receiptFilter = String(receipt ?? '').toLowerCase();
+      if (receiptFilter === 'pending') where.receivedAt = null;
+      else if (receiptFilter === 'done') where.receivedAt = { not: null };
 
       // Engenharia: próprias + contratos liberados. Suprimentos usa scope=all.
       const scopeAll = String(scope ?? '').toLowerCase() === 'all';
@@ -949,11 +974,14 @@ export class ToolRentalRequestController {
         throw createError('Anexe o comprovante de pagamento antes de encaminhar para Recebimento', 400);
       }
 
+      // Renovação não passa por «Aguardando recebimento»: o equipamento já está com a obra.
+      const finalizaDireto = row.demandType === ToolRentalDemandType.RENOVACAO;
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
           where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.COMPLETED,
+            ...(finalizaDireto ? { receivedAt: new Date() } : {}),
             ...(paymentProofUrl
               ? {
                   paymentProofUrl,
@@ -969,7 +997,9 @@ export class ToolRentalRequestController {
           fromStatus: ToolRentalRequestStatus.AWAITING_PAYMENT,
           toStatus: ToolRentalRequestStatus.COMPLETED,
           actorId: req.user!.id,
-          note: paymentProofUrl
+          note: finalizaDireto
+            ? 'Renovação finalizada — não precisa de confirmação de recebimento'
+            : paymentProofUrl
             ? 'Comprovante de pagamento anexado — solicitação finalizada (aguardando confirmação de recebimento)'
             : 'Solicitação finalizada — aguardando confirmação de recebimento pela Engenharia',
         });

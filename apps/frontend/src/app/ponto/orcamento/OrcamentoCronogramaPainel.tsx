@@ -374,8 +374,12 @@ function CelulaLinhaTimeline({
   largura,
   diaPx,
   modo,
-  onEdit
+  onEdit,
+  bgCls = '',
+  bgStyle
 }: {
+  bgCls?: string;
+  bgStyle?: React.CSSProperties;
   row: CronogramaTimelineLinha | undefined;
   timelineRange: CronogramaTimelineRange | null;
   largura: number;
@@ -384,9 +388,14 @@ function CelulaLinhaTimeline({
   onEdit: (row: CronogramaTimelineLinha, e: React.MouseEvent) => void;
 }) {
   const tdClsTimeline = 'relative h-px border-l border-gray-200 p-0 align-middle dark:border-gray-600';
-  const tdStyle = { width: largura || undefined, minWidth: largura || undefined, maxWidth: largura || undefined };
+  const tdStyle = {
+    ...bgStyle,
+    width: largura || undefined,
+    minWidth: largura || undefined,
+    maxWidth: largura || undefined
+  };
   if (!timelineRange || largura <= 0 || diaPx <= 0) {
-    return <td className={tdClsTimeline} style={tdStyle} />;
+    return <td className={`${tdClsTimeline} ${bgCls}`} style={tdStyle} />;
   }
 
   const linha = row && !row.isCabecalhoServico && !row.isCabecalhoSubtitulo ? row : null;
@@ -470,7 +479,7 @@ function CelulaLinhaTimeline({
       }));
 
   return (
-    <td className={tdClsTimeline} style={tdStyle}>
+    <td className={`${tdClsTimeline} ${bgCls}`} style={tdStyle}>
       <div className="absolute inset-0" style={{ width: largura }}>
         <div
           className="absolute inset-0 grid"
@@ -498,15 +507,13 @@ function CelulaLinhaTimeline({
               desvio?.temDesvio ? ` · ${formatDesvioDiasLabel(desvio.desvioFimDias) ?? ''}` : ''
             }`}
           >
-            <div className="h-full rounded-sm border border-dashed border-gray-400/70 bg-gray-400/[0.06] dark:border-gray-500/60 dark:bg-gray-500/10" />
+            <div className="h-full rounded-sm border border-dashed border-gray-400/70 dark:border-gray-500/60" />
           </button>
         ) : null}
         {mostrarPlanejadoNoReal && barPlan && linha ? (
           <div
             className={`pointer-events-none absolute z-[1] rounded-sm border border-dashed border-gray-500/70 dark:border-gray-400/60 ${
-              mostrarBarraReal
-                ? 'top-1 bottom-1 bg-gray-400/[0.08] dark:bg-gray-500/10'
-                : 'top-1 bottom-1 bg-gray-400/[0.06] dark:bg-gray-500/10'
+              'top-1 bottom-1'
             }`}
             style={{ left: barPlan.leftPx, width: barPlan.widthPx }}
             title={`Planejado: ${formatDataBr(linha.dados.dataInicio)} → ${formatDataBr(linha.dados.dataFim)}`}
@@ -956,7 +963,7 @@ export function OrcamentoCronogramaPainel({
 
   const modoFolha: 'plan' | 'real' = abaCronograma === 'real' ? 'real' : 'plan';
 
-  const renderTimeline = (key: string) => (
+  const renderTimeline = (key: string, bgCls = '', bgStyle?: React.CSSProperties) => (
     <CelulaLinhaTimeline
       row={timelinePorKey.get(key)}
       timelineRange={timelineRange}
@@ -964,6 +971,8 @@ export function OrcamentoCronogramaPainel({
       diaPx={timelineLayout?.diaPx ?? 0}
       modo={modoFolha}
       onEdit={abrirEditorEtapa}
+      bgCls={bgCls}
+      bgStyle={bgStyle}
     />
   );
 
@@ -1147,7 +1156,7 @@ export function OrcamentoCronogramaPainel({
                 <col className="w-[9rem]" />
                 <col className="w-[4rem]" />
                 <col className="w-[6.5rem]" />
-                <col className="w-[7rem]" />
+                {modoFolha === 'real' ? <col className="w-[7rem]" /> : null}
                 <col style={timelineLayout ? { width: timelineLayout.largura } : undefined} />
               </colgroup>
               <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -1188,7 +1197,7 @@ export function OrcamentoCronogramaPainel({
                           {timelineRange.meses.map((mes) => (
                             <div
                               key={mes.key}
-                              className="whitespace-nowrap border-l border-gray-200/70 py-1 text-center text-[10px] font-semibold uppercase text-gray-500 first:border-l-0 dark:border-gray-700/70 dark:text-gray-400"
+                              className="overflow-hidden text-ellipsis whitespace-nowrap border-l border-gray-200/70 px-1 py-1 text-center text-[10px] font-semibold uppercase text-gray-500 first:border-l-0 dark:border-gray-700/70 dark:text-gray-400"
                               style={{ gridColumn: `span ${mes.span}` }}
                             >
                               {mes.label}
@@ -1253,7 +1262,7 @@ export function OrcamentoCronogramaPainel({
                       className={`${
                         estilosAparencia?.servico
                           ? estilosAparencia.classeCustom
-                          : 'bg-sky-100 dark:bg-sky-950/60'
+                          : 'bg-sky-100 dark:bg-sky-950'
                       } border-b border-sky-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                       style={estilosAparencia?.servico}
                     >
@@ -1295,7 +1304,11 @@ export function OrcamentoCronogramaPainel({
                         corStatusPropria={!estilosAparencia?.servico}
                         onPatch={(patch) => patchServico(linha.servicoKey, patch)}
                       />
-                      {renderTimeline(linha.servicoKey)}
+                      {renderTimeline(
+                        linha.servicoKey,
+                        estilosAparencia?.servico ? '' : 'bg-sky-100 dark:bg-sky-950',
+                        estilosAparencia?.servico
+                      )}
                     </tr>
                   );
 
@@ -1317,8 +1330,8 @@ export function OrcamentoCronogramaPainel({
                     const bgListraTr = estiloListra
                       ? estilosAparencia!.classeCustom
                       : listraClara
-                        ? 'bg-white dark:bg-gray-900/80'
-                        : 'bg-slate-100 dark:bg-gray-800/70';
+                        ? 'bg-white dark:bg-gray-900'
+                        : 'bg-slate-100 dark:bg-gray-800';
                     const bgListraTd = estiloListra
                       ? ''
                       : listraClara
@@ -1349,7 +1362,7 @@ export function OrcamentoCronogramaPainel({
                           modo={modoFolha}
                           onPatch={(patch) => patchComposicaoEtapa(blocoKey, comp.chave, patch)}
                         />
-                        {renderTimeline(`${linha.servicoKey}::${blocoKey}::${comp.chave}`)}
+                        {renderTimeline(`${linha.servicoKey}::${blocoKey}::${comp.chave}`, bgListraTd, estiloListra)}
                       </tr>
                     );
                   };
@@ -1426,7 +1439,11 @@ export function OrcamentoCronogramaPainel({
                           modo={modoFolha}
                           onPatch={() => {}}
                         />
-                        {renderTimeline(`${st.blocoKey}::cabecalho`)}
+                        {renderTimeline(
+                          `${st.blocoKey}::cabecalho`,
+                          estilosAparencia?.subtitulo ? '' : 'bg-slate-200 dark:bg-gray-900',
+                          estilosAparencia?.subtitulo
+                        )}
                       </tr>
                     );
                     st.composicoes.forEach((comp) => {

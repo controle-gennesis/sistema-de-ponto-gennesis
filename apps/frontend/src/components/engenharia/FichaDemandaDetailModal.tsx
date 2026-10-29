@@ -720,6 +720,12 @@ export function FichaDemandaDetailModal({
               : (FD_STATUS_LABELS[record.status] || record.status)
           }</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
+          {record.purchaseStatus === 'CANCELLED' && record.purchaseStatusUpdaterNome ? (
+            <Field label="Cancelada por">
+              {record.purchaseStatusUpdaterNome}
+              {record.purchaseStatusUpdatedAt ? ` · ${record.purchaseStatusUpdatedAt}` : ''}
+            </Field>
+          ) : null}
           {record.purchaseStatus === 'CANCELLED' && record.purchaseCancellationNote ? (
             <div className="sm:col-span-2">
               <Field label="Observação do cancelamento">{record.purchaseCancellationNote}</Field>
@@ -778,7 +784,8 @@ export function FichaDemandaDetailModal({
             <div className="space-y-4 p-4">
               {isCancelled && record.purchaseCancellationNote ? (
                 <p className="text-sm text-red-700 dark:text-red-300">
-                  Cancelada: {record.purchaseCancellationNote}
+                  Cancelada{record.purchaseStatusUpdaterNome ? ` por ${record.purchaseStatusUpdaterNome}` : ''}:{' '}
+                  {record.purchaseCancellationNote}
                 </p>
               ) : null}
               {stage === 'all' ? (

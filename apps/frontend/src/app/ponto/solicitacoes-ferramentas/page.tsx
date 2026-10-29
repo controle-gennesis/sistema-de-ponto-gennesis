@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   CheckCircle,
+  PackageCheck,
   CreditCard,
   FileSearch,
   Inbox,
@@ -65,6 +66,7 @@ import {
   type ToolRentalLogisticsMode,
   type ToolRentalPriority,
   type ToolRentalRequestStatus,
+  isToolRentalPermanentEnd,
 } from '@/lib/toolRentalLabels';
 import { buildToolRentalTimeline, type ToolRentalTimelineEvent } from '@/lib/toolRentalTimeline';
 import {
@@ -114,7 +116,14 @@ type ToolRentalRequest = {
   events?: ToolRentalTimelineEvent[];
 };
 
-type StatusFilter = 'ALL' | 'OPEN' | 'QUOTATION' | 'AWAITING_PAYMENT' | 'COMPLETED' | 'CANCELLED';
+type StatusFilter =
+  | 'ALL'
+  | 'OPEN'
+  | 'QUOTATION'
+  | 'AWAITING_PAYMENT'
+  | 'AWAITING_RECEIPT'
+  | 'COMPLETED'
+  | 'CANCELLED';
 
 const LIST_HEADER_BY_FILTER: Record<
   StatusFilter,
@@ -154,6 +163,13 @@ const LIST_HEADER_BY_FILTER: Record<
     iconBg: 'bg-violet-100 dark:bg-violet-900/30',
     iconColor: 'text-violet-600 dark:text-violet-400',
   },
+  AWAITING_RECEIPT: {
+    title: 'Aguardando recebimento',
+    subtitle: 'Pagas, aguardando a confirmação de recebimento pela Engenharia.',
+    Icon: PackageCheck,
+    iconBg: 'bg-teal-100 dark:bg-teal-900/30',
+    iconColor: 'text-teal-600 dark:text-teal-400',
+  },
   COMPLETED: {
     title: 'Finalizadas',
     subtitle: 'Solicitações concluídas.',
@@ -178,6 +194,7 @@ function anexosByKind(list: ToolRentalAnexo[] | null | undefined, kind: string):
 
 function formatDateOnly(value: string | null | undefined): string {
   if (!value) return '—';
+  if (isToolRentalPermanentEnd(value)) return 'Permanente';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
   return format(d, 'dd/MM/yyyy', { locale: ptBR });
@@ -304,7 +321,18 @@ function SolicitacoesFerramentasPage() {
           page,
           limit: 20,
           scope: 'all',
-          status: statusFilter === 'ALL' ? undefined : statusFilter,
+          status:
+            statusFilter === 'ALL'
+              ? undefined
+              : statusFilter === 'AWAITING_RECEIPT' || statusFilter === 'COMPLETED'
+                ? 'COMPLETED,AWAITING_RECEIPT'
+                : statusFilter,
+          receipt:
+            statusFilter === 'AWAITING_RECEIPT'
+              ? 'pending'
+              : statusFilter === 'COMPLETED'
+                ? 'done'
+                : undefined,
         },
       });
       return res.data;
@@ -320,6 +348,7 @@ function SolicitacoesFerramentasPage() {
           open: 0,
           quotation: 0,
           awaitingPayment: 0,
+          awaitingReceipt: 0,
           completed: 0,
           cancelled: 0,
           total: 0,
@@ -616,6 +645,11 @@ function SolicitacoesFerramentasPage() {
         filter: 'AWAITING_PAYMENT',
         label: 'Pagamento',
         value: summaryData?.awaitingPayment ?? 0,
+      },
+      {
+        filter: 'AWAITING_RECEIPT',
+        label: 'Aguardando recebimento',
+        value: summaryData?.awaitingReceipt ?? 0,
       },
       { filter: 'COMPLETED', label: 'Finalizadas', value: summaryData?.completed ?? 0 },
       { filter: 'CANCELLED', label: 'Canceladas', value: summaryData?.cancelled ?? 0 },

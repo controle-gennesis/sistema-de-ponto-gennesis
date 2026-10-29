@@ -20,7 +20,7 @@ export function CronogramaGraficosPainel({
   hoje = new Date()
 }: Props) {
   return (
-    <div className="p-4">
+    <div className="h-full p-4">
       <CronogramaCurvaSPanel
         linhas={linhas}
         cronograma={cronograma}
@@ -28,6 +28,7 @@ export function CronogramaGraficosPainel({
         dataFimObra={dataFimObra}
         hoje={hoje}
         inModal
+        preencher
       />
     </div>
   );
