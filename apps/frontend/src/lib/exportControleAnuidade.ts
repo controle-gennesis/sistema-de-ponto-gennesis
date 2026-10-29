@@ -18,14 +18,24 @@ function formatExportDate(value: string | null | undefined): string {
   return `${dd}/${mm}/${d.getUTCFullYear()}`;
 }
 
+/** Data real do Excel (filtra e ordena como data); texto original quando não dá para ler. */
+function toExcelDate(value: string | null | undefined): Date | string {
+  const text = formatExportDate(value);
+  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return text;
+  return new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+}
+
 function formatExportValor(value: string | number | null | undefined): string | number {
   if (value === null || value === undefined || value === '') return '';
   if (typeof value === 'number') return Number.isFinite(value) ? value : '';
-  const n = parseFloat(String(value).replace(/\./g, '').replace(',', '.'));
+  // Mesma leitura da tela: com vírgula é formato BR (1.234,56); sem vírgula o ponto é decimal (304.84).
+  const raw = String(value).trim().replace(/[^\d.,-]/g, '');
+  const n = raw.includes(',') ? parseFloat(raw.replace(/\./g, '').replace(',', '.')) : parseFloat(raw);
   return Number.isFinite(n) ? n : String(value);
 }
 
-function toRowValues(r: ControleAnuidadeExportRow): (string | number)[] {
+function toRowValues(r: ControleAnuidadeExportRow): (string | number | Date)[] {
   return [
     r.pagosPelo || '',
     r.empresa || '',
@@ -34,9 +44,9 @@ function toRowValues(r: ControleAnuidadeExportRow): (string | number)[] {
     r.crea || '',
     r.cpfCnpj || '',
     formatExportValor(r.valor),
-    formatExportDate(r.dataVencimento),
-    formatExportDate(r.dataParaPagamento),
-    formatExportDate(r.dataPagamento),
+    toExcelDate(r.dataVencimento),
+    toExcelDate(r.dataParaPagamento),
+    toExcelDate(r.dataPagamento),
     r.status || '',
     r.fluig || '',
   ];
@@ -69,6 +79,7 @@ export async function exportControleAnuidadeEntries(
                   : 14,
       align: header === 'STATUS' || header === 'VALOR' || header === 'CREA' ? 'center' : 'left',
       statusTone: header === 'STATUS',
+      numFmt: header === 'VALOR' ? '"R$" #,##0.00' : header.includes('DATA') ? 'dd/mm/yyyy' : undefined,
     })),
     rows: entries.map(toRowValues),
   });

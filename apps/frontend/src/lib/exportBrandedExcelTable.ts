@@ -26,6 +26,8 @@ export type BrandedExcelColumn = {
   width?: number;
   align?: 'left' | 'center' | 'right';
   statusTone?: boolean;
+  /** Formato numérico do Excel para células numéricas (ex.: moeda). */
+  numFmt?: string;
 };
 
 export type ExportBrandedExcelOptions = {
@@ -34,7 +36,7 @@ export type ExportBrandedExcelOptions = {
   sheetName: string;
   filename: string;
   columns: BrandedExcelColumn[];
-  rows: (string | number)[][];
+  rows: (string | number | Date)[][];
 };
 
 function statusStyle(value: string): { bg: string; fg: string } | null {
@@ -186,6 +188,7 @@ export async function exportBrandedExcelTable(
       const col = columns[colIdx];
       const cell = row.getCell(colIdx + 1);
       cell.value = value;
+      if (col?.numFmt && (typeof value === 'number' || value instanceof Date)) cell.numFmt = col.numFmt;
       cell.font = { name: 'Calibri', size: 10, color: { argb: TITLE_TEXT } };
       cell.alignment = {
         vertical: 'middle',
