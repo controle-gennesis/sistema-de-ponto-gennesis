@@ -4,11 +4,16 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { MedicalCertificateList } from '@/components/medical-certificate/MedicalCertificateList';
+import { MedicalCertificateList, type MedicalCertificateStatusTab } from '@/components/medical-certificate/MedicalCertificateList';
 import { RegisterAbsenceModal } from '@/components/absence/RegisterAbsenceModal';
-import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, Calendar, ChevronDown, ChevronUp, RotateCcw, Building2, Plus, AlertCircle } from 'lucide-react';
+import { FileText, Users, Clock, CheckCircle, XCircle, Filter, Search, RotateCcw, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { Loading } from '@/components/ui/Loading';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import api from '@/lib/api';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
@@ -27,9 +32,52 @@ const CERTIFICATE_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions, filterOptionsWithAll } from '@/lib/selectOptionBuilders';
 
+const STATUS_LIST_HEADER: Record<
+  MedicalCertificateStatusTab,
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Todos os registros',
+    subtitle: 'Todas as ausências registradas',
+    Icon: FileText,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  PENDING: {
+    title: 'Ausências pendentes',
+    subtitle: 'Ausências aguardando análise',
+    Icon: Clock,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  APPROVED: {
+    title: 'Ausências aprovadas',
+    subtitle: 'Ausências já aprovadas',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  REJECTED: {
+    title: 'Ausências rejeitadas',
+    subtitle: 'Ausências que foram rejeitadas',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+  CANCELLED: {
+    title: 'Ausências canceladas',
+    subtitle: 'Ausências que foram canceladas',
+    Icon: XCircle,
+    iconBg: 'bg-gray-100 dark:bg-gray-700',
+    iconColor: 'text-gray-600 dark:text-gray-300',
+  },
+};
+
 export default function AtestadosPage() {
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [statusTab, setStatusTab] = useState<MedicalCertificateStatusTab>('all');
+  const listHeader = STATUS_LIST_HEADER[statusTab];
+  const ListHeaderIcon = listHeader.Icon;
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
@@ -148,6 +196,15 @@ export default function AtestadosPage() {
     });
   };
 
+  const hasAdvancedFilters = !!(
+    filters.type !== 'all' ||
+    filters.department ||
+    filters.position ||
+    filters.company ||
+    filters.month ||
+    filters.year
+  );
+
   const user = userData?.data || {
     name: 'Usuário',
     role: 'EMPLOYEE'
@@ -172,268 +229,217 @@ export default function AtestadosPage() {
         userName={user.name} 
         onLogout={handleLogout}
       >
-        <div className="space-y-6">
-        {/* Cabeçalho */}
-        <Card>
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
-                  <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Registrar Falta</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Registre faltas para funcionários do sistema</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAbsenceModal(true)}
-                className="px-3 sm:px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-2 text-sm sm:text-base"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">Nova Falta</span>
-                <span className="sm:hidden">Nova</span>
-              </button>
-            </div>
-          </CardContent>
-        </Card>
+        <PageStack>
+        <ListPageHeader
+          title="Gerenciar Atestados"
+          description="Registre faltas e acompanhe as ausências dos funcionários"
+        />
 
         {/* Estatísticas */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Registros</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.total}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center justify-center">
-                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Pendentes</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.pending}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Aprovados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.approved}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-                  <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Rejeitados</p>
-                  <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.rejected}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className={pageStatCardsGridClass}>
+          <FilterStatCard
+            label="Total"
+            count={stats.total}
+            icon={Users}
+            iconBg="bg-blue-100 dark:bg-blue-900/30"
+            iconColor="text-blue-600 dark:text-blue-400"
+            isActive={statusTab === 'all'}
+            onClick={() => setStatusTab('all')}
+          />
+          <FilterStatCard
+            label="Pendentes"
+            count={stats.pending}
+            icon={Clock}
+            iconBg="bg-amber-100 dark:bg-amber-900/30"
+            iconColor="text-amber-600 dark:text-amber-400"
+            isActive={statusTab === 'PENDING'}
+            onClick={() => setStatusTab('PENDING')}
+          />
+          <FilterStatCard
+            label="Aprovados"
+            count={stats.approved}
+            icon={CheckCircle}
+            iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+            iconColor="text-emerald-600 dark:text-emerald-400"
+            isActive={statusTab === 'APPROVED'}
+            onClick={() => setStatusTab('APPROVED')}
+          />
+          <FilterStatCard
+            label="Rejeitados"
+            count={stats.rejected}
+            icon={XCircle}
+            iconBg="bg-red-100 dark:bg-red-900/30"
+            iconColor="text-red-600 dark:text-red-400"
+            isActive={statusTab === 'REJECTED'}
+            onClick={() => setStatusTab('REJECTED')}
+          />
         </div>
 
-        {/* Filtros */}
-        <Card>
-          <CardHeader className="border-b-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+        {/* Lista de Atestados */}
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <div className={cadastroListClasses.cardHeaderIconRow}>
+                <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                  <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{listHeader.title}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
+                </div>
               </div>
-              <div className="flex items-center space-x-4">
-                {!isFiltersMinimized && (
-                  <>
-                    <button
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
-                    </button>
-                    <button
-                      onClick={clearFilters}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar todos os filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-                >
-                  {isFiltersMinimized ? (
-                    <ChevronDown className="w-5 h-5" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </CardHeader>
-          {!isFiltersMinimized && (
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-4">
-                {/* Filtro Principal - Busca Geral */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Buscar
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
+              <div className={cadastroListClasses.cardToolbar}>
+                <div className={cadastroListClasses.searchFilterGroup}>
+                  <div className={cadastroListClasses.searchFieldInGroup}>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       value={filters.search}
                       onChange={handleSearchChange}
-                      placeholder="Digite nome, email ou CPF do funcionário..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      placeholder="Buscar nome, email ou CPF..."
+                      className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
                     />
                   </div>
-                </div>
-
-                {/* Filtros Avançados */}
-                {showAdvancedFilters && (
-                  <div className="border-t dark:border-gray-700 pt-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Avançados</h4>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Tipo
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.type}
-                          onChange={handleTypeChange}
-                          options={CERTIFICATE_TYPE_FILTER_OPTIONS}
-                          allowEmpty={false}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Setor
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={filters.department}
-                            onChange={handleDepartmentChange}
-                            options={DEPARTMENTS_LIST}
-                            emptyOptionLabel="Todos os setores"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Cargo
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.position}
-                          onChange={handlePositionChange}
-                          options={CARGOS_LIST}
-                          emptyOptionLabel="Todos os cargos"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Empresa
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.company}
-                          onChange={handleCompanyChange}
-                          options={COMPANIES_LIST}
-                          emptyOptionLabel="Todas as empresas"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Mês
-                        </label>
-                        <div className="relative">
-                          <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={String(filters.month)}
-                            onChange={handleMonthChange}
-                            options={monthFilterSelectOptions}
-                            allowEmpty={false}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Ano
-                        </label>
-                        <div className="relative">
-                          <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={String(filters.year)}
-                            onChange={handleYearChange}
-                            options={yearFilterSelectOptions}
-                            allowEmpty={false}
-                          />
-                        </div>
-                      </div>
-                    </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersOpen(true)}
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                        hasAdvancedFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      title={hasAdvancedFilters ? 'Filtros (ativos)' : 'Filtros'}
+                      aria-label="Abrir filtros"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasAdvancedFilters ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
                   </div>
-                )}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Lista de Atestados */}
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                 </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Registros de Ausência</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Lista de todas as ausências registradas</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAbsenceModal(true)}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Nova Falta</span>
+                </button>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <MedicalCertificateList showActions={true} filters={filters} />
+          <CardContent className={cadastroListClasses.cardContent}>
+            <MedicalCertificateList showActions={true} statusFilter={statusTab} filters={filters} />
           </CardContent>
         </Card>
-      </div>
+      </PageStack>
+
+
+      <Modal
+        isOpen={isFiltersOpen}
+        onClose={() => setIsFiltersOpen(false)}
+        title="Filtros — Gerenciar Atestados"
+        size="md"
+      >
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Tipo
+                    </label>
+                    <StringSingleSelectDropdown
+                      className="w-full"
+                      value={filters.type}
+                      onChange={handleTypeChange}
+                      options={CERTIFICATE_TYPE_FILTER_OPTIONS}
+                      allowEmpty={false}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Setor
+                    </label>
+                    <StringSingleSelectDropdown
+                        className="w-full"
+                        value={filters.department}
+                        onChange={handleDepartmentChange}
+                        options={DEPARTMENTS_LIST}
+                        emptyOptionLabel="Todos os setores"
+                      />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Cargo
+                    </label>
+                    <StringSingleSelectDropdown
+                      className="w-full"
+                      value={filters.position}
+                      onChange={handlePositionChange}
+                      options={CARGOS_LIST}
+                      emptyOptionLabel="Todos os cargos"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Empresa
+                    </label>
+                    <StringSingleSelectDropdown
+                      className="w-full"
+                      value={filters.company}
+                      onChange={handleCompanyChange}
+                      options={COMPANIES_LIST}
+                      emptyOptionLabel="Todas as empresas"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Mês
+                    </label>
+                    <StringSingleSelectDropdown
+                        className="w-full"
+                        value={String(filters.month)}
+                        onChange={handleMonthChange}
+                        options={monthFilterSelectOptions}
+                        allowEmpty={false}
+                      />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Ano
+                    </label>
+                    <StringSingleSelectDropdown
+                        className="w-full"
+                        value={String(filters.year)}
+                        onChange={handleYearChange}
+                        options={yearFilterSelectOptions}
+                        allowEmpty={false}
+                      />
+                  </div>
+                </div>
+
+          <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Limpar filtros
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFiltersOpen(false)}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+            >
+              Aplicar
+            </button>
+          </div>
+      </Modal>
 
       {/* Modal de Registrar Falta */}
       <RegisterAbsenceModal

@@ -3,12 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Clock, Calendar, Filter, Download, Search, RotateCcw } from 'lucide-react';
+import { Clock, Filter, Download, Search, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListLoading, CadastroListEmpty, CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { DEPARTMENTS_LIST, CLIENTS_LIST, POLOS_LIST } from '@/constants/payrollFilters';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { CARGOS_LIST } from '@/constants/cargos';
@@ -19,6 +20,8 @@ import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const BANK_HOURS_STATUS_OPTIONS = labeledToSelectOptions([
@@ -62,13 +65,13 @@ function BankHoursPageContent() {
   const { costCentersList } = useCostCenters();
   const router = useRouter();
   const queryClient = useQueryClient();
-  
+
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
-    }
+    },
   });
 
   const [filters, setFilters] = useState<BankHoursFilters>(() => {
@@ -77,18 +80,23 @@ function BankHoursPageContent() {
     const today = new Date();
     return {
       search: '',
-      department: 'Departamento Pessoal',
+      department: '',
       position: '',
       costCenter: '',
       client: '',
       polo: '',
       status: '',
       startDate: firstDay.toISOString().split('T')[0],
-      endDate: today.toISOString().split('T')[0]
+      endDate: today.toISOString().split('T')[0],
     };
   });
 
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -97,39 +105,39 @@ function BankHoursPageContent() {
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters(prev => ({ ...prev, search: e.target.value }));
+    setFilters((prev) => ({ ...prev, search: e.target.value }));
   };
 
   const handleDepartmentChange = (value: string) => {
-    setFilters(prev => ({ ...prev, department: value }));
+    setFilters((prev) => ({ ...prev, department: value }));
   };
 
   const handlePositionChange = (value: string) => {
-    setFilters(prev => ({ ...prev, position: value }));
+    setFilters((prev) => ({ ...prev, position: value }));
   };
 
   const handleCostCenterChange = (value: string) => {
-    setFilters(prev => ({ ...prev, costCenter: value }));
+    setFilters((prev) => ({ ...prev, costCenter: value }));
   };
 
   const handleClientChange = (value: string) => {
-    setFilters(prev => ({ ...prev, client: value }));
+    setFilters((prev) => ({ ...prev, client: value }));
   };
 
   const handlePoloChange = (value: string) => {
-    setFilters(prev => ({ ...prev, polo: value }));
+    setFilters((prev) => ({ ...prev, polo: value }));
   };
 
   const handleStatusChange = (value: string) => {
-    setFilters(prev => ({ ...prev, status: value }));
+    setFilters((prev) => ({ ...prev, status: value }));
   };
 
-  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters(prev => ({ ...prev, startDate: e.target.value }));
+  const handleStartDateChange = (value: string) => {
+    setFilters((prev) => ({ ...prev, startDate: value }));
   };
 
-  const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters(prev => ({ ...prev, endDate: e.target.value }));
+  const handleEndDateChange = (value: string) => {
+    setFilters((prev) => ({ ...prev, endDate: value }));
   };
 
   const clearFilters = () => {
@@ -144,27 +152,31 @@ function BankHoursPageContent() {
       client: '',
       status: '',
       startDate: firstDay.toISOString().split('T')[0],
-      endDate: today.toISOString().split('T')[0]
+      endDate: today.toISOString().split('T')[0],
     });
   };
 
   const clearAdvancedFilters = () => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       department: '',
       position: '',
       costCenter: '',
       client: '',
-      status: ''
+      status: '',
     }));
   };
 
-  const { data: bankHoursData, isLoading: loadingBankHours, error: bankHoursError } = useQuery({
+  const {
+    data: bankHoursData,
+    isLoading: loadingBankHours,
+    error: bankHoursError,
+  } = useQuery({
     queryKey: ['bank-hours', filters],
     queryFn: async () => {
       try {
         const res = await api.get('/bank-hours/employees', {
-          params: { 
+          params: {
             search: filters.search,
             department: filters.department,
             position: filters.position,
@@ -172,9 +184,9 @@ function BankHoursPageContent() {
             client: filters.client,
             polo: filters.polo,
             status: filters.status,
-            startDate: filters.startDate, 
-            endDate: filters.endDate
-          }
+            startDate: filters.startDate,
+            endDate: filters.endDate,
+          },
         });
         console.log('📊 Resposta da API banco de horas:', res.data);
         return res.data;
@@ -185,7 +197,7 @@ function BankHoursPageContent() {
       }
     },
     retry: 2,
-    retryDelay: 1000
+    retryDelay: 1000,
   });
 
   const formatHours = (hours: number) => {
@@ -193,7 +205,7 @@ function BankHoursPageContent() {
     const h = Math.floor(totalMinutes / 60);
     const m = Math.floor(totalMinutes % 60);
     const s = Math.floor((totalMinutes % 1) * 60);
-    
+
     const sign = hours >= 0 ? '+' : '-';
     return `${sign}${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
@@ -203,7 +215,7 @@ function BankHoursPageContent() {
     const h = Math.floor(totalMinutes / 60);
     const m = Math.floor(totalMinutes % 60);
     const s = Math.floor((totalMinutes % 1) * 60);
-    
+
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
@@ -229,17 +241,17 @@ function BankHoursPageContent() {
     const exportData = filteredData.map((employee: BankHoursData) => ({
       'Data Inicial': filters.startDate,
       'Data Final': filters.endDate,
-      'Funcionário': employee.employeeName,
-      'CPF': employee.employeeCpf,
-      'Setor': employee.department,
-      'Cargo': employee.position,
+      Funcionário: employee.employeeName,
+      CPF: employee.employeeCpf,
+      Setor: employee.department,
+      Cargo: employee.position,
       'Centro de Custo': employee.costCenter || '-',
-      'Tomador': employee.client || '-',
+      Tomador: employee.client || '-',
       'Horas Esperadas': formatHoursNoSign(employee.totalExpectedHours),
       'Horas Trabalhadas': formatHoursNoSign(employee.totalWorkedHours),
       'Horas Extras (ponderadas)': formatHoursNoSign(employee.overtimeMultipliedHours),
       'Horas Devidas': formatHoursNoSign(employee.pendingHours),
-      'Saldo Atual': formatHours(employee.bankHours)
+      'Saldo Atual': formatHours(employee.bankHours),
     }));
 
     // Criar workbook
@@ -260,7 +272,7 @@ function BankHoursPageContent() {
       { wch: 15 }, // Horas Esperadas
       { wch: 15 }, // Banco de Horas
       { wch: 20 }, // Horas Extras (Multiplicadas)
-      { wch: 10 }  // Status
+      { wch: 10 }, // Status
     ];
     ws['!cols'] = colWidths;
 
@@ -283,25 +295,21 @@ function BankHoursPageContent() {
     XLSX.writeFile(wb, fileName);
   };
 
-
-
   if (loadingUser || !userData) {
-    return (
-      <Loading 
-        message="Carregando banco de horas..."
-        fullScreen
-        size="lg"
-      />
-    );
+    return <Loading message="Carregando banco de horas..." fullScreen size="lg" />;
   }
 
   const user = userData?.data || {
     name: 'Usuário',
     cpf: '000.000.000-00',
-    role: 'EMPLOYEE'
+    role: 'EMPLOYEE',
   };
 
   const filteredData = bankHoursData?.data || [];
+  const PAGE_SIZE = 20;
+  const listRange = getCadastroListRange(page, PAGE_SIZE, filteredData.length);
+  const currentPage = Math.min(page, listRange.totalPages);
+  const pagedData = filteredData.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Log para debug
   console.log('📊 bankHoursData:', bankHoursData);
@@ -319,16 +327,9 @@ function BankHoursPageContent() {
   );
 
   return (
-    <MainLayout
-      userRole={user.role}
-      userName={user.name}
-      onLogout={handleLogout}
-    >
+    <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
       <PageStack>
-          <ListPageHeader
-            title="Controle de Banco de Horas"
-            description="Acompanhamento do banco de horas de todos os funcionários"
-          />
+        <ListPageHeader title="Banco de Horas" description="Acompanhamento do banco de horas de todos os funcionários" />
 
         <Card className={cadastroListClasses.card}>
           <CardHeader className={cadastroListClasses.cardHeader}>
@@ -338,12 +339,8 @@ function BankHoursPageContent() {
                   <Clock className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Banco de Horas
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Cálculo do banco de horas de todos os funcionários
-                  </p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Banco de Horas</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Cálculo do banco de horas de todos os funcionários</p>
                 </div>
               </div>
               <div className={cadastroListClasses.cardToolbar}>
@@ -361,14 +358,14 @@ function BankHoursPageContent() {
                   <div className={cadastroListClasses.filterIconButtonWrap}>
                     <button
                       type="button"
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                      onClick={() => setIsFiltersOpen(true)}
                       className={`${cadastroListClasses.filterIconButton} transition-colors ${
-                        showAdvancedFilters || hasAdvancedFilters
+                        hasAdvancedFilters
                           ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                       }`}
-                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
-                      aria-label="Filtros avançados"
+                      title={hasAdvancedFilters ? 'Filtros (ativos)' : 'Filtros'}
+                      aria-label="Abrir filtros"
                     >
                       <Filter className="h-4 w-4" />
                       {hasAdvancedFilters ? (
@@ -377,291 +374,216 @@ function BankHoursPageContent() {
                     </button>
                   </div>
                 </div>
-                <div className="relative w-full sm:w-[10.5rem]">
-                  <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                  <input
-                    type="date"
-                    value={filters.startDate}
-                    onChange={handleStartDateChange}
-                    title="Data inicial"
-                    aria-label="Data inicial"
-                    className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
-                  />
-                </div>
-                <div className="relative w-full sm:w-[10.5rem]">
-                  <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                  <input
-                    type="date"
-                    value={filters.endDate}
-                    onChange={handleEndDateChange}
-                    title="Data final"
-                    aria-label="Data final"
-                    className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-900/30"
-                  title="Limpar todos os filtros"
-                  aria-label="Limpar filtros"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
                 <button
                   type="button"
                   onClick={exportToExcel}
-                  className="flex h-10 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-green-700 sm:px-4"
+                  title="Exportar"
+                  aria-label="Exportar"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
-                  <Download className="h-4 w-4 shrink-0" />
-                  <span>Exportar</span>
+                  <Download className="h-4 w-4" />
                 </button>
               </div>
             </div>
-
-            {showAdvancedFilters && (
-              <div className="mt-3 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700/30 sm:p-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Filtros específicos
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={clearAdvancedFilters}
-                    className="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                  >
-                    Limpar avançados
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  <h5 className="text-xs font-medium uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                    Informações básicas
-                  </h5>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Setor
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.department ?? ''}
-                        onChange={handleDepartmentChange}
-                        options={DEPARTMENTS_LIST || []}
-                        emptyOptionLabel="Todos os setores"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Cargo
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.position ?? ''}
-                        onChange={handlePositionChange}
-                        options={CARGOS_LIST || []}
-                        emptyOptionLabel="Todos os cargos"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Status do Banco
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.status ?? ''}
-                        onChange={handleStatusChange}
-                        options={BANK_HOURS_STATUS_OPTIONS}
-                        emptyOptionLabel="Todos os status"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h5 className="text-xs font-medium uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                    Informações financeiras
-                  </h5>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Centro de Custo
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.costCenter ?? ''}
-                        onChange={handleCostCenterChange}
-                        options={costCentersList}
-                        emptyOptionLabel="Todos os centros de custo"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Tomador
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.client ?? ''}
-                        onChange={handleClientChange}
-                        options={CLIENTS_LIST || []}
-                        emptyOptionLabel="Todos os tomadores"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Polo
-                      </label>
-                      <StringSingleSelectDropdown
-                        value={filters.polo ?? ''}
-                        onChange={handlePoloChange}
-                        options={POLOS_LIST || []}
-                        emptyOptionLabel="Todos os polos"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </CardHeader>
 
-          <CardContent className={`${cadastroListClasses.cardContent} p-0 sm:p-0`}>
-            <div className={cadastroListClasses.tableScroll}>
-              <table className={`${cadastroListClasses.table} min-w-[56rem]`}>
-                <thead className="border-b border-gray-200 dark:border-gray-700">
-                  <tr>
-                    <th className={cadastroListClasses.th}>Funcionário</th>
-                    <th className={`${cadastroListClasses.thCenter} hidden sm:table-cell`}>Setor</th>
-                    <th className={`${cadastroListClasses.thCenter} hidden md:table-cell`}>
-                      Centro de Custo
-                    </th>
-                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>Tomador</th>
-                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>
-                      Horas Esperadas
-                    </th>
-                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>
-                      Horas Trabalhadas
-                    </th>
-                    <th className={cadastroListClasses.thCenter}>Horas Extras</th>
-                    <th className={cadastroListClasses.thCenter}>Horas Devidas</th>
-                    <th className={cadastroListClasses.thCenter}>Saldo Atual</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                  {bankHoursError ? (
-                    <tr>
-                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
-                        <div className="text-red-600 dark:text-red-400">
-                          <p className="font-semibold">Erro ao carregar dados</p>
-                          <p className="mt-1 text-sm">
-                            {bankHoursError instanceof Error && bankHoursError.message.includes('CORS')
-                              ? 'Erro de CORS: Verifique a configuração do servidor'
-                              : bankHoursError instanceof Error
-                                ? bankHoursError.message
-                                : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
-                          </p>
-                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                            Verifique o console do navegador para mais detalhes.
-                          </p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : loadingBankHours ? (
-                    <tr>
-                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
-                        <CadastroListLoading message="Carregando banco de horas..." />
-                      </td>
-                    </tr>
-                  ) : !Array.isArray(filteredData) || filteredData.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
-                        <div className="text-gray-500 dark:text-gray-400">
-                          <p>Nenhum funcionário encontrado.</p>
-                          <p className="mt-1 text-sm">Tente ajustar os filtros de busca.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredData.map((employee: BankHoursData) => (
-                      <tr key={employee.employeeId} className={listTableRowClasses.tr}>
-                        <td className={cadastroListClasses.tdTruncate}>
-                          <div className="min-w-0">
-                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {employee.employeeName}
-                            </span>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 sm:text-sm">
-                              {employee.employeeCpf}
-                            </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500 sm:hidden">
-                              {employee.department &&
-                                `${employee.department} • ${employee.costCenter || 'N/A'}`}
-                            </div>
-                          </div>
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} hidden sm:table-cell`}>
-                          <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {employee.department || 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {employee.position || 'N/A'}
-                            </div>
-                          </div>
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} hidden md:table-cell`}>
-                          {employee.costCenter || 'N/A'}
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
-                          {employee.client || 'N/A'}
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
-                          {formatHoursNoSign(employee.totalExpectedHours)}
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
-                          {formatHoursNoSign(employee.totalWorkedHours)}
-                        </td>
-                        <td className={cadastroListClasses.tdCenter}>
-                          {formatHoursNoSign(employee.overtimeMultipliedHours)}
-                        </td>
-                        <td className={cadastroListClasses.tdCenter}>
-                          {formatHoursNoSign(employee.pendingHours)}
-                        </td>
-                        <td className={cadastroListClasses.tdCenter}>
-                          <span
-                            className={`text-sm font-bold ${
-                              employee.bankHours >= 0
-                                ? 'text-green-600 dark:text-green-400'
-                                : 'text-red-600 dark:text-red-400'
-                            }`}
-                          >
-                            {formatHours(employee.bankHours)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {filteredData.length > 0 && (
-              <div className="rounded-b-lg border-t border-gray-200 bg-gray-50 px-4 py-4 dark:border-gray-700 dark:bg-gray-800/50 sm:px-6">
-                <div className="flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-6">
-                    <span>
-                      <strong>Período:</strong>{' '}
-                      {new Date(filters.startDate + 'T00:00:00').toLocaleDateString('pt-BR')} até{' '}
-                      {new Date(filters.endDate + 'T00:00:00').toLocaleDateString('pt-BR')}
-                    </span>
-                    <span>
-                      <strong>Total de funcionários:</strong> {filteredData.length}
-                    </span>
-                  </div>
-                  {filters.department && (
-                    <span>
-                      <strong>Setor:</strong> {filters.department}
-                    </span>
-                  )}
+          <CardContent className={`${cadastroListClasses.cardContent}`}>
+            {bankHoursError ? (
+              <div className="px-4 py-8 text-center">
+                <div className="text-red-600 dark:text-red-400">
+                  <p className="font-semibold">Erro ao carregar dados</p>
+                  <p className="mt-1 text-sm">
+                    {bankHoursError instanceof Error && bankHoursError.message.includes('CORS')
+                      ? 'Erro de CORS: Verifique a configuração do servidor'
+                      : bankHoursError instanceof Error
+                        ? bankHoursError.message
+                        : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
+                  </p>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Verifique o console do navegador para mais detalhes.</p>
                 </div>
               </div>
+            ) : loadingBankHours ? (
+              <CadastroListLoading message="Carregando banco de horas..." />
+            ) : !Array.isArray(filteredData) || filteredData.length === 0 ? (
+              <CadastroListEmpty icon={Users} title="Nenhum funcionário encontrado." hint="Tente ajustar os filtros de busca." />
+            ) : (
+              <>
+                <CadastroListSummary
+                  startItem={listRange.startItem}
+                  endItem={listRange.endItem}
+                  total={filteredData.length}
+                  itemLabel="funcionário"
+                  itemLabelPlural="funcionários"
+                  currentPage={currentPage}
+                  totalPages={listRange.totalPages}
+                />
+                <div className={cadastroListClasses.tableScroll}>
+                  <table className={`${cadastroListClasses.table} min-w-[56rem]`}>
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className={cadastroListClasses.th}>Funcionário</th>
+                        <th className={`${cadastroListClasses.thCenter} hidden sm:table-cell`}>Setor</th>
+                        <th className={`${cadastroListClasses.thCenter} hidden md:table-cell`}>Centro de Custo</th>
+                        <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>Tomador</th>
+                        <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>Horas Esperadas</th>
+                        <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>Horas Trabalhadas</th>
+                        <th className={cadastroListClasses.thCenter}>Horas Extras</th>
+                        <th className={cadastroListClasses.thCenter}>Horas Devidas</th>
+                        <th className={cadastroListClasses.thCenter}>Saldo Atual</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                      {pagedData.map((employee: BankHoursData) => (
+                        <tr key={employee.employeeId} className={listTableRowClasses.tr}>
+                          <td className={cadastroListClasses.tdTruncate}>
+                            <div className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {employee.employeeName}
+                              </span>
+                              <div className="text-xs text-gray-500 dark:text-gray-400 sm:text-sm">{employee.employeeCpf}</div>
+                              <div className="text-xs text-gray-400 dark:text-gray-500 sm:hidden">
+                                {employee.department && `${employee.department} • ${employee.costCenter || 'N/A'}`}
+                              </div>
+                            </div>
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} hidden sm:table-cell`}>
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{employee.department || 'N/A'}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">{employee.position || 'N/A'}</div>
+                            </div>
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} hidden md:table-cell`}>{employee.costCenter || 'N/A'}</td>
+                          <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>{employee.client || 'N/A'}</td>
+                          <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
+                            {formatHoursNoSign(employee.totalExpectedHours)}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
+                            {formatHoursNoSign(employee.totalWorkedHours)}
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>{formatHoursNoSign(employee.overtimeMultipliedHours)}</td>
+                          <td className={cadastroListClasses.tdCenter}>{formatHoursNoSign(employee.pendingHours)}</td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <span
+                              className={`text-sm font-bold ${
+                                employee.bankHours >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                              }`}
+                            >
+                              {formatHours(employee.bankHours)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ListPagination currentPage={currentPage} totalPages={listRange.totalPages} onPageChange={setPage} />
+              </>
             )}
           </CardContent>
         </Card>
       </PageStack>
+
+      <Modal isOpen={isFiltersOpen} onClose={() => setIsFiltersOpen(false)} title="Filtros — Banco de Horas" size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Data inicial</label>
+            <DatePickerField
+              value={filters.startDate}
+              onChange={handleStartDateChange}
+              placeholder="dd/mm/aaaa"
+              aria-label="Data inicial"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Data final</label>
+            <DatePickerField
+              value={filters.endDate}
+              onChange={handleEndDateChange}
+              placeholder="dd/mm/aaaa"
+              aria-label="Data final"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Setor</label>
+            <StringSingleSelectDropdown
+              value={filters.department ?? ''}
+              onChange={handleDepartmentChange}
+              options={DEPARTMENTS_LIST || []}
+              emptyOptionLabel="Todos os setores"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Cargo</label>
+            <StringSingleSelectDropdown
+              value={filters.position ?? ''}
+              onChange={handlePositionChange}
+              options={CARGOS_LIST || []}
+              emptyOptionLabel="Todos os cargos"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status do Banco</label>
+            <StringSingleSelectDropdown
+              value={filters.status ?? ''}
+              onChange={handleStatusChange}
+              options={BANK_HOURS_STATUS_OPTIONS}
+              emptyOptionLabel="Todos os status"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Centro de Custo</label>
+            <StringSingleSelectDropdown
+              value={filters.costCenter ?? ''}
+              onChange={handleCostCenterChange}
+              options={costCentersList}
+              emptyOptionLabel="Todos os centros de custo"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tomador</label>
+            <StringSingleSelectDropdown
+              value={filters.client ?? ''}
+              onChange={handleClientChange}
+              options={CLIENTS_LIST || []}
+              emptyOptionLabel="Todos os tomadores"
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Polo</label>
+            <StringSingleSelectDropdown
+              value={filters.polo ?? ''}
+              onChange={handlePoloChange}
+              options={POLOS_LIST || []}
+              emptyOptionLabel="Todos os polos"
+              className="w-full"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Limpar filtros
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFiltersOpen(false)}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+            >
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </Modal>
     </MainLayout>
   );
 }

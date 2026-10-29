@@ -8,7 +8,18 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
@@ -104,8 +115,9 @@ function GerenciarFeriadosPageContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const hasAdvancedFilters = selectedMonth != null || !!filterType || selectedYear !== new Date().getFullYear();
   const [formData, setFormData] = useState<{
     name: string;
     date: string;
@@ -158,6 +170,11 @@ function GerenciarFeriadosPageContent() {
     textMatchesSearch(holiday.name, searchTerm) ||
     textMatchesSearch(holiday.description, searchTerm)
   );
+
+  const PAGE_SIZE = 10;
+  const listRange = getCadastroListRange(page, PAGE_SIZE, filteredHolidays.length);
+  const currentPage = Math.min(page, listRange.totalPages);
+  const pagedHolidays = filteredHolidays.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Mutation para criar feriado
   const createMutation = useMutation({
@@ -271,6 +288,10 @@ function GerenciarFeriadosPageContent() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.date) {
+      toast.error('Informe a data do feriado');
+      return;
+    }
     // Limpar campos vazios antes de enviar
     const dataToSend = {
       ...formData,
@@ -350,301 +371,190 @@ function GerenciarFeriadosPageContent() {
         router.push('/auth/login');
       }}
     >
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Gerenciar Feriados</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-            Gerencie o calendário de feriados da empresa
-          </p>
-        </div>
-
-        {/* Filtros */}
-        <Card>
-          <CardHeader className="border-b-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-              </div>
-              <div className="flex items-center space-x-4">
-                {!isFiltersMinimized && (
-                  <>
-                    <button
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSearchTerm('');
-                        setSelectedYear(new Date().getFullYear());
-                        setSelectedMonth(undefined);
-                        setFilterType('');
-                      }}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar todos os filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-                >
-                  {isFiltersMinimized ? (
-                    <ChevronDown className="w-5 h-5" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </CardHeader>
-          {!isFiltersMinimized && (
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-4">
-                {/* Filtro Principal - Busca Geral */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Buscar Feriado
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Digite o nome do feriado..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Filtros Avançados - Condicionais */}
-                {showAdvancedFilters && (
-                  <div className="border-t dark:border-gray-700 pt-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Específicos</h4>
-                    </div>
-                    
-                    {/* Grupo 1: Filtros de Período e Tipo */}
-                    <div className="space-y-3">
-                      <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Período e Tipo</h5>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Ano
-                          </label>
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <StringSingleSelectDropdown
-                              value={String(selectedYear)}
-                              onChange={(v) => setSelectedYear(parseInt(v))}
-                              options={yearFilterOptions}
-                              allowEmpty={false}
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Mês
-                          </label>
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <StringSingleSelectDropdown
-                              value={selectedMonth != null ? String(selectedMonth) : ''}
-                              onChange={(v) => setSelectedMonth(v ? parseInt(v) : undefined)}
-                              options={monthFilterOptions}
-                              allowEmpty={false}
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Tipo
-                          </label>
-                          <div className="relative">
-                            <Flag className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <StringSingleSelectDropdown
-                              value={filterType}
-                              onChange={setFilterType}
-                              options={HOLIDAY_TYPE_FILTER_OPTIONS}
-                              allowEmpty={false}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          )}
-        </Card>
+      <PageStack>
+        <ListPageHeader
+          title="Gerenciar Feriados"
+          description="Gerencie o calendário de feriados da empresa"
+        />
 
         {/* Lista de Feriados */}
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <Calendar className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <div className={cadastroListClasses.cardHeaderIconRow}>
+                <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                  <Calendar className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                 </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Feriados ({filteredHolidays.length})</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Calendário de feriados da empresa</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                {selectedYear && (
-                  <button
-                    onClick={() => generateRecurringMutation.mutate(selectedYear)}
-                    disabled={generateRecurringMutation.isPending}
-                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
-                    title="Gerar feriados recorrentes"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${generateRecurringMutation.isPending ? 'animate-spin' : ''}`} />
-                    <span>Gerar Recorrentes</span>
-                  </button>
-                )}
+              <div className={cadastroListClasses.cardToolbar}>
+                <div className={cadastroListClasses.searchFilterGroup}>
+                  <div className={cadastroListClasses.searchFieldInGroup}>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar feriado..."
+                      className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
+                    />
+                  </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersOpen(true)}
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                        hasAdvancedFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      title="Filtros"
+                      aria-label="Abrir filtros"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasAdvancedFilters ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
+                  </div>
+                </div>
                 <button
+                  type="button"
+                  onClick={() => generateRecurringMutation.mutate(selectedYear)}
+                  disabled={generateRecurringMutation.isPending}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  title="Gerar feriados recorrentes"
+                >
+                  <RefreshCw className={`h-4 w-4 ${generateRecurringMutation.isPending ? 'animate-spin' : ''}`} />
+                  <span>Gerar Recorrentes</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setIsImportModalOpen(true)}
-                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-sm sm:text-base"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                   title="Importar feriados nacionais"
                 >
-                  <Upload className="w-4 h-4" />
+                  <Upload className="h-4 w-4" />
                   <span>Importar</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     resetForm();
                     setIsModalOpen(true);
                   }}
-                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   title="Criar novo feriado"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="h-4 w-4 shrink-0" />
                   <span>Novo Feriado</span>
                 </button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className={cadastroListClasses.cardContent}>
             {isLoading ? (
-              <div className="p-6">
-                <CadastroListLoading message="Carregando feriados..." />
-              </div>
+              <CadastroListLoading message="Carregando feriados..." />
             ) : filteredHolidays.length === 0 ? (
-              <div className="p-6 text-center py-12">
-                <Calendar className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">Nenhum feriado encontrado</p>
-              </div>
+              <CadastroListEmpty
+                icon={Calendar}
+                title="Nenhum feriado encontrado"
+                hint="Ajuste os filtros ou cadastre um novo feriado."
+              />
             ) : (
+              <>
+              <CadastroListSummary
+                startItem={listRange.startItem}
+                endItem={listRange.endItem}
+                total={filteredHolidays.length}
+                itemLabel="feriado"
+                itemLabelPlural="feriados"
+                currentPage={currentPage}
+                totalPages={listRange.totalPages}
+              />
               <div className="table-scroll">
-                <table className="w-full">
+                <table className={cadastroListClasses.table}>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Data
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Nome
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Tipo
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Localização
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Recorrente
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Ações
-                      </th>
+                      <th className={cadastroListClasses.th}>Data</th>
+                      <th className={cadastroListClasses.th}>Nome</th>
+                      <th className={cadastroListClasses.thCenter}>Tipo</th>
+                      <th className={cadastroListClasses.thCenter}>Localização</th>
+                      <th className={cadastroListClasses.thCenter}>Recorrente</th>
+                      <th className={cadastroListClasses.thCenter}>Status</th>
+                      <th className={cadastroListClasses.thRight}>Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredHolidays.map((holiday) => (
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                    {pagedHolidays.map((holiday) => (
                       <tr key={holiday.id} className={listTableRowClasses.tr}>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {formatDate(holiday.date)}
-                          </div>
+                        <td className={`${cadastroListClasses.td} whitespace-nowrap font-medium`}>
+                          {formatDate(holiday.date)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4">
-                          <div>
-                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
-                              {holiday.name}
-                            </span>
-                            {holiday.description && (
-                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {holiday.description}
-                              </div>
-                            )}
-                          </div>
+                        <td className={cadastroListClasses.td}>
+                          <span className="font-medium text-gray-900 dark:text-gray-100">{holiday.name}</span>
+                          {holiday.description && (
+                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{holiday.description}</div>
+                          )}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className={cadastroListClasses.tdCenter}>
                           <div className="flex items-center justify-center gap-2">
                             {getTypeIcon(holiday.type)}
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{getTypeLabel(holiday.type)}</span>
+                            <span>{getTypeLabel(holiday.type)}</span>
                           </div>
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className={cadastroListClasses.tdCenter}>
                           {holiday.city ? (
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{holiday.city}, {getStateName(holiday.state) || holiday.state}</span>
+                            <span>{holiday.city}, {getStateName(holiday.state) || holiday.state}</span>
                           ) : holiday.state ? (
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{getStateName(holiday.state)}</span>
+                            <span>{getStateName(holiday.state)}</span>
                           ) : (
-                            <span className="text-sm text-gray-400 dark:text-gray-500">Nacional</span>
+                            <span className="text-gray-400 dark:text-gray-500">Nacional</span>
                           )}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className={cadastroListClasses.tdCenter}>
                           {holiday.isRecurring ? (
                             <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-                              <Check className="w-4 h-4" />
-                              <span className="text-sm">Sim</span>
+                              <Check className="h-4 w-4" />
+                              <span>Sim</span>
                             </span>
                           ) : (
-                            <span className="text-sm text-gray-400 dark:text-gray-500">Não</span>
+                            <span className="text-gray-400 dark:text-gray-500">Não</span>
                           )}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className={cadastroListClasses.tdCenter}>
                           {holiday.isActive ? (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">
+                            <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800 dark:bg-green-900/30 dark:text-green-400">
                               Ativo
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300">
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-800 dark:bg-gray-700 dark:text-gray-300">
                               Inativo
                             </span>
                           )}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                        <td className={cadastroListClasses.tdCenter}>
                           <div className="flex justify-center gap-2">
                             <button
+                              type="button"
                               onClick={() => handleEdit(holiday)}
-                              className="inline-flex items-center justify-center h-8 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none"
+                              className="inline-flex h-8 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                               title="Editar feriado"
+                              aria-label="Editar feriado"
                             >
-                              <Edit className="w-4 h-4" />
+                              <Edit className="h-4 w-4" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDelete(holiday.id)}
-                              className="inline-flex items-center justify-center h-8 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent hover:bg-red-50 dark:hover:bg-red-900/30 active:bg-red-100 dark:active:bg-red-900/50 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none"
+                              className="inline-flex h-8 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-red-600 transition-colors hover:bg-red-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-900/30"
                               title="Excluir feriado"
+                              aria-label="Excluir feriado"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
                         </td>
@@ -653,9 +563,77 @@ function GerenciarFeriadosPageContent() {
                   </tbody>
                 </table>
               </div>
+              <ListPagination
+                currentPage={currentPage}
+                totalPages={listRange.totalPages}
+                onPageChange={setPage}
+              />
+              </>
             )}
           </CardContent>
         </Card>
+
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Gerenciar Feriados"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Ano</label>
+              <StringSingleSelectDropdown
+                value={String(selectedYear)}
+                onChange={(v) => setSelectedYear(parseInt(v))}
+                options={yearFilterOptions}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Mês</label>
+              <StringSingleSelectDropdown
+                value={selectedMonth != null ? String(selectedMonth) : ''}
+                onChange={(v) => setSelectedMonth(v ? parseInt(v) : undefined)}
+                options={monthFilterOptions}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
+              <StringSingleSelectDropdown
+                value={filterType}
+                onChange={setFilterType}
+                options={HOLIDAY_TYPE_FILTER_OPTIONS}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedYear(new Date().getFullYear());
+                  setSelectedMonth(undefined);
+                  setFilterType('');
+                  setPage(1);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersOpen(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         {/* Modal de Criar/Editar Feriado */}
         <Modal
@@ -683,11 +661,12 @@ function GerenciarFeriadosPageContent() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Data *
               </label>
-              <Input
-                type="date"
+              <DatePickerField
                 value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                required
+                onChange={(date) => setFormData({ ...formData, date })}
+                placeholder="dd/mm/aaaa"
+                aria-label="Data do feriado"
+                className="w-full"
               />
             </div>
 
@@ -748,35 +727,23 @@ function GerenciarFeriadosPageContent() {
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full"
+                className={FORM_FIELD_TEXTAREA_CLS}
                 rows={3}
                 placeholder="Descrição adicional do feriado"
               />
             </div>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.isRecurring}
-                  onChange={(e) => setFormData({ ...formData, isRecurring: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 bg-white dark:bg-gray-800"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Feriado recorrente (todos os anos)</span>
-              </label>
-            </div>
+            <Checkbox
+              checked={formData.isRecurring}
+              onChange={(checked) => setFormData({ ...formData, isRecurring: checked })}
+              label="Feriado recorrente (todos os anos)"
+            />
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 bg-white dark:bg-gray-800"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Ativo</span>
-              </label>
-            </div>
+            <Checkbox
+              checked={formData.isActive}
+              onChange={(checked) => setFormData({ ...formData, isActive: checked })}
+              label="Ativo"
+            />
 
             <div className="flex justify-end gap-2 pt-4">
               <Button
@@ -837,7 +804,7 @@ function GerenciarFeriadosPageContent() {
             </div>
           </div>
         </Modal>
-      </div>
+      </PageStack>
     </MainLayout>
   );
 }

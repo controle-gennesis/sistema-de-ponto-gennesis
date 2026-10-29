@@ -785,6 +785,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Painel do Sistema',
+            section: 'Geral',
             href: '/ponto/painel-do-sistema',
             icon: LayoutDashboard,
             description: 'Visão geral do sistema',
@@ -792,6 +793,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Fluig - Processos',
+            section: 'Fluig',
             href: '/ponto/financeiro/gestao-solicitacoes',
             icon: BarChart3,
             description: 'Solicitações do Fluig na visão financeira',
@@ -799,6 +801,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Fluig - Aprovações',
+            section: 'Fluig',
             href: '/ponto/fluig/aprovacoes-workflow',
             icon: FileCheck,
             description: 'Status de aprovação Compras, Gestor e Diretoria (G3/G5)',
@@ -807,6 +810,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Aprovadores',
+            section: 'Fluig',
             href: '/ponto/fluig/aprovadores',
             icon: Users,
             description: 'Aprovações e pendências por pessoa (G3/G5)',
@@ -817,6 +821,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Chamadas ao Fluig',
+            section: 'Fluig',
             href: '/ponto/fluig-chamadas',
             icon: Activity,
             description: 'Registro das requisições do Conecta ao Fluig (só administrador)',
@@ -824,6 +829,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Avaliações do Sistema',
+            section: 'Geral',
             href: '/ponto/avaliacoes-sistema',
             icon: Star,
             description: 'O que as pessoas responderam à Gennecy (só administrador)',
@@ -831,6 +837,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Solicitações Internas',
+            section: 'Solicitações',
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
@@ -838,6 +845,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Frota',
+            section: 'Frota e Logística',
             href: '/ponto/reserva-veiculos',
             icon: Car,
             description: 'Solicitar reserva de veículos da frota',
@@ -846,6 +854,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Abastecimento',
+            section: 'Frota e Logística',
             href: '/ponto/solicitar-combustivel',
             icon: Fuel,
             description: 'Solicitar abastecimento de veículos',
@@ -853,7 +862,32 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator || can(pk('/ponto/solicitar-combustivel'))
           },
           {
+            name: 'Alterações de Ponto',
+            section: 'Solicitações',
+            href: '/ponto/solicitacoes',
+            icon: MailPlus,
+            description: 'Solicitar e acompanhar alterações de marcação do ponto',
+            permission: isAdministrator || can(pk('/ponto/solicitacoes'))
+          },
+          {
+            name: 'Enviar Atestado',
+            section: 'Solicitações',
+            href: '/ponto/atestados',
+            icon: CalendarX2,
+            description: 'Enviar atestados e acompanhar o status',
+            permission: isAdministrator || can(pk('/ponto/atestados'))
+          },
+          {
+            name: 'Minhas Férias',
+            section: 'Solicitações',
+            href: '/ponto/ferias',
+            icon: ImagePlus,
+            description: 'Solicitar e acompanhar férias',
+            permission: isAdministrator || can(pk('/ponto/ferias'))
+          },
+          {
             name: 'Meus Chamados',
+            section: 'Chamados',
             href: '/ponto/meus-chamados',
             icon: Wrench,
             description: 'Abrir e acompanhar seus chamados de manutenção',
@@ -861,6 +895,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Relatórios da Localidade',
+            section: 'Chamados',
             href: '/ponto/meus-chamados/relatorios',
             icon: BarChart3,
             description: 'Serviços executados nas suas localidades, com exportação em PDF',
@@ -868,6 +903,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Entrega da Logística',
+            section: 'Frota e Logística',
             href: '/ponto/entrega-logistica',
             icon: Truck,
             description: 'Finalizar solicitações de entrega logística',
@@ -875,6 +911,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Central de Treinamentos',
+            section: 'Geral',
             href: '/ponto/treinamentos',
             icon: GraduationCap,
             description: 'Videoaulas, avaliações e certificados',
@@ -882,6 +919,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Central de Ajuda',
+            section: 'Geral',
             href: '/ponto/central-de-ajuda',
             icon: HelpCircle,
             description: 'Guias e tutoriais passo a passo do sistema',
@@ -896,6 +934,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Funcionários e Externos',
+            section: 'Pessoas',
             href: '/ponto/funcionarios',
             icon: Users,
             description: 'Cadastrar e gerenciar funcionários e externos',
@@ -903,34 +942,23 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Folha de Pagamento',
+            section: 'Folha e Contabilidade',
             href: '/ponto/folha-pagamento',
             icon: FileSpreadsheet,
             description: 'Gestão de folha de pagamento',
             permission: isAdministrator || permissions.canAccessPayroll
           },
           {
-            name: 'Ausências',
-            href: '/ponto/atestados',
-            icon: CalendarX2,
-            description: 'Registrar e gerenciar ausências',
-            permission: isAdministrator || can(pk('/ponto/atestados'))
-          },
-          {
-            name: 'Gerenciar Ausências',
+            name: 'Gerenciar Atestados',
+            section: 'Ausências e Férias',
             href: '/ponto/gerenciar-atestados',
             icon: BookText,
             description: 'Gerenciar todas as ausências',
             permission: isAdministrator || can(pk('/ponto/gerenciar-atestados'))
           },
           {
-            name: 'Alterações de Ponto',
-            href: '/ponto/solicitacoes',
-            icon: MailPlus,
-            description: 'Solicitar e acompanhar alterações de marcação do ponto',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes'))
-          },
-          {
             name: 'Gerenciar Alterações de Ponto',
+            section: 'Ponto',
             href: '/ponto/gerenciar-solicitacoes',
             icon: FileText,
             description: 'Analisar e aprovar alterações de marcação dos colaboradores',
@@ -938,6 +966,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Gerenciar Solicitações',
+            section: 'Atendimento',
             href: '/ponto/gerenciar-solicitacoes-gerais',
             icon: FileText,
             description: 'Tramitar solicitações do Departamento Pessoal',
@@ -946,6 +975,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Comunicação Contábil',
+            section: 'Folha e Contabilidade',
             href: '/ponto/dp-contabilidade',
             icon: Calculator,
             description: 'Comunicação do DP com a Contabilidade',
@@ -958,6 +988,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Central de Atendimentos',
+            section: 'Atendimento',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,
             description: 'Conversas do chatbot WhatsApp para o pessoal ver',
@@ -965,20 +996,15 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Solicitações - Fluig',
+            section: 'Atendimento',
             href: '/ponto/solicitacoes-fluig',
             icon: Workflow,
             description: 'Solicitações do Departamento Pessoal no Fluig',
             permission: isAdministrator || can(pk('/ponto/solicitacoes-fluig')),
           },
           {
-            name: 'Férias',
-            href: '/ponto/ferias',
-            icon: ImagePlus,
-            description: 'Solicitar e acompanhar férias',
-            permission: isAdministrator || can(pk('/ponto/ferias'))
-          },
-          {
             name: 'Gerenciar Férias',
+            section: 'Ausências e Férias',
             href: '/ponto/gerenciar-ferias',
             icon: BookImage,
             description: 'Gerenciar férias dos funcionários',
@@ -986,6 +1012,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Gerenciar Feriados',
+            section: 'Ausências e Férias',
             href: '/ponto/gerenciar-feriados',
             icon: CalendarDays,
             description: 'Gerenciar calendário de feriados',
@@ -993,6 +1020,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Banco de Horas',
+            section: 'Ponto',
             href: '/ponto/banco-horas',
             icon: FolderClock,
             description: 'Controle de banco de horas',
@@ -1000,6 +1028,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Configurações do Ponto',
+            section: 'Ponto',
             href: '/ponto/configuracoes-ponto',
             icon: ShieldCheck,
             description: 'Confirmação de presença por geolocalização',
@@ -1007,6 +1036,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Alocação',
+            section: 'Pessoas',
             href: '/relatorios/alocacao',
             icon: Users,
             description: 'Alocação de funcionários',
@@ -1014,6 +1044,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Aniversariantes',
+            section: 'Pessoas',
             href: '/ponto/aniversariantes',
             icon: Cake,
             description: 'Ver aniversariantes do mês',
@@ -1021,6 +1052,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Segurança do Trabalho',
+            section: 'Pessoas',
             href: '/ponto/seguranca-do-trabalho',
             icon: Shield,
             description: 'Controle de ASO dos funcionários',
@@ -1050,6 +1082,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Controle Financeiro',
+            section: 'Controle',
             href: '/ponto/financeiro/controle-financeiro',
             icon: ClipboardList,
             description: 'Controle de Material/Serviço Aplicado por mês e ano',
@@ -1057,6 +1090,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Controle de Boletos',
+            section: 'Controle',
             href: '/ponto/financeiro/controle-boletos',
             icon: Banknote,
             description: 'Boletos por fornecedor, vencimento e confirmação de pagamento',
@@ -1064,6 +1098,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Receitas',
+            section: 'Controle',
             href: '/ponto/financeiro/receitas',
             icon: CircleDollarSign,
             description: 'Receitas e repasses dos consórcios BSB e HUB',
@@ -1071,6 +1106,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Espelhos de NF',
+            section: 'Notas e Folha',
             href: '/ponto/financeiro/espelhos-aprovados',
             icon: FileSpreadsheet,
             description: 'Espelhos de nota fiscal aprovados, prontos para o Financeiro',
@@ -1078,6 +1114,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Pagamento da Folha',
+            section: 'Notas e Folha',
             href: '/ponto/financeiro',
             icon: DollarSign,
             description: 'Borderô em PDF e remessa CNAB400 da folha',
@@ -1092,6 +1129,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Balanço Financeiro',
+            section: 'Financeiro',
             href: '/ponto/financeiro/analise-extrato',
             icon: BarChart3,
             description: 'Acompanhe o balanço financeiro',
@@ -1107,6 +1145,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Entrada Fiscal',
+            section: 'Financeiro',
             href: '/ponto/financeiro/nfs-recebidas',
             icon: FileText,
             description: 'Notas fiscais emitidas contra a empresa (SEFAZ)',
@@ -1115,6 +1154,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Controle Geral de Contratos',
+            section: 'Contratos',
             href: '/ponto/contratos/controle-geral',
             icon: LayoutDashboard,
             description: 'Visão consolidada de todos os contratos',
@@ -1122,6 +1162,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Contratos Sócios',
+            section: 'Contratos',
             href: '/ponto/contratos/socios',
             icon: Users,
             description: 'Controle dos contratos compartilhados com sócios',
@@ -1129,6 +1170,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Gastos Operacionais',
+            section: 'Contratos',
             href: '/ponto/contratos/gastos-operacionais',
             icon: Wallet,
             description: 'Gastos operacionais por contrato (QUERY BASE DE GASTOS)',
@@ -1136,6 +1178,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Relatórios de Contrato',
+            section: 'Contratos',
             href: '/ponto/metricas/relatorios-contrato',
             icon: FileText,
             description: 'Reuniões quinzenais por contrato — acompanhamento interno',
@@ -1144,6 +1187,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           {
             // key estável (legado `ponto_metricas_ocs-boleto-pix`) — href atualizado sem invalidar permissões no banco
             name: 'Pagamentos de OCs',
+            section: 'Financeiro',
             href: '/ponto/metricas/pagamentos-ocs',
             icon: CreditCard,
             description: 'Ordens de compra do TOTVS (consulta OCSBOLETOPIX)',
@@ -1285,6 +1329,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Espelhos de NF',
+            section: 'Contratos',
             href: '/ponto/espelho-nf',
             icon: FileSpreadsheet,
             description: 'Montar os espelhos de nota fiscal',
@@ -1292,6 +1337,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Licitações',
+            section: 'Licitações',
             href: '/ponto/licitacoes',
             icon: ClipboardList,
             description: 'Acompanhar processos de licitação',
@@ -1299,6 +1345,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'PNCP',
+            section: 'Licitações',
             href: '/ponto/licitacoes-pncp',
             icon: Search,
             description: 'Consultar publicações no Portal Nacional de Contratações',
@@ -1306,6 +1353,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Responsáveis Técnicos',
+            section: 'Contratos',
             href: '/ponto/responsaveis-tecnicos',
             icon: BadgeCheck,
             description: 'Cadastro de responsáveis técnicos (CREA)',
@@ -1313,6 +1361,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Anuidades',
+            section: 'Contratos',
             href: '/ponto/controle-anuidade',
             icon: CalendarDays,
             description: 'Controle de pagamentos de anuidade CREA',
@@ -1327,6 +1376,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Medições',
+            section: 'Contratos',
             href: '/ponto/contratos/medicao',
             icon: FileSpreadsheet,
             description: 'Importar e visualizar planilhas de medição',
@@ -1362,6 +1412,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         items: [
           {
             name: 'Requisições de Materiais',
+            section: 'Compras',
             href: '/ponto/gerenciar-materiais',
             icon: Package,
             description: 'Aprovar SC e criar OC',
@@ -1369,6 +1420,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Mapa de Cotação',
+            section: 'Compras',
             href: '/ponto/mapa-cotacao',
             icon: FileSpreadsheet,
             description: 'Comparar cotações entre fornecedores e gerar OC por vencedor',
@@ -1376,6 +1428,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Ordens de Compra',
+            section: 'Compras',
             href: '/ponto/ordem-de-compra',
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
@@ -1383,6 +1436,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Controle de Entregas',
+            section: 'Entregas',
             href: '/ponto/controle-entregas',
             icon: Truck,
             description: 'Acompanhar entregas de material e recebimento pela engenharia',
@@ -1390,6 +1444,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Entregas Logística',
+            section: 'Entregas',
             href: '/ponto/entregas-logistica',
             icon: Truck,
             description: 'Registrar solicitações de entrega logística',
@@ -1397,6 +1452,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Estoque',
+            section: 'Estoque',
             href: '/ponto/estoque',
             icon: Package,
             description: 'Gerenciar estoque de materiais',
@@ -1404,6 +1460,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Furo de Estoque',
+            section: 'Estoque',
             href: '/ponto/furo-estoque',
             icon: PackageX,
             description: 'Pendências de entrega após recebimento parcial',
@@ -1411,6 +1468,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Ajuste de Estoque',
+            section: 'Estoque',
             href: '/ponto/ajuste-estoque',
             icon: Package,
             description: 'Realizar entradas e saídas de ajuste no estoque',
@@ -1418,6 +1476,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Fichas de Demanda',
+            section: 'Compras',
             href: '/ponto/fds-aprovadas',
             icon: ClipboardCheck,
             description: 'Fichas aprovadas — status de compras',
@@ -1426,6 +1485,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Fila de Abastecimento',
+            section: 'Frota',
             href: '/ponto/solicitacoes-combustivel',
             icon: Fuel,
             description: 'Pedidos de abastecimento (sistema e Gennecy)',
@@ -1434,6 +1494,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Gestão da Frota',
+            section: 'Frota',
             href: '/ponto/solicitacoes-reserva-veiculos',
             icon: CalendarRange,
             description: 'Aprovar ou rejeitar solicitações de uso da frota',
@@ -1442,6 +1503,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           },
           {
             name: 'Pedidos de Ferramentas',
+            section: 'Compras',
             href: '/ponto/solicitacoes-ferramentas',
             icon: Wrench,
             description: 'Analisar solicitações de locação, renovação, devolução ou compra',

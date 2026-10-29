@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { Calendar, Upload, FileText, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { Badge } from '@/components/ui/Badge';
 import api from '@/lib/api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -186,12 +188,13 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
                   Data de Início
                 </div>
               </label>
-              <Input
-                type="date"
+              <DatePickerField
                 value={formData.startDate}
-                onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                fullWidth
-                required
+                onChange={(v) => setFormData({ ...formData, startDate: v })}
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                className="w-full"
+                aria-label="Data de início"
               />
             </div>
             <div>
@@ -201,12 +204,14 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
                   Data de Fim
                 </div>
               </label>
-              <Input
-                type="date"
+              <DatePickerField
                 value={formData.endDate}
-                onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                fullWidth
-                required
+                onChange={(v) => setFormData({ ...formData, endDate: v })}
+                min={formData.startDate || undefined}
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                className="w-full"
+                aria-label="Data de fim"
               />
             </div>
           </div>
@@ -219,7 +224,7 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="input w-full min-h-[100px] resize-none bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+              className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[100px] resize-none`}
               placeholder="Adicione observações sobre a ausência..."
             />
           </div>
@@ -236,7 +241,7 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
               type="file"
               onChange={handleFileChange}
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/30 file:text-blue-700 dark:file:text-blue-400 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50"
+              className={`${FORM_FIELD_INPUT_CLS} file:mr-4 file:rounded-md file:border-0 file:bg-red-50 file:px-4 file:py-1 file:text-sm file:font-semibold file:text-red-700 hover:file:bg-red-100 dark:file:bg-red-900/30 dark:file:text-red-400 dark:hover:file:bg-red-900/50`}
             />
             {file && (
               <div className="flex items-center gap-2 mt-2 text-sm text-green-600 dark:text-green-400">
@@ -263,7 +268,7 @@ export const MedicalCertificateCard: React.FC<MedicalCertificateCardProps> = ({ 
             ) : (
               <>
                 <FileText className="w-5 h-5 mr-2" />
-                Registrar Ausência
+                Enviar Atestado
               </>
             )}
           </Button>

@@ -2,24 +2,21 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { 
-  Clock, 
-  Calendar, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Eye,
-  FileText,
-  User
-} from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/Card';
-import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { Clock, CheckCircle, XCircle, AlertCircle, Eye, FileText, Plus } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
-import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface PointCorrectionRequest {
   id: string;
@@ -78,9 +75,56 @@ const formatTime = (timeString: string) => {
   return timeString.substring(0, 5); // HH:MM
 };
 
-export const PointCorrectionList: React.FC = () => {
+const STATUS_LIST_HEADER: Record<
+  'all' | 'PENDING' | 'APPROVED' | 'REJECTED',
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Todas as solicitações',
+    subtitle: 'Todas as alterações de ponto registradas',
+    Icon: FileText,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  PENDING: {
+    title: 'Solicitações pendentes',
+    subtitle: 'Alterações de ponto aguardando análise',
+    Icon: Clock,
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  APPROVED: {
+    title: 'Solicitações aprovadas',
+    subtitle: 'Alterações de ponto já aprovadas',
+    Icon: CheckCircle,
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  REJECTED: {
+    title: 'Solicitações rejeitadas',
+    subtitle: 'Alterações de ponto que foram rejeitadas',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+function listHeaderFor(tab: string) {
+  return STATUS_LIST_HEADER[tab as keyof typeof STATUS_LIST_HEADER] ?? STATUS_LIST_HEADER.all;
+}
+
+const PAGE_SIZE = 10;
+
+type StatusTab = 'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+interface PointCorrectionListProps {
+  onNew?: () => void;
+}
+
+export const PointCorrectionList: React.FC<PointCorrectionListProps> = ({ onNew }) => {
   const [selectedRequest, setSelectedRequest] = useState<PointCorrectionRequest | null>(null);
-  const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
+  const [activeStatusTab, setActiveStatusTab] = useState<StatusTab>('all');
+  const [page, setPage] = useState(1);
 
   const { data: requestsData, isLoading, error } = useQuery({
     queryKey: ['point-corrections'],
@@ -90,261 +134,260 @@ export const PointCorrectionList: React.FC = () => {
     }
   });
 
-  const allRequests = requestsData || [];
+  const allRequests: PointCorrectionRequest[] = requestsData || [];
 
-  // Calcular estatísticas
   const stats = {
     total: allRequests.length,
-    pending: allRequests.filter((r: PointCorrectionRequest) => r.status === 'PENDING').length,
-    approved: allRequests.filter((r: PointCorrectionRequest) => r.status === 'APPROVED').length,
-    rejected: allRequests.filter((r: PointCorrectionRequest) => r.status === 'REJECTED').length,
-    cancelled: allRequests.filter((r: PointCorrectionRequest) => r.status === 'CANCELLED').length,
-    inReview: allRequests.filter((r: PointCorrectionRequest) => r.status === 'IN_REVIEW').length
+    pending: allRequests.filter((r) => r.status === 'PENDING').length,
+    approved: allRequests.filter((r) => r.status === 'APPROVED').length,
+    rejected: allRequests.filter((r) => r.status === 'REJECTED').length,
   };
 
-  // Filtrar solicitações por status
-  const filteredRequests = allRequests.filter((request: PointCorrectionRequest) => {
-    if (activeStatusTab !== 'all') {
-      if (request.status !== activeStatusTab) return false;
-    }
-    return true;
-  });
+  const filteredRequests = allRequests.filter(
+    (request) => activeStatusTab === 'all' || request.status === activeStatusTab
+  );
 
-  // Contar solicitações por status
-  const statusCounts = {
-    all: allRequests.length,
-    PENDING: stats.pending,
-    IN_REVIEW: stats.inReview,
-    APPROVED: stats.approved,
-    REJECTED: stats.rejected,
-    CANCELLED: stats.cancelled
+  const listRange = getCadastroListRange(page, PAGE_SIZE, filteredRequests.length);
+  const currentPage = Math.min(page, listRange.totalPages);
+  const pagedRequests = filteredRequests.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const selectTab = (tab: StatusTab) => {
+    setActiveStatusTab(tab);
+    setPage(1);
   };
 
-  if (isLoading) {
-    return <CadastroListLoading message="Carregando solicitações..." />;
-  }
+  const listHeader = listHeaderFor(activeStatusTab);
+  const ListHeaderIcon = listHeader.Icon;
 
-  if (error) {
-    return (
-      <div className="text-center py-8">
-        <AlertCircle className="w-12 h-12 text-red-500 dark:text-red-400 mx-auto mb-4" />
-        <p className="text-red-600 dark:text-red-400">Erro ao carregar solicitações</p>
-      </div>
-    );
-  }
-
-  if (!allRequests || allRequests.length === 0) {
-    return (
-      <Card className={cadastroListClasses.card}>
-        <CardContent className={cadastroListClasses.cardContent}>
-          <CadastroListEmpty
-            icon={FileText}
-            title="Nenhuma solicitação encontrada"
-            hint="Crie sua primeira solicitação de correção"
-          />
-        </CardContent>
-      </Card>
-    );
-  }
+  const emptyHint =
+    allRequests.length === 0
+      ? 'Crie sua primeira solicitação de correção'
+      : activeStatusTab !== 'all'
+        ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
+        : 'Nenhuma solicitação encontrada.';
 
   return (
-    <div className="space-y-4">
-      {/* Tabs de Status */}
-      <AppUnderlineTabList aria-label="Status das solicitações" centered={false}>
-        {(
-          [
-            { id: 'PENDING' as const, label: `Pendentes (${statusCounts.PENDING})` },
-            { id: 'APPROVED' as const, label: `Aprovados (${statusCounts.APPROVED})` },
-            { id: 'REJECTED' as const, label: `Rejeitados (${statusCounts.REJECTED})` },
-            { id: 'CANCELLED' as const, label: `Cancelados (${statusCounts.CANCELLED})` },
-            { id: 'all' as const, label: `Todas (${statusCounts.all})` },
-          ] as const
-        ).map((tab) => (
-          <AppUnderlineTabButton
-            key={tab.id}
-            active={activeStatusTab === tab.id}
-            onClick={() => setActiveStatusTab(tab.id)}
-            className="flex items-center gap-2 whitespace-nowrap px-3 py-2 text-sm"
-          >
-            {tab.label}
-          </AppUnderlineTabButton>
-        ))}
-      </AppUnderlineTabList>
-
-      <div className="space-y-3">
-        {filteredRequests.length === 0 ? (
-          <Card className={cadastroListClasses.card}>
-            <CardContent className={cadastroListClasses.cardContent}>
-              <CadastroListEmpty
-                icon={FileText}
-                title="Nenhuma solicitação encontrada"
-                hint={
-                  activeStatusTab !== 'all'
-                    ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
-                    : 'Nenhuma solicitação encontrada.'
-                }
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          filteredRequests.map((request: PointCorrectionRequest) => {
-          const statusInfo = getStatusInfo(request.status);
-          const StatusIcon = statusInfo.icon;
-
-          return (
-            <Card key={request.id} className="hover:shadow-md transition-all duration-200">
-              <CardContent className="p-4">
-                {/* Header compacto */}
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {request.title}
-                      </h4>
-                      <Badge className={`${statusInfo.color} shrink-0 text-xs`}>
-                        <StatusIcon className="w-3 h-3 mr-1" />
-                        {statusInfo.label}
-                      </Badge>
-                    </div>
-                    {request.justification && (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
-                        {request.justification}
-                      </p>
-                    )}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedRequest(request)}
-                    className="shrink-0 h-8 px-2"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-
-                {/* Comparação compacta */}
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  {/* Original */}
-                  <div className="p-2.5 rounded border-l-2 border-red-500 dark:border-red-400 bg-red-50/50 dark:bg-red-900/10">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
-                        {formatDate(request.originalDate)} {formatTime(request.originalTime)}
-                      </p>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
-                        {getTypeLabel(request.originalType)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Corrigido */}
-                  <div className="p-2.5 rounded border-l-2 border-green-500 dark:border-green-400 bg-green-50/50 dark:bg-green-900/10">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">
-                        {formatDate(request.correctedDate)} {formatTime(request.correctedTime)}
-                      </p>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
-                        {getTypeLabel(request.correctedType)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer compacto */}
-                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                    <Calendar className="w-3 h-3" />
-                    <span>{formatDate(request.createdAt)}</span>
-                  </div>
-                  {request.approvedAt && (
-                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                      <Clock className="w-3 h-3" />
-                      <span>Aprovado {formatDate(request.approvedAt)}</span>
-                    </div>
-                  )}
-                  {request.approvedBy && (
-                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                      <User className="w-3 h-3" />
-                      <span>{request.approvedBy.name}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Motivo da rejeição compacto */}
-                {request.rejectionReason && (
-                  <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border-l-2 border-red-500 dark:border-red-400 rounded-r">
-                    <p className="text-xs text-red-700 dark:text-red-300">
-                      <span className="font-semibold">Rejeição:</span> {request.rejectionReason}
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })
-      )}
+    <>
+      <div className={pageStatCardsGridClass}>
+        <FilterStatCard
+          label="Todas"
+          count={stats.total}
+          icon={FileText}
+          iconBg="bg-blue-100 dark:bg-blue-900/30"
+          iconColor="text-blue-600 dark:text-blue-400"
+          isActive={activeStatusTab === 'all'}
+          onClick={() => selectTab('all')}
+        />
+        <FilterStatCard
+          label="Pendentes"
+          count={stats.pending}
+          icon={Clock}
+          iconBg="bg-amber-100 dark:bg-amber-900/30"
+          iconColor="text-amber-600 dark:text-amber-400"
+          isActive={activeStatusTab === 'PENDING'}
+          onClick={() => selectTab('PENDING')}
+        />
+        <FilterStatCard
+          label="Aprovadas"
+          count={stats.approved}
+          icon={CheckCircle}
+          iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+          iconColor="text-emerald-600 dark:text-emerald-400"
+          isActive={activeStatusTab === 'APPROVED'}
+          onClick={() => selectTab('APPROVED')}
+        />
+        <FilterStatCard
+          label="Rejeitadas"
+          count={stats.rejected}
+          icon={XCircle}
+          iconBg="bg-red-100 dark:bg-red-900/30"
+          iconColor="text-red-600 dark:text-red-400"
+          isActive={activeStatusTab === 'REJECTED'}
+          onClick={() => selectTab('REJECTED')}
+        />
       </div>
 
-      {/* Modal de detalhes */}
-      {selectedRequest && (
-        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedRequest(null)} />
-          <div className="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Detalhes da Solicitação
-              </h3>
-              <button
-                onClick={() => setSelectedRequest(null)}
-                className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-              >
-                <XCircle className="w-5 h-5" />
-              </button>
+      <Card className={cadastroListClasses.card}>
+        <CardHeader className={cadastroListClasses.cardHeader}>
+          <div className={cadastroListClasses.cardHeaderRow}>
+            <div className={cadastroListClasses.cardHeaderIconRow}>
+              <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{listHeader.title}</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
+              </div>
             </div>
-            
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">{selectedRequest.title}</h4>
+            {onNew ? (
+              <div className={cadastroListClasses.cardToolbar}>
+                <button
+                  type="button"
+                  onClick={onNew}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Nova Alteração</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className={cadastroListClasses.cardContent}>
+          {isLoading ? (
+            <CadastroListLoading message="Carregando solicitações..." />
+          ) : error ? (
+            <div className="py-8 text-center">
+              <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500 dark:text-red-400" />
+              <p className="text-red-600 dark:text-red-400">Erro ao carregar solicitações</p>
+            </div>
+          ) : filteredRequests.length === 0 ? (
+            <CadastroListEmpty icon={FileText} title="Nenhuma solicitação encontrada" hint={emptyHint} />
+          ) : (
+            <>
+              <CadastroListSummary
+                startItem={listRange.startItem}
+                endItem={listRange.endItem}
+                total={filteredRequests.length}
+                itemLabel="solicitação"
+                itemLabelPlural="solicitações"
+                currentPage={currentPage}
+                totalPages={listRange.totalPages}
+              />
+              <div className="table-scroll">
+                <table className={cadastroListClasses.table}>
+                  <thead className="border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                      <th className={cadastroListClasses.th}>Solicitação</th>
+                      <th className={cadastroListClasses.thCenter}>Original</th>
+                      <th className={cadastroListClasses.thCenter}>Corrigido</th>
+                      <th className={cadastroListClasses.thCenter}>Registrada em</th>
+                      <th className={cadastroListClasses.thCenter}>Status</th>
+                      <th className={cadastroListClasses.thCenter}>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                    {pagedRequests.map((request) => {
+                      const statusInfo = getStatusInfo(request.status);
+                      const StatusIcon = statusInfo.icon;
+                      return (
+                        <tr
+                          key={request.id}
+                          className={getListTableRowClassName(true)}
+                          onClick={() => setSelectedRequest(request)}
+                        >
+                          <td className={cadastroListClasses.tdTruncate}>
+                            <ListRowNavigableLabel className="font-medium">{request.title}</ListRowNavigableLabel>
+                            {request.justification ? (
+                              <p className="line-clamp-1 text-xs text-gray-500 dark:text-gray-400">
+                                {request.justification}
+                              </p>
+                            ) : null}
+                            {request.rejectionReason && request.status === 'REJECTED' ? (
+                              <p className="text-xs text-red-600 dark:text-red-400">
+                                Rejeição: {request.rejectionReason}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <p>
+                              {formatDate(request.originalDate)} {formatTime(request.originalTime)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {getTypeLabel(request.originalType)}
+                            </p>
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <p>
+                              {formatDate(request.correctedDate)} {formatTime(request.correctedTime)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {getTypeLabel(request.correctedType)}
+                            </p>
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            {formatDate(request.createdAt)}
+                            {request.approvedBy ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{request.approvedBy.name}</p>
+                            ) : null}
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${statusInfo.color}`}
+                            >
+                              <StatusIcon className="h-3 w-3" />
+                              {statusInfo.label}
+                            </span>
+                          </td>
+                          <td className={cadastroListClasses.tdCenter} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRequest(request)}
+                              title="Ver detalhes"
+                              aria-label="Ver detalhes"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <ListPagination currentPage={currentPage} totalPages={listRange.totalPages} onPageChange={setPage} />
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Modal
+        isOpen={!!selectedRequest}
+        onClose={() => setSelectedRequest(null)}
+        title="Detalhes da Solicitação"
+        size="lg"
+      >
+        {selectedRequest ? (
+          <div className="space-y-4">
+            <h4 className="font-medium text-gray-900 dark:text-gray-100">{selectedRequest.title}</h4>
+
+            <div>
+              <h5 className="mb-2 font-medium text-gray-900 dark:text-gray-100">Justificativa:</h5>
+              <p className="rounded bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                {selectedRequest.justification}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="rounded bg-red-50 p-3 dark:bg-red-900/30">
+                <h6 className="mb-2 font-medium text-red-800 dark:text-red-300">Dados Originais</h6>
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  {formatDate(selectedRequest.originalDate)} às {formatTime(selectedRequest.originalTime)}
+                </p>
+                <p className="text-xs text-red-600 dark:text-red-400">{getTypeLabel(selectedRequest.originalType)}</p>
               </div>
 
-              <div>
-                <h5 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Justificativa:</h5>
-                <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                  {selectedRequest.justification}
+              <div className="rounded bg-green-50 p-3 dark:bg-green-900/30">
+                <h6 className="mb-2 font-medium text-green-800 dark:text-green-300">Dados Corrigidos</h6>
+                <p className="text-sm text-green-700 dark:text-green-300">
+                  {formatDate(selectedRequest.correctedDate)} às {formatTime(selectedRequest.correctedTime)}
+                </p>
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {getTypeLabel(selectedRequest.correctedType)}
                 </p>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded">
-                  <h6 className="font-medium text-red-800 dark:text-red-300 mb-2">Dados Originais</h6>
-                  <p className="text-sm text-red-700 dark:text-red-300">
-                    {formatDate(selectedRequest.originalDate)} às {formatTime(selectedRequest.originalTime)}
-                  </p>
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    {getTypeLabel(selectedRequest.originalType)}
-                  </p>
-                </div>
-
-                <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded">
-                  <h6 className="font-medium text-green-800 dark:text-green-300 mb-2">Dados Corrigidos</h6>
-                  <p className="text-sm text-green-700 dark:text-green-300">
-                    {formatDate(selectedRequest.correctedDate)} às {formatTime(selectedRequest.correctedTime)}
-                  </p>
-                  <p className="text-xs text-green-600 dark:text-green-400">
-                    {getTypeLabel(selectedRequest.correctedType)}
-                  </p>
-                </div>
-              </div>
-
-              {selectedRequest.rejectionReason && (
-                <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded">
-                  <h6 className="font-medium text-red-800 dark:text-red-300 mb-2">Motivo da Rejeição:</h6>
-                  <p className="text-sm text-red-700 dark:text-red-300">{selectedRequest.rejectionReason}</p>
-                </div>
-              )}
             </div>
+
+            {selectedRequest.rejectionReason ? (
+              <div className="rounded border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/30">
+                <h6 className="mb-2 font-medium text-red-800 dark:text-red-300">Motivo da Rejeição:</h6>
+                <p className="text-sm text-red-700 dark:text-red-300">{selectedRequest.rejectionReason}</p>
+              </div>
+            ) : null}
           </div>
-        </AppModalOverlay>
-      )}
-    </div>
+        ) : null}
+      </Modal>
+    </>
   );
 };

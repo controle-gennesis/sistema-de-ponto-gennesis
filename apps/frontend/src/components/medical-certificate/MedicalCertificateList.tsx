@@ -21,6 +21,7 @@ import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppT
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 
 interface MedicalCertificate {
@@ -52,8 +53,12 @@ interface MedicalCertificate {
   };
 }
 
+export type MedicalCertificateStatusTab = 'all' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
 interface MedicalCertificateListProps {
   showActions?: boolean;
+  /** Quando informado, o filtro de status vem da página (cards) e as abas internas somem. */
+  statusFilter?: MedicalCertificateStatusTab;
   filters?: {
     search?: string;
     type?: string;
@@ -105,6 +110,7 @@ const statusLabels: Record<string, string> = {
 
 export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({ 
   showActions = false,
+  statusFilter,
   filters = {}
 }) => {
   const [selectedCertificate, setSelectedCertificate] = useState<MedicalCertificate | null>(null);
@@ -116,7 +122,8 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
   const [certificateToApprove, setCertificateToApprove] = useState<MedicalCertificate | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [certificateToCancel, setCertificateToCancel] = useState<MedicalCertificate | null>(null);
-  const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
+  const [tabState, setActiveStatusTab] = useState<MedicalCertificateStatusTab>('PENDING');
+  const activeStatusTab = statusFilter ?? tabState;
 
   const queryClient = useQueryClient();
   const { permissions, isLoading: permissionsLoading } = usePermissions();
@@ -350,21 +357,13 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
   };
 
   if (isLoading) {
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-center">
-            <Clock className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-400 mr-2" />
-            <span className="text-gray-900 dark:text-gray-100">Carregando registros de ausências...</span>
-          </div>
-        </CardContent>
-      </Card>
-    );
+    return <CadastroListLoading message="Carregando registros de ausências..." />;
   }
 
   return (
     <div className="space-y-4">
       {/* Tabs de Status */}
+      {statusFilter === undefined ? (
       <AppUnderlineTabList aria-label="Status dos atestados" centered={false}>
         {(
           [
@@ -385,27 +384,24 @@ export const MedicalCertificateList: React.FC<MedicalCertificateListProps> = ({
           </AppUnderlineTabButton>
         ))}
       </AppUnderlineTabList>
+      ) : null}
 
       {/* Lista de Atestados */}
       <div className="space-y-3">
         {filteredCertificates.length === 0 ? (
-          <Card>
-            <CardContent className="p-6 text-center">
-              <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                Nenhum registro de ausência encontrado
-              </h3>
-              <p className="text-gray-500 dark:text-gray-400">
-                {activeStatusTab !== 'all' 
-                  ? `Não há ausências ${statusLabels[activeStatusTab]?.toLowerCase()} no momento.`
-                  : (filters.search || (filters.type && filters.type !== 'all') || filters.department || filters.position || filters.company)
-                    ? 'Nenhum registro encontrado com os filtros selecionados.'
-                    : certificates.length === 0
-                      ? 'Você ainda não enviou nenhum registro de ausência.'
-                      : 'Nenhum registro encontrado.'}
-              </p>
-            </CardContent>
-          </Card>
+          <CadastroListEmpty
+            icon={FileText}
+            title="Nenhum registro de ausência encontrado"
+            hint={
+              activeStatusTab !== 'all'
+                ? `Não há ausências ${statusLabels[activeStatusTab]?.toLowerCase()} no momento.`
+                : (filters.search || (filters.type && filters.type !== 'all') || filters.department || filters.position || filters.company)
+                  ? 'Nenhum registro encontrado com os filtros selecionados.'
+                  : certificates.length === 0
+                    ? 'Você ainda não enviou nenhum registro de ausência.'
+                    : 'Nenhum registro encontrado.'
+            }
+          />
         ) : (
           filteredCertificates.map((certificate) => (
             <Card key={certificate.id} className="hover:shadow-md transition-shadow">

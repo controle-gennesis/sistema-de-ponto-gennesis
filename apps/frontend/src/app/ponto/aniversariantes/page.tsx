@@ -3,13 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Cake, Search, Calendar, Users, Mail, Filter, ChevronDown, ChevronUp } from 'lucide-react';
+import { Cake, Search, Calendar, Users, Mail, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import api from '@/lib/api';
+import { Modal } from '@/components/ui/Modal';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
@@ -68,7 +73,9 @@ export default function AniversariantesPage() {
   const selectedYear = new Date().getFullYear(); // Sempre o ano atual
   const [searchTerm, setSearchTerm] = useState<string>('');
   const showAllBirthdays = true; // Sempre true para mostrar todos os aniversários do mês
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const currentMonthDefault = new Date().getMonth() + 1;
+  const hasActiveFilter = selectedMonth !== currentMonthDefault;
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -170,116 +177,85 @@ export default function AniversariantesPage() {
         userName={user.name} 
         onLogout={handleLogout}
       >
-        <div className="space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <div className="flex items-center justify-center space-x-3 mb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Aniversariantes</h1>
-              <p className="mt-2 text-gray-600 dark:text-gray-400">
-                {selectedMonth === 'all' 
-                  ? `Todos os meses - ${selectedYear}` 
-                  : `${months[typeof selectedMonth === 'number' ? selectedMonth - 1 : 0]} ${selectedYear}`}
-              </p>
-            </div>
-          </div>
-        </div>
+        <PageStack>
+        <ListPageHeader
+          title="Aniversariantes"
+          description={
+            selectedMonth === 'all'
+              ? `Todos os meses - ${selectedYear}`
+              : `${months[typeof selectedMonth === 'number' ? selectedMonth - 1 : 0]} ${selectedYear}`
+          }
+        />
 
         {/* Estatísticas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Aniversariantes este mês</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {birthdayResponse.stats.total}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                  <Calendar className="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Aniversariantes hoje</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {birthdayResponse.stats.todayBirthdays}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+          <FilterStatCard
+            label="Aniversariantes este mês"
+            count={birthdayResponse.stats.total}
+            icon={Users}
+            iconBg="bg-blue-100 dark:bg-blue-900/30"
+            iconColor="text-blue-600 dark:text-blue-400"
+          />
+          <FilterStatCard
+            label="Aniversariantes hoje"
+            count={birthdayResponse.stats.todayBirthdays}
+            icon={Calendar}
+            iconBg="bg-green-100 dark:bg-green-900/30"
+            iconColor="text-green-600 dark:text-green-400"
+          />
         </div>
 
-        {/* Filtros */}
-        <Card className="mb-6">
-          <CardHeader className="border-b-0 pb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+        {/* Busca e filtros */}
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <div className={cadastroListClasses.cardHeaderIconRow}>
+                <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                  <Cake className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Aniversariantes
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Funcionários que fazem aniversário no período
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-              >
-                {isFiltersMinimized ? (
-                  <ChevronDown className="w-5 h-5" />
-                ) : (
-                  <ChevronUp className="w-5 h-5" />
-                )}
-              </button>
-            </div>
-          </CardHeader>
-          {!isFiltersMinimized && (
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-4">
-                {/* Filtro Principal - Busca Geral e Mês */}
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                  <div className="space-y-2 sm:col-span-10">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Buscar Aniversariante
-                    </label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                      <input
-                        type="text"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Digite o nome do funcionário ou o setor..."
-                        className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Mês
-                    </label>
-                    <StringSingleSelectDropdown
-                      value={String(selectedMonth)}
-                      onChange={(value) => {
-                        setSelectedMonth(value === 'all' ? 'all' : parseInt(value));
-                      }}
-                      options={MONTH_FILTER_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
+              <div className={cadastroListClasses.cardToolbar}>
+                <div className={cadastroListClasses.searchFilterGroup}>
+                  <div className={cadastroListClasses.searchFieldInGroup}>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar aniversariante..."
+                      className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
                     />
+                  </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersOpen(true)}
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                        hasActiveFilter
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      aria-label="Abrir filtros"
+                      title={hasActiveFilter ? 'Filtros (ativos)' : 'Filtros'}
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasActiveFilter ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
                   </div>
                 </div>
               </div>
-            </CardContent>
-          )}
+            </div>
+          </CardHeader>
         </Card>
 
         {/* Lista de Aniversariantes */}
@@ -485,7 +461,48 @@ export default function AniversariantesPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+        </PageStack>
+
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Aniversariantes"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Mês
+              </label>
+              <StringSingleSelectDropdown
+                value={String(selectedMonth)}
+                onChange={(value) => {
+                  setSelectedMonth(value === 'all' ? 'all' : parseInt(value));
+                }}
+                options={MONTH_FILTER_OPTIONS}
+                allowEmpty={false}
+                className="w-full"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setSelectedMonth(currentMonthDefault)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersOpen(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </Modal>
 
       </MainLayout>
     </ProtectedRoute>

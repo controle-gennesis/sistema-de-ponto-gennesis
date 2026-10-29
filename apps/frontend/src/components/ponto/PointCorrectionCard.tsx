@@ -1,5 +1,7 @@
 'use client';
 
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { TimePickerField } from '@/components/ui/TimePickerField';
 import React, { useState } from 'react';
 import { Calendar, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -263,16 +265,17 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
               <label className="block text-sm font-semibold text-gray-900 dark:text-gray-300 mb-2">
                 Data do Ponto *
               </label>
-              <Input
-                type="date"
+              <DatePickerField
                 value={selectedDate}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
+                onChange={(value) => {
+                  setSelectedDate(value);
                   setSelectedOriginalRecord(null);
                 }}
                 max={new Date().toISOString().split('T')[0]}
-                required
-                fullWidth
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                className="w-full"
+                aria-label="Data do ponto"
               />
             </div>
 
@@ -372,19 +375,19 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
                     <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
                       Horário Corrigido *
                     </label>
-                    <Input
-                      type="time"
+                    <TimePickerField
                       value={formData.originalTime}
-                      onChange={(e) => {
-                        const newTime = e.target.value;
+                      onChange={(newTime) => {
                         setFormData(prev => ({
                           ...prev,
                           originalTime: newTime,
                           correctedTime: newTime // Sincronizar com correctedTime
                         }));
                       }}
-                      required
-                      className="bg-white dark:bg-gray-800"
+                      stepMinutes={1}
+                      allowEmpty={false}
+                      noFocusRing
+                      aria-label="Horário corrigido"
                     />
                   </div>
                 </div>

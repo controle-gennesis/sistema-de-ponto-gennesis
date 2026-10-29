@@ -334,15 +334,7 @@ export class ToolRentalRequestController {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       await assertUserHasToolRentalSuppliesAccess(req.user.id, req.user.isAdmin);
       const count = await prisma.toolRentalRequest.count({
-        where: {
-          status: {
-            in: [
-              ToolRentalRequestStatus.OPEN,
-              ToolRentalRequestStatus.QUOTATION,
-              ToolRentalRequestStatus.AWAITING_PAYMENT,
-            ],
-          },
-        },
+        where: { status: ToolRentalRequestStatus.OPEN },
       });
       res.json({ success: true, data: { count } });
     } catch (error) {

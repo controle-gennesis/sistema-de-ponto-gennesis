@@ -314,7 +314,7 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
       },
       {
         title: 'Acompanhe a análise',
-        body: 'O status muda após análise do DP. Em Gerenciar Ausências, quem tiver permissão valida ou devolve com motivo.',
+        body: 'O status muda após análise do DP. Em Gerenciar Atestados, quem tiver permissão valida ou devolve com motivo.',
       },
     ],
   },
