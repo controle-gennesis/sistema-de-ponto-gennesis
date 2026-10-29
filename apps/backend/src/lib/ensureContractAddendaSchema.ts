@@ -25,6 +25,7 @@ export async function ensureContractAddendaTable(prisma: PrismaClient): Promise<
         "effectiveDate" TIMESTAMP(3) NOT NULL,
         "amount" DECIMAL(15, 2) NOT NULL,
         "note" TEXT,
+        "addendumNumber" TEXT,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL,
         CONSTRAINT "contract_addenda_pkey" PRIMARY KEY ("id")

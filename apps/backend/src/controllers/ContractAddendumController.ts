@@ -32,6 +32,7 @@ export class ContractAddendumController {
           effectiveDate: r.effectiveDate,
           amount: toNum(r.amount),
           note: r.note ?? null,
+          addendumNumber: r.addendumNumber ?? null,
           createdAt: r.createdAt,
         })),
       });
@@ -44,7 +45,8 @@ export class ContractAddendumController {
     try {
       const { contractId } = req.params;
       await assertContractAccess(req, contractId);
-      const { effectiveDate, amount, note } = req.body as {
+      const { effectiveDate, amount, note, addendumNumber } = req.body as {
+        addendumNumber?: string | null;
         effectiveDate?: string;
         amount?: number | string;
         note?: string | null;
@@ -55,7 +57,10 @@ export class ContractAddendumController {
       if (Number.isNaN(dt.getTime())) throw createError('Data do aditivo inválida', 400);
 
       const num = toNum(amount);
-      if (Math.abs(num) < 0.0000001) throw createError('Valor do aditivo deve ser diferente de zero', 400);
+      // Aditivo sem valor (ex.: de prazo) é permitido, mas precisa de uma observação para ter significado.
+      if (Math.abs(num) < 0.0000001 && !(typeof note === 'string' && note.trim())) {
+        throw createError('Aditivo sem valor precisa de uma observação (ex.: aditivo de prazo)', 400);
+      }
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
@@ -66,6 +71,7 @@ export class ContractAddendumController {
           effectiveDate: dt,
           amount: new Decimal(num),
           note: note?.trim() || null,
+          addendumNumber: typeof addendumNumber === 'string' ? addendumNumber.trim() || null : null,
         },
       });
 
@@ -77,6 +83,7 @@ export class ContractAddendumController {
           effectiveDate: created.effectiveDate,
           amount: toNum(created.amount),
           note: created.note ?? null,
+          addendumNumber: created.addendumNumber ?? null,
           createdAt: created.createdAt,
         },
         message: 'Aditivo registrado com sucesso',

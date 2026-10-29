@@ -1589,6 +1589,8 @@ model ContractAddendum {
   effectiveDate DateTime
   amount        Decimal  @db.Decimal(15, 2) // pode ser positivo ou negativo
   note          String?
+  /// Número do aditivo como o contrato o chama (ex.: "2º TA")
+  addendumNumber String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

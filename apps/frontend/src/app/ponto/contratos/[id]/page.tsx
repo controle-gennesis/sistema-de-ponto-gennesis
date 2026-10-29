@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import {
   ArrowLeft,
   FileText,
+  History,
   FileSpreadsheet,
   Download,
   Plus,
@@ -240,6 +241,7 @@ interface ContractAddendumRow {
   effectiveDate: string;
   amount: number;
   note?: string | null;
+  addendumNumber?: string | null;
   createdAt?: string;
 }
 
@@ -1226,6 +1228,7 @@ export default function ContractDetailPage() {
   const [addendumDate, setAddendumDate] = useState('');
   const [addendumAmount, setAddendumAmount] = useState('');
   const [addendumNote, setAddendumNote] = useState('');
+  const [addendumNumber, setAddendumNumber] = useState('');
 
   const closeAddendumModal = useCallback(() => {
     setShowAddendumModal(false);
@@ -1619,16 +1622,19 @@ export default function ContractDetailPage() {
     }
   });
   const createAddendumMutation = useMutation({
-    mutationFn: async (payload: { effectiveDate: string; amount: number; note?: string | null }) => {
+    mutationFn: async (payload: { effectiveDate: string; amount: number; note?: string | null; addendumNumber?: string | null }) => {
       const res = await api.post(`/contracts/${contractId}/addenda`, payload);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contract-addenda', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.invalidateQueries({ queryKey: ['contract', contractId] });
       setShowAddendumModal(false);
       setAddendumDate('');
       setAddendumAmount('');
       setAddendumNote('');
+      setAddendumNumber('');
       toast.success('Aditivo cadastrado com sucesso');
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
@@ -1642,6 +1648,8 @@ export default function ContractDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contract-addenda', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.invalidateQueries({ queryKey: ['contract', contractId] });
       toast.success('Aditivo removido');
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
@@ -6696,6 +6704,91 @@ export default function ContractDetailPage() {
             </ContractSurfaceCard>
           ) : null}
 
+          {mainTab === 'dados' && canAccessGestorTabs ? (
+            <ContractSurfaceCard>
+              <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                      <History className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                        Histórico de aditivos
+                      </h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {addenda.length === 0
+                          ? 'Nenhum aditivo cadastrado'
+                          : `${addenda.length} aditivo(s) · ${totalAddenda >= 0 ? '+' : ''}${formatCurrency(totalAddenda)}`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className={cadastroListClasses.cardContent}>
+                {addenda.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    Use o botão Aditivo para cadastrar o primeiro.
+                  </p>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="w-full table-fixed">
+                      <colgroup>
+                        <col className="w-[12%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[26%]" />
+                        <col />
+                      </colgroup>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          <th className="px-3 py-3 text-center font-medium">Nº</th>
+                          <th className="px-3 py-3 text-center font-medium">Data</th>
+                          <th className="px-3 py-3 text-center font-medium">Valor do aditivo</th>
+                          <th className="px-3 py-3 text-center font-medium">Valor do contrato após o aditivo</th>
+                          <th className="px-3 py-3 text-center font-medium">Observação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        {(() => {
+                          let running = Number(contract.valuePlusAddenda) || 0;
+                          return addenda.map((a) => {
+                            running += Number(a.amount) || 0;
+                            return (
+                              <tr key={a.id} className="text-sm text-gray-900 dark:text-gray-100">
+                                <td className="whitespace-nowrap px-3 py-3 text-center font-medium">{a.addendumNumber || '—'}</td>
+                                <td className="whitespace-nowrap px-3 py-3 text-center">{formatDate(a.effectiveDate)}</td>
+                                <td className="whitespace-nowrap px-3 py-3 text-center tabular-nums">
+                                  {Math.abs(a.amount) < 1e-9 ? 'Sem valor' : `${a.amount >= 0 ? '+' : ''}${formatCurrency(a.amount)}`}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300">
+                                  {formatCurrency(running)}
+                                </td>
+                                <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{a.note || '—'}</td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                      <tfoot className="border-t-2 border-gray-300 dark:border-gray-600">
+                        <tr className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          <td className="px-3 py-3 text-center">Total</td>
+                          <td className="px-3 py-3 text-center" />
+                          <td className="px-3 py-3 text-center tabular-nums">
+                            {totalAddenda >= 0 ? '+' : ''}
+                            {formatCurrency(totalAddenda)}
+                          </td>
+                          <td className="px-3 py-3 text-center tabular-nums">{formatCurrency(valorMaisAditivosTotal)}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </ContractSurfaceCard>
+          ) : null}
+
           <ContractGastosResumoModal
             isOpen={gastosResumoModal != null}
             onClose={() => setGastosResumoModal(null)}
@@ -7135,7 +7228,7 @@ export default function ContractDetailPage() {
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Valor (R$) *
+                        Valor (R$)
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
@@ -7155,15 +7248,17 @@ export default function ContractDetailPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const amount = parseAjusteValorInput(addendumAmount);
+                        const amount = addendumAmount.trim() === '' ? 0 : parseAjusteValorInput(addendumAmount);
                         if (!addendumDate) return toast.error('Informe a data do aditivo');
-                        if (Number.isNaN(amount) || Math.abs(amount) < 1e-9) {
-                          return toast.error('Informe um valor diferente de zero');
+                        if (Number.isNaN(amount)) return toast.error('Valor do aditivo inválido');
+                        if (Math.abs(amount) < 1e-9 && !addendumNote.trim()) {
+                          return toast.error('Aditivo sem valor precisa de uma observação (ex.: aditivo de prazo)');
                         }
                         createAddendumMutation.mutate({
                           effectiveDate: addendumDate,
                           amount,
-                          note: addendumNote.trim() || null
+                          note: addendumNote.trim() || null,
+                          addendumNumber: addendumNumber.trim() || null
                         });
                       }}
                       className="h-10 w-full px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
@@ -7173,17 +7268,37 @@ export default function ContractDetailPage() {
                     </button>
                     </div>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Observação (opcional)"
-                    value={addendumNote}
-                    onChange={(e) => setAddendumNote(e.target.value)}
-                    className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Nº do aditivo
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex.: 2º TA"
+                        value={addendumNumber}
+                        onChange={(e) => setAddendumNumber(e.target.value)}
+                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Observação
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Observação (opcional)"
+                        value={addendumNote}
+                        onChange={(e) => setAddendumNote(e.target.value)}
+                        className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  </div>
                   <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                     <table className="w-full">
                       <thead className="bg-gray-50 dark:bg-gray-900/40">
                         <tr>
+                          <th className="px-3 py-2 text-left text-xs text-gray-500">Nº</th>
                           <th className="px-3 py-2 text-left text-xs text-gray-500">Data</th>
                           <th className="px-3 py-2 text-left text-xs text-gray-500">Valor</th>
                           <th className="px-3 py-2 text-left text-xs text-gray-500">Obs.</th>
@@ -7193,12 +7308,13 @@ export default function ContractDetailPage() {
                       <tbody>
                         {addenda.length === 0 ? (
                           <tr>
-                            <td className="px-3 py-3 text-sm text-gray-500" colSpan={4}>Nenhum aditivo cadastrado.</td>
+                            <td className="px-3 py-3 text-sm text-gray-500" colSpan={5}>Nenhum aditivo cadastrado.</td>
                           </tr>
                         ) : addenda.map((a) => (
                           <tr key={a.id} className="border-t border-gray-200 dark:border-gray-700">
+                            <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">{a.addendumNumber || '-'}</td>
                             <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{formatDate(a.effectiveDate)}</td>
-                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{a.amount >= 0 ? '+' : ''}{formatCurrency(a.amount)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{Math.abs(a.amount) < 1e-9 ? 'Sem valor' : `${a.amount >= 0 ? '+' : ''}${formatCurrency(a.amount)}`}</td>
                             <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">{a.note || '-'}</td>
                             <td className="px-3 py-2 text-right">
                               <button
