@@ -66,7 +66,7 @@ export function FluigWorkflowAprovadorDetailPage() {
   const user = userData?.data ?? { name: 'Usuário', role: 'EMPLOYEE' as const };
 
   const { g3Buckets, g5Buckets, bucketsByDataset, rowKeyMapsByDataset, isLoading, hasError, errorMessage } =
-    useFluigWorkflowApprovalDatasets({ approverNameKey: nameKey });
+    useFluigWorkflowApprovalDatasets({ approverNameKey: nameKey, activeDatasetIndex: activeTab });
 
   const mergedSummary = useMemo(
     () => mergeWorkflowApproverBuckets(g3Buckets, g5Buckets).find((item) => item.nameKey === nameKey),

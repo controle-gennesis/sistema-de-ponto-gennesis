@@ -171,9 +171,12 @@ export function FluigDatasetToggle({
 export function useFluigWorkflowApprovalDatasets(options?: {
   approverNameKey?: string;
   enabled?: boolean;
+  /** Índice do dataset aberto: só ele monta a lista detalhada; o outro entra só nos totais. */
+  activeDatasetIndex?: number;
 }) {
   const approverNameKey = options?.approverNameKey?.trim() || undefined;
   const enabled = options?.enabled !== false;
+  const activeDatasetIndex = options?.activeDatasetIndex;
 
   const datasetQueries = useQueries({
     queries: FLUIG_WORKFLOW_DATASETS.map(({ id }) => ({
@@ -200,18 +203,21 @@ export function useFluigWorkflowApprovalDatasets(options?: {
   }, [datasetQueries[0]?.data, datasetQueries[1]?.data]);
 
   const bucketsByDataset = useMemo(() => {
-    return parsedRowsByDataset.map((rows) =>
+    return parsedRowsByDataset.map((rows, index) =>
       aggregateWorkflowByApprover(rows, {
-        summariesOnly: !approverNameKey,
+        summariesOnly:
+          !approverNameKey || (activeDatasetIndex !== undefined && index !== activeDatasetIndex),
         nameKeyFilter: approverNameKey,
       })
     );
-  }, [parsedRowsByDataset, approverNameKey]);
+  }, [parsedRowsByDataset, approverNameKey, activeDatasetIndex]);
 
   const rowKeyMapsByDataset = useMemo(() => {
     if (!approverNameKey) return [null, null] as const;
-    return parsedRowsByDataset.map((rows) => buildWorkflowRowKeyMap(rows));
-  }, [parsedRowsByDataset, approverNameKey]);
+    return parsedRowsByDataset.map((rows, index) =>
+      activeDatasetIndex === undefined || index === activeDatasetIndex ? buildWorkflowRowKeyMap(rows) : null
+    );
+  }, [parsedRowsByDataset, approverNameKey, activeDatasetIndex]);
 
   const isLoading = enabled && datasetQueries.some((query) => query.isLoading);
   const isFetching = enabled && datasetQueries.some((query) => query.isFetching);

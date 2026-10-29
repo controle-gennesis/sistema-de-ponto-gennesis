@@ -3,7 +3,8 @@
 import React, { useDeferredValue, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock, Search, UserCog, Users } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { CheckCircle2, Clock, RefreshCw, Search, UserCog, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +22,7 @@ import { fetchAllFluigApproverViewerKeys } from '@/lib/fluigApproverViewers';
 import { ListPagination } from '@/components/ui/ListPagination';
 import {
   APPROVERS_LIST_PAGE_SIZE,
+  FLUIG_WORKFLOW_DATASETS,
   useFluigWorkflowApprovalDatasets,
 } from '@/components/fluig/fluigWorkflowAprovadoresShared';
 import { FluigApproverViewersModal } from '@/components/fluig/FluigApproverViewersModal';
@@ -33,6 +35,7 @@ export function FluigWorkflowAprovadoresPage() {
   const [search, setSearch] = useState('');
   const [listPage, setListPage] = useState(1);
   const [viewerModal, setViewerModal] = useState<{ nameKey: string; name: string } | null>(null);
+  const [syncingMirror, setSyncingMirror] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   const {
@@ -147,6 +150,28 @@ export function FluigWorkflowAprovadoresPage() {
     queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
   };
 
+  /** Atualiza o espelho (G3 e G5) a partir do Fluig, sem esperar a sincronização agendada. */
+  const handleMirrorSync = async () => {
+    if (syncingMirror) return;
+    setSyncingMirror(true);
+    const toastId = toast.loading('Sincronizando com o Fluig…');
+    try {
+      for (const { id } of FLUIG_WORKFLOW_DATASETS) {
+        await api.post(`/fluig/datasets/${encodeURIComponent(id)}/mirror/sync`, {}, { timeout: 180000 });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
+      toast.success('Aprovadores atualizados com os dados do Fluig', { id: toastId });
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (err as Error)?.message ||
+        'Falha ao sincronizar';
+      toast.error(msg, { id: toastId });
+    } finally {
+      setSyncingMirror(false);
+    }
+  };
+
   if (permissionsLoading || isSingleApproverUser) {
     return null;
   }
@@ -246,6 +271,18 @@ export function FluigWorkflowAprovadoresPage() {
                           className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                         />
                       </div>
+                      {canManageFluigApproverViewers ? (
+                        <button
+                          type="button"
+                          onClick={handleMirrorSync}
+                          disabled={syncingMirror || isLoading}
+                          title="Atualizar com os dados do Fluig"
+                          aria-label="Atualizar com os dados do Fluig"
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${syncingMirror ? 'animate-spin' : ''}`} />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </CardHeader>
