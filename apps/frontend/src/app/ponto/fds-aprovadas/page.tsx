@@ -283,7 +283,6 @@ export default function FdsAprovadasPage() {
               const style = LIST_HEADER_BY_FILTER[card.filter];
               return (
                 <FilterStatCard
-                  size="sm"
                   key={card.filter}
                   label={card.label}
                   count={statCounts[card.filter]}

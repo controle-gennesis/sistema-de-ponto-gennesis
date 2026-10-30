@@ -546,7 +546,6 @@ function DashboardBoletosPage() {
           {kpis.map((k) => (
             <FilterStatCard
               key={k.key}
-              size="sm"
               label={k.label}
               count={k.key === 'media' ? brl(k.value) : `${k.count.toLocaleString('pt-BR')} boletos`}
               subtitle={k.key === 'media' ? 'média por boleto' : brl(k.value)}

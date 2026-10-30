@@ -475,7 +475,6 @@ function ControleBoletosPage() {
           {stats.map((s) => (
             <FilterStatCard
               key={s.key}
-              size="sm"
               label={s.label}
               count={s.count}
               subtitle={brl(s.value)}

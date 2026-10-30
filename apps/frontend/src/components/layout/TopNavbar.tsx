@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import {
+  Activity,
   ArrowLeft,
   Camera,
   ChevronRight,
@@ -15,6 +16,8 @@ import {
   LogOut,
   Menu,
   Moon,
+  Settings,
+  Star,
   Sun,
 } from 'lucide-react';
 import api from '@/lib/api';
@@ -141,7 +144,8 @@ export function TopNavbar({
 }: TopNavbarProps) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
-  const { user, userDepartment, userPosition, canAccessCollaborationTools, isLinkedEmpreiteiro } = usePermissions();
+  const { user, userDepartment, userPosition, canAccessCollaborationTools, isLinkedEmpreiteiro, isAdministrator } =
+    usePermissions();
   const { isDark, toggleTheme } = useTheme();
   const { breadcrumbEntities } = usePageTitleOverride();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -380,7 +384,7 @@ export function TopNavbar({
                 return !v;
               });
             }}
-            className={`profile-avatar-btn relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-0 outline-none ring-0 focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:size-10 ${
+            className={`profile-avatar-btn group relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-0 outline-none ring-0 focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:size-10 ${
               profileReady && profilePhotoHref
                 ? 'bg-transparent'
                 : 'bg-red-600'
@@ -398,6 +402,12 @@ export function TopNavbar({
                 {profileReady ? getInitials(displayName) : '\u00A0'}
               </span>
             )}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/65 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+            >
+              <Settings size={18} className="text-white" />
+            </span>
             {uploadProfilePhotoMutation.isPending && (
               <span className="absolute inset-0 flex items-center justify-center bg-black/60">
                 <Loader2 size={18} className="animate-spin text-white" />
@@ -441,8 +451,14 @@ export function TopNavbar({
                 right: profileMenuPos.right,
                 zIndex: 9999,
               }}
-              className="app-popover-panel w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+              className="app-popover-panel w-[min(20rem,calc(100vw-1.5rem))]"
             >
+              {/* Setinha saindo do botão do perfil (centro do botão = 20px da borda direita) */}
+              <span
+                aria-hidden="true"
+                className="absolute -top-1.5 right-[14px] z-10 h-3 w-3 rotate-45 rounded-tl-sm border-l border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+              />
+              <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800">
               <div className="flex items-center gap-3 px-4 py-3.5">
                 <button
                   type="button"
@@ -483,6 +499,30 @@ export function TopNavbar({
 
               <div className="mx-3 border-t border-gray-100 dark:border-gray-700" />
 
+              {isAdministrator ? (
+                <>
+                  <div className="py-1.5">
+                    {[
+                      { href: '/ponto/fluig-chamadas', label: 'Chamadas ao Fluig', Icon: Activity },
+                      { href: '/ponto/avaliacoes-sistema', label: 'Avaliações do Sistema', Icon: Star },
+                    ].map(({ href, label, Icon }) => (
+                      <Link
+                        key={href}
+                        href={href}
+                        role="menuitem"
+                        onClick={() => setProfileMenuOpen(false)}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/70"
+                      >
+                        <Icon size={16} className="shrink-0 text-gray-500 dark:text-gray-400" />
+                        <span className="font-medium">{label}</span>
+                      </Link>
+                    ))}
+                  </div>
+
+                  <div className="mx-3 border-t border-gray-100 dark:border-gray-700" />
+                </>
+              ) : null}
+
               <div className="py-1.5">
                 <button
                   type="button"
@@ -518,6 +558,7 @@ export function TopNavbar({
                     Sair
                   </span>
                 </button>
+              </div>
               </div>
             </div>
           </>,
