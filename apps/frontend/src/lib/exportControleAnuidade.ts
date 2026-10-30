@@ -96,27 +96,35 @@ export async function exportControleAnuidadePdf(
     filename: `controle-anuidade_${suffix}.pdf`,
     footerLabel: 'Controle de Anuidade',
     columns: [
-      { key: 'n', label: '#', width: 10, tone: 'muted' },
-      { key: 'profissional', label: 'PROFISSIONAL', width: 52, tone: 'bold' },
-      { key: 'empresa', label: 'EMPRESA', width: 36 },
-      { key: 'crea', label: 'CREA', width: 28, tone: 'muted' },
-      { key: 'valor', label: 'VALOR', width: 22 },
-      { key: 'vencimento', label: 'VENCIMENTO', width: 26 },
-      { key: 'pagamento', label: 'PAGAMENTO', width: 26 },
+      { key: 'n', label: 'ID', width: 10, tone: 'muted' },
+      { key: 'empresa', label: 'EMPRESA', width: 30 },
+      { key: 'pagosPelo', label: 'PAGOS PELO', width: 28 },
+      { key: 'profissional', label: 'PROFISSIONAL', width: 75, tone: 'bold' },
+      { key: 'valor', label: 'VALOR', width: 26 },
+      { key: 'vencimento', label: 'VENCIMENTO', width: 25 },
+      { key: 'paraPagamento', label: 'P/ PAGAMENTO', width: 25 },
+      { key: 'pagamento', label: 'PAGAMENTO', width: 25 },
       { key: 'status', label: 'STATUS', width: 24, tone: 'status' },
     ],
     rows: entries.map((r, i) => ({
       n: String(i + 1),
-      profissional: String(r.profissional || '—').trim() || '—',
       empresa: String(r.empresa || '—').trim() || '—',
-      crea: String(r.crea || '—').trim() || '—',
+      pagosPelo: String(r.pagosPelo || '—').trim() || '—',
+      // Como na tela: o CREA aparece embaixo do nome do profissional.
+      profissional: [String(r.profissional || '—').trim() || '—', String(r.crea || '').trim()]
+        .filter(Boolean)
+        .join('\n'),
       valor:
         r.valor === null || r.valor === undefined || r.valor === ''
           ? '—'
-          : typeof r.valor === 'number'
-            ? r.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-            : String(r.valor),
+          : (() => {
+              const n = formatExportValor(r.valor);
+              return typeof n === 'number'
+                ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                : String(r.valor);
+            })(),
       vencimento: formatExportDate(r.dataVencimento) || '—',
+      paraPagamento: formatExportDate(r.dataParaPagamento) || '—',
       pagamento: formatExportDate(r.dataPagamento) || '—',
       status: String(r.status || '—').trim().toUpperCase() || '—',
     })),

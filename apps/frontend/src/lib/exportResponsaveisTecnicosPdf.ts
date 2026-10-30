@@ -18,13 +18,12 @@ const FOOTER_RESERVE = 12;
 type Col = { key: string; label: string; width: number };
 
 const COLS: Col[] = [
-  { key: 'n', label: '#', width: 10 },
-  { key: 'crea', label: 'CREA', width: 14 },
-  { key: 'profissional', label: 'PROFISSIONAL', width: 62 },
-  { key: 'empresa', label: 'EMPRESA', width: 38 },
-  { key: 'titulo', label: 'TÍTULO', width: 48 },
-  { key: 'status', label: 'STATUS', width: 22 },
-  { key: 'anuidade', label: 'ANUIDADE', width: 22 },
+  { key: 'n', label: 'ID', width: 10 },
+  { key: 'crea', label: 'CREA', width: 16 },
+  { key: 'profissional', label: 'PROFISSIONAL', width: 90 },
+  { key: 'empresa', label: 'EMPRESA', width: 50 },
+  { key: 'titulo', label: 'TÍTULO', width: 80 },
+  { key: 'status', label: 'STATUS', width: 27 },
 ];
 
 function formatExportDate(value?: string | null): string {
@@ -133,17 +132,16 @@ function drawRow(
   const empresa = String(row.empresa || '—').trim() || '—';
   const titulo = String(row.titulo || '—').trim() || '—';
   const status = String(row.status || '—').trim().toUpperCase() || '—';
-  const anuidade = String(row.anuidade2026 || '—').trim().toUpperCase() || '—';
   const crea = extractUf(row.crea);
 
   const values: Record<string, string> = {
     n: String(index),
     crea,
-    profissional: registro ? `${profissional} · ${registro}` : profissional,
+    // Como na tela: o registro aparece embaixo do nome.
+    profissional: registro ? `${profissional}\n${registro}` : profissional,
     empresa,
     titulo,
     status,
-    anuidade,
   };
 
   doc.setFont('helvetica', 'normal');

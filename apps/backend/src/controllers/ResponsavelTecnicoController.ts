@@ -149,7 +149,7 @@ export class ResponsavelTecnicoController {
 
       const rows = await prisma.responsavelTecnico.findMany({
         where,
-        orderBy: [{ profissional: 'asc' }, { crea: 'asc' }],
+        orderBy: [{ crea: 'asc' }, { profissional: 'asc' }],
       });
 
       res.json({ success: true, data: rows });
