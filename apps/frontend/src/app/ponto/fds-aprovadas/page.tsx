@@ -389,9 +389,6 @@ export default function FdsAprovadasPage() {
                             Contrato
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Obra
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Solicitante
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -440,10 +437,12 @@ export default function FdsAprovadasPage() {
                               </p>
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.contratoNome}
-                            </td>
-                            <td className="px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.obra}
+                              <p>{row.contratoNome}</p>
+                              {row.obra?.trim() ? (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {row.obra.trim()}
+                                </p>
+                              ) : null}
                             </td>
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.solicitanteNome}

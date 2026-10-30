@@ -620,9 +620,6 @@ export default function AprovacaoFdsPage() {
                             Solicitante
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Polo
-                          </th>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -668,13 +665,15 @@ export default function AprovacaoFdsPage() {
                               {row.codigoPedido}
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.contratoNome}
+                              <p>{row.contratoNome}</p>
+                              {row.obra?.trim() ? (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {row.obra.trim()}
+                                </p>
+                              ) : null}
                             </td>
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.solicitanteNome}
-                            </td>
-                            <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
-                              {row.polo}
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <FdStatusBadges record={row} />
