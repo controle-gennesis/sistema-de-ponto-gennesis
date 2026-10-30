@@ -388,6 +388,74 @@ function getSectorColumns(columns: string[], sector: WorkflowSector): string[] {
   return columns.filter((col) => columnBelongsToSector(col, sector));
 }
 
+type SectorColumnGroups = {
+  sectorColumns: string[];
+  explicitApproverCols: string[];
+  approverCols: string[];
+  pendingCols: string[];
+  statusCols: string[];
+  dateCols: string[];
+};
+
+const sectorColumnGroupsCache = new WeakMap<string[], Map<WorkflowSector, SectorColumnGroups>>();
+
+/** Classifica as colunas de uma etapa uma única vez por conjunto de colunas (e não a cada linha). */
+function getSectorColumnGroups(columns: string[], sector: WorkflowSector): SectorColumnGroups {
+  let bySector = sectorColumnGroupsCache.get(columns);
+  if (!bySector) {
+    bySector = new Map();
+    sectorColumnGroupsCache.set(columns, bySector);
+  }
+  const cached = bySector.get(sector);
+  if (cached) return cached;
+
+  const sectorColumns = getSectorColumns(columns, sector);
+  const groups: SectorColumnGroups = {
+    sectorColumns,
+    explicitApproverCols: sectorColumns.filter((col) => {
+      const explicit = getExplicitSectorColumn(col);
+      return explicit?.sector === sector && explicit.role === 'approver';
+    }),
+    approverCols: [],
+    pendingCols: [],
+    statusCols: [],
+    dateCols: [],
+  };
+  for (const col of sectorColumns) {
+    const role = classifySectorColumnRole(normalizeFluigColumnKey(col), col);
+    if (role === 'approver') groups.approverCols.push(col);
+    else if (role === 'pending') groups.pendingCols.push(col);
+    else if (role === 'status') groups.statusCols.push(col);
+    else if (role === 'date') groups.dateCols.push(col);
+  }
+  bySector.set(sector, groups);
+  return groups;
+}
+
+const canonicalColumnsCache = new Map<string, string[]>();
+
+/** Devolve sempre o mesmo array para o mesmo conjunto de colunas, para os caches por array funcionarem. */
+function getCanonicalColumns(columns: string[]): string[] {
+  const key = columns.join('\u0001');
+  const cached = canonicalColumnsCache.get(key);
+  if (cached) return cached;
+  if (canonicalColumnsCache.size > 16) canonicalColumnsCache.clear();
+  canonicalColumnsCache.set(key, columns);
+  return columns;
+}
+
+const columnMappingByKeyCache = new Map<string, WorkflowColumnMapping>();
+
+function getColumnMappingForColumns(columns: string[]): WorkflowColumnMapping {
+  const key = columns.join('\u0001');
+  const cached = columnMappingByKeyCache.get(key);
+  if (cached) return cached;
+  if (columnMappingByKeyCache.size > 16) columnMappingByKeyCache.clear();
+  const mapping = buildWorkflowColumnMapping(columns);
+  columnMappingByKeyCache.set(key, mapping);
+  return mapping;
+}
+
 function readFirstNonEmpty(row: Record<string, unknown>, cols: string[]): string {
   for (const col of cols) {
     const val = readCell(row, col);
@@ -985,20 +1053,10 @@ function scanSectorPersonFromRow(
   columns: string[],
   sector: WorkflowSector
 ): string | null {
-  const sectorColumns = getSectorColumns(columns, sector);
-  const approverCols: string[] = [];
-  const pendingCols: string[] = [];
-  const statusCols: string[] = [];
-  const otherCols: string[] = [];
-
-  for (const col of sectorColumns) {
-    const norm = normalizeFluigColumnKey(col);
-    const role = classifySectorColumnRole(norm, col);
-    if (role === 'approver') approverCols.push(col);
-    else if (role === 'pending') pendingCols.push(col);
-    else if (role === 'status') statusCols.push(col);
-    else otherCols.push(col);
-  }
+  const { sectorColumns, approverCols, pendingCols, statusCols } = getSectorColumnGroups(columns, sector);
+  const otherCols = sectorColumns.filter(
+    (col) => !approverCols.includes(col) && !pendingCols.includes(col) && !statusCols.includes(col)
+  );
 
   for (const col of [...approverCols, ...pendingCols, ...statusCols, ...otherCols]) {
     const val = readCell(row, col);
@@ -1018,16 +1076,10 @@ function resolveSectorFieldValues(
   mapping: WorkflowColumnMapping
 ) {
   const cols = mapping.sectorCols[sector] ?? {};
-  const sectorColumns = getSectorColumns(columns, sector);
-  const explicitApproverCols = sectorColumns.filter((col) => {
-    const explicit = getExplicitSectorColumn(col);
-    return explicit?.sector === sector && explicit.role === 'approver';
-  });
-
-  const approverCols = sectorColumns.filter((col) => classifySectorColumnRole(normalizeFluigColumnKey(col), col) === 'approver');
-  const pendingCols = sectorColumns.filter((col) => classifySectorColumnRole(normalizeFluigColumnKey(col), col) === 'pending');
-  const statusCols = sectorColumns.filter((col) => classifySectorColumnRole(normalizeFluigColumnKey(col), col) === 'status');
-  const dateCols = sectorColumns.filter((col) => classifySectorColumnRole(normalizeFluigColumnKey(col), col) === 'date');
+  const { explicitApproverCols, approverCols, pendingCols, statusCols, dateCols } = getSectorColumnGroups(
+    columns,
+    sector
+  );
 
   return {
     statusRaw: readFirstNonEmpty(row, [
@@ -1285,7 +1337,7 @@ function readSectorApprovalDateFromRaw(
   mapping?: WorkflowColumnMapping
 ): string | null {
   const effectiveColumns = columns.length > 0 ? columns : Object.keys(raw);
-  const effectiveMapping = mapping ?? buildWorkflowColumnMapping(effectiveColumns);
+  const effectiveMapping = mapping ?? getColumnMappingForColumns(effectiveColumns);
   const { dateRaw } = resolveSectorFieldValues(raw, effectiveColumns, sector, effectiveMapping);
   if (dateRaw) return dateRaw;
 
@@ -1304,7 +1356,7 @@ function readSectorApprovalDateFromRow(
   row: ParsedWorkflowRow,
   sector: WorkflowSector
 ): string | null {
-  const columns = Object.keys(row.raw);
+  const columns = getCanonicalColumns(Object.keys(row.raw));
   const fromRaw = readSectorApprovalDateFromRaw(row.raw, columns, sector);
   if (fromRaw) return fromRaw;
 

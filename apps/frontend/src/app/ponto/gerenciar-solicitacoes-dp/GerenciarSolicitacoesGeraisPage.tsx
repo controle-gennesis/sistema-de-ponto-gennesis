@@ -470,25 +470,16 @@ export function GerenciarSolicitacoesGeraisPage({
     router.push('/auth/login');
   };
 
-  const { data: resp, isLoading: loadingList } = useQuery({
-    queryKey: [scopeConfig.queryKeyPrefix, cardFilter],
-    queryFn: async () => {
-      const statusParam = cardFilter === 'pending' || cardFilter === 'all' ? 'all' : cardFilter;
-      const res = await api.get(scopeConfig.apiPath, { params: { status: statusParam } });
-      let data = (res.data?.data ?? []) as DpRequest[];
-      if (scope === 'DP') {
-        data = data.filter((r) => r.status !== 'WAITING_MANAGER');
-      }
-      if (cardFilter === 'pending') {
-        data = data.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
-      }
-      return data;
-    },
-    enabled: !loadingUser,
-  });
-
-  const { data: statsResp, isLoading: loadingStats } = useQuery({
-    queryKey: [scopeConfig.queryKeyPrefix, 'stats'],
+  // Uma única consulta traz tudo; lista e totais são derivados no navegador.
+  const {
+    data: allRequestsResp,
+    isLoading: loadingList,
+    isError: listError,
+    error: listErrorObj,
+    refetch: refetchList,
+    isFetching: fetchingList,
+  } = useQuery({
+    queryKey: [scopeConfig.queryKeyPrefix, 'all'],
     queryFn: async () => {
       const res = await api.get(scopeConfig.apiPath, { params: { status: 'all' } });
       let data = (res.data?.data ?? []) as DpRequest[];
@@ -497,10 +488,25 @@ export function GerenciarSolicitacoesGeraisPage({
       }
       return data;
     },
-    enabled: !loadingUser,
+    retry: 2,
   });
 
-  const requests = (resp as DpRequest[]) || [];
+  const loadingStats = loadingList;
+  const statsResp = allRequestsResp;
+
+  const listErrorMessage = (() => {
+    const e = listErrorObj as { response?: { status?: number; data?: { error?: string; message?: string } }; message?: string } | null;
+    const status = e?.response?.status;
+    const detail = e?.response?.data?.error || e?.response?.data?.message || e?.message || '';
+    return `Não foi possível carregar as solicitações${status ? ` (erro ${status})` : ''}${detail ? `: ${detail}` : '.'}`;
+  })();
+
+  const requests = useMemo(() => {
+    const all = (allRequestsResp as DpRequest[]) || [];
+    if (cardFilter === 'all') return all;
+    if (cardFilter === 'pending') return all.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
+    return all.filter((r) => r.status === cardFilter);
+  }, [allRequestsResp, cardFilter]);
 
   const manageStats = useMemo(() => {
     const list = ((statsResp as DpRequest[]) || []).filter((r) =>
@@ -825,6 +831,13 @@ export function GerenciarSolicitacoesGeraisPage({
             <CardContent>
               {loadingList ? (
                 <CadastroListLoading message="Carregando solicitações..." />
+              ) : listError ? (
+                <div className="py-10 text-center">
+                  <p className="text-sm text-red-600 dark:text-red-400">{listErrorMessage}</p>
+                  <Button type="button" className="mt-4" onClick={() => void refetchList()} disabled={fetchingList}>
+                    Tentar novamente
+                  </Button>
+                </div>
               ) : (
                 <>
                   {!hideTableColumns && (
