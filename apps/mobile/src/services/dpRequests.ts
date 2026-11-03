@@ -127,15 +127,15 @@ export const URGENCY_LABELS: Record<DpUrgency, string> = {
 };
 
 export const STATUS_LABELS: Record<DpRequestStatus, string> = {
-  WAITING_MANAGER: 'Aguardando aprovação',
-  IN_REVIEW_DP: 'Em análise',
-  IN_FINANCEIRO: 'No financeiro',
-  WAITING_RETURN: 'Sua pendência',
-  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
+  WAITING_MANAGER: 'Aguardando Aprovação',
+  IN_REVIEW_DP: 'Em Análise',
+  IN_FINANCEIRO: 'No Financeiro',
+  WAITING_RETURN: 'Sua Pendência',
+  WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
-  WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
-  WAITING_PAYMENT: 'Aguardando pagamento',
+  WAITING_RETURN_ENGINEERING: 'Pendência Engenharia',
+  WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
+  WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };

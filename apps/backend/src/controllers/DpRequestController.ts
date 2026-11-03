@@ -14,7 +14,7 @@ import {
   isSensitiveDpRequestType,
   userMayCreateSensitiveDpRequest,
 } from '../lib/dpApprovalAccess';
-import { parseDpRequestDetails } from '../lib/dpRequestDetails';
+import { parseDpRequestDetails, isAccountingDirectRequestType } from '../lib/dpRequestDetails';
 import {
   isAdmTstDpRequestType,
   isDepartamentoPessoalSector,
@@ -24,7 +24,14 @@ import {
   ADM_TST_MAY_ACT_STATUSES,
 } from '../lib/dpRequestAdmTst';
 import { assertUserCanManageDpRequest } from '../lib/dpApprovalAccess';
-import { createDpContabilidadeFromConcludedInterna } from '../lib/dpContabilidadeFromInterna';
+import {
+  createDpContabilidadeFromConcludedInterna,
+  createDpContabilidadeFromDirectInterna,
+  deleteStoredAccountingAttachments,
+  dpRequestGoesToAccounting,
+  findDpRequestIdsLinkedToAccounting,
+  storeAccountingAttachments,
+} from '../lib/dpContabilidadeFromInterna';
 import {
   getDpApprovalNotifyUserIds,
   notifyApprovalDecisionWhatsApp,
@@ -51,6 +58,12 @@ const DP_REQUEST_TYPES = [
   'ADM_INFORMATICA',
   'ADM_TREINAMENTOS_NR',
   'ADM_ASOS',
+  'CONVENCAO_COLETIVA',
+  'FECHAMENTO_FOLHA',
+  'IMPOSTOS_ENCARGOS',
+  'REALOCACAO_COLABORADOR',
+  'RETIFICACAO_RECALCULO',
+  'SOLICITACAO_GERAL',
 ] as const;
 
 const createDpRequestSchema = z.object({
@@ -97,7 +110,6 @@ const DP_FEEDBACK_NEXT_STATUSES = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
   'WAITING_RETURN',
-  'WAITING_RETURN_ACCOUNTING',
   'WAITING_RETURN_ADM_TST',
   'WAITING_RETURN_ENGINEERING',
   'CONCLUDED',
@@ -461,7 +473,15 @@ export class DpRequestController {
         orderBy: { createdAt: 'desc' },
       });
 
-      const data = await attachDpContractSummaries(requests);
+      const summarized = await attachDpContractSummaries(requests);
+
+      // Pedidos diretos à Contabilidade cujo envio falhou (sem pedido lá): permite reenviar.
+      const directInQueue = requests.filter(
+        (r) => r.status === 'IN_ACCOUNTING' && isAccountingDirectRequestType(r.requestType)
+      );
+      const linked = await findDpRequestIdsLinkedToAccounting(directInQueue.map((r) => r.id));
+      const notSent = new Set(directInQueue.filter((r) => !linked.has(r.id)).map((r) => r.id));
+      const data = summarized.map((r) => ({ ...r, contabilidadePendente: notSent.has(r.id) }));
 
       return res.json({ success: true, data });
     } catch (e) {
@@ -487,6 +507,15 @@ export class DpRequestController {
         !isDepartamentoPessoalSector(employee.department)
       ) {
         throw createError("ASO's disponível apenas para o setor Departamento Pessoal", 403);
+      }
+
+      const isAccountingDirect = isAccountingDirectRequestType(validated.requestType);
+      if (
+        isAccountingDirect &&
+        !req.user.isAdmin &&
+        !isDepartamentoPessoalSector(employee.department)
+      ) {
+        throw createError('Solicitações à Contabilidade disponíveis apenas para o setor Departamento Pessoal', 403);
       }
 
       let parsedDetails: Record<string, unknown>;
@@ -584,9 +613,19 @@ export class DpRequestController {
         ADM_INFORMATICA: 'Informática',
         ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
         ADM_ASOS: "ASO's",
+        CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
+        FECHAMENTO_FOLHA: 'Fechamento da folha',
+        IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
+        REALOCACAO_COLABORADOR: 'Realocação de colaborador',
+        RETIFICACAO_RECALCULO: 'Retificação / recálculo',
+        SOLICITACAO_GERAL: 'Solicitação geral',
       };
       const isAdmRequest = isAdmTstDpRequestType(validated.requestType);
-      const titlePrefix = isAdmRequest ? 'Solicitação ADM/TST' : 'Solicitação DP';
+      const titlePrefix = isAccountingDirect
+        ? 'Solicitação Contábil'
+        : isAdmRequest
+          ? 'Solicitação ADM/TST'
+          : 'Solicitação DP';
       const title = `${titlePrefix} · ${typeLabel[validated.requestType] ?? validated.requestType.replace(/_/g, ' ')}`;
 
       const { prazoInicio, prazoFim } = computePrazos(validated.prazoInicio, validated.prazoFim);
@@ -594,9 +633,23 @@ export class DpRequestController {
       const DP_DISPLAY_NUMBER_ADVISORY_LOCK = 91827364;
       const createdAtIso = new Date().toISOString();
       const actorName = (employee.user?.name || employee.user?.email || '').trim() || undefined;
-      const initialStatus = isAdmRequest ? 'IN_REVIEW_DP' : 'WAITING_MANAGER';
+      const initialStatus = isAccountingDirect
+        ? 'IN_ACCOUNTING'
+        : isAdmRequest
+          ? 'IN_REVIEW_DP'
+          : 'WAITING_MANAGER';
 
-      const created = await prisma.$transaction(async (tx) => {
+      // Anexos do fluxo direto vão para o S3; no banco fica só a referência.
+      let storedAttachmentKeys: string[] = [];
+      if (isAccountingDirect) {
+        const stored = await storeAccountingAttachments(parsedDetails);
+        parsedDetails = stored.details;
+        storedAttachmentKeys = stored.storedKeys;
+      }
+
+      let created: Awaited<ReturnType<typeof prisma.dpRequest.create>>;
+      try {
+      created = await prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${DP_DISPLAY_NUMBER_ADVISORY_LOCK})`);
         const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
         const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
@@ -627,11 +680,32 @@ export class DpRequestController {
                 ...(isAdmRequest
                   ? { note: 'Encaminhada para ADM/TST (sem aprovação do gestor)' }
                   : {}),
+                ...(isAccountingDirect
+                  ? { note: 'Enviada diretamente à Contabilidade (sem aprovação do gestor)' }
+                  : {}),
               },
             ] as Prisma.InputJsonValue,
           },
         });
       });
+      } catch (createErr) {
+        await deleteStoredAccountingAttachments(storedAttachmentKeys);
+        throw createErr;
+      }
+
+      if (isAccountingDirect) {
+        let contabilidadeError = false;
+        try {
+          await createDpContabilidadeFromDirectInterna(created, {
+            id: actorUserId,
+            name: actorName || employee.user?.email || 'Usuário',
+          });
+        } catch (mirrorErr) {
+          contabilidadeError = true;
+          console.error('[dp-contabilidade] falha ao enviar solicitação direta:', mirrorErr);
+        }
+        return res.status(201).json({ success: true, data: created, contabilidadeError });
+      }
 
       if (initialStatus === 'WAITING_MANAGER') {
         const approverIds = await getDpApprovalNotifyUserIds({
@@ -694,7 +768,18 @@ export class DpRequestController {
       orderBy: { createdAt: 'desc' },
     });
 
-    const data = await attachDpContractSummaries(requests);
+    const summarized = await attachDpContractSummaries(requests);
+
+    // Finalizadas que deveriam ter ido à Contabilidade e não têm pedido lá (envio falhou).
+    let data: Array<(typeof summarized)[number] & { contabilidadePendente?: boolean }> = summarized;
+    if (scope === 'DP') {
+      const candidates = requests.filter(
+        (r) => r.status === 'CONCLUDED' && dpRequestGoesToAccounting(r)
+      );
+      const linked = await findDpRequestIdsLinkedToAccounting(candidates.map((r) => r.id));
+      const pending = new Set(candidates.filter((r) => !linked.has(r.id)).map((r) => r.id));
+      data = summarized.map((r) => ({ ...r, contabilidadePendente: pending.has(r.id) }));
+    }
     return res.json({ success: true, data });
   }
 
@@ -1171,6 +1256,7 @@ export class DpRequestController {
       });
 
       let contabilidadeCreated = false;
+      let contabilidadeError = false;
       if (next === 'CONCLUDED') {
         try {
           contabilidadeCreated = await createDpContabilidadeFromConcludedInterna(updated, {
@@ -1178,11 +1264,12 @@ export class DpRequestController {
             name: dpActorName,
           });
         } catch (mirrorErr) {
+          contabilidadeError = true;
           console.error('[dp-contabilidade] falha ao espelhar solicitação interna:', mirrorErr);
         }
       }
 
-      return res.json({ success: true, data: updated, contabilidadeCreated });
+      return res.json({ success: true, data: updated, contabilidadeCreated, contabilidadeError });
     } catch (e: unknown) {
       if (e instanceof z.ZodError) {
         return res.status(400).json({ error: 'Dados inválidos', details: e.issues });
@@ -1192,6 +1279,62 @@ export class DpRequestController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao registrar feedback DP' });
+    }
+  }
+
+  /** Reenvia ao Atendimento Contábil uma solicitação finalizada cujo envio automático falhou. */
+  async resendToAccounting(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const requestId = String(req.params.id || '').trim();
+      if (!requestId) throw createError('ID inválido', 400);
+
+      const dpRequest = await prisma.dpRequest.findUnique({ where: { id: requestId } });
+      if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
+
+      if (isAccountingDirectRequestType(dpRequest.requestType)) {
+        // Fluxo direto: quem abriu (ou administrador) pode reenviar se o envio inicial falhou.
+        const owner = await prisma.employee.findUnique({
+          where: { id: dpRequest.employeeId },
+          select: { userId: true },
+        });
+        if (!req.user.isAdmin && owner?.userId !== req.user.id) {
+          throw createError('Sem permissão para reenviar esta solicitação', 403);
+        }
+        if (dpRequest.status !== 'IN_ACCOUNTING') {
+          throw createError('Esta solicitação já foi atendida pela Contabilidade.', 400);
+        }
+        const actorName = await getUserDisplayName(req.user.id);
+        const contabilidadeCreated = await createDpContabilidadeFromDirectInterna(dpRequest, {
+          id: req.user.id,
+          name: actorName,
+        });
+        return res.json({ success: true, contabilidadeCreated });
+      }
+
+      await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+
+      if (dpRequest.status !== 'CONCLUDED') {
+        throw createError('Só é possível reenviar solicitações já finalizadas.', 400);
+      }
+      if (!dpRequestGoesToAccounting(dpRequest)) {
+        throw createError('Este tipo de solicitação não é enviado à Contabilidade.', 400);
+      }
+
+      const actorName = await getUserDisplayName(req.user.id);
+      const contabilidadeCreated = await createDpContabilidadeFromConcludedInterna(dpRequest, {
+        id: req.user.id,
+        name: actorName,
+      });
+
+      return res.json({ success: true, contabilidadeCreated });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode && typeof err.statusCode === 'number') {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      console.error('[dp-contabilidade] falha ao reenviar solicitação:', e);
+      return res.status(500).json({ error: 'Erro ao reenviar à Contabilidade' });
     }
   }
 

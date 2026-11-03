@@ -8,6 +8,8 @@ import {
   Bell,
   CalendarClock,
   CalendarRange,
+  Calculator,
+  ChevronRight,
   ClipboardCheck,
   ClipboardList,
   FileCheck,
@@ -42,6 +44,54 @@ type NotificationItem = {
   Icon: LucideIcon;
 };
 
+type NotificationGroup = 'approval' | 'operation' | 'other';
+
+const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
+  approval: 'Aprovações',
+  operation: 'Compras, estoque e frota',
+  other: 'Chamados e mensagens',
+};
+
+const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = ['approval', 'operation', 'other'];
+
+const APPROVAL_IDS = new Set(['dp', 'espelho', 'fd', 'fuel', 'rm', 'oc', 'medicao']);
+const OPERATION_IDS = new Set([
+  'fd-compras',
+  'fd-reprovadas',
+  'furo-estoque',
+  'recebimento',
+  'fuel-supplies',
+  'vehicle-supplies',
+  'entrega-logistica',
+]);
+
+function notificationGroupOf(id: string): NotificationGroup {
+  if (APPROVAL_IDS.has(id)) return 'approval';
+  if (OPERATION_IDS.has(id)) return 'operation';
+  return 'other';
+}
+
+const NOTIFICATION_GROUP_STYLE: Record<
+  NotificationGroup,
+  { tile: string; pill: string; dot: string }
+> = {
+  approval: {
+    tile: 'bg-red-50 text-red-600 dark:bg-red-900/25 dark:text-red-300',
+    pill: 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200 dark:bg-red-900/30 dark:text-red-200 dark:ring-red-800/60',
+    dot: 'bg-red-500',
+  },
+  operation: {
+    tile: 'bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300',
+    pill: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:ring-amber-800/60',
+    dot: 'bg-amber-500',
+  },
+  other: {
+    tile: 'bg-sky-50 text-sky-600 dark:bg-sky-900/25 dark:text-sky-300',
+    pill: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:ring-sky-800/60',
+    dot: 'bg-sky-500',
+  },
+};
+
 type NotificationsDropdownProps = {
   chatUnreadCount?: number;
 };
@@ -71,6 +121,9 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
   const canSeeEntregaLogistica =
     isAdministrator || can(pathToModuleKey('/ponto/entrega-logistica'));
   const canSeeFdAprovadas = isAdministrator || can(pathToModuleKey('/ponto/fds-aprovadas'));
+  const canSeeAtendimentoContabil =
+    isAdministrator ||
+    can(pathToModuleKey('/ponto/dp-contabilidade'));
 
   const canSeeGestaoOs =
     isAdministrator ||
@@ -94,6 +147,19 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
       } | null;
     },
     enabled: !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
+  const { data: atendimentoContabilPendingCount = 0 } = useQuery({
+    queryKey: ['dp-contabilidade-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/dp-contabilidade/pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeAtendimentoContabil && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
@@ -314,6 +380,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: Truck,
       });
     }
+    if (canSeeAtendimentoContabil && atendimentoContabilPendingCount > 0) {
+      list.push({
+        id: 'atendimento-contabil',
+        title: 'Atendimento Contábil',
+        description: 'Pedidos aguardando atendimento',
+        count: atendimentoContabilPendingCount,
+        href: '/ponto/dp-contabilidade',
+        Icon: Calculator,
+      });
+    }
     if (chatUnreadCount > 0) {
       list.push({
         id: 'chat',
@@ -430,12 +506,29 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     fuelSuppliesPendingCount,
     vehicleReservationSuppliesPendingCount,
     entregaLogisticaPendingCount,
+    canSeeAtendimentoContabil,
+    atendimentoContabilPendingCount,
     chatUnreadCount,
     gestaoOsInbox,
   ]);
 
   const badgeTotal = useMemo(
     () => items.reduce((sum, item) => sum + item.count, 0),
+    [items],
+  );
+
+  const groupedItems = useMemo(
+    () =>
+      NOTIFICATION_GROUP_ORDER.map((group) => ({
+        group,
+        label: NOTIFICATION_GROUP_LABEL[group],
+        items: items.filter((item) => notificationGroupOf(item.id) === group),
+      }))
+        .filter((entry) => entry.items.length > 0)
+        .map((entry) => ({
+          ...entry,
+          total: entry.items.reduce((sum, item) => sum + item.count, 0),
+        })),
     [items],
   );
 
@@ -509,72 +602,107 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
                 right: pos.right,
                 zIndex: 9999,
               }}
-              className="app-popover-panel flex w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+              className="app-popover-panel w-[min(24rem,calc(100vw-1.5rem))]"
             >
-              <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-700">
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  Notificações
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {badgeTotal > 0
-                    ? `${badgeTotal} pendente${badgeTotal === 1 ? '' : 's'}`
-                    : 'Tudo em dia'}
-                </p>
-              </div>
-
-              <div className="max-h-[min(24rem,70vh)] overflow-y-auto overscroll-contain">
-                {approvalsLoading && items.length === 0 ? (
-                  <div className="space-y-2 p-3">
-                    {Array.from({ length: 3 }, (_, i) => (
-                      <div
-                        key={i}
-                        className="h-14 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-700/60"
-                      />
-                    ))}
+              {/* Setinha saindo do botão do sino (centro do botão = 20px da borda direita) */}
+              <span
+                aria-hidden="true"
+                className="absolute -top-1.5 right-[14px] z-10 h-3 w-3 rotate-45 rounded-tl-sm border-l border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+              />
+              <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl ring-1 ring-black/5 dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+                      Notificações
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {badgeTotal > 0
+                        ? `${badgeTotal} pendência${badgeTotal === 1 ? '' : 's'} aguardando você`
+                        : 'Você não tem pendências'}
+                    </p>
                   </div>
-                ) : items.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
-                      <Bell className="h-5 w-5" />
+                  {badgeTotal > 0 ? (
+                    <span className="inline-flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-full bg-gray-900 px-2.5 text-xs font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                      {badgeTotal > 99 ? '99+' : badgeTotal}
                     </span>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                      Nenhuma notificação
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Quando houver pendências, elas aparecem aqui.
-                    </p>
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-gray-100 dark:divide-gray-700/80">
-                    {items.map((item) => {
-                      const Icon = item.Icon;
-                      return (
-                        <li key={item.id}>
-                          <Link
-                            href={item.href}
-                            onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                          >
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300">
-                              <Icon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                {item.title}
+                  ) : null}
+                </div>
+
+                <div className="max-h-[min(28rem,70vh)] overflow-y-auto overscroll-contain border-t border-gray-100 dark:border-gray-800">
+                  {approvalsLoading && items.length === 0 ? (
+                    <div className="space-y-2 p-3">
+                      {Array.from({ length: 4 }, (_, i) => (
+                        <div
+                          key={i}
+                          className="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800"
+                        />
+                      ))}
+                    </div>
+                  ) : items.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-500 dark:bg-emerald-900/20 dark:text-emerald-400">
+                        <ClipboardCheck className="h-6 w-6" />
+                      </span>
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Tudo em dia</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Quando houver pendências, elas aparecem aqui.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="pb-2">
+                      {groupedItems.map((entry) => {
+                        const style = NOTIFICATION_GROUP_STYLE[entry.group];
+                        return (
+                          <section key={entry.group}>
+                            <div className="flex items-center justify-between px-5 pb-1.5 pt-4">
+                              <h3 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
+                                {entry.label}
+                              </h3>
+                              <span className="text-[11px] font-medium tabular-nums text-gray-400 dark:text-gray-500">
+                                {entry.total > 99 ? '99+' : entry.total}
                               </span>
-                              <span className="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">
-                                {item.description}
-                              </span>
-                            </span>
-                            <span className="inline-flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center self-center rounded-md bg-red-600 px-1 text-[10px] font-bold text-white">
-                              {item.count > 99 ? '99+' : item.count}
-                            </span>
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+                            </div>
+                            <ul className="px-2">
+                              {entry.items.map((item) => {
+                                const Icon = item.Icon;
+                                return (
+                                  <li key={item.id}>
+                                    <Link
+                                      href={item.href}
+                                      onClick={() => setOpen(false)}
+                                      className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                                    >
+                                      <span
+                                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${style.tile}`}
+                                      >
+                                        <Icon className="h-[18px] w-[18px]" />
+                                      </span>
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                          {item.title}
+                                        </span>
+                                        <span className="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">
+                                          {item.description}
+                                        </span>
+                                      </span>
+                                      <span
+                                        className={`inline-flex h-6 min-w-[1.75rem] shrink-0 items-center justify-center rounded-full px-2 text-xs font-semibold tabular-nums ${style.pill}`}
+                                      >
+                                        {item.count > 99 ? '99+' : item.count}
+                                      </span>
+                                      <ChevronRight className="-mr-1 h-4 w-4 shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-300" />
+                                    </Link>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </>,

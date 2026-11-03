@@ -232,6 +232,106 @@ function employeeArraySchema<T extends z.ZodTypeAny>(itemSchema: T) {
   return z.array(itemSchema).min(1).max(20);
 }
 
+// ── Solicitações criadas direto para a Contabilidade (sem gestor/DP) ─────────
+
+/** Tipos que vão direto para o Atendimento Contábil ao serem criados. */
+export const ACCOUNTING_DIRECT_REQUEST_TYPES = [
+  'CONVENCAO_COLETIVA',
+  'FECHAMENTO_FOLHA',
+  'IMPOSTOS_ENCARGOS',
+  'REALOCACAO_COLABORADOR',
+  'RETIFICACAO_RECALCULO',
+  'SOLICITACAO_GERAL',
+] as const;
+
+export type AccountingDirectRequestType = (typeof ACCOUNTING_DIRECT_REQUEST_TYPES)[number];
+
+export function isAccountingDirectRequestType(requestType: string): requestType is AccountingDirectRequestType {
+  return (ACCOUNTING_DIRECT_REQUEST_TYPES as readonly string[]).includes(requestType);
+}
+
+/** Anexo na criação: chega em Base64 e o servidor grava no S3 (guarda só a referência). */
+const accountingAttachmentInputSchema = dpAttachmentSchema.extend({
+  tipoArquivo: str,
+  dataValidade: strOpt,
+});
+
+const accountingAnexosField = z.array(accountingAttachmentInputSchema).max(10).optional();
+
+const simNao = z.enum(['SIM', 'NAO']);
+
+const convencaoColetivaDetails = z.object({
+  sindicatoCategoria: str,
+  vigenciaDataBase: str,
+  assunto: str,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const fechamentoFolhaDetails = z.object({
+  competencia: str,
+  novosOptantesVt: strOpt,
+  desistentesVt: strOpt,
+  outrasInformacoes: strOpt,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const impostosEncargosDetails = z.object({
+  competencia: str,
+  tipoImpostoEncargo: str,
+  colaboradorEmployeeId: strOpt,
+  dataVencimento: str,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const realocacaoColaboradorDetails = z
+  .object({
+    employeeId: str,
+    empresaAtual: str,
+    poloAtual: str,
+    contratoAtual: str,
+    setorAtual: str,
+    novaEmpresa: str,
+    novoPolo: str,
+    novoContrato: str,
+    novoSetor: str,
+    dataRealocacao: str,
+    funcaoPermanece: simNao,
+    novaFuncao: strOpt,
+    salarioPermanece: simNao,
+    novoSalario: strOpt,
+    observacoes: str,
+    anexos: accountingAnexosField,
+  })
+  .superRefine((data, ctx) => {
+    if (data.funcaoPermanece === 'NAO' && !data.novaFuncao?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['novaFuncao'], message: 'Informe a nova função' });
+    }
+    if (data.salarioPermanece === 'NAO' && !data.novoSalario?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['novoSalario'], message: 'Informe o novo salário' });
+    }
+  });
+
+const retificacaoRecalculoDetails = z.object({
+  numeroSolicitacaoOriginal: str,
+  tipoSolicitacaoOriginal: str,
+  competencia: str,
+  motivo: str,
+  informacaoOriginal: str,
+  informacaoCorreta: str,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const solicitacaoGeralDetails = z.object({
+  assunto: str,
+  colaboradorEmployeeId: strOpt,
+  descricao: str,
+  anexos: accountingAnexosField,
+});
+
 export const dpDetailsSchemas = {
   ADMISSAO: z.preprocess(
     normalizeAdmissaoDetails,
@@ -304,6 +404,12 @@ export const dpDetailsSchemas = {
       .object({ asos: employeeArraySchema(admAsosItemSchema) })
       .superRefine((data, ctx) => uniqueEmployeeRefine('asos', data, ctx))
   ),
+  CONVENCAO_COLETIVA: convencaoColetivaDetails,
+  FECHAMENTO_FOLHA: fechamentoFolhaDetails,
+  IMPOSTOS_ENCARGOS: impostosEncargosDetails,
+  REALOCACAO_COLABORADOR: realocacaoColaboradorDetails,
+  RETIFICACAO_RECALCULO: retificacaoRecalculoDetails,
+  SOLICITACAO_GERAL: solicitacaoGeralDetails,
 } as const;
 
 export type DpRequestTypeKey = keyof typeof dpDetailsSchemas;

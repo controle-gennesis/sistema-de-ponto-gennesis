@@ -20,8 +20,10 @@ import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchD
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
+import { DP_SENT_TO_ACCOUNTING_LABEL, dpRequestIsSentToAccounting } from '@/lib/dpRequestDpUi';
 import { ArrowLeft, ChevronRight, ClipboardList, FileText, Filter, MailPlus, MoreVertical, Plus, RotateCcw, Search, Users, X, type LucideIcon } from 'lucide-react';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton, AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './DpSolicitacaoTypeFields';
 import {
   AdmTstSolicitacaoTypeFields,
@@ -33,6 +35,7 @@ import { getInitialSolicitacaoDetails } from './dpSolicitacaoInitialDetails';
 import { usePermissions } from '@/hooks/usePermissions';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
+import { isContabilDirectRequestType } from '@/lib/contabilRequestDetailsView';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
 import {
   ADM_TST_STATUS_LABELS,
@@ -92,7 +95,7 @@ const CREATE_TARGET_DEPARTMENT_OPTIONS: Array<{
 ];
 
 const createTargetDepartmentButtonCls =
-  'group flex w-full items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-[border-color,background-color,box-shadow] hover:border-red-300 hover:bg-red-50/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/35 dark:border-gray-600 dark:bg-gray-800/70 dark:hover:border-red-700/70 dark:hover:bg-red-950/25';
+  'group flex w-full items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 text-left transition-[border-color,background-color] hover:border-red-300 hover:bg-red-50/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/35 dark:border-gray-600 dark:bg-gray-800/70 dark:hover:border-red-700/70 dark:hover:bg-red-950/25';
 
 type DpContractSummary = { id: string; number: string; name: string };
 type DpCostCenterSummary = {
@@ -246,38 +249,35 @@ const DESTINATION_LIST_CONFIG: Record<
   },
 };
 
-const DESTINATION_STAT_CARDS: {
-  filter: DestinationCardFilter;
-  label: string;
-  iconBg: string;
-  iconColor: string;
-  Icon: LucideIcon;
-  countKey: keyof { total: number; dp: number; admTst: number };
-}[] = [
-  {
-    filter: 'all',
-    label: 'Registros',
-    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
-    iconColor: 'text-blue-600 dark:text-blue-400',
-    Icon: MailPlus,
-    countKey: 'total',
-  },
-  {
-    filter: 'DP',
-    label: 'Departamento Pessoal',
-    iconBg: 'bg-red-100 dark:bg-red-900/30',
-    iconColor: 'text-red-600 dark:text-red-400',
-    Icon: Users,
-    countKey: 'dp',
-  },
-  {
-    filter: 'ADM_TST',
-    label: 'Administração',
-    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
-    iconColor: 'text-indigo-600 dark:text-indigo-400',
-    Icon: ClipboardList,
-    countKey: 'admTst',
-  },
+const DESTINATION_TABS: { filter: Exclude<DestinationCardFilter, 'all'>; label: string }[] = [
+  { filter: 'DP', label: 'Departamento Pessoal' },
+  { filter: 'ADM_TST', label: 'Administração' },
+];
+
+/** Abas de etapa (estilo das Ordens de Compra): Todos, uma por status e Contabilidade. */
+type StageCardFilter = 'all' | 'ACCOUNTING' | DpRequestStatus;
+
+function matchesStage(r: { status: DpRequestStatus; requestType: string }, filter: StageCardFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'ACCOUNTING') {
+    return r.status === 'CONCLUDED' && dpRequestIsSentToAccounting(r.requestType);
+  }
+  return r.status === filter;
+}
+
+const STAGE_TABS: { filter: StageCardFilter; label: string }[] = [
+  { filter: 'all', label: 'Todos' },
+  { filter: 'WAITING_MANAGER', label: 'Aguardando Aprovação' },
+  { filter: 'IN_REVIEW_DP', label: 'Em Análise' },
+  { filter: 'IN_FINANCEIRO', label: 'No Financeiro' },
+  { filter: 'WAITING_RETURN', label: 'Sua Pendência' },
+  { filter: 'WAITING_RETURN_ADM_TST', label: 'Pendência ADM/TST' },
+  { filter: 'WAITING_RETURN_ENGINEERING', label: 'Pendência Engenharia' },
+  { filter: 'WAITING_SUPPLIES', label: 'Suprimentos' },
+  { filter: 'WAITING_PAYMENT', label: 'Pagamento' },
+  { filter: 'ACCOUNTING', label: 'Na Contabilidade' },
+  { filter: 'CONCLUDED', label: 'Finalizadas' },
+  { filter: 'CANCELLED', label: 'Canceladas' },
 ];
 
 async function fileToDpAttachment(file: File) {
@@ -330,15 +330,15 @@ function setIndexedFileState(
 }
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
-  WAITING_MANAGER: 'Aguardando aprovação',
-  IN_REVIEW_DP: 'Em análise',
-  IN_FINANCEIRO: 'No financeiro',
-  WAITING_RETURN: 'Sua pendência',
-  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
+  WAITING_MANAGER: 'Aguardando Aprovação',
+  IN_REVIEW_DP: 'Em Análise',
+  IN_FINANCEIRO: 'No Financeiro',
+  WAITING_RETURN: 'Sua Pendência',
+  WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
-  WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
-  WAITING_PAYMENT: 'Aguardando pagamento',
+  WAITING_RETURN_ENGINEERING: 'Pendência Engenharia',
+  WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
+  WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
@@ -660,7 +660,8 @@ export function SolicitacoesGeraisPage() {
   }, [form.requestType]);
 
   const [myStatusFilter, setMyStatusFilter] = useState<'all' | DpRequestStatus>('all');
-  const [destinationFilter, setDestinationFilter] = useState<DestinationCardFilter>('all');
+  const [destinationFilter, setDestinationFilter] = useState<DestinationCardFilter>('DP');
+  const [stageFilter, setStageFilter] = useState<StageCardFilter>('all');
   const [filterUrgency, setFilterUrgency] = useState<'all' | DpUrgency>('all');
   const [filterRequestType, setFilterRequestType] = useState<'all' | DpRequestType>('all');
   const [filterContractId, setFilterContractId] = useState<'all' | string>('all');
@@ -676,7 +677,7 @@ export function SolicitacoesGeraisPage() {
     enabled: !loadingUser,
   });
 
-  const { data: statsResp, isLoading: loadingStats } = useQuery({
+  const { data: statsResp } = useQuery({
     queryKey: ['dp-my-requests', 'stats'],
     queryFn: async () => {
       const res = await api.get('/solicitacoes-dp/minhas', { params: { status: 'all' } });
@@ -685,14 +686,31 @@ export function SolicitacoesGeraisPage() {
     enabled: !loadingUser,
   });
 
-  const myRequests = (myResp as DpRequest[]) || [];
+  // Pedidos criados direto para a Contabilidade ficam na página própria do Departamento Pessoal.
+  const myRequests = ((myResp as DpRequest[]) || []).filter(
+    (r) => !isContabilDirectRequestType(r.requestType)
+  );
 
-  const destinationStats = React.useMemo(() => {
-    const list = (statsResp as DpRequest[]) || [];
-    const admTst = list.filter((r) => isAdmTstRequestType(r.requestType)).length;
-    const dp = list.length - admTst;
-    return { total: list.length, dp, admTst };
-  }, [statsResp]);
+  // Contagem por etapa respeita o destino escolhido (aba Departamento Pessoal / Administração).
+  const stageStats = React.useMemo(() => {
+    const list = ((statsResp as DpRequest[]) || [])
+      .filter((r) => !isContabilDirectRequestType(r.requestType))
+      .filter((r) => {
+      if (destinationFilter === 'DP') return !isAdmTstRequestType(r.requestType);
+      if (destinationFilter === 'ADM_TST') return isAdmTstRequestType(r.requestType);
+      return true;
+    });
+    const counts: Record<string, number> = { all: list.length, ACCOUNTING: 0 };
+    for (const r of list) {
+      counts[r.status] = (counts[r.status] ?? 0) + 1;
+      if (matchesStage(r, 'ACCOUNTING')) counts.ACCOUNTING += 1;
+    }
+    return counts;
+  }, [statsResp, destinationFilter]);
+
+  const handleStageFilter = (filter: StageCardFilter) => {
+    setStageFilter(filter);
+  };
 
   const handleDestinationFilter = (filter: DestinationCardFilter) => {
     setDestinationFilter(filter);
@@ -841,6 +859,7 @@ export function SolicitacoesGeraisPage() {
   const filteredMyRequests = myRequests.filter((r) => {
     if (destinationFilter === 'DP' && isAdmTstRequestType(r.requestType)) return false;
     if (destinationFilter === 'ADM_TST' && !isAdmTstRequestType(r.requestType)) return false;
+    if (!matchesStage(r, stageFilter)) return false;
     if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
     if (filterRequestType !== 'all' && r.requestType !== filterRequestType) return false;
     if (filterContractId !== 'all') {
@@ -951,8 +970,14 @@ export function SolicitacoesGeraisPage() {
       const res = await api.put(`/solicitacoes-dp/${id}/requester-return`, { comment });
       return res.data?.data as DpRequest;
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, vars) => {
       toast.success('Retorno enviado para o DP');
+      setReturnComment((p) => {
+        const next = { ...p };
+        delete next[vars.id];
+        return next;
+      });
+      closeHistoryRequest();
       await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
     },
     onError: (err: any) => {
@@ -964,10 +989,16 @@ export function SolicitacoesGeraisPage() {
     if (isAdmTstRequestType(r.requestType) && isAdmTstFlowStatus(r.status)) {
       return getAdmTstStatusLabel(r.status);
     }
+    if (r.status === 'CONCLUDED' && dpRequestIsSentToAccounting(r.requestType)) {
+      return DP_SENT_TO_ACCOUNTING_LABEL;
+    }
     return STATUS_LABELS[r.status] ?? r.status;
   };
 
   const getStatusRowBadge = (r: DpRequest) => {
+    if (r.status === 'CONCLUDED' && dpRequestIsSentToAccounting(r.requestType)) {
+      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
+    }
     if (isAdmTstRequestType(r.requestType) && isAdmTstFlowStatus(r.status)) {
       return getAdmTstStatusRowBadge(r.status);
     }
@@ -977,7 +1008,9 @@ export function SolicitacoesGeraisPage() {
   const buildTimeline = (r: DpRequest) => {
     const labels = isAdmTstRequestType(r.requestType)
       ? { ...STATUS_LABELS, ...ADM_TST_STATUS_LABELS }
-      : STATUS_LABELS;
+      : dpRequestIsSentToAccounting(r.requestType)
+        ? { ...STATUS_LABELS, CONCLUDED: DP_SENT_TO_ACCOUNTING_LABEL }
+        : STATUS_LABELS;
     return buildDpRequestTimeline(r, labels, formatDuration);
   };
 
@@ -1039,20 +1072,50 @@ export function SolicitacoesGeraisPage() {
             description="Crie e acompanhe pedidos para Departamento Pessoal e Administração"
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
-            {DESTINATION_STAT_CARDS.map((card) => (
-              <FilterStatCard
-                key={card.filter}
-                label={card.label}
-                count={destinationStats[card.countKey]}
-                icon={card.Icon}
-                iconBg={card.iconBg}
-                iconColor={card.iconColor}
-                isActive={destinationFilter === card.filter}
-                loading={loadingStats}
-                onClick={() => handleDestinationFilter(card.filter)}
-              />
+          <AppUnderlineTabList aria-label="Destino das solicitações">
+            {DESTINATION_TABS.map((tab) => (
+              <AppUnderlineTabButton
+                key={tab.filter}
+                active={destinationFilter === tab.filter}
+                onClick={() => handleDestinationFilter(tab.filter)}
+                className="whitespace-nowrap px-2 py-2.5 text-xs sm:px-3 sm:text-sm"
+              >
+                {tab.label}
+              </AppUnderlineTabButton>
             ))}
+          </AppUnderlineTabList>
+
+          <div id="secao-etapas-solicitacoes" className="scroll-mt-4 px-2 bg-transparent">
+            <nav
+              aria-label="Etapas das solicitações"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGE_TABS.map((tab) => {
+                const active = stageFilter === tab.filter;
+                return (
+                  <React.Fragment key={tab.filter}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => handleStageFilter(tab.filter)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={stageStats[tab.filter] ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {tab.filter === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
@@ -1173,7 +1236,7 @@ export function SolicitacoesGeraisPage() {
                         <table className="w-full text-sm">
                           <thead className="border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                              <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                                 ID
                               </th>
                               <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -1212,7 +1275,7 @@ export function SolicitacoesGeraisPage() {
                                   onClick={() => openHistoryRequest(r)}
                                   className={getListTableRowClassName(true)}
                                 >
-                                  <td className="px-3 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
+                                  <td className="px-3 py-3 text-center align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
                                     <ListRowNavigableLabel className="font-medium tabular-nums">
                                       {r.displayNumber ?? '—'}
                                     </ListRowNavigableLabel>
@@ -1251,52 +1314,12 @@ export function SolicitacoesGeraisPage() {
                                   <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                     {formatDateTime(r.createdAt)}
                                   </td>
-                                  {r.status === 'WAITING_RETURN' ? (
-                                    <td
-                                      className={`${listTableRowClasses.actionTd} text-right`}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <div className="ml-auto max-w-[280px] space-y-2 text-left">
-                                        <div className="flex justify-end">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement);
-                                            }}
-                                            className={rowActionMenuButtonClass(isRowMenuOpen(r.id))}
-                                            aria-label="Menu de ações"
-                                            aria-expanded={isRowMenuOpen(r.id)}
-                                            aria-haspopup="menu"
-                                          >
-                                            <MoreVertical className="h-4 w-4" />
-                                          </button>
-                                        </div>
-                                        <textarea
-                                          value={returnComment[r.id] || ''}
-                                          onChange={(e) =>
-                                            setReturnComment((p) => ({ ...p, [r.id]: e.target.value }))
-                                          }
-                                          placeholder="Digite seu retorno para o DP..."
-                                          className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
-                                        />
-                                        <Button
-                                          size="sm"
-                                          onClick={() => requesterReturnMutation.mutate({ id: r.id })}
-                                          disabled={requesterReturnMutation.isPending}
-                                        >
-                                          {requesterReturnMutation.isPending ? 'Enviando...' : 'Responder ao DP'}
-                                        </Button>
-                                      </div>
-                                    </td>
-                                  ) : (
                                     <RowActionMenuCell
                                       isOpen={isRowMenuOpen(r.id)}
                                       onToggle={(e) =>
                                         toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
                                       }
                                     />
-                                  )}
                                 </tr>
                             ))}
                           </tbody>
@@ -1655,6 +1678,7 @@ export function SolicitacoesGeraisPage() {
                   type="button"
                   onClick={() => {
                     setMyStatusFilter('all');
+                    setStageFilter('all');
                     setFilterUrgency('all');
                     setFilterRequestType('all');
                     setFilterContractId('all');
@@ -1713,10 +1737,32 @@ export function SolicitacoesGeraisPage() {
                     </DpRequestHistorySectionCard>
                   ) : null}
 
+                  {historyRequest.status === 'WAITING_RETURN' ? (
+                    <DpRequestHistorySectionCard title="Responder ao DP">
+                      <textarea
+                        value={returnComment[historyRequest.id] || ''}
+                        onChange={(e) =>
+                          setReturnComment((p) => ({ ...p, [historyRequest.id]: e.target.value }))
+                        }
+                        placeholder="Digite seu retorno para o DP..."
+                        className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[100px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
+                      />
+                    </DpRequestHistorySectionCard>
+                  ) : null}
+
                   <DpRequestHistoryModalFooter>
                     <Button type="button" variant="outline" onClick={closeHistoryRequest}>
                       Fechar
                     </Button>
+                    {historyRequest.status === 'WAITING_RETURN' ? (
+                      <Button
+                        type="button"
+                        onClick={() => requesterReturnMutation.mutate({ id: historyRequest.id })}
+                        disabled={requesterReturnMutation.isPending}
+                      >
+                        {requesterReturnMutation.isPending ? 'Enviando...' : 'Responder ao DP'}
+                      </Button>
+                    ) : null}
                   </DpRequestHistoryModalFooter>
                 </div>
               ) : (

@@ -12,10 +12,10 @@ export type DpFlowFeedbackStatus =
   | 'CONCLUDED'
   | 'CANCELLED';
 
+/** "Pendência contábil" saiu das etapas selecionáveis; o rótulo segue para solicitações antigas nessa etapa. */
 export const DP_FLOW_FEEDBACK_STATUSES: DpFlowFeedbackStatus[] = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
-  'WAITING_RETURN_ACCOUNTING',
   'WAITING_RETURN',
   'WAITING_RETURN_ADM_TST',
   'WAITING_RETURN_ENGINEERING',
@@ -24,12 +24,12 @@ export const DP_FLOW_FEEDBACK_STATUSES: DpFlowFeedbackStatus[] = [
 ];
 
 export const DP_STATUS_LABELS: Record<DpFlowFeedbackStatus, string> = {
-  IN_REVIEW_DP: 'Em análise',
-  IN_FINANCEIRO: 'No financeiro',
-  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
-  WAITING_RETURN: 'Pendência colaborador',
+  IN_REVIEW_DP: 'Em Análise',
+  IN_FINANCEIRO: 'No Financeiro',
+  WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
+  WAITING_RETURN: 'Pendência Colaborador',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
-  WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
+  WAITING_RETURN_ENGINEERING: 'Pendência Engenharia',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
@@ -48,19 +48,58 @@ export const DP_STATUS_LABEL_CLASS: Record<DpFlowFeedbackStatus, string> = {
 /** Status exibidos no filtro da fila DP (inclui etapas de tramitação). */
 export const DP_FLOW_FILTER_STATUSES: DpFlowFeedbackStatus[] = [...DP_FLOW_FEEDBACK_STATUSES];
 
-function toColoredSelectOption(value: DpFlowFeedbackStatus): MultiSelectSearchOption {
-  const label = DP_STATUS_LABELS[value];
+/** Tipos que, ao finalizar, geram um pedido no Atendimento Contábil (espelha o backend). */
+const DP_TYPES_SENT_TO_ACCOUNTING = new Set([
+  'ADMISSAO',
+  'FERIAS',
+  'RESCISAO',
+  'ALTERACAO_FUNCAO_SALARIO',
+  'RETIFICACAO_ALOCACAO',
+]);
+
+export const DP_SENT_TO_ACCOUNTING_LABEL = 'Na Contabilidade';
+export const DP_SEND_TO_ACCOUNTING_ACTION_LABEL = 'Enviar à Contabilidade';
+
+export function dpRequestIsSentToAccounting(requestType: string | null | undefined): boolean {
+  return !!requestType && DP_TYPES_SENT_TO_ACCOUNTING.has(requestType);
+}
+
+/** Rótulo da etapa final: nos tipos que vão para a Contabilidade, "Finalizada" vira "Enviada à Contabilidade". */
+export function dpStatusLabelForType(status: DpFlowFeedbackStatus, requestType: string): string {
+  if (status === 'CONCLUDED' && dpRequestIsSentToAccounting(requestType)) {
+    return DP_SENT_TO_ACCOUNTING_LABEL;
+  }
+  return DP_STATUS_LABELS[status];
+}
+
+function toColoredSelectOption(
+  value: DpFlowFeedbackStatus,
+  requestType?: string
+): MultiSelectSearchOption {
+  // No seletor de feedback é uma ação, então usa o verbo; nos selos de status fica "Enviada à Contabilidade".
+  const label =
+    requestType && value === 'CONCLUDED' && dpRequestIsSentToAccounting(requestType)
+      ? DP_SEND_TO_ACCOUNTING_ACTION_LABEL
+      : DP_STATUS_LABELS[value];
   return {
     value,
     label,
     searchText: label,
-    labelClassName: DP_STATUS_LABEL_CLASS[value],
+    labelClassName:
+      label === DP_SEND_TO_ACCOUNTING_ACTION_LABEL
+        ? 'font-semibold text-indigo-700 dark:text-indigo-300'
+        : DP_STATUS_LABEL_CLASS[value],
   };
 }
 
 /** Opções do select de feedback DP (com cores alinhadas ao badge da tabela). */
 export function buildDpFeedbackSelectOptions(): MultiSelectSearchOption[] {
-  return DP_FLOW_FEEDBACK_STATUSES.map(toColoredSelectOption);
+  return DP_FLOW_FEEDBACK_STATUSES.map((value) => toColoredSelectOption(value));
+}
+
+/** Opções do feedback DP para um tipo específico (rótulo da etapa final varia com o tipo). */
+export function buildDpFeedbackSelectOptionsForType(requestType: string): MultiSelectSearchOption[] {
+  return DP_FLOW_FEEDBACK_STATUSES.map((value) => toColoredSelectOption(value, requestType));
 }
 
 /** Opções do filtro de status DP — mesmas etapas e rótulos do feedback. */

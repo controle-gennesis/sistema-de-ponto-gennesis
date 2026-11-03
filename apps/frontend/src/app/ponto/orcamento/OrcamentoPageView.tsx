@@ -13259,17 +13259,6 @@ export function OrcamentoPageView({
     };
   }, []);
 
-  const composicaoNaBarra = useMemo(() => {
-    if (!composicaoFocoKey) return null;
-    const row = itensCalculados.find((r) => r.key === composicaoFocoKey);
-    if (!row) return null;
-    const desconto = parsePercentualMeta(meta.descontoPercentual);
-    return {
-      rotulo: rotuloItemComposicaoPorKey.get(row.key) ?? '',
-      valor: row.totalComBdi * (1 - desconto)
-    };
-  }, [composicaoFocoKey, itensCalculados, meta.descontoPercentual, rotuloItemComposicaoPorKey]);
-
   /** Célula de outra memória na fórmula: `{1.1.2!3!A}` (linha 1-based da composição). */
   const resolverFormulaMemoria = useCallback(
     (rotulo: string, linha: number, campo: string): number | null => {
@@ -16821,12 +16810,16 @@ export function OrcamentoPageView({
       const observacao = observacoesPorItem[row.key]?.trim() || '';
       const descricaoItem = (row.item.descricao || '').trim().toUpperCase();
 
-      rows.push({
+      const precoUnitSemBdi = Number(row.item.precoUnitario) || null;
+      const linhaItemCabecalho: OrcamentoExcelRow = {
         kind: 'item',
-        values: [rotulo, descricaoItem, un, observacao, '', '', '', '', '', '', ''],
-        merge: [3, 10],
-        tones: { 0: 'item', 1: 'label', 2: 'plain', 3: 'label' },
-      });
+        values: [rotulo, descricaoItem, un, '', precoUnitSemBdi ?? '', '', observacao, '', '', '', ''],
+        merge: [6, 10],
+        formats: { 3: 'qty', 4: 'currency', 5: 'currency' },
+        tones: { 0: 'item', 1: 'label', 2: 'plain', 3: 'plain', 4: 'plain', 5: 'plain', 6: 'label' },
+      };
+      rows.push(linhaItemCabecalho);
+      const indiceLinhaItemCabecalho = rows.length - 1;
       rows.push({
         kind: 'cabecalho',
         values: [
@@ -16938,6 +16931,16 @@ export function OrcamentoPageView({
           };
         }
         totalPorRotulo.set(rotulo.trim(), inicioCorpo);
+      }
+
+      // Quantidade puxa o TOTAL da memória; o total sem BDI é quantidade × unitário (fórmula do Excel).
+      linhaItemCabecalho.values[3] = totalSub;
+      if (rows.length > inicioCorpo) {
+        linhaItemCabecalho.formulas = { 3: `K{R${inicioCorpo}}` };
+      }
+      if (precoUnitSemBdi != null) {
+        linhaItemCabecalho.values[5] = roundTo(totalSub * precoUnitSemBdi, 2);
+        linhaItemCabecalho.formulas = { ...(linhaItemCabecalho.formulas ?? {}), 5: `D{R${indiceLinhaItemCabecalho}}*E{R${indiceLinhaItemCabecalho}}` };
       }
     });
 
@@ -20140,6 +20143,7 @@ export function OrcamentoPageView({
                                                 row.tipoUnidade
                                               )}
                                               quantidadeUn={row.quantidade}
+                                              precoUnitarioSemBdi={Number(row.item.precoUnitario) || null}
                                               quantidadeUnReadOnly={gradeTravada}
                                               onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
                                               modoContagemLista={meta.usarMemoriaCalculo === true}
@@ -21245,16 +21249,6 @@ export function OrcamentoPageView({
                     </p>
                   </div>
                   )}
-                  {composicaoNaBarra ? (
-                    <div className="shrink-0" title="Valor da composição selecionada, já com quantidade, BDI e desconto">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        {composicaoNaBarra.rotulo ? `Item ${composicaoNaBarra.rotulo}` : 'Composição'}
-                      </p>
-                      <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-red-600 dark:text-red-400 sm:text-base whitespace-nowrap">
-                        {formatarBRLExport(composicaoNaBarra.valor)}
-                      </p>
-                    </div>
-                  ) : null}
                   {naFichaDemanda && (
                     <>
                       <div className="shrink-0">

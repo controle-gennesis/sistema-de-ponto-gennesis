@@ -315,8 +315,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canAccessCollaborationTools,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
-    isDepartmentFinanceiro,
-    isDepartmentContabil,
   } = usePermissions();
   const { logoSrc, logoAlt } = useBrandingLogo();
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -467,6 +465,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     isAdministrator || can(pk('/ponto/entrega-logistica'));
   const canSeeCentralAtendimentos =
     isAdministrator || can(pk('/ponto/conversas-whatsapp'));
+  const canSeeAtendimentoContabil =
+    isAdministrator ||
+    can(pk('/ponto/dp-contabilidade'));
 
   const { data: chatUnreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
@@ -492,6 +493,19 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
+  });
+
+  const { data: atendimentoContabilPendingCount = 0 } = useQuery({
+    queryKey: ['dp-contabilidade-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/dp-contabilidade/pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeAtendimentoContabil && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
   });
 
   const { data: pendingFuroCount = 0 } = useQuery({
@@ -624,6 +638,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/solicitacoes-ferramentas') return toolRentalSuppliesPendingCount;
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
+    if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount;
     if (href === '/ponto/contratos') return mensalReportPendingCount;
     if (href === '/ponto/cronogramas') return cronogramasNovosCount;
     return 0;
@@ -957,17 +972,15 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
-            name: 'Comunicação Contábil',
+            name: 'Solicitações à Contabilidade',
             section: 'Folha e Contabilidade',
-            href: '/ponto/dp-contabilidade',
+            href: '/ponto/solicitacoes-contabilidade',
             icon: Calculator,
-            description: 'Comunicação do DP com a Contabilidade',
+            description: 'Criar pedidos diretos à Contabilidade e acompanhar o andamento',
             permission:
               isAdministrator ||
               isDepartmentPessoal ||
-              isDepartmentFinanceiro ||
-              isDepartmentContabil ||
-              can(pk('/ponto/dp-contabilidade')),
+              can(pk('/ponto/solicitacoes-contabilidade')),
           },
           {
             name: 'Central de Atendimentos',
@@ -1104,6 +1117,23 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/financeiro'))
           },
         ]
+      },
+      {
+        id: 'contabilidade',
+        name: 'Contabilidade',
+        icon: Calculator,
+        items: [
+          {
+            name: 'Atendimento Contábil',
+            section: 'Atendimento',
+            href: '/ponto/dp-contabilidade',
+            icon: MessageSquare,
+            description: 'Pedidos à Contabilidade e acompanhamento das respostas',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/dp-contabilidade')),
+          },
+        ],
       },
       {
         id: 'metricas',
@@ -2754,7 +2784,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           <div className="flex h-16 shrink-0 items-center border-b border-gray-200 px-5 dark:border-gray-800">
             <div className="flex w-full items-center justify-between gap-2">
               <h2 className="truncate text-lg font-semibold leading-snug text-gray-900 dark:text-gray-100">
-                {searchTerm.trim() ? 'Busca' : selectedModule?.name ?? 'Menu'}
+                {searchTerm.trim() ? 'Busca' : sidebarHydrated ? selectedModule?.name ?? 'Menu' : 'Menu'}
               </h2>
               <div className="flex shrink-0 items-center gap-1">
                 <button

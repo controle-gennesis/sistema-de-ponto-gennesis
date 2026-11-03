@@ -44,6 +44,7 @@ router.get(
   controller.getForAdmTstManagement.bind(controller)
 );
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
+router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
 
 export default router;
 

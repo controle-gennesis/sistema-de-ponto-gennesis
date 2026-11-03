@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { ACCOUNTING_DIRECT_REQUEST_TYPES } from './dpRequestDetails';
 
 const ADM_TST_TYPE_VALUES = [
   'ADM_VIAGENS',
@@ -23,11 +24,17 @@ export function isDepartamentoPessoalSector(department?: string | null): boolean
   return normalized === 'departamento pessoal';
 }
 
-/** Solicitações ADM/TST não entram na fila de aprovação do gestor. */
+/**
+ * Solicitações ADM/TST e as criadas direto para a Contabilidade não entram na fila de
+ * aprovação do gestor nem na fila de gerenciamento do DP.
+ */
 export function admTstManagerApprovalExclusionWhere(): Prisma.DpRequestWhereInput {
   return {
     requestType: {
-      notIn: [...ADM_TST_TYPE_VALUES] as Prisma.EnumDpRequestTypeFilter['in'],
+      notIn: [
+        ...ADM_TST_TYPE_VALUES,
+        ...ACCOUNTING_DIRECT_REQUEST_TYPES,
+      ] as Prisma.EnumDpRequestTypeFilter['in'],
     },
   };
 }

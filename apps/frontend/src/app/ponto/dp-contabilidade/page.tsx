@@ -13,14 +13,14 @@ import {
   FileText,
   Filter,
   MailPlus,
-  Plus,
   RotateCcw,
   Search,
   X,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
-import { FORM_FIELD_INPUT_CLS, FORM_FIELD_NO_FOCUS_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { ContabilRequestDetailsView } from '@/lib/contabilRequestDetailsView';
+import { FORM_FIELD_NO_FOCUS_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -92,6 +92,18 @@ type DpContabilidadeRequest = {
   concludedAt: string | null;
   cancelledAt: string | null;
   sourceDpRequestId?: string | null;
+  /** Dados estruturados da solicitação interna criada direto para a Contabilidade. */
+  source?: {
+    displayNumber: number;
+    requestType: string;
+    details: unknown;
+    company: string | null;
+    polo: string | null;
+    prazoInicio: string;
+    prazoFim: string;
+    costCenterName: string | null;
+    employeeNames: Record<string, string>;
+  } | null;
   createdAt: string;
   updatedAt: string;
   comments: Comment[];
@@ -146,13 +158,6 @@ const EMPTY_STATS: ListResponse['stats'] = {
   CANCELLED: 0,
 };
 
-const emptyCreateForm = {
-  requestType: '' as RequestType | '',
-  title: '',
-  description: '',
-  contractId: '',
-};
-
 function apiErrorMessage(err: unknown, fallback: string) {
   const ax = err as { response?: { data?: { error?: string; message?: string } } };
   return ax.response?.data?.error || ax.response?.data?.message || fallback;
@@ -171,10 +176,10 @@ export default function DpContabilidadePage() {
   const [toDate, setToDate] = useState('');
   const [listPage, setListPage] = useState(1);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selected, setSelected] = useState<DpContabilidadeRequest | null>(null);
-  const [createForm, setCreateForm] = useState(emptyCreateForm);
   const [commentBody, setCommentBody] = useState('');
+  const [confirmAction, setConfirmAction] = useState<'CONCLUDED' | 'CANCELLED' | null>(null);
+  const [confirmComment, setConfirmComment] = useState('');
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -257,14 +262,6 @@ export default function DpContabilidadePage() {
     Boolean(fromDate) ||
     Boolean(toDate);
 
-  const typeOptions = useMemo(
-    () =>
-      labeledToSelectOptions(
-        REQUEST_TYPES.map((value) => ({ value, label: TYPE_LABELS[value] }))
-      ),
-    []
-  );
-
   const filterTypeOptions = useMemo(
     () =>
       labeledToSelectOptions([
@@ -298,39 +295,10 @@ export default function DpContabilidadePage() {
     [contracts]
   );
 
-  const createContractOptions = useMemo(
-    () =>
-      labeledToSelectOptions(
-        contracts.map((c) => ({
-          value: c.id,
-          label: c.number ? `${c.number} — ${c.name}` : c.name,
-        }))
-      ),
-    [contracts]
-  );
-
   const invalidateList = () => {
     void queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
   };
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.post('/dp-contabilidade', {
-        requestType: createForm.requestType,
-        title: createForm.title.trim(),
-        description: createForm.description.trim(),
-        contractId: createForm.contractId || null,
-      });
-      return res.data as { data: DpContabilidadeRequest };
-    },
-    onSuccess: () => {
-      toast.success('Solicitação registrada.');
-      setIsCreateModalOpen(false);
-      setCreateForm(emptyCreateForm);
-      invalidateList();
-    },
-    onError: (err) => toast.error(apiErrorMessage(err, 'Não foi possível abrir a solicitação.')),
-  });
 
   const commentMutation = useMutation({
     mutationFn: async ({ id, body }: { id: string; body: string }) => {
@@ -347,8 +315,16 @@ export default function DpContabilidadePage() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: Exclude<RequestStatus, 'OPEN'> }) => {
-      const res = await api.put(`/dp-contabilidade/${id}/status`, { status });
+    mutationFn: async ({
+      id,
+      status,
+      comment,
+    }: {
+      id: string;
+      status: Exclude<RequestStatus, 'OPEN'>;
+      comment?: string;
+    }) => {
+      const res = await api.put(`/dp-contabilidade/${id}/status`, { status, comment });
       return res.data as { data: DpContabilidadeRequest };
     },
     onSuccess: (payload, vars) => {
@@ -358,6 +334,9 @@ export default function DpContabilidadePage() {
         CANCELLED: 'Solicitação cancelada. O registro permanece no histórico.',
       };
       toast.success(labels[vars.status]);
+      setConfirmAction(null);
+      setConfirmComment('');
+      setCommentBody('');
       setSelected(payload.data);
       invalidateList();
     },
@@ -374,30 +353,34 @@ export default function DpContabilidadePage() {
     setToDate('');
   };
 
-  const openCreate = () => {
-    setCreateForm(emptyCreateForm);
-    setIsCreateModalOpen(true);
-  };
-
-  const submitCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!createForm.requestType) {
-      toast.error('Selecione o tipo da solicitação.');
-      return;
-    }
-    if (createForm.title.trim().length < 3) {
-      toast.error('Informe um título com pelo menos 3 caracteres.');
-      return;
-    }
-    if (createForm.description.trim().length < 8) {
-      toast.error('Descreva a solicitação com pelo menos 8 caracteres.');
-      return;
-    }
-    createMutation.mutate();
-  };
-
   const canActOnSelected =
     selected?.status === 'OPEN' || selected?.status === 'IN_PROGRESS';
+
+  // Concluir e cancelar pedem confirmação; o texto já digitado na caixa de mensagem segue junto.
+  const openConfirm = (action: 'CONCLUDED' | 'CANCELLED') => {
+    setConfirmComment(commentBody);
+    setConfirmAction(action);
+  };
+
+  const closeConfirm = () => {
+    if (statusMutation.isPending) return;
+    setConfirmAction(null);
+    setConfirmComment('');
+  };
+
+  const submitConfirm = () => {
+    if (!selected || !confirmAction) return;
+    const comment = confirmComment.trim();
+    if (confirmAction === 'CANCELLED' && comment.length < 3) {
+      toast.error('Informe o motivo do cancelamento.');
+      return;
+    }
+    statusMutation.mutate({
+      id: selected.id,
+      status: confirmAction,
+      comment: comment || undefined,
+    });
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -410,8 +393,8 @@ export default function DpContabilidadePage() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Comunicação Contábil"
-            description="Canal do Departamento Pessoal com a Contabilidade. As solicitações ficam registradas para consulta e não passam por aprovação."
+            title="Atendimento Contábil"
+            description="Registre pedidos à Contabilidade e acompanhe o andamento de cada um."
           />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -475,7 +458,7 @@ export default function DpContabilidadePage() {
                       Solicitações
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Histórico permanente de comunicação com a contabilidade
+                      Pedidos recebidos e acompanhamento do atendimento
                     </p>
                   </div>
                 </div>
@@ -509,14 +492,6 @@ export default function DpContabilidadePage() {
                   >
                     <Filter className="h-4 w-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={openCreate}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                  >
-                    <Plus className="h-4 w-4 shrink-0" />
-                    <span>Nova solicitação</span>
-                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -542,7 +517,7 @@ export default function DpContabilidadePage() {
                     <CadastroListEmpty
                       icon={ClipboardList}
                       title="Nenhuma solicitação ainda."
-                      hint="Use Nova solicitação para enviar um pedido à contabilidade. Tudo fica registrado para consulta futura."
+                      hint="Os pedidos chegam automaticamente quando o Departamento Pessoal finaliza uma solicitação. Tudo fica registrado para consulta."
                     />
                   )
                 ) : (
@@ -564,8 +539,8 @@ export default function DpContabilidadePage() {
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
                             <th className={cadastroListClasses.th}>ID</th>
+                            <th className={cadastroListClasses.th}>Título</th>
                             <th className={cadastroListClasses.thCenter}>Tipo</th>
-                            <th className={cadastroListClasses.thCenter}>Título</th>
                             <th className={cadastroListClasses.thCenter}>Contrato</th>
                             <th className={cadastroListClasses.thCenter}>Solicitante</th>
                             <th className={cadastroListClasses.thCenter}>Aberta em</th>
@@ -588,11 +563,11 @@ export default function DpContabilidadePage() {
                                   {row.displayNumber}
                                 </ListRowNavigableLabel>
                               </td>
+                              <td className="max-w-[280px] px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                {row.title}
+                              </td>
                               <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                                 {TYPE_LABELS[row.requestType]}
-                              </td>
-                              <td className="max-w-[280px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {row.title}
                               </td>
                               <td className="max-w-[240px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                                 {row.contractName || '—'}
@@ -660,95 +635,12 @@ export default function DpContabilidadePage() {
         </PageStack>
 
         <Modal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          title="Nova solicitação"
-          size="lg"
-          contentOverflowVisible
-          elevated
-        >
-          <form onSubmit={submitCreate} className="space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Tipo de solicitação
-              </label>
-              <SingleSelectSearchDropdown
-                value={createForm.requestType}
-                onChange={(value) =>
-                  setCreateForm((prev) => ({
-                    ...prev,
-                    requestType: value as RequestType,
-                    title:
-                      !prev.title.trim() ||
-                      (prev.requestType && prev.title === TYPE_LABELS[prev.requestType])
-                        ? TYPE_LABELS[value as RequestType]
-                        : prev.title,
-                  }))
-                }
-                options={typeOptions}
-                allowEmpty={false}
-                placeholder="Selecione o tipo"
-                searchPlaceholder="Pesquisar tipo..."
-                noFocusRing
-              />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Título
-              </label>
-              <input
-                value={createForm.title}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, title: e.target.value }))}
-                maxLength={180}
-                placeholder="Resumo da solicitação"
-                className={FORM_FIELD_INPUT_CLS}
-              />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Descrição
-              </label>
-              <textarea
-                value={createForm.description}
-                onChange={(e) =>
-                  setCreateForm((prev) => ({ ...prev, description: e.target.value }))
-                }
-                maxLength={8000}
-                placeholder="Detalhe o que a contabilidade precisa tratar."
-                className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[140px]`}
-              />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Contrato (opcional)
-              </label>
-              <SingleSelectSearchDropdown
-                value={createForm.contractId}
-                onChange={(value) => setCreateForm((prev) => ({ ...prev, contractId: value }))}
-                options={createContractOptions}
-                allowEmpty
-                emptyOptionLabel="Nenhum"
-                placeholder="Vincular a um contrato"
-                searchPlaceholder="Pesquisar contrato..."
-                noFocusRing
-              />
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-
-        <Modal
           isOpen={!!selected}
           onClose={() => {
             setSelected(null);
             setCommentBody('');
+            setConfirmAction(null);
+            setConfirmComment('');
           }}
           title={
             selected
@@ -844,14 +736,41 @@ export default function DpContabilidadePage() {
                 ) : null}
               </div>
 
-              <div>
-                <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Descrição
-                </p>
-                <p className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                  {selected.description}
-                </p>
-              </div>
+              {selected.source ? (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Dados da solicitação nº {selected.source.displayNumber}
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/40 sm:grid-cols-2">
+                    {[
+                      { label: 'Unidade', value: selected.source.costCenterName },
+                      { label: 'Empresa', value: selected.source.company },
+                      { label: 'Polo', value: selected.source.polo },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          {item.label}
+                        </p>
+                        <p className="mt-1 text-gray-900 dark:text-gray-100">{item.value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <ContabilRequestDetailsView
+                    requestType={selected.source.requestType}
+                    details={selected.source.details}
+                    employeeNameById={new Map(Object.entries(selected.source.employeeNames ?? {}))}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Descrição
+                  </p>
+                  <p className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                    {selected.description}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -919,9 +838,7 @@ export default function DpContabilidadePage() {
                       type="button"
                       variant="success"
                       disabled={statusMutation.isPending}
-                      onClick={() =>
-                        statusMutation.mutate({ id: selected.id, status: 'CONCLUDED' })
-                      }
+                      onClick={() => openConfirm('CONCLUDED')}
                     >
                       Concluir
                     </Button>
@@ -929,9 +846,7 @@ export default function DpContabilidadePage() {
                       type="button"
                       variant="error"
                       disabled={statusMutation.isPending}
-                      onClick={() =>
-                        statusMutation.mutate({ id: selected.id, status: 'CANCELLED' })
-                      }
+                      onClick={() => openConfirm('CANCELLED')}
                     >
                       Cancelar
                     </Button>
@@ -944,6 +859,59 @@ export default function DpContabilidadePage() {
               )}
             </div>
           ) : null}
+        </Modal>
+
+        <Modal
+          isOpen={!!selected && !!confirmAction}
+          onClose={closeConfirm}
+          title={confirmAction === 'CANCELLED' ? 'Cancelar solicitação' : 'Concluir solicitação'}
+          size="md"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {confirmAction === 'CANCELLED'
+                ? 'Ao cancelar, a solicitação é encerrada e não poderá ser reaberta. Ela permanece no histórico.'
+                : 'Ao concluir, a solicitação é encerrada e não poderá ser reaberta. Ela permanece no histórico.'}
+            </p>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {confirmAction === 'CANCELLED' ? 'Motivo do cancelamento' : 'Mensagem (opcional)'}
+              </label>
+              <textarea
+                value={confirmComment}
+                onChange={(e) => setConfirmComment(e.target.value)}
+                maxLength={4000}
+                placeholder={
+                  confirmAction === 'CANCELLED'
+                    ? 'Explique por que está cancelando...'
+                    : 'Registre uma observação final, se quiser...'
+                }
+                className={FORM_FIELD_TEXTAREA_CLS}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={statusMutation.isPending}
+                onClick={closeConfirm}
+              >
+                Voltar
+              </Button>
+              <Button
+                type="button"
+                variant={confirmAction === 'CANCELLED' ? 'error' : 'success'}
+                disabled={statusMutation.isPending}
+                onClick={submitConfirm}
+              >
+                {statusMutation.isPending
+                  ? 'Salvando...'
+                  : confirmAction === 'CANCELLED'
+                    ? 'Cancelar solicitação'
+                    : 'Concluir solicitação'}
+              </Button>
+            </div>
+          </div>
         </Modal>
 
         {isFiltersModalOpen && (
