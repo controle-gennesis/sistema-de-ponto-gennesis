@@ -551,22 +551,6 @@ html.dark *::-webkit-scrollbar-thumb:active {
     scrollbar-width: none !important;
     scrollbar-color: transparent transparent !important;
   }
-
-  .sidebar-nav-list {
-    scrollbar-width: none !important;
-    scrollbar-color: transparent transparent !important;
-  }
-
-  .sidebar-nav-list:hover,
-  .sidebar-nav-list:focus-within {
-    scrollbar-width: thin !important;
-    scrollbar-color: rgb(148 163 184 / 0.28) transparent !important;
-  }
-
-  html.dark .sidebar-nav-list:hover,
-  html.dark .sidebar-nav-list:focus-within {
-    scrollbar-color: rgb(255 255 255 / 0.14) transparent !important;
-  }
 }
 
 .scrollbar-hide,
@@ -588,13 +572,8 @@ html.dark .scrollbar-hide::-webkit-scrollbar {
   background: transparent !important;
 }
 
-/* Sidebar: barra só aparece com o mouse em cima (não usa scrollbar-width no Chrome). */
+/* Sidebar: o rolo fica sempre visível (cor padrão do app), sem aparecer/sumir com o mouse. */
 .sidebar-nav-list {
-  overflow-y: hidden !important;
-}
-
-.sidebar-nav-list:hover,
-.sidebar-nav-list:focus-within {
   overflow-y: auto !important;
 }
 
@@ -603,30 +582,6 @@ html.dark .scrollbar-hide::-webkit-scrollbar {
   height: var(--app-scrollbar-size) !important;
   max-width: var(--app-scrollbar-size) !important;
   max-height: var(--app-scrollbar-size) !important;
-}
-
-.sidebar-nav-list::-webkit-scrollbar-thumb {
-  background: transparent !important;
-}
-
-.sidebar-nav-list:hover::-webkit-scrollbar-thumb,
-.sidebar-nav-list:focus-within::-webkit-scrollbar-thumb {
-  background: rgb(148 163 184 / 0.28) !important;
-}
-
-html.dark .sidebar-nav-list:hover::-webkit-scrollbar-thumb,
-html.dark .sidebar-nav-list:focus-within::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.14) !important;
-}
-
-.sidebar-nav-list:hover::-webkit-scrollbar-thumb:hover,
-.sidebar-nav-list:focus-within::-webkit-scrollbar-thumb:hover {
-  background: rgb(148 163 184 / 0.36) !important;
-}
-
-html.dark .sidebar-nav-list:hover::-webkit-scrollbar-thumb:hover,
-html.dark .sidebar-nav-list:focus-within::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.18) !important;
 }
 
 .app-thin-scroll::-webkit-scrollbar,
