@@ -33,7 +33,7 @@ import {
   type BoletoParcelasOrderFields,
   type RowDraft
 } from '@/components/oc/boletoParcelasUtils';
-import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
+import { formatCurrencyInputBrFromNumber, maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 
 export type BoletoParcelasListProps = {
   order: BoletoParcelasOrderFields & {
@@ -72,6 +72,9 @@ function BoletoParcelasListInner({
   const [rows, setRows] = useState<RowDraft[]>(() => buildInitialRows(order));
   const [saving, setSaving] = useState(false);
   const [forcingSingle, setForcingSingle] = useState(false);
+  const [discountOpen, setDiscountOpen] = useState(false);
+  const [discountInput, setDiscountInput] = useState('');
+  const [applyingDiscount, setApplyingDiscount] = useState(false);
   const [persistedOrder, setPersistedOrder] = useState<
     (BoletoParcelasOrderFields & { id: string }) | null
   >(null);
@@ -232,6 +235,41 @@ function BoletoParcelasListInner({
     }
   };
 
+  const currentDiscount = useMemo(() => {
+    const d = Number(order.discountAmount ?? 0);
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  }, [order.discountAmount]);
+  const anyRowLocked = useMemo(
+    () => parsedRows.some((r) => ['PAID', 'AWAITING_PAYMENT'].includes(rowStatus(r))),
+    [parsedRows]
+  );
+  const canApplyDiscount = editable && order.paymentBoletoPhaseReleased !== true && !anyRowLocked;
+
+  const handleApplyDiscount = async () => {
+    const value = discountInput.trim() === '' ? 0 : parseMoneyInput(discountInput);
+    if (value == null || value < 0) {
+      toast.error('Informe um valor de desconto válido.');
+      return;
+    }
+    setApplyingDiscount(true);
+    try {
+      const res = await api.patch(`/purchase-orders/${order.id}/payment-discount`, { discountAmount: value });
+      const updated = (res.data as { data?: BoletoParcelasOrderFields & { id: string } })?.data;
+      if (updated) setPersistedOrder(updated);
+      onSaved?.(res.data);
+      setDiscountOpen(false);
+      toast.success('Desconto aplicado. Confira as parcelas e salve.');
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { message?: string } } }).response?.data?.message
+          : null;
+      toast.error(msg || 'Erro ao aplicar desconto');
+    } finally {
+      setApplyingDiscount(false);
+    }
+  };
+
   const canForceSingleParcel =
     isAdministrator &&
     editable &&
@@ -269,8 +307,59 @@ function BoletoParcelasListInner({
       {editable && orderTotal > 0 ? (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Total da OC: <span className="font-medium text-gray-700 dark:text-gray-300">{formatMoneyDisplay(orderTotal)}</span>
+          {currentDiscount > 0 ? (
+            <span> (já com desconto de {formatMoneyDisplay(currentDiscount)})</span>
+          ) : null}
           {n > 1 && !partialDelivery ? ' — ao alterar uma parcela, as demais ajustam automaticamente.' : '.'}
         </p>
+      ) : null}
+      {canApplyDiscount && orderTotal > 0 ? (
+        <div className="flex flex-col gap-2">
+          {!discountOpen ? (
+            <button
+              type="button"
+              onClick={() => {
+                setDiscountInput(currentDiscount > 0 ? formatCurrencyInputBrFromNumber(currentDiscount) : '');
+                setDiscountOpen(true);
+              }}
+              className="self-start rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {currentDiscount > 0 ? 'Alterar desconto' : 'Aplicar desconto'}
+            </button>
+          ) : (
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
+              <label className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-300">
+                Desconto total da OC (R$)
+                <input
+                  value={discountInput}
+                  onChange={(e) => setDiscountInput(maskCurrencyInputBrOrEmpty(e.target.value))}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  className="h-9 w-40 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={applyingDiscount}
+                onClick={() => void handleApplyDiscount()}
+                className="h-9 rounded-lg bg-red-600 px-3 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {applyingDiscount ? 'Aplicando…' : 'Aplicar'}
+              </button>
+              <button
+                type="button"
+                disabled={applyingDiscount}
+                onClick={() => setDiscountOpen(false)}
+                className="h-9 rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <p className="basis-full text-[11px] text-gray-500 dark:text-gray-400">
+                O total a pagar passa a ser itens + frete − desconto, e as parcelas são redistribuídas sobre o novo total.
+              </p>
+            </div>
+          )}
+        </div>
       ) : null}
       {partialDelivery && amountValidation.valid && (amountValidation.remaining ?? 0) > 0 ? (
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-100">

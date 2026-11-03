@@ -4332,6 +4332,8 @@ export function OcPurchaseOrdersPanel({
         paymentBoletoPhaseReleased: updated.paymentBoletoPhaseReleased,
         paymentParcelCount: updated.paymentParcelCount,
         paymentCondition: updated.paymentCondition,
+        amountToPay: updated.amountToPay,
+        discountAmount: updated.discountAmount,
         updatedAt: updated.updatedAt
       });
     }

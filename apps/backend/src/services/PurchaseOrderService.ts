@@ -2928,6 +2928,65 @@ export class PurchaseOrderService {
   /**
    * Grava todas as parcelas de boleto (valor, vencimento, anexo por parcela).
    */
+  /**
+   * Desconto concedido depois da criação da OC (ex.: o fornecedor emitiu o boleto com valor menor).
+   * `discountAmount` é o desconto TOTAL da OC; o total a pagar passa a ser itens + frete − desconto, e as
+   * parcelas ainda sem boleto pago/aguardando pagamento são redistribuídas pela tela sobre o novo total.
+   */
+  async applyPaymentDiscount(id: string, discountAmount: number, _userId?: string) {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        paymentType: true,
+        paymentBoletoPhaseReleased: true,
+        paymentBoletoInstallments: true,
+        freightAmount: true
+      }
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+    if (order.status !== 'APPROVED') {
+      throw new Error('Só é possível aplicar desconto em OC aprovada');
+    }
+    if (order.paymentType !== 'BOLETO') {
+      throw new Error('Desconto nas parcelas aplica-se apenas a OC com pagamento em boleto');
+    }
+    if (order.paymentBoletoPhaseReleased) {
+      throw new Error('Só é possível aplicar desconto antes de enviar a OC para a fase Pagamento');
+    }
+    const stored = parseStoredInstallments(order.paymentBoletoInstallments);
+    if (stored.some((r) => ['AWAITING_PAYMENT', 'PAID'].includes(rowStatus(r)))) {
+      throw new Error('Não é possível aplicar desconto: já há parcela aguardando pagamento ou paga');
+    }
+    const discount = Number(discountAmount);
+    if (!Number.isFinite(discount) || discount < 0) {
+      throw new Error('Desconto inválido');
+    }
+    const items = await prisma.purchaseOrderItem.findMany({
+      where: { purchaseOrderId: id },
+      select: { totalPrice: true }
+    });
+    const itemsSum = items.reduce((s, it) => s.plus(new Decimal(it.totalPrice)), new Decimal(0));
+    const freight = order.freightAmount != null ? new Decimal(order.freightAmount) : new Decimal(0);
+    const gross = itemsSum.plus(freight);
+    const discountDec = new Decimal(discount.toFixed(2));
+    if (discountDec.gt(gross)) {
+      throw new Error('Desconto maior que o valor da compra');
+    }
+    const updated = await prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        discountAmount: discountDec,
+        amountToPay: gross.minus(discountDec),
+        updatedAt: new Date()
+      },
+      include: purchaseOrderIncludeListSummary
+    });
+    const [e] = await enrichOrdersParcelPlans([updated]);
+    return e;
+  }
+
   async savePaymentBoletoInstallments(
     id: string,
     body: {

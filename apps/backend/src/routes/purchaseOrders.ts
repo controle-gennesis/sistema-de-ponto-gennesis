@@ -730,6 +730,34 @@ router.patch('/:id/payment-boleto-installments', async (req: AuthRequest, res: R
   }
 });
 
+router.patch('/:id/payment-discount', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_BOLETO_KEY,
+      'Sem permissão na aba Anexar Boleto da OC'
+    );
+    const raw = (req.body as { discountAmount?: unknown })?.discountAmount;
+    const order = await service.applyPaymentDiscount(req.params.id, Number(raw), req.user.id);
+    res.json({ success: true, data: order, message: 'Desconto aplicado' });
+  } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
+    if (
+      error instanceof Error &&
+      /Ordem de compra não encontrada|Só é possível|Não é possível|Desconto|Usuário não autenticado/.test(error.message)
+    ) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
 router.patch(
   '/:id/force-single-boleto-parcel',
   requireAdministrator,

@@ -12,6 +12,8 @@ import {
 export type BoletoParcelasOrderFields = {
   orderDate?: string | null;
   amountToPay?: number | string | null;
+  /** Desconto total em R$ já aplicado à OC (itens + frete − desconto = total a pagar). */
+  discountAmount?: number | string | null;
   paymentParcelCount?: number;
   paymentParcelDueDays?: number[];
   paymentBoletoInstallments?: unknown;
@@ -309,7 +311,7 @@ export function draftToRow(d: RowDraft): BoletoInstallmentRow {
 }
 
 export function installmentsStateKey(order: BoletoParcelasOrderFields & { id: string }): string {
-  return `${order.id}:${JSON.stringify(order.paymentBoletoInstallments ?? null)}:${order.paymentBoletoPhaseReleased ?? ''}:${order.paymentParcelCount ?? 1}:${order.paymentProofUrl ?? ''}`;
+  return `${order.id}:${JSON.stringify(order.paymentBoletoInstallments ?? null)}:${order.paymentBoletoPhaseReleased ?? ''}:${order.paymentParcelCount ?? 1}:${order.paymentProofUrl ?? ''}:${order.amountToPay ?? ''}`;
 }
 
 export function rowsToInstallments(rows: RowDraft[]): BoletoInstallmentRow[] {
