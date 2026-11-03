@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ListPlus, Plus, Trash2 } from 'lucide-react';
+import { ListPlus, Plus, Trash2, X } from 'lucide-react';
 import {
   type CampoFormulaMedicao,
   type DimensoesItem,
@@ -4076,20 +4076,16 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             >
               Incluir memória de cálculo
             </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Cada composição marcada entra como uma linha. Entra só o total do memorial dela: em C se for metro, na área se for m² e no volume se for m³.
-            </p>
             <div className="mt-4">
               <MultiSelectSearchDropdown
-                menuInline
                 listMaxHeight={280}
                 placeholder="Selecione as memórias"
                 searchPlaceholder="Buscar composição..."
                 emptyOptionsMessage="Nenhuma outra memória neste orçamento."
                 options={memoriasDisponiveis.map((m) => ({
                   value: m.key,
-                  label: `${m.rotulo} - ${m.descricao || 'Sem descrição'}`,
-                  description: m.unidade,
+                  label: `${m.rotulo} - ${m.descricao || 'Sem descrição'}`.toUpperCase(),
+                  description: m.unidade?.toUpperCase(),
                   searchText: `${m.rotulo} ${m.descricao} ${m.unidade ?? ''}`,
                 }))}
                 selected={linhasEfetivas
@@ -4097,6 +4093,41 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
                   .filter((k): k is string => Boolean(k))}
                 onChange={onMemoriasIncluidasChange}
               />
+              {(() => {
+                const chaves = linhasEfetivas
+                  .map((ln) => ln.origemMemoriaKey)
+                  .filter((k): k is string => Boolean(k));
+                const incluidas = chaves
+                  .map((k) => memoriasDisponiveis.find((m) => m.key === k))
+                  .filter((m): m is NonNullable<typeof m> => Boolean(m));
+                if (incluidas.length === 0) return null;
+                return (
+                  <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                    {incluidas.map((m) => (
+                      <li
+                        key={m.key}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40"
+                      >
+                        <span className="min-w-0 flex-1 text-xs font-semibold uppercase text-gray-800 dark:text-gray-100">
+                          {m.rotulo} - {m.descricao || 'Sem descrição'}
+                          {m.unidade ? (
+                            <span className="ml-1.5 font-normal text-gray-500 dark:text-gray-400">({m.unidade})</span>
+                          ) : null}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onMemoriasIncluidasChange(chaves.filter((k) => k !== m.key))}
+                          aria-label="Remover memória"
+                          title="Remover"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
             </div>
             <div className="mt-6 flex justify-end">
               <button

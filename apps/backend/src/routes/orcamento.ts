@@ -1,11 +1,51 @@
-import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { Router, Response, NextFunction } from 'express';
+import multer from 'multer';
+import { authenticate, AuthRequest } from '../middleware/auth';
+import { createError } from '../middleware/errorHandler';
+import { savePersistentUpload } from '../lib/persistentUpload';
 import { OrcamentoController } from '../controllers/OrcamentoController';
 
 const router = Router();
 const controller = new OrcamentoController();
 
 router.use(authenticate);
+
+const uploadMapaCotacao = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+/** Print/imagem de uma proposta do Mapa de Cotação (composições próprias "COTAÇÃO - n"). */
+router.post(
+  '/mapa-cotacao/anexo',
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    uploadMapaCotacao.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        res.status(400).json({ success: false, message: err instanceof Error ? err.message : 'Erro no upload' });
+        return;
+      }
+      next();
+    });
+  },
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file?.buffer) throw createError('Selecione uma imagem', 400);
+      if (!/^image\//i.test(req.file.mimetype || '')) throw createError('Envie um arquivo de imagem', 400);
+      const saved = await savePersistentUpload({
+        folder: 'orcamento/mapa-cotacao',
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+      res.json({
+        success: true,
+        data: { url: saved.url, name: req.file.originalname || saved.fileName, mimeType: req.file.mimetype },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 router.get('/composicoes/geral', (req, res, next) => controller.getComposicoesGeral(req as any, res, next));
 router.put('/composicoes/geral', (req, res, next) => controller.saveComposicoesGeral(req as any, res, next));

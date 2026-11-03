@@ -83,6 +83,21 @@ export type OrcamentoExcelRow = {
   destaqueTitulo?: boolean;
   /** Cor por célula, por cima do tipo da linha. `item` usa a cor do item; `plain` fica branco. */
   tones?: Record<number, 'item' | 'plain' | 'label'>;
+  /** Altura da linha em pontos (padrão 30). */
+  altura?: number;
+  /** Cor da letra/fundo (hex) e negrito por célula, por cima de tudo. */
+  cores?: Record<number, { fg?: string; bg?: string; bold?: boolean }>;
+  /** Célula vira link: coluna 0-based → URL (o texto continua sendo o valor da célula). */
+  links?: Record<number, string>;
+};
+
+/** Imagem dentro de uma célula (ex.: print de proposta): cabe na célula sem deformar. */
+export type OrcamentoExcelImagem = {
+  url: string;
+  /** Índice da linha em `rows` (0-based). */
+  row: number;
+  /** Coluna 0-based. */
+  col: number;
 };
 
 /** Célula do quadro de identificação no topo da aba; `de`/`ate` são colunas 0-based (inclusive). */
@@ -94,7 +109,7 @@ export type OrcamentoExcelCabecalhoCelula = {
   rotulo?: boolean;
   alinhamento?: 'left' | 'center' | 'right';
   /** `barra` = faixa preta com texto branco; `destaque` = valor maior, em negrito; `rotuloClaro` = rótulo em negrito, fundo cinza claro. */
-  estilo?: 'barra' | 'destaque' | 'legenda' | 'rotuloClaro';
+  estilo?: 'barra' | 'destaque' | 'legenda' | 'rotuloClaro' | 'informacao';
   /** Mescla para baixo: quantas linhas a mais a célula ocupa (0 = só a atual). */
   linhasAbaixo?: number;
   /** Reserva a célula para a logo (sem isso, a logo usa a 1ª célula da 1ª linha). */
@@ -147,6 +162,8 @@ export type OrcamentoExcelSheetSpec = {
   tamanhos?: { item?: number; header?: number };
   /** Linhas de item todas brancas, sem alternar com cinza claro. */
   semZebra?: boolean;
+  /** Imagens ancoradas em células (baixadas na hora de montar o arquivo; se falhar, a célula fica vazia). */
+  imagens?: OrcamentoExcelImagem[];
 };
 
 export type OrcamentoExcelAparencia = {
@@ -355,12 +372,17 @@ async function fillWorkbook(
           }
           const cell = sheet.getCell(linha, de);
           // Cabeçalhos: tudo em maiúsculas e fonte 12 (a legenda é nota, fica como está).
-          cell.value = celula.estilo === 'legenda' ? celula.texto : String(celula.texto ?? '').toUpperCase();
+          cell.value =
+            celula.estilo === 'legenda' || celula.estilo === 'informacao'
+              ? celula.texto
+              : String(celula.texto ?? '').toUpperCase();
           cell.font =
             celula.estilo === 'barra'
               ? { name: fontName, size: 12, bold: true, color: { argb: WHITE } }
               : celula.estilo === 'destaque'
                 ? { name: fontName, size: 12, bold: true, color: { argb: TITLE_TEXT } }
+                : celula.estilo === 'informacao'
+                  ? { name: 'Times New Roman', size: 11, bold: true, color: { argb: TITLE_TEXT } }
                 : celula.estilo === 'legenda'
                   ? { name: FONTE_LEGENDA, size: 9, italic: true, color: { argb: TITLE_TEXT } }
                 : {
@@ -373,7 +395,9 @@ async function fillWorkbook(
             vertical: 'middle',
             horizontal:
               celula.alinhamento ??
-              (celula.rotulo || (celula.estilo && celula.estilo !== 'rotuloClaro') ? 'center' : 'left'),
+              (celula.rotulo || (celula.estilo && celula.estilo !== 'rotuloClaro' && celula.estilo !== 'informacao')
+                ? 'center'
+                : 'left'),
             wrapText: true,
           };
           if (ate > de || extra > 0) sheet.mergeCells(linha, de, linha + extra, ate);
@@ -534,7 +558,27 @@ async function fillWorkbook(
             wrapText: true,
           };
         }
+
+        const cor = rowSpec.cores?.[c];
+        if (cor) {
+          if (cor.bg) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(cor.bg, WHITE) } };
+          const f = cell.font ?? {};
+          cell.font = {
+            ...f,
+            name: f.name ?? fontName,
+            size: f.size ?? tamItem,
+            bold: cor.bold ?? f.bold,
+            color: cor.fg ? { argb: hexToArgb(cor.fg, TITLE_TEXT) } : f.color,
+          };
+        }
+        const link = rowSpec.links?.[c];
+        if (link && cell.value != null && cell.value !== '') {
+          cell.value = { text: String(cell.value), hyperlink: link };
+          const f = cell.font ?? {};
+          cell.font = { ...f, name: f.name ?? fontName, size: f.size ?? tamItem, underline: true, color: { argb: 'FF2563EB' } };
+        }
       }
+      if (rowSpec.altura != null) row.height = rowSpec.altura;
       if (rowSpec.rowSpan) {
         // Mescla só depois de todas as linhas: escrever numa célula coberta apagaria o valor da principal.
         for (const [col, n] of Object.entries(rowSpec.rowSpan)) {
@@ -560,6 +604,42 @@ async function fillWorkbook(
       const largura = Math.min(120, Math.max(col.width ?? 20, maior + 3));
       sheet.getColumn(i + 1).width = largura;
     });
+
+    for (const img of spec.imagens ?? []) {
+      try {
+        const resp = await fetch(img.url);
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        const bmp = await createImageBitmap(blob);
+        const ext = /png/i.test(blob.type) ? 'png' : /gif/i.test(blob.type) ? 'gif' : 'jpeg';
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        const imageId = workbook.addImage({ base64: btoa(bin), extension: ext as 'png' | 'jpeg' | 'gif' });
+        const excelRow = offsetCabecalho + (showHeader ? 2 : 1) + img.row;
+        const larguraCel = Math.round((sheet.getColumn(img.col + 1).width ?? 8.43) * 7 + 5);
+        const alturaCel = Math.round((((sheet.getRow(excelRow).height ?? 30) as number) * 96) / 72);
+        const margem = 8;
+        const escala = Math.min((larguraCel - 2 * margem) / bmp.width, (alturaCel - 2 * margem) / bmp.height, 1);
+        const w = Math.max(10, Math.round(bmp.width * escala));
+        const h = Math.max(10, Math.round(bmp.height * escala));
+        sheet.addImage(imageId, {
+          tl: {
+            nativeCol: img.col,
+            nativeColOff: Math.round(((larguraCel - w) / 2) * 9525),
+            nativeRow: excelRow - 1,
+            nativeRowOff: Math.round(((alturaCel - h) / 2) * 9525),
+          },
+          ext: { width: w, height: h },
+          editAs: 'oneCell',
+        } as unknown as ExcelJS.ImageRange);
+        bmp.close();
+      } catch {
+        /* sem a imagem: a célula fica vazia e o resto do arquivo segue válido */
+      }
+    }
 
     if (cabecalho?.logo) {
       try {

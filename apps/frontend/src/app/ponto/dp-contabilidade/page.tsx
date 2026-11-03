@@ -29,7 +29,8 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
 import {
@@ -150,6 +151,55 @@ const STATUS_BADGE: Record<RequestStatus, string> = {
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
 
+const STAGE_TABS: { filter: 'all' | RequestStatus; label: string }[] = [
+  { filter: 'all', label: 'Todas' },
+  { filter: 'OPEN', label: 'Abertas' },
+  { filter: 'IN_PROGRESS', label: 'Em Andamento' },
+  { filter: 'CONCLUDED', label: 'Concluídas' },
+  { filter: 'CANCELLED', label: 'Canceladas' },
+];
+
+const STAGE_LIST_HEADER: Record<
+  'all' | RequestStatus,
+  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
+> = {
+  all: {
+    title: 'Solicitações',
+    subtitle: 'Pedidos recebidos e acompanhamento do atendimento',
+    Icon: Calculator,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  OPEN: {
+    title: 'Abertas',
+    subtitle: 'Pedidos que ainda não foram atendidos',
+    Icon: MailPlus,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  IN_PROGRESS: {
+    title: 'Em Andamento',
+    subtitle: 'Pedidos que a Contabilidade já começou a atender',
+    Icon: CircleDot,
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+  },
+  CONCLUDED: {
+    title: 'Concluídas',
+    subtitle: 'Pedidos atendidos pela Contabilidade',
+    Icon: CheckCircle2,
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+  },
+  CANCELLED: {
+    title: 'Canceladas',
+    subtitle: 'Pedidos cancelados, com o motivo no histórico',
+    Icon: Ban,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
 const EMPTY_STATS: ListResponse['stats'] = {
   total: 0,
   OPEN: 0,
@@ -230,6 +280,8 @@ export default function DpContabilidadePage() {
 
   const requests = listData?.data ?? [];
   const stats = listData?.stats ?? EMPTY_STATS;
+  const listHeader = STAGE_LIST_HEADER[statusFilter];
+  const ListHeaderIcon = listHeader.Icon;
 
   const { startItem, endItem, totalPages } = getCadastroListRange(
     listPage,
@@ -397,69 +449,52 @@ export default function DpContabilidadePage() {
             description="Registre pedidos à Contabilidade e acompanhe o andamento de cada um."
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <FilterStatCard
-              label="Abertas"
-              count={stats.OPEN}
-              icon={MailPlus}
-              iconBg="bg-blue-100 dark:bg-blue-900/30"
-              iconColor="text-blue-600 dark:text-blue-400"
-              isActive={statusFilter === 'OPEN'}
-              loading={isLoading}
-              onClick={() => setStatusFilter((prev) => (prev === 'OPEN' ? 'all' : 'OPEN'))}
-            />
-            <FilterStatCard
-              label="Em andamento"
-              count={stats.IN_PROGRESS}
-              icon={CircleDot}
-              iconBg="bg-yellow-100 dark:bg-yellow-900/30"
-              iconColor="text-yellow-600 dark:text-yellow-400"
-              isActive={statusFilter === 'IN_PROGRESS'}
-              loading={isLoading}
-              onClick={() =>
-                setStatusFilter((prev) => (prev === 'IN_PROGRESS' ? 'all' : 'IN_PROGRESS'))
-              }
-            />
-            <FilterStatCard
-              label="Concluídas"
-              count={stats.CONCLUDED}
-              icon={CheckCircle2}
-              iconBg="bg-green-100 dark:bg-green-900/30"
-              iconColor="text-green-600 dark:text-green-400"
-              isActive={statusFilter === 'CONCLUDED'}
-              loading={isLoading}
-              onClick={() =>
-                setStatusFilter((prev) => (prev === 'CONCLUDED' ? 'all' : 'CONCLUDED'))
-              }
-            />
-            <FilterStatCard
-              label="Canceladas"
-              count={stats.CANCELLED}
-              icon={Ban}
-              iconBg="bg-red-100 dark:bg-red-900/30"
-              iconColor="text-red-600 dark:text-red-400"
-              isActive={statusFilter === 'CANCELLED'}
-              loading={isLoading}
-              onClick={() =>
-                setStatusFilter((prev) => (prev === 'CANCELLED' ? 'all' : 'CANCELLED'))
-              }
-            />
+          <div id="secao-etapas-contabil" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas do atendimento"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGE_TABS.map((tab) => {
+                const active = statusFilter === tab.filter;
+                const count = tab.filter === 'all' ? stats.total : stats[tab.filter];
+                return (
+                  <React.Fragment key={tab.filter}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStatusFilter(tab.filter)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={count ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {tab.filter === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
-                    <Calculator className="h-5 w-5 text-blue-600 sm:h-6 sm:w-6 dark:text-blue-400" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Solicitações
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Pedidos recebidos e acompanhamento do atendimento
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
