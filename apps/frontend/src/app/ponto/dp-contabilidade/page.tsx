@@ -501,18 +501,11 @@ export default function DpContabilidadePage() {
                   <CadastroListLoading message="Carregando solicitações..." />
                 ) : requests.length === 0 ? (
                   hasActiveFilters ? (
-                    <div className="rounded-lg border border-dashed border-gray-300 py-8 text-center dark:border-gray-600">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Nenhuma solicitação encontrada para os filtros aplicados.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={clearFilters}
-                        className="mt-2 text-sm font-medium text-red-600 hover:underline dark:text-red-400"
-                      >
-                        Limpar filtros
-                      </button>
-                    </div>
+                    <CadastroListEmpty
+                      icon={ClipboardList}
+                      title="Nenhuma solicitação encontrada"
+                      hint="Ajuste a busca ou os filtros para ver outros resultados."
+                    />
                   ) : (
                     <CadastroListEmpty
                       icon={ClipboardList}

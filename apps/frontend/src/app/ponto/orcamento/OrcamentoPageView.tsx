@@ -3236,7 +3236,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   pronta: 'FD pronta',
   aguardando_aprovacao: 'Aguardando aprovação',
   aprovado: 'Aprovado',
-  em_correcao: 'Reprovada',
+  em_correcao: 'Reprovado',
   reprovado: 'Reprovado',
   finalizado: 'Finalizado',
 };

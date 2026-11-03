@@ -3,7 +3,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, Calculator, Clock, FileEdit, Filter, Layers, Plus, Search, Upload, X } from 'lucide-react';
+import {
+  BadgeCheck,
+  CheckCircle,
+  Calculator,
+  ClipboardCheck,
+  Clock,
+  FileEdit,
+  Filter,
+  Layers,
+  Plus,
+  RotateCcw,
+  Search,
+  Upload,
+  X,
+  XCircle,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -11,10 +26,11 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   RowActionMenuCell,
@@ -86,19 +102,21 @@ type OrcamentoListItem = {
 
 const ITEMS_PER_PAGE = 20;
 
-type StatusCard = 'all' | 'elaboracao' | 'aguardando' | 'finalizados';
+type StatusCard = 'all' | Exclude<OrcamentoStatusAprovacao, 'reprovado'>;
 
-const STATUS_CARD_MATCH: Record<StatusCard, OrcamentoStatusAprovacao[] | null> = {
-  all: null,
-  elaboracao: ['rascunho', 'pronta', 'em_correcao', 'reprovado'],
-  aguardando: ['aguardando_aprovacao'],
-  finalizados: ['aprovado', 'finalizado'],
-};
+const STAGE_TABS: { card: StatusCard; label: string }[] = [
+  { card: 'all', label: 'Todos' },
+  { card: 'rascunho', label: 'Rascunho' },
+  { card: 'pronta', label: 'FD Pronta' },
+  { card: 'aguardando_aprovacao', label: 'Aguardando Aprovação' },
+  { card: 'aprovado', label: 'Aprovado' },
+  { card: 'em_correcao', label: 'Reprovado' },
+  { card: 'finalizado', label: 'Finalizado' },
+];
 
-const STATUS_LIST_HEADER: Record<
-  StatusCard,
-  { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string }
-> = {
+type ListHeaderInfo = { title: string; subtitle: string; Icon: React.ElementType; iconBg: string; iconColor: string };
+
+const STATUS_LIST_HEADER: Record<StatusCard, ListHeaderInfo> = {
   all: {
     title: 'Orçamentos',
     subtitle: 'Crie, edite e exclua os orçamentos dos seus contratos',
@@ -106,23 +124,44 @@ const STATUS_LIST_HEADER: Record<
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
-  elaboracao: {
-    title: 'Em elaboração',
-    subtitle: 'Orçamentos em rascunho, FD pronta ou em correção',
+  rascunho: {
+    title: 'Rascunho',
+    subtitle: 'Orçamentos ainda em elaboração',
     Icon: FileEdit,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
-  aguardando: {
-    title: 'Aguardando aprovação',
+  pronta: {
+    title: 'FD Pronta',
+    subtitle: 'Orçamentos com a ficha de demanda pronta',
+    Icon: ClipboardCheck,
+    iconBg: 'bg-sky-100 dark:bg-sky-900/30',
+    iconColor: 'text-sky-600 dark:text-sky-400',
+  },
+  aguardando_aprovacao: {
+    title: 'Aguardando Aprovação',
     subtitle: 'Orçamentos enviados e ainda sem aprovação',
     Icon: Clock,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
     iconColor: 'text-indigo-600 dark:text-indigo-400',
   },
-  finalizados: {
-    title: 'Finalizados',
-    subtitle: 'Orçamentos aprovados ou finalizados',
+  em_correcao: {
+    title: 'Reprovado',
+    subtitle: 'Orçamentos reprovados e devolvidos para correção',
+    Icon: RotateCcw,
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+  },
+  aprovado: {
+    title: 'Aprovado',
+    subtitle: 'Orçamentos aprovados',
+    Icon: BadgeCheck,
+    iconBg: 'bg-teal-100 dark:bg-teal-900/30',
+    iconColor: 'text-teal-600 dark:text-teal-400',
+  },
+  finalizado: {
+    title: 'Finalizado',
+    subtitle: 'Orçamentos finalizados',
     Icon: CheckCircle,
     iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
     iconColor: 'text-emerald-600 dark:text-emerald-400',
@@ -130,16 +169,17 @@ const STATUS_LIST_HEADER: Record<
 };
 
 function matchesStatusCard(status: OrcamentoStatusAprovacao, card: StatusCard): boolean {
-  const allowed = STATUS_CARD_MATCH[card];
-  return !allowed || allowed.includes(status);
+  // "reprovado" é um status antigo, igual ao Reprovado (devolvida para correção): as duas ficam na mesma aba.
+  if (card === 'em_correcao') return status === 'em_correcao' || status === 'reprovado';
+  return card === 'all' || status === card;
 }
 
 const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   rascunho: 'Rascunho',
-  pronta: 'FD pronta',
-  aguardando_aprovacao: 'Aguardando aprovação',
+  pronta: 'FD Pronta',
+  aguardando_aprovacao: 'Aguardando Aprovação',
   aprovado: 'Aprovado',
-  em_correcao: 'Reprovada',
+  em_correcao: 'Reprovado',
   reprovado: 'Reprovado',
   finalizado: 'Finalizado',
 };
@@ -417,15 +457,19 @@ export default function OrcamentosPage() {
     return familiasAtuais.filter((o) => idsBusca.has(o.id) && matchesStatusCard(o.status, statusCard));
   }, [familiasAtuais, orcamentosFiltrados, statusCard]);
 
-  const stats = useMemo(
-    () => ({
-      total: familiasAtuais.length,
-      elaboracao: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'elaboracao')).length,
-      aguardando: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'aguardando')).length,
-      finalizados: familiasAtuais.filter((o) => matchesStatusCard(o.status, 'finalizados')).length,
-    }),
-    [familiasAtuais]
-  );
+  const stats = useMemo(() => {
+    const counts: Record<StatusCard, number> = {
+      all: familiasAtuais.length,
+      rascunho: 0,
+      pronta: 0,
+      aguardando_aprovacao: 0,
+      em_correcao: 0,
+      aprovado: 0,
+      finalizado: 0,
+    };
+    for (const o of familiasAtuais) counts[o.status === 'reprovado' ? 'em_correcao' : o.status] += 1;
+    return counts;
+  }, [familiasAtuais]);
 
   // Numeração em sequência (o mais recente tem o maior número), mantida ao filtrar/buscar.
   const numeroPorOrcamento = useMemo(() => {
@@ -549,55 +593,40 @@ export default function OrcamentosPage() {
             description="Orçamentos dos contratos liberados para você."
           />
 
-          <div className={pageStatCardsGridClass}>
-            <FilterStatCard
-              label="Total"
-              count={stats.total}
-              icon={Layers}
-              iconBg="bg-blue-100 dark:bg-blue-900/30"
-              iconColor="text-blue-600 dark:text-blue-400"
-              isActive={statusCard === 'all'}
-              onClick={() => {
-                setStatusCard('all');
-                setCurrentPage(1);
-              }}
-            />
-            <FilterStatCard
-              label="Em elaboração"
-              count={stats.elaboracao}
-              icon={FileEdit}
-              iconBg="bg-amber-100 dark:bg-amber-900/30"
-              iconColor="text-amber-600 dark:text-amber-400"
-              isActive={statusCard === 'elaboracao'}
-              onClick={() => {
-                setStatusCard('elaboracao');
-                setCurrentPage(1);
-              }}
-            />
-            <FilterStatCard
-              label="Aguardando aprovação"
-              count={stats.aguardando}
-              icon={Clock}
-              iconBg="bg-indigo-100 dark:bg-indigo-900/30"
-              iconColor="text-indigo-600 dark:text-indigo-400"
-              isActive={statusCard === 'aguardando'}
-              onClick={() => {
-                setStatusCard('aguardando');
-                setCurrentPage(1);
-              }}
-            />
-            <FilterStatCard
-              label="Finalizados"
-              count={stats.finalizados}
-              icon={CheckCircle}
-              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
-              iconColor="text-emerald-600 dark:text-emerald-400"
-              isActive={statusCard === 'finalizados'}
-              onClick={() => {
-                setStatusCard('finalizados');
-                setCurrentPage(1);
-              }}
-            />
+          <div id="secao-etapas-orcamentos" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas dos orçamentos"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGE_TABS.map((tab) => {
+                const active = statusCard === tab.card;
+                return (
+                  <React.Fragment key={tab.card}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => {
+                        setStatusCard(tab.card);
+                        setCurrentPage(1);
+                      }}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={stats[tab.card] ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {tab.card === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
