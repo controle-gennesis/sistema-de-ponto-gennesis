@@ -415,14 +415,16 @@ function useCopiaCelulaMedicao() {
   );
 }
 
-/** Referências da mesma composição andam junto com a linha, como no Excel. A linha T não muda. */
-function deslocarFormulaLinhas(formula: string, rotulo: string, delta: number): string {
+/**
+ * Referências a linhas andam junto com a linha ao copiar/arrastar, como no Excel: vale para a própria composição
+ * e para as outras ({1.1.1!3!N} vira {1.1.1!4!N} na linha de baixo). A linha T (total) não muda.
+ */
+function deslocarFormulaLinhas(formula: string, _rotulo: string, delta: number): string {
   if (!delta || !formula.trimStart().startsWith('=')) return formula;
-  const rot = rotulo.trim();
   return formula.replace(
     /\{([^{}!]+)!(\d+|T)!(SUB|C|L|H|N|%|A|V)\}/gi,
     (bruto, r: string, lin: string, col: string) => {
-      if (r.trim() !== rot || /^t$/i.test(lin)) return bruto;
+      if (/^t$/i.test(lin)) return bruto;
       return `{${r}!${Math.max(1, Number(lin) + delta)}!${col}}`;
     }
   );
@@ -3166,14 +3168,14 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         </span>
       </th>
       {[
-        { rotulo: 'Quantidade', valor: totalMemoriaQtd, title: 'Total da memória de cálculo', calculo: false, cor: 0 },
-        { rotulo: 'Unitário s/ BDI', valor: precoUnitarioSemBdi, title: 'Valor unitário sem BDI', calculo: false, cor: 1 },
+        { rotulo: 'Quantidade', valor: totalMemoriaQtd, title: 'Total da memória de cálculo', calculo: false, moeda: false, cor: 0 },
+        { rotulo: 'Unitário s/ BDI', valor: precoUnitarioSemBdi, title: 'Valor unitário sem BDI', calculo: false, moeda: true, cor: 1 },
         {
           rotulo: 'Total s/ BDI',
           valor: precoUnitarioSemBdi == null ? null : totalMemoriaQtd * precoUnitarioSemBdi,
           title: 'Duplo clique para ver o cálculo (quantidade × unitário s/ BDI)',
           calculo: true,
-          cor: -1,
+          moeda: true, cor: -1,
         },
       ].map(c => (
         <th
@@ -3204,7 +3206,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               {c.rotulo}
             </span>
             <span className="text-xs font-bold tabular-nums text-gray-800 dark:text-gray-100">
-              {c.valor == null ? '—' : formatMedicaoCentavos(c.valor)}
+              {c.valor == null ? '—' : `${c.moeda ? 'R$ ' : ''}${formatMedicaoCentavos(c.valor)}`}
             </span>
           </div>
           {c.calculo && calcSemBdiVisivel && totalSemBdiCelulaRef.current && precoUnitarioSemBdi != null ? (
@@ -3448,6 +3450,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         const textoLinha = deslocarFormulaLinhas(texto, itemRotulo, linhaDadosDe(i) - linhaDadosDe(idxOrigem));
         gravarCelulaMedicao(i, campo, textoLinha, linha);
       }
+      // Como no Excel: depois de preencher, a seleção passa a cobrir todas as células preenchidas.
+      const col = COLUNAS_MEDICAO.indexOf(campo);
+      if (col >= 0) setSelecao({ idxIni: inicio, idxFim: fim, colIni: col, colFim: col });
     });
   };
 

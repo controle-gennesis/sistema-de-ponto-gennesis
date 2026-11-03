@@ -6,7 +6,7 @@ import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
@@ -1182,41 +1182,26 @@ export function SolicitacoesGeraisPage() {
                   {loadingMy ? (
                     <CadastroListLoading message="Carregando solicitações…" />
                   ) : myRequests.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <ClipboardList
-                        className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
-                        aria-hidden
-                        strokeWidth={1.25}
-                      />
-                      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                        Nenhuma solicitação ainda.
-                      </p>
-                      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                        Use <span className="font-medium text-gray-700 dark:text-gray-300">Nova solicitação</span> acima para
-                        enviar um pedido e acompanhar o andamento nesta lista.
-                      </p>
-                    </div>
+                    <CadastroListEmpty
+                      icon={ClipboardList}
+                      title="Nenhuma solicitação ainda."
+                      hint="Use Nova solicitação acima para enviar um pedido e acompanhar o andamento nesta lista."
+                    />
                   ) : filteredMyRequests.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <ListHeaderIcon
-                        className={`mx-auto mb-3 h-10 w-10 ${listHeader.iconColor} opacity-60`}
-                        aria-hidden
-                        strokeWidth={1.25}
-                      />
-                      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                        Nenhuma solicitação encontrada
-                      </p>
-                      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                        {destinationFilter !== 'all' &&
+                    <CadastroListEmpty
+                      icon={ListHeaderIcon}
+                      title="Nenhuma solicitação encontrada"
+                      hint={
+                        destinationFilter !== 'all' &&
                         !mySearch.trim() &&
                         myStatusFilter === 'all' &&
                         filterUrgency === 'all' &&
                         filterRequestType === 'all' &&
                         filterContractId === 'all'
                           ? `Não há solicitações enviadas ao ${listHeader.title} ainda.`
-                          : 'Ajuste os filtros ou aguarde novas solicitações.'}
-                      </p>
-                    </div>
+                          : 'Ajuste a busca ou os filtros para ver outros resultados.'
+                      }
+                    />
                   ) : (
                     <>
                       <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">

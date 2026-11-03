@@ -5,7 +5,7 @@ import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -997,17 +997,11 @@ export function GerenciarSolicitacoesGeraisPage({
                         {filteredRequests.length === 0 && (
                           <tr>
                             <td colSpan={9} className="px-6 py-10 text-center">
-                              <ListHeaderIcon
-                                className={`mx-auto mb-3 h-10 w-10 ${listHeader.iconColor} opacity-60`}
-                                aria-hidden
-                                strokeWidth={1.25}
+                              <CadastroListEmpty
+                                icon={ListHeaderIcon}
+                                title="Nenhuma solicitação encontrada"
+                                hint="Ajuste a busca ou os filtros para ver outros resultados."
                               />
-                              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                                Nenhuma solicitação encontrada
-                              </p>
-                              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                Ajuste os filtros ou aguarde novas solicitações.
-                              </p>
                             </td>
                           </tr>
                         )}

@@ -19,7 +19,7 @@ import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -679,23 +679,17 @@ export function SolicitacoesContabilidadePage() {
                 {loadingList ? (
                   <CadastroListLoading message="Carregando solicitações…" />
                 ) : filtered.length === 0 ? (
-                  <div className="py-10 text-center">
-                    <ClipboardList
-                      className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
-                      aria-hidden
-                      strokeWidth={1.25}
-                    />
-                    <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                      {requests.length === 0 ? 'Nenhuma solicitação ainda.' : 'Nenhuma solicitação encontrada'}
-                    </p>
-                    <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                      {requests.length === 0
+                  <CadastroListEmpty
+                    icon={ClipboardList}
+                    title={requests.length === 0 ? 'Nenhuma solicitação ainda.' : 'Nenhuma solicitação encontrada'}
+                    hint={
+                      requests.length === 0
                         ? canCreate
                           ? 'Use Nova solicitação para enviar um pedido à Contabilidade.'
                           : 'Os pedidos enviados à Contabilidade aparecem aqui.'
-                        : 'Ajuste a busca ou o filtro de etapa.'}
-                    </p>
-                  </div>
+                        : 'Ajuste a busca ou o filtro de etapa.'
+                    }
+                  />
                 ) : (
                   <>
                     <div className="mb-2 text-sm text-gray-600 dark:text-gray-400">

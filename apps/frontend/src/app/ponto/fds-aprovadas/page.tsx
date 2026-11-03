@@ -47,7 +47,8 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
@@ -70,14 +71,14 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   PENDING: {
-    title: 'Fila',
+    title: 'Em Fila',
     subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
   QUOTATION: {
-    title: 'Cotação',
+    title: 'Em Cotação',
     subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
     Icon: Timer,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
@@ -120,12 +121,18 @@ function matchesPurchaseStatus(
 
 const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
-  { value: 'NONE', label: 'Fila' },
+  { value: 'NONE', label: 'Em Fila' },
   { value: 'WAREHOUSE_DF', label: 'Almoxarifado' },
-  { value: 'QUOTATION', label: 'Cotação' },
+  { value: 'QUOTATION', label: 'Em Cotação' },
   { value: 'FINISHED', label: 'Finalizado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ]);
+
+/** Rótulo do status de compras no badge: Fila e Cotação aparecem como "Em Fila" e "Em Cotação". */
+function labelBadgeCompras(status: Parameters<typeof purchaseStatusLabel>[0]): string {
+  const label = purchaseStatusLabel(status);
+  return label === 'Fila' || label === 'Cotação' ? `Em ${label}` : label;
+}
 
 export default function FdsAprovadasPage() {
   const router = useRouter();
@@ -271,31 +278,43 @@ export default function FdsAprovadasPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
-            {(
-              [
+          <div id="secao-etapas-fichas" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas das fichas de demanda"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {([
                 { filter: 'ALL', label: 'Todas' },
-                { filter: 'PENDING', label: 'Fila' },
-                { filter: 'QUOTATION', label: 'Cotação' },
+                { filter: 'PENDING', label: 'Em Fila' },
+                { filter: 'QUOTATION', label: 'Em Cotação' },
                 { filter: 'FINISHED', label: 'Finalizadas' },
                 { filter: 'CANCELLED', label: 'Canceladas' },
-              ] as const
-            ).map((card) => {
-              const style = LIST_HEADER_BY_FILTER[card.filter];
-              return (
-                <FilterStatCard
-                  key={card.filter}
-                  label={card.label}
-                  count={statCounts[card.filter]}
-                  icon={style.Icon}
-                  iconBg={style.iconBg}
-                  iconColor={style.iconColor}
-                  loading={loadingList}
-                  isActive={statCardFilter === card.filter}
-                  onClick={() => setStatCardFilter(card.filter)}
-                />
-              );
-            })}
+              ] as const).map((tab) => {
+                const active = statCardFilter === tab.filter;
+                return (
+                  <React.Fragment key={tab.filter}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStatCardFilter(tab.filter)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={statCounts[tab.filter] ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {tab.filter === 'ALL' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
@@ -462,9 +481,9 @@ export default function FdsAprovadasPage() {
                             <td className="px-3 py-4 text-center sm:px-6">
                               <span
                                 className={`inline-flex max-w-[220px] whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${fdPurchaseStatusBadgeClass(row.purchaseStatus)}`}
-                                title={purchaseStatusLabel(row.purchaseStatus)}
+                                title={labelBadgeCompras(row.purchaseStatus)}
                               >
-                                {purchaseStatusLabel(row.purchaseStatus)}
+                                {labelBadgeCompras(row.purchaseStatus)}
                               </span>
                             </td>
                             <td

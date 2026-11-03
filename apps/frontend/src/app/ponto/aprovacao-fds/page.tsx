@@ -60,6 +60,8 @@ import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
 
@@ -105,21 +107,21 @@ const CARD_STYLE: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   IN_APPROVAL: {
-    label: 'Aprovação',
+    label: 'Aguardando Aprovação',
     subtitle: 'Fichas aguardando a aprovação do gestor',
     Icon: FileCheck2,
     iconBg: 'bg-violet-100 dark:bg-violet-900/30',
     iconColor: 'text-violet-600 dark:text-violet-400',
   },
   PENDING: {
-    label: 'Fila',
+    label: 'Em Fila',
     subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
   QUOTATION: {
-    label: 'Cotação',
+    label: 'Em Cotação',
     subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
     Icon: Timer,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
@@ -449,23 +451,37 @@ export default function AprovacaoFdsPage() {
             description="Cadastre e acompanhe as fichas de demanda."
           />
 
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
-            {CARD_ORDER.map((card) => {
-              const style = CARD_STYLE[card];
-              return (
-                <FilterStatCard
-                  key={card}
-                  label={style.label}
-                  count={statusCounts[card]}
-                  icon={style.Icon}
-                  iconBg={style.iconBg}
-                  iconColor={style.iconColor}
-                  loading={loadingList}
-                  isActive={statusFilter === card}
-                  onClick={() => setStatusFilter((prev) => (prev === card ? 'ALL' : card))}
-                />
-              );
-            })}
+          <div id="secao-etapas-fichas" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas das fichas de demanda"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {CARD_ORDER.map((card) => ({ card, label: CARD_STYLE[card].label })).map((tab) => {
+                const active = statusFilter === tab.card;
+                return (
+                  <React.Fragment key={tab.card}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStatusFilter(tab.card)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {tab.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={statusCounts[tab.card] ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {tab.card === 'ALL' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
