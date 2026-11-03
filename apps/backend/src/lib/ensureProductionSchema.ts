@@ -880,6 +880,34 @@ async function ensureDpRequestTypeAdmAsos(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+/** Tipos e status das solicitações internas criadas direto para a Contabilidade. */
+async function ensureDpRequestAccountingDirectEnums(prisma: PrismaClient): Promise<void> {
+  const additions: Array<{ enumName: string; value: string }> = [
+    { enumName: 'DpRequestType', value: 'CONVENCAO_COLETIVA' },
+    { enumName: 'DpRequestType', value: 'FECHAMENTO_FOLHA' },
+    { enumName: 'DpRequestType', value: 'IMPOSTOS_ENCARGOS' },
+    { enumName: 'DpRequestType', value: 'REALOCACAO_COLABORADOR' },
+    { enumName: 'DpRequestType', value: 'RETIFICACAO_RECALCULO' },
+    { enumName: 'DpRequestType', value: 'SOLICITACAO_GERAL' },
+    { enumName: 'DpRequestStatus', value: 'IN_ACCOUNTING' },
+  ];
+  for (const { enumName, value } of additions) {
+    const rows = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+        SELECT 1 FROM pg_enum e
+        INNER JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = '${enumName}' AND e.enumlabel = '${value}'
+      ) AS "exists"`,
+    );
+    if (rows[0]?.exists) continue;
+    console.warn(
+      `[Schema] Enum ${enumName} sem ${value} — adicionando. ` +
+        'Prefira: cd apps/backend && npx prisma migrate deploy.',
+    );
+    await prisma.$executeRawUnsafe(`ALTER TYPE "${enumName}" ADD VALUE IF NOT EXISTS '${value}'`);
+  }
+}
+
 async function ensurePurchaseOrderAttachmentsColumn(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'purchase_orders'))) return;
   if (!(await columnExists(prisma, 'purchase_orders', 'attachments'))) {
@@ -3430,6 +3458,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureFinancialControlAttachmentsColumn(prisma);
     await ensureFinancialControlApplicationTypeColumn(prisma);
     await ensureDpRequestTypeAdmAsos(prisma);
+    await ensureDpRequestAccountingDirectEnums(prisma);
     await ensureLicitacoesTables(prisma);
     await ensureLicitacaoColumns(prisma);
     await ensureLicitacaoRegiaoAceitesTable(prisma);

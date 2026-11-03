@@ -8,6 +8,7 @@ import {
   Bell,
   CalendarClock,
   CalendarRange,
+  Calculator,
   ClipboardCheck,
   ClipboardList,
   FileCheck,
@@ -59,6 +60,9 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     canApproveMaterialRequests,
     canApproveEmpreiteiroDaily,
     canAccessRecebimentoEntregasRoutePage,
+    isDepartmentPessoal,
+    isDepartmentFinanceiro,
+    isDepartmentContabil,
   } = usePermissions();
   const { counts, isLoading: approvalsLoading } = useApprovalNotificationCounts();
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
@@ -71,6 +75,12 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
   const canSeeEntregaLogistica =
     isAdministrator || can(pathToModuleKey('/ponto/entrega-logistica'));
   const canSeeFdAprovadas = isAdministrator || can(pathToModuleKey('/ponto/fds-aprovadas'));
+  const canSeeAtendimentoContabil =
+    isAdministrator ||
+    isDepartmentPessoal ||
+    isDepartmentFinanceiro ||
+    isDepartmentContabil ||
+    can(pathToModuleKey('/ponto/dp-contabilidade'));
 
   const canSeeGestaoOs =
     isAdministrator ||
@@ -94,6 +104,19 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
       } | null;
     },
     enabled: !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
+  const { data: atendimentoContabilPendingCount = 0 } = useQuery({
+    queryKey: ['dp-contabilidade-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/dp-contabilidade/pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeAtendimentoContabil && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
@@ -314,6 +337,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: Truck,
       });
     }
+    if (canSeeAtendimentoContabil && atendimentoContabilPendingCount > 0) {
+      list.push({
+        id: 'atendimento-contabil',
+        title: 'Atendimento Contábil',
+        description: 'Pedidos aguardando atendimento',
+        count: atendimentoContabilPendingCount,
+        href: '/ponto/dp-contabilidade',
+        Icon: Calculator,
+      });
+    }
     if (chatUnreadCount > 0) {
       list.push({
         id: 'chat',
@@ -430,6 +463,8 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     fuelSuppliesPendingCount,
     vehicleReservationSuppliesPendingCount,
     entregaLogisticaPendingCount,
+    canSeeAtendimentoContabil,
+    atendimentoContabilPendingCount,
     chatUnreadCount,
     gestaoOsInbox,
   ]);

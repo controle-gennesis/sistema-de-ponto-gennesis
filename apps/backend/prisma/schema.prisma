@@ -765,6 +765,7 @@ enum DpRequestStatus {
   WAITING_RETURN_ENGINEERING // PendÃªncia engenharia
   WAITING_SUPPLIES // Aguardando setor de suprimentos (fluxo ADM/TST)
   WAITING_PAYMENT // Aguardando pagamento (fluxo ADM/TST)
+  IN_ACCOUNTING // Na Contabilidade (fluxo direto)
   CONCLUDED // ConcluÃ­da
   CANCELLED // Cancelada
 }
@@ -787,6 +788,12 @@ enum DpRequestType {
   ADM_INFORMATICA
   ADM_TREINAMENTOS_NR
   ADM_ASOS
+  CONVENCAO_COLETIVA
+  FECHAMENTO_FOLHA
+  IMPOSTOS_ENCARGOS
+  REALOCACAO_COLABORADOR
+  RETIFICACAO_RECALCULO
+  SOLICITACAO_GERAL
 }
 
 // Modelo de SolicitaÃ§Ã£o DP (especÃ­fico do AppSheet âSolicitaÃ§Ãµes Departamento Pessoalâ)

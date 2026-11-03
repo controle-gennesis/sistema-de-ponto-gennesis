@@ -357,6 +357,7 @@ const CATEGORY_ORDER = [
   'Departamento Pessoal',
   'Administração',
   'Financeiro',
+  'Contabilidade',
   'Métricas',
   'Engenharia',
   'Contratos e Licitações',
@@ -399,7 +400,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/gerenciar-atestados',
       '/ponto/gerenciar-solicitacoes',
       '/ponto/gerenciar-solicitacoes-dp',
-      '/ponto/dp-contabilidade',
+      '/ponto/solicitacoes-contabilidade',
       '/ponto/conversas-whatsapp',
       '/ponto/gerenciar-ferias',
       '/ponto/gerenciar-feriados',
@@ -411,6 +412,9 @@ function inferCategoryFromHref(href: string): string {
     ].some((p) => h === p)
   ) {
     return 'Departamento Pessoal';
+  }
+  if (h === '/ponto/dp-contabilidade') {
+    return 'Contabilidade';
   }
   if (h === '/ponto/gerenciar-solicitacoes-adm-tst') {
     return 'Administração';

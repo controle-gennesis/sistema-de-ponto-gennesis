@@ -10,7 +10,7 @@ router.use(authenticate);
 router.use(requireDpContabilidadeAccess);
 
 router.get('/', controller.list.bind(controller));
-router.post('/', controller.create.bind(controller));
+router.get('/pending-count', controller.pendingCount.bind(controller));
 router.get('/:id', controller.getById.bind(controller));
 router.post('/:id/comments', controller.addComment.bind(controller));
 router.put('/:id/status', controller.updateStatus.bind(controller));

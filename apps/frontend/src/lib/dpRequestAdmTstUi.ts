@@ -18,9 +18,9 @@ export const ADM_TST_FLOW_STATUSES: AdmTstFlowStatus[] = [
 ];
 
 export const ADM_TST_STATUS_LABELS: Record<AdmTstFlowStatus, string> = {
-  IN_REVIEW_DP: 'Em análise',
-  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
-  WAITING_PAYMENT: 'Aguardando pagamento',
+  IN_REVIEW_DP: 'Em Análise',
+  WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
+  WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };

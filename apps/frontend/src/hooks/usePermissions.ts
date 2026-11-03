@@ -814,6 +814,8 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
     '/ponto/gerenciar-solicitacoes-adm-tst':
       isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-adm-tst')),
+    '/ponto/solicitacoes-contabilidade':
+      isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-contabilidade')),
     '/ponto/dp-contabilidade':
       isAdministrator ||
       isDepartmentPessoal ||

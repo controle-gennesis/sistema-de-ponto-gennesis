@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BadgeCheck,
   BarChart3,
+  Calculator,
   ClipboardList,
   Database,
   DraftingCompass,
@@ -21,6 +22,7 @@ export const MODULE_CATEGORY_ICONS: Record<string, LucideIcon> = {
   'Departamento Pessoal': Users,
   Administração: ClipboardList,
   Financeiro: Landmark,
+  Contabilidade: Calculator,
   Métricas: BarChart3,
   Engenharia: DraftingCompass,
   'Contratos e Licitações': ScrollText,

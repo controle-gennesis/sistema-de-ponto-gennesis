@@ -1,5 +1,7 @@
 import { Prisma, type DpContabilidadeRequestType, type DpRequest } from '@prisma/client';
 import { prisma } from './prisma';
+import { isAccountingDirectRequestType } from './dpRequestDetails';
+import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
 
 const INTERNA_TYPE_LABELS: Record<string, string> = {
   ADMISSAO: 'Admissão',
@@ -7,6 +9,12 @@ const INTERNA_TYPE_LABELS: Record<string, string> = {
   RESCISAO: 'Rescisão',
   ALTERACAO_FUNCAO_SALARIO: 'Alteração de função/salário',
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
+  CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
+  FECHAMENTO_FOLHA: 'Fechamento da folha',
+  IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
+  REALOCACAO_COLABORADOR: 'Realocação de colaborador',
+  RETIFICACAO_RECALCULO: 'Retificação / recálculo',
+  SOLICITACAO_GERAL: 'Solicitação geral',
 };
 
 function mapInternaTypeToContabilidade(row: DpRequest): DpContabilidadeRequestType | null {
@@ -30,7 +38,107 @@ function mapInternaTypeToContabilidade(row: DpRequest): DpContabilidadeRequestTy
   }
 }
 
-function buildDescription(row: DpRequest, contractName: string | null, conclusionComment: string): string {
+/** O tipo da solicitação gera pedido no Atendimento Contábil ao ser finalizada pelo DP? */
+export function dpRequestGoesToAccounting(row: DpRequest): boolean {
+  return mapInternaTypeToContabilidade(row) !== null;
+}
+
+/** IDs de solicitações internas que já têm pedido correspondente no Atendimento Contábil. */
+export async function findDpRequestIdsLinkedToAccounting(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.$queryRaw<{ sourceDpRequestId: string }[]>`
+    SELECT "sourceDpRequestId" FROM "dp_contabilidade_requests"
+    WHERE "sourceDpRequestId" = ANY(${ids}::text[])
+  `;
+  return new Set(rows.map((r) => r.sourceDpRequestId));
+}
+
+/** Anexo recebido na criação (Base64) -> grava no S3 e devolve só a referência. */
+type AccountingAttachmentInput = {
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+  tipoArquivo: string;
+  dataValidade?: string;
+};
+
+export type StoredAccountingAttachment = {
+  fileName: string;
+  mimeType: string;
+  tipoArquivo: string;
+  dataValidade?: string;
+  url: string;
+  key: string;
+};
+
+/**
+ * Troca os anexos em Base64 de `details.anexos` por referências no armazenamento persistente (S3).
+ * Devolve também as chaves gravadas, para o chamador remover se a criação falhar depois.
+ */
+export async function storeAccountingAttachments(
+  details: Record<string, unknown>
+): Promise<{ details: Record<string, unknown>; storedKeys: string[] }> {
+  const raw = details.anexos;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    const { anexos: _drop, ...rest } = details;
+    return { details: rest, storedKeys: [] };
+  }
+
+  const stored: StoredAccountingAttachment[] = [];
+  const storedKeys: string[] = [];
+  try {
+    for (const item of raw as AccountingAttachmentInput[]) {
+      const saved = await savePersistentUpload({
+        folder: 'dp-contabilidade',
+        buffer: Buffer.from(item.dataBase64, 'base64'),
+        originalName: item.fileName,
+        mimeType: item.mimeType,
+        fileNamePrefix: 'contab-',
+        includeSafeOriginalName: true,
+      });
+      storedKeys.push(saved.key);
+      stored.push({
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        tipoArquivo: item.tipoArquivo,
+        ...(item.dataValidade ? { dataValidade: item.dataValidade } : {}),
+        url: saved.url,
+        key: saved.key,
+      });
+    }
+  } catch (err) {
+    await Promise.all(storedKeys.map((key) => deletePersistentUpload(key).catch(() => undefined)));
+    throw err;
+  }
+  return { details: { ...details, anexos: stored }, storedKeys };
+}
+
+export async function deleteStoredAccountingAttachments(keys: string[]): Promise<void> {
+  await Promise.all(keys.map((key) => deletePersistentUpload(key).catch(() => undefined)));
+}
+
+function strField(details: Record<string, unknown> | null, key: string): string {
+  const value = details?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Texto livre principal do pedido direto (usado na descrição e na busca do Atendimento Contábil). */
+function directMainText(row: DpRequest): string {
+  const details = (row.details ?? null) as Record<string, unknown> | null;
+  const parts = [
+    strField(details, 'assunto'),
+    strField(details, 'observacoes'),
+    strField(details, 'descricao'),
+    strField(details, 'motivo'),
+  ].filter(Boolean);
+  return parts.join('\n');
+}
+
+function buildConcludedDescription(
+  row: DpRequest,
+  contractName: string | null,
+  conclusionComment: string
+): string {
   const typeLabel = INTERNA_TYPE_LABELS[row.requestType] || row.requestType;
   const lines = [
     `Gerada automaticamente ao finalizar a solicitação interna nº ${row.displayNumber}.`,
@@ -44,11 +152,32 @@ function buildDescription(row: DpRequest, contractName: string | null, conclusio
   return lines.filter(Boolean).join('\n');
 }
 
-export async function createDpContabilidadeFromConcludedInterna(
+function buildDirectDescription(row: DpRequest, contractName: string | null): string {
+  const typeLabel = INTERNA_TYPE_LABELS[row.requestType] || row.requestType;
+  const lines = [
+    `Criada diretamente para a Contabilidade na solicitação interna nº ${row.displayNumber}.`,
+    `Tipo: ${typeLabel}`,
+    `Solicitante: ${row.solicitanteNome}${row.solicitanteEmail ? ` (${row.solicitanteEmail})` : ''}`,
+    row.sectorSolicitante ? `Setor: ${row.sectorSolicitante}` : '',
+    contractName ? `Contrato: ${contractName}` : '',
+    directMainText(row),
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
+type MirrorMode = 'concluded' | 'direct';
+
+async function createLinkedAccountingRequest(
   row: DpRequest,
-  actor: { id: string; name: string }
+  actor: { id: string; name: string },
+  mode: MirrorMode
 ): Promise<boolean> {
-  const requestType = mapInternaTypeToContabilidade(row);
+  const requestType: DpContabilidadeRequestType | null =
+    mode === 'direct'
+      ? isAccountingDirectRequestType(row.requestType)
+        ? (row.requestType as DpContabilidadeRequestType)
+        : null
+      : mapInternaTypeToContabilidade(row);
   if (!requestType) return false;
 
   const alreadyLinked = await prisma.$queryRaw<{ id: string }[]>`
@@ -77,8 +206,14 @@ export async function createDpContabilidadeFromConcludedInterna(
     select: { displayNumber: true },
   });
 
-  const conclusionComment = (row.dpConclusionComment || row.dpFeedback || '').trim();
-  const description = buildDescription(row, contractName, conclusionComment);
+  const description =
+    mode === 'direct'
+      ? buildDirectDescription(row, contractName)
+      : buildConcludedDescription(row, contractName, (row.dpConclusionComment || row.dpFeedback || '').trim());
+  const firstComment =
+    mode === 'direct'
+      ? `Solicitação interna nº ${row.displayNumber} enviada diretamente à Contabilidade.`
+      : `Solicitação interna nº ${row.displayNumber} encaminhada automaticamente à Contabilidade.`;
 
   try {
     const created = await prisma.dpContabilidadeRequest.create({
@@ -98,7 +233,7 @@ export async function createDpContabilidadeFromConcludedInterna(
           create: {
             userId: actor.id,
             userName: actor.name,
-            body: `Solicitação interna nº ${row.displayNumber} encaminhada automaticamente à Contabilidade.`,
+            body: firstComment,
           },
         },
       },
@@ -116,4 +251,20 @@ export async function createDpContabilidadeFromConcludedInterna(
     }
     throw err;
   }
+}
+
+/** DP finalizou uma solicitação interna de tipo que segue para a Contabilidade. */
+export function createDpContabilidadeFromConcludedInterna(
+  row: DpRequest,
+  actor: { id: string; name: string }
+): Promise<boolean> {
+  return createLinkedAccountingRequest(row, actor, 'concluded');
+}
+
+/** Solicitação interna criada direto para a Contabilidade (sem gestor/DP). */
+export function createDpContabilidadeFromDirectInterna(
+  row: DpRequest,
+  actor: { id: string; name: string }
+): Promise<boolean> {
+  return createLinkedAccountingRequest(row, actor, 'direct');
 }

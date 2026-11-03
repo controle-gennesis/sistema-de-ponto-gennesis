@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
+import { isAccountingDirectRequestType } from '../lib/dpRequestDetails';
 
 const REQUEST_TYPES = [
   'ADMISSAO',
@@ -22,20 +23,19 @@ const REQUEST_TYPES = [
 
 const STATUSES = ['OPEN', 'IN_PROGRESS', 'CONCLUDED', 'CANCELLED'] as const;
 
-const createSchema = z.object({
-  requestType: z.enum(REQUEST_TYPES),
-  title: z.string().trim().min(3, 'Informe um título com pelo menos 3 caracteres.').max(180),
-  description: z.string().trim().min(8, 'Descreva a solicitação com pelo menos 8 caracteres.').max(8000),
-  contractId: z.string().trim().min(1).optional().nullable(),
-});
-
 const commentSchema = z.object({
   body: z.string().trim().min(1, 'Informe o comentário.').max(4000),
 });
 
-const statusSchema = z.object({
-  status: z.enum(['IN_PROGRESS', 'CONCLUDED', 'CANCELLED']),
-});
+const statusSchema = z
+  .object({
+    status: z.enum(['IN_PROGRESS', 'CONCLUDED', 'CANCELLED']),
+    comment: z.string().trim().max(4000).optional(),
+  })
+  .refine((v) => v.status !== 'CANCELLED' || (v.comment?.length ?? 0) >= 3, {
+    message: 'Informe o motivo do cancelamento.',
+    path: ['comment'],
+  });
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -72,10 +72,90 @@ async function loadActor(userId: string) {
   };
 }
 
-function serializeRequest(
-  row: Prisma.DpContabilidadeRequestGetPayload<{ include: { comments: true } }>
-) {
+type RequestRow = Prisma.DpContabilidadeRequestGetPayload<{ include: { comments: true } }>;
+
+/** Dados estruturados da solicitação interna de origem (só os tipos criados direto para a Contabilidade). */
+type SourceInfo = {
+  displayNumber: number;
+  requestType: string;
+  details: unknown;
+  company: string | null;
+  polo: string | null;
+  prazoInicio: string;
+  prazoFim: string;
+  costCenterName: string | null;
+  /** Nomes dos colaboradores citados em `details` (employeeId / colaboradorEmployeeId). */
+  employeeNames: Record<string, string>;
+};
+
+async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>> {
+  const ids = rows
+    .filter(
+      (r) => (r as { sourceDpRequestId?: string | null }).sourceDpRequestId && isAccountingDirectRequestType(r.requestType)
+    )
+    .map((r) => (r as { sourceDpRequestId?: string | null }).sourceDpRequestId as string);
+  const map = new Map<string, SourceInfo>();
+  if (ids.length === 0) return map;
+  const sources = await prisma.dpRequest.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      displayNumber: true,
+      requestType: true,
+      details: true,
+      company: true,
+      polo: true,
+      prazoInicio: true,
+      prazoFim: true,
+      costCenter: { select: { name: true } },
+    },
+  });
+  const employeeIds = new Set<string>();
+  for (const src of sources) {
+    const det = (src.details ?? {}) as Record<string, unknown>;
+    for (const key of ['employeeId', 'colaboradorEmployeeId']) {
+      const v = det[key];
+      if (typeof v === 'string' && v.trim()) employeeIds.add(v.trim());
+    }
+  }
+  const employees = employeeIds.size
+    ? await prisma.employee.findMany({
+        where: { id: { in: [...employeeIds] } },
+        select: { id: true, user: { select: { name: true } } },
+      })
+    : [];
+  const employeeNames: Record<string, string> = {};
+  for (const e of employees) {
+    if (e.user?.name) employeeNames[e.id] = e.user.name;
+  }
+
+  for (const s of sources) {
+    map.set(s.id, {
+      displayNumber: s.displayNumber,
+      requestType: s.requestType,
+      details: s.details,
+      company: s.company,
+      polo: s.polo,
+      prazoInicio: s.prazoInicio.toISOString(),
+      prazoFim: s.prazoFim.toISOString(),
+      costCenterName: s.costCenter?.name ?? null,
+      employeeNames,
+    });
+  }
+  return map;
+}
+
+async function serializeWithSources(rows: RequestRow[]) {
+  const sources = await loadSources(rows);
+  return rows.map((row) => {
+    const sourceId = (row as { sourceDpRequestId?: string | null }).sourceDpRequestId ?? null;
+    return serializeRequest(row, sourceId ? (sources.get(sourceId) ?? null) : null);
+  });
+}
+
+function serializeRequest(row: RequestRow, source: SourceInfo | null = null) {
   return {
+    source,
     id: row.id,
     displayNumber: row.displayNumber,
     createdByUserId: row.createdByUserId,
@@ -183,7 +263,7 @@ export class DpContabilidadeController {
 
       res.json({
         success: true,
-        data: rows.map(serializeRequest),
+        data: await serializeWithSources(rows),
         stats,
       });
     } catch (err) {
@@ -199,57 +279,19 @@ export class DpContabilidadeController {
         include: listInclude,
       });
       if (!existing) throw createError('Solicitação não encontrada.', 404);
-      res.json({ success: true, data: serializeRequest(existing) });
+      res.json({ success: true, data: (await serializeWithSources([existing]))[0] });
     } catch (err) {
       next(err);
     }
   }
 
-  async create(req: AuthRequest, res: Response, next: NextFunction) {
+  /** Pedidos ainda não atendidos (Abertas): alimenta o selo do menu e do sino. */
+  async pendingCount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const parsed = createSchema.parse(req.body);
-      const actor = await loadActor(req.user.id);
-
-      let contractName: string | null = null;
-      if (parsed.contractId) {
-        const contract = await prisma.contract.findUnique({
-          where: { id: parsed.contractId },
-          select: { id: true, name: true },
-        });
-        if (!contract) throw createError('Contrato não encontrado.', 404);
-        contractName = contract.name;
-      }
-
-      const last = await prisma.dpContabilidadeRequest.findFirst({
-        orderBy: { displayNumber: 'desc' },
-        select: { displayNumber: true },
-      });
-      const displayNumber = (last?.displayNumber ?? 0) + 1;
-
-      const created = await prisma.dpContabilidadeRequest.create({
-        data: {
-          displayNumber,
-          createdByUserId: actor.id,
-          createdByName: actor.name,
-          createdByEmail: actor.email,
-          sector: actor.sector,
-          requestType: parsed.requestType,
-          title: parsed.title,
-          description: parsed.description,
-          contractId: parsed.contractId || null,
-          contractName,
-          status: 'OPEN',
-        },
-        include: listInclude,
-      });
-
-      res.status(201).json({ success: true, data: serializeRequest(created) });
+      const count = await prisma.dpContabilidadeRequest.count({ where: { status: 'OPEN' } });
+      res.json({ success: true, data: { count } });
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
-        return;
-      }
       next(err);
     }
   }
@@ -286,7 +328,7 @@ export class DpContabilidadeController {
         where: { id: existing.id },
         include: listInclude,
       });
-      res.json({ success: true, data: serializeRequest(updated!) });
+      res.json({ success: true, data: (await serializeWithSources([updated!]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {
         next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
@@ -299,7 +341,7 @@ export class DpContabilidadeController {
   async updateStatus(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const { status } = statusSchema.parse(req.body);
+      const { status, comment } = statusSchema.parse(req.body);
       const actor = await loadActor(req.user.id);
 
       const existing = await prisma.dpContabilidadeRequest.findUnique({
@@ -321,12 +363,67 @@ export class DpContabilidadeController {
         data.cancelledByUserId = actor.id;
       }
 
-      const updated = await prisma.dpContabilidadeRequest.update({
-        where: { id: existing.id, status: existing.status },
-        data,
-        include: listInclude,
+      const commentBody = comment
+        ? status === 'CANCELLED'
+          ? `Motivo do cancelamento: ${comment}`
+          : comment
+        : '';
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.dpContabilidadeRequest.update({
+          where: { id: existing.id, status: existing.status },
+          data,
+        });
+        if (commentBody) {
+          await tx.dpContabilidadeComment.create({
+            data: {
+              requestId: row.id,
+              userId: actor.id,
+              userName: actor.name,
+              body: commentBody,
+            },
+          });
+        }
+        // Pedido nascido de uma solicitação interna direta: o status volta para quem pediu.
+        const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
+        if (sourceId && (status === 'CONCLUDED' || status === 'CANCELLED')) {
+          const source = await tx.dpRequest.findUnique({
+            where: { id: sourceId },
+            select: { id: true, requestType: true, status: true, statusHistory: true },
+          });
+          if (
+            source &&
+            isAccountingDirectRequestType(source.requestType) &&
+            source.status === 'IN_ACCOUNTING'
+          ) {
+            const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+            await tx.dpRequest.update({
+              where: { id: source.id },
+              data: {
+                status,
+                statusHistory: [
+                  ...history,
+                  {
+                    at: new Date().toISOString(),
+                    status,
+                    actorUserId: actor.id,
+                    actorName: actor.name,
+                  },
+                ] as Prisma.InputJsonValue,
+                dpHandledBy: actor.id,
+                ...(status === 'CONCLUDED'
+                  ? { dpConcludedAt: new Date(), dpConclusionComment: comment || null }
+                  : { dpCancellationReason: comment || null }),
+              },
+            });
+          }
+        }
+        return tx.dpContabilidadeRequest.findUniqueOrThrow({
+          where: { id: row.id },
+          include: listInclude,
+        });
       });
-      res.json({ success: true, data: serializeRequest(updated) });
+      res.json({ success: true, data: (await serializeWithSources([updated]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {
         next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));

@@ -41,7 +41,13 @@ import {
   getAdmTstStatusRowBadge,
   isAdmTstFlowStatus,
 } from '@/lib/dpRequestAdmTstUi';
-import { buildDpFeedbackSelectOptions, buildDpStatusFilterOptions } from '@/lib/dpRequestDpUi';
+import {
+  buildDpFeedbackSelectOptions,
+  buildDpFeedbackSelectOptionsForType,
+  buildDpStatusFilterOptions,
+  DP_SENT_TO_ACCOUNTING_LABEL,
+  dpRequestIsSentToAccounting,
+} from '@/lib/dpRequestDpUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -134,6 +140,8 @@ type DpRequest = {
   details?: Record<string, unknown> | null;
   statusHistory?: unknown;
   employee?: { costCenter?: string | null } | null;
+  /** Finalizada em tipo que vai à Contabilidade, mas sem pedido lá (envio automático falhou). */
+  contabilidadePendente?: boolean;
 };
 
 function formatDateTime(iso?: string | null) {
@@ -154,15 +162,15 @@ function formatDuration(ms: number) {
 }
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
-  WAITING_MANAGER: 'Aguardando aprovação',
-  IN_REVIEW_DP: 'Em análise',
-  IN_FINANCEIRO: 'No financeiro',
-  WAITING_RETURN: 'Pendência colaborador',
-  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
+  WAITING_MANAGER: 'Aguardando Aprovação',
+  IN_REVIEW_DP: 'Em Análise',
+  IN_FINANCEIRO: 'No Financeiro',
+  WAITING_RETURN: 'Pendência Colaborador',
+  WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
-  WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
-  WAITING_PAYMENT: 'Aguardando pagamento',
+  WAITING_RETURN_ENGINEERING: 'Pendência Engenharia',
+  WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
+  WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
@@ -589,17 +597,32 @@ export function GerenciarSolicitacoesGeraisPage({
     [scope]
   );
 
-  const buildTimeline = (r: DpRequest) =>
-    buildDpRequestTimeline(r, statusLabelsForScope, formatDuration);
+  const sentToAccounting = (r: Pick<DpRequest, 'requestType'>) =>
+    scope !== 'ADM_TST' && dpRequestIsSentToAccounting(r.requestType);
 
-  const getStatusLabel = (status: DpRequestStatus) => {
+  const buildTimeline = (r: DpRequest) =>
+    buildDpRequestTimeline(
+      r,
+      sentToAccounting(r)
+        ? { ...statusLabelsForScope, CONCLUDED: DP_SENT_TO_ACCOUNTING_LABEL }
+        : statusLabelsForScope,
+      formatDuration
+    );
+
+  const getStatusLabel = (status: DpRequestStatus, requestType?: DpRequestType) => {
     if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
       return getAdmTstStatusLabel(status);
+    }
+    if (status === 'CONCLUDED' && requestType && sentToAccounting({ requestType })) {
+      return DP_SENT_TO_ACCOUNTING_LABEL;
     }
     return STATUS_LABELS[status];
   };
 
-  const getStatusRowBadge = (status: DpRequestStatus) => {
+  const getStatusRowBadge = (status: DpRequestStatus, requestType?: DpRequestType) => {
+    if (status === 'CONCLUDED' && requestType && sentToAccounting({ requestType })) {
+      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
+    }
     if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
       return getAdmTstStatusRowBadge(status);
     }
@@ -626,19 +649,50 @@ export function GerenciarSolicitacoesGeraisPage({
         responsibleNote: responsibleNote?.trim() || undefined,
         cancellationReason: cancellationReason?.trim() || undefined,
       });
-      return res.data as { data: DpRequest; contabilidadeCreated?: boolean };
+      return res.data as {
+        data: DpRequest;
+        contabilidadeCreated?: boolean;
+        contabilidadeError?: boolean;
+      };
     },
     onSuccess: async (payload, vars) => {
-      toast.success(
-        payload?.contabilidadeCreated
-          ? 'Finalizada e enviada à Comunicação Contábil.'
-          : 'Feedback registrado'
-      );
+      if (payload?.contabilidadeError) {
+        toast.error(
+          'Solicitação finalizada, mas não foi possível enviar à Contabilidade. Abra a solicitação e use "Reenviar à Contabilidade".',
+          { duration: 8000 }
+        );
+      } else {
+        toast.success(
+          payload?.contabilidadeCreated
+            ? 'Enviada ao Atendimento Contábil.'
+            : 'Feedback registrado'
+        );
+      }
       cancelRowDraft(vars.id);
       closeHistoryRequest();
       await queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
+  });
+
+  const resendToAccountingMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/solicitacoes-dp/${id}/reenviar-contabilidade`);
+      return res.data as { contabilidadeCreated?: boolean };
+    },
+    onSuccess: async (payload) => {
+      toast.success(
+        payload?.contabilidadeCreated
+          ? 'Enviada ao Atendimento Contábil.'
+          : 'Esta solicitação já foi enviada à Contabilidade.'
+      );
+      closeHistoryRequest();
+      await queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.error || err?.message || 'Não foi possível reenviar.'),
   });
 
   const cancelRowDraft = (id: string) => {
@@ -694,9 +748,9 @@ export function GerenciarSolicitacoesGeraisPage({
       label: 'Status',
       value: (
         <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status)}`}
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status, r.requestType)}`}
         >
-          {getStatusLabel(r.status)}
+          {getStatusLabel(r.status, r.requestType)}
         </span>
       ),
     },
@@ -854,7 +908,7 @@ export function GerenciarSolicitacoesGeraisPage({
                       {!hideTableColumns && (
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                             ID
                           </th>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -890,7 +944,7 @@ export function GerenciarSolicitacoesGeraisPage({
                               onClick={() => openHistoryRequest(r)}
                               className={getListTableRowClassName(true)}
                             >
-                              <td className="px-3 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
+                              <td className="px-3 py-3 text-center align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
                                 <ListRowNavigableLabel className="font-medium tabular-nums">
                                   {r.displayNumber ?? '—'}
                                 </ListRowNavigableLabel>
@@ -923,9 +977,9 @@ export function GerenciarSolicitacoesGeraisPage({
                               </td>
                               <td className="px-3 py-3 align-middle text-center">
                                 <span
-                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status)}`}
+                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status, r.requestType)}`}
                                 >
-                                  {getStatusLabel(r.status)}
+                                  {getStatusLabel(r.status, r.requestType)}
                                 </span>
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
@@ -1141,7 +1195,11 @@ export function GerenciarSolicitacoesGeraisPage({
                                 [historyRequest.id]: value as DpDpFeedbackNextStatus,
                               }))
                             }
-                            options={scopeConfig.feedbackSelectOptions}
+                            options={
+                              scope === 'ADM_TST'
+                                ? scopeConfig.feedbackSelectOptions
+                                : buildDpFeedbackSelectOptionsForType(historyRequest.requestType)
+                            }
                             allowEmpty={false}
                             placeholder="Selecione o feedback..."
                             searchPlaceholder="Pesquisar..."
@@ -1171,6 +1229,22 @@ export function GerenciarSolicitacoesGeraisPage({
                         </p>
                       </div>
                     </DpRequestHistorySectionCard>
+                  ) : null}
+
+                  {historyRequest.contabilidadePendente ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+                      <p>Esta solicitação foi finalizada, mas ainda não chegou à Contabilidade.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={resendToAccountingMutation.isPending}
+                        onClick={() => resendToAccountingMutation.mutate(historyRequest.id)}
+                      >
+                        {resendToAccountingMutation.isPending
+                          ? 'Enviando...'
+                          : 'Reenviar à Contabilidade'}
+                      </Button>
+                    </div>
                   ) : null}
 
                   <DpRequestHistoryModalFooter>
