@@ -445,18 +445,9 @@ function CartaoComposicao({
         <span className="flex min-h-[2.75rem] w-[6.5rem] shrink-0 items-center justify-center bg-red-600 px-1 text-sm font-bold tabular-nums text-white dark:bg-red-950/90">
           {composicao.item || '—'}
         </span>
-        <span className="flex min-w-0 flex-1 items-center border-r border-gray-200 px-3.5 py-2.5 dark:border-gray-700">
-          <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-bold uppercase leading-relaxed text-gray-900 dark:text-gray-100">
-            {composicao.descricao || 'Sem descrição'}
-          </span>
-        </span>
-        <span className="flex w-24 shrink-0 items-center justify-center border-r border-gray-200 px-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:border-gray-700 dark:text-gray-200">
-          {composicao.unidade || '—'}
-        </span>
         {[
           { rotulo: 'Código', valor: composicao.codigo, largura: 'w-36' },
           { rotulo: 'Banco', valor: composicao.banco || '—', largura: 'w-28' },
-          { rotulo: 'Valor adotado', valor: brl(adotado.valor), largura: 'w-40' },
         ].map((c) => (
           <span
             key={c.rotulo}
@@ -470,6 +461,22 @@ function CartaoComposicao({
             </span>
           </span>
         ))}
+        <span className="flex min-w-0 flex-1 items-center border-r border-gray-200 px-3.5 py-2.5 dark:border-gray-700">
+          <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-bold uppercase leading-relaxed text-gray-900 dark:text-gray-100">
+            {composicao.descricao || 'Sem descrição'}
+          </span>
+        </span>
+        <span className="flex w-24 shrink-0 items-center justify-center border-r border-gray-200 px-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:border-gray-700 dark:text-gray-200">
+          {composicao.unidade || '—'}
+        </span>
+        <span className="flex w-40 shrink-0 flex-col items-center justify-center border-r border-gray-200 px-2 leading-tight dark:border-gray-700">
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            Valor adotado
+          </span>
+          <span className="text-xs font-bold uppercase tabular-nums text-gray-800 dark:text-gray-100">
+            {brl(adotado.valor)}
+          </span>
+        </span>
         <span className="flex w-12 shrink-0 items-center justify-center">
           <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${aberto ? 'rotate-180' : ''}`} />
         </span>
