@@ -127,6 +127,8 @@ const tdRest =
 /** Corpo da tabela: sem padding no td para o input cobrir a célula inteira (borda de foco = borda da célula). */
 const tdFirstBody =
   `${MEMORIAL_ROW_H} relative p-0 align-middle text-left border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colDesc}`;
+/** Descrição da memória: a linha cresce para a descrição quebrar em vez de ficar cortada. */
+const tdFirstBodyQuebra = tdFirstBody.replace(' max-h-[2.75rem]', '');
 const tdRestBody =
   `${MEMORIAL_ROW_H} relative p-0 align-middle border-b border-r border-gray-200 bg-white text-center focus-within:z-[4] dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const tdCalc =
@@ -135,6 +137,8 @@ const tdCalcBody =
   `${MEMORIAL_ROW_H} relative p-0 text-center tabular-nums text-sm font-bold text-gray-900 focus-within:z-[4] dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0 focus:!bg-transparent dark:focus:!bg-transparent`;
 /** O foco global zera o box-shadow do input; a borda vermelha fica no contêiner. */
+const caixaFocoDescricaoQuebraCls =
+  'relative min-h-[2.75rem] w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]';
 const caixaFocoDescricaoCls =
   'relative h-full w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]';
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
@@ -3785,9 +3789,18 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={tdItemCol} aria-hidden />
-        <td className={tdFirstBody} data-col-medicao={0}>
+        <td className={tdFirstBodyQuebra} data-col-medicao={0}>
           {marcasCelula(idx, 'descricao')}
-          <div className={caixaFocoDescricaoCls}>
+          <div className={caixaFocoDescricaoQuebraCls}>
+            {/* Texto quebrado: dá a altura da célula. O campo fica por cima e recebe cliques e teclas. */}
+            <div
+              aria-hidden
+              className={`flex min-h-[2.75rem] items-center whitespace-normal break-words px-3 py-2.5 text-left text-sm leading-snug sm:px-3.5 ${
+                descAberta === idx ? 'text-transparent' : 'text-gray-900 dark:text-gray-100'
+              }`}
+            >
+              {ln.descricao || ''}
+            </div>
             <MemorialCampoLocal
               committedValue={ln.descricao || ''}
               onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
@@ -3795,7 +3808,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               editando={descAberta === idx}
               onPedirEdicao={() => setDescAberta(idx)}
               title={linhaVinculada ? 'Vem da memória de origem. Apague para voltar ao automático.' : undefined}
-              className={`${inputCls} !px-3 text-left sm:!px-3.5`}
+              className={`${inputCls} !absolute inset-0 !px-3 text-left sm:!px-3.5 ${
+                descAberta === idx ? '' : '!text-transparent'
+              }`}
               inputRef={el => {
                 descInputRefs.current[idx] = el;
               }}

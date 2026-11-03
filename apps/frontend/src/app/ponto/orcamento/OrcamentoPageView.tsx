@@ -14789,34 +14789,6 @@ export function OrcamentoPageView({
     }
   }, [fdAprovadaRecord?.id, fichaDemandaRecord?.id, reabrindoPedidos]);
 
-  /** Código da composição em edição na aba Orçamento (duplo clique na célula). */
-  const [codigoEditando, setCodigoEditando] = useState<{ key: string; valor: string } | null>(null);
-
-  const alterarCodigoItem = (itemKey: string, novoCodigo: string) => {
-    if (gradeTravadaRef.current) return;
-    const codigo = novoCodigo.trim();
-    const [servicoId, subId, ...resto] = itemKey.split('|');
-    const chave = resto.join('|');
-    if (!codigo || !servicoId || !subId || !chave) return;
-    const updated = servicos.map((svc) =>
-      svc.id !== servicoId
-        ? svc
-        : {
-            ...svc,
-            subtitulos: svc.subtitulos.map((sub) =>
-              sub.id !== subId
-                ? sub
-                : { ...sub, itens: sub.itens.map((it) => (it.chave === chave ? { ...it, codigo } : it)) }
-            ),
-          }
-    );
-    setServicos(updated);
-    if (centroCustoId && orcamentoAtivoId) {
-      saveServicos(centroCustoId, updated);
-      persistToApi(updated, imports);
-    }
-  };
-
   const setQuantidadeItem = (itemKey: string, valor: number, formulaRaw?: string) => {
     if (gradeTravadaRef.current) return;
     setQuantidadesPorItem(prev => ({ ...prev, [itemKey]: Math.max(0, valor) }));
@@ -20945,30 +20917,7 @@ export function OrcamentoPageView({
                                       <td data-orc-col="item" style={estiloFundoPinturaOrc(row.key, 'item', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
                                         {`${main}.${subIdx}.${itemIdx + 1}`}
                                       </td>
-                                      <td data-orc-col="codigo" style={estiloFundoPinturaOrc(row.key, 'codigo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700" onDoubleClick={() => {
-                                        if (!gradeTravada) setCodigoEditando({ key: row.key, valor: row.item.codigo });
-                                      }} title={gradeTravada ? undefined : 'Duplo clique para editar o código'}>
-                                        {codigoEditando?.key === row.key ? (
-                                          <input
-                                            autoFocus
-                                            value={codigoEditando.valor}
-                                            onChange={(e) => setCodigoEditando({ key: row.key, valor: e.target.value })}
-                                            onBlur={() => {
-                                              if (codigoEditando.valor.trim() !== row.item.codigo) {
-                                                alterarCodigoItem(row.key, codigoEditando.valor);
-                                              }
-                                              setCodigoEditando(null);
-                                            }}
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                                              if (e.key === 'Escape') setCodigoEditando(null);
-                                            }}
-                                            className="w-full min-w-[80px] rounded border border-red-500 bg-white px-1.5 py-1 text-center text-sm text-gray-900 outline-none dark:bg-gray-800 dark:text-gray-100"
-                                          />
-                                        ) : (
-                                          row.item.codigo
-                                        )}
-                                      </td>
+                                      <td data-orc-col="codigo" style={estiloFundoPinturaOrc(row.key, 'codigo', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{row.item.codigo}</td>
                                       <td data-orc-col="banco" style={estiloFundoPinturaOrc(row.key, 'banco', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle text-center border-l border-gray-200 dark:border-gray-700">{nomeBancoParaExibicao(row.item.banco)}</td>
                                       <td data-orc-col="descricao" style={estiloFundoPinturaOrc(row.key, 'descricao', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 align-middle border-l border-gray-200 dark:border-gray-700">
                                         <div className="whitespace-normal break-words uppercase">{row.item.descricao}</div>
