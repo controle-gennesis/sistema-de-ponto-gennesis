@@ -14,7 +14,11 @@ import {
   isSensitiveDpRequestType,
   userMayCreateSensitiveDpRequest,
 } from '../lib/dpApprovalAccess';
-import { parseDpRequestDetails, isAccountingDirectRequestType } from '../lib/dpRequestDetails';
+import {
+  parseDpRequestDetails,
+  isAccountingDirectRequestType,
+  ACCOUNTING_DIRECT_REQUEST_TYPES,
+} from '../lib/dpRequestDetails';
 import {
   isAdmTstDpRequestType,
   isDepartamentoPessoalSector,
@@ -486,6 +490,43 @@ export class DpRequestController {
       return res.json({ success: true, data });
     } catch (e) {
       return res.status(500).json({ error: 'Erro ao buscar solicitações DP' });
+    }
+  }
+
+  /**
+   * Visão da página Solicitações à Contabilidade: todos os pedidos diretos à Contabilidade e as solicitações
+   * internas finalizadas que seguiram para lá, de qualquer solicitante (o acesso é controlado por permissão).
+   */
+  async getAccountingRequests(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const requests = await prisma.dpRequest.findMany({
+        where: {
+          OR: [
+            { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
+            {
+              requestType: {
+                in: ['ADMISSAO', 'FERIAS', 'RESCISAO', 'ALTERACAO_FUNCAO_SALARIO', 'RETIFICACAO_ALOCACAO'],
+              },
+              status: 'CONCLUDED',
+            },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const summarized = await attachDpContractSummaries(requests);
+      const directInQueue = requests.filter(
+        (r) => r.status === 'IN_ACCOUNTING' && isAccountingDirectRequestType(r.requestType)
+      );
+      const linked = await findDpRequestIdsLinkedToAccounting(directInQueue.map((r) => r.id));
+      const notSent = new Set(directInQueue.filter((r) => !linked.has(r.id)).map((r) => r.id));
+      const data = summarized.map((r) => ({ ...r, contabilidadePendente: notSent.has(r.id) }));
+
+      return res.json({ success: true, data });
+    } catch (e) {
+      return res.status(500).json({ error: 'Erro ao buscar solicitações à Contabilidade' });
     }
   }
 

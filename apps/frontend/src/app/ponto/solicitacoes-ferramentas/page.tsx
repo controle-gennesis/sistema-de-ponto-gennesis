@@ -26,7 +26,8 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Loading } from '@/components/ui/Loading';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { Bloco } from '@/components/ferramentas/Bloco';
@@ -150,7 +151,7 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
   QUOTATION: {
-    title: 'Cotação',
+    title: 'Em Cotação',
     subtitle: 'Cotação e ordem de compra em andamento.',
     Icon: FileSearch,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
@@ -164,7 +165,7 @@ const LIST_HEADER_BY_FILTER: Record<
     iconColor: 'text-violet-600 dark:text-violet-400',
   },
   AWAITING_RECEIPT: {
-    title: 'Aguardando recebimento',
+    title: 'Aguardando Recebimento',
     subtitle: 'Pagas, aguardando a confirmação de recebimento pela Engenharia.',
     Icon: PackageCheck,
     iconBg: 'bg-teal-100 dark:bg-teal-900/30',
@@ -640,7 +641,7 @@ function SolicitacoesFerramentasPage() {
     const defs: Array<{ filter: StatusFilter; label: string; value: number }> = [
       { filter: 'ALL', label: 'Todas', value: summaryData?.total ?? 0 },
       { filter: 'OPEN', label: 'Abertas', value: summaryData?.open ?? 0 },
-      { filter: 'QUOTATION', label: 'Cotação', value: summaryData?.quotation ?? 0 },
+      { filter: 'QUOTATION', label: 'Em Cotação', value: summaryData?.quotation ?? 0 },
       {
         filter: 'AWAITING_PAYMENT',
         label: 'Pagamento',
@@ -648,7 +649,7 @@ function SolicitacoesFerramentasPage() {
       },
       {
         filter: 'AWAITING_RECEIPT',
-        label: 'Recebimento',
+        label: 'Aguardando Recebimento',
         value: summaryData?.awaitingReceipt ?? 0,
       },
       { filter: 'COMPLETED', label: 'Finalizadas', value: summaryData?.completed ?? 0 },
@@ -678,22 +679,40 @@ function SolicitacoesFerramentasPage() {
             description="Gerencie as solicitações de ferramentas"
           />
 
-        <div className={pageStatCardsGrid6Class}>
-          {stats.map((stat) => (
-            <FilterStatCard
-              key={stat.filter}
-              label={stat.label}
-              count={stat.value}
-              icon={stat.Icon}
-              iconBg={stat.iconBg}
-              iconColor={stat.iconColor}
-              isActive={statusFilter === stat.filter}
-              onClick={() => {
-                setStatusFilter(stat.filter);
-                setPage(1);
-              }}
-            />
-          ))}
+        <div id="secao-etapas-ferramentas" className="scroll-mt-4 bg-transparent px-2">
+          <nav
+            aria-label="Etapas dos pedidos de ferramentas"
+            className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+          >
+            {stats.map((tab) => {
+              const active = statusFilter === tab.filter;
+              return (
+                <React.Fragment key={tab.filter}>
+                  <AppTabButton
+                    active={active}
+                    onClick={() => {
+                      setStatusFilter(tab.filter);
+                      setPage(1);
+                    }}
+                    className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                  >
+                    {tab.label}
+                    <span className="app-tab__badge">
+                      <TabCountBadge count={tab.value} active={active} tone="red" />
+                    </span>
+                  </AppTabButton>
+                  {tab.filter === 'ALL' ? (
+                    <span
+                      aria-hidden
+                      className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                    >
+                      |
+                    </span>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
+          </nav>
         </div>
 
         <Card className={cadastroListClasses.card}>
@@ -1131,11 +1150,14 @@ function SolicitacoesFerramentasPage() {
                     ) : null}
                   </div>
 
-                  {selected.status === 'OPEN' || selected.scNumber || selected.scId ? (
+                  {selected.status === 'OPEN' ||
+                  selected.scNumber ||
+                  selected.scId ||
+                  (selected.status !== 'CANCELLED' && selected.status !== 'REJECTED') ? (
                     <Bloco
                       title="Solicitação de compra"
                       action={
-                        selected.status === 'OPEN' ? (
+                        selected.status !== 'CANCELLED' && selected.status !== 'REJECTED' ? (
                           <BlocoActionButton
                             label={selected.scNumber ? 'Editar solicitação de compra' : 'Adicionar solicitação de compra'}
                             icon={selected.scNumber ? 'edit' : 'plus'}

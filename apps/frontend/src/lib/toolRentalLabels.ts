@@ -22,9 +22,9 @@ export type ToolRentalLogisticsMode =
 export const TOOL_RENTAL_STATUS_LABELS: Record<ToolRentalRequestStatus, string> = {
   OPEN: 'Aberta',
   SUPPLIER_RELATION: 'Em análise',
-  QUOTATION: 'Cotação',
+  QUOTATION: 'Em Cotação',
   AWAITING_PAYMENT: 'Aguardando pagamento',
-  AWAITING_RECEIPT: 'Aguardando recebimento',
+  AWAITING_RECEIPT: 'Aguardando Recebimento',
   IN_USE: 'Em uso',
   COMPLETED: 'Finalizada',
   REJECTED: 'Rejeitada',

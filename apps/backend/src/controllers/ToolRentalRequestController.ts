@@ -787,11 +787,12 @@ export class ToolRentalRequestController {
 
       const row = await prisma.toolRentalRequest.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Solicitação não encontrada', 404);
-      if (row.status !== ToolRentalRequestStatus.OPEN) {
-        throw createError(
-          'Número da SC só pode ser informado em Aberta',
-          400,
-        );
+      // A SC pode ser corrigida em qualquer etapa, até a solicitação ser cancelada ou rejeitada.
+      if (
+        row.status === ToolRentalRequestStatus.CANCELLED ||
+        row.status === ToolRentalRequestStatus.REJECTED
+      ) {
+        throw createError('Solicitação cancelada ou rejeitada não pode ter a SC alterada', 400);
       }
 
       const scNumber = requireString(
@@ -806,15 +807,15 @@ export class ToolRentalRequestController {
           where: { id: row.id },
           data: { scNumber, scId },
         });
-        if (row.scNumber !== scNumber) {
+        if (row.scNumber !== scNumber || row.scId !== scId) {
           await appendStatusEvent(tx, {
             requestId: row.id,
             fromStatus: row.status,
             toStatus: row.status,
             actorId: req.user!.id,
             note: row.scNumber
-              ? `Número da SC atualizado: ${scNumber}`
-              : `Número da SC informado: ${scNumber}`,
+              ? `SC atualizada: Nº ${scNumber} · ID ${scId}`
+              : `SC informada: Nº ${scNumber} · ID ${scId}`,
           });
         }
         return tx.toolRentalRequest.findUniqueOrThrow({

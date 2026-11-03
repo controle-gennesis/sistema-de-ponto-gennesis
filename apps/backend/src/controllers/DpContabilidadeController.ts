@@ -120,11 +120,10 @@ type SourceInfo = {
 };
 
 async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>> {
+  // Todo pedido com origem traz a unidade (centro de custo); os detalhes completos só vêm nos tipos diretos.
   const ids = rows
-    .filter(
-      (r) => (r as { sourceDpRequestId?: string | null }).sourceDpRequestId && isAccountingDirectRequestType(r.requestType)
-    )
-    .map((r) => (r as { sourceDpRequestId?: string | null }).sourceDpRequestId as string);
+    .map((r) => (r as { sourceDpRequestId?: string | null }).sourceDpRequestId)
+    .filter((id): id is string => !!id);
   const map = new Map<string, SourceInfo>();
   if (ids.length === 0) return map;
   const sources = await prisma.dpRequest.findMany({
@@ -143,6 +142,7 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
   });
   const employeeIds = new Set<string>();
   for (const src of sources) {
+    if (!isAccountingDirectRequestType(src.requestType)) continue;
     const det = (src.details ?? {}) as Record<string, unknown>;
     for (const key of ['employeeId', 'colaboradorEmployeeId']) {
       const v = det[key];
@@ -164,7 +164,7 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
     map.set(s.id, {
       displayNumber: s.displayNumber,
       requestType: s.requestType,
-      details: s.details,
+      details: isAccountingDirectRequestType(s.requestType) ? s.details : null,
       company: s.company,
       polo: s.polo,
       prazoInicio: s.prazoInicio.toISOString(),

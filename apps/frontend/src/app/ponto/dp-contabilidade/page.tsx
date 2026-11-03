@@ -534,7 +534,7 @@ export default function DpContabilidadePage() {
                             <th className={cadastroListClasses.th}>ID</th>
                             <th className={cadastroListClasses.th}>Título</th>
                             <th className={cadastroListClasses.thCenter}>Tipo</th>
-                            <th className={cadastroListClasses.thCenter}>Contrato</th>
+                            <th className={cadastroListClasses.thCenter}>Unidade</th>
                             <th className={cadastroListClasses.thCenter}>Solicitante</th>
                             <th className={cadastroListClasses.thCenter}>Aberta em</th>
                             <th className={cadastroListClasses.thCenter}>Status</th>
@@ -563,7 +563,7 @@ export default function DpContabilidadePage() {
                                 {TYPE_LABELS[row.requestType]}
                               </td>
                               <td className="max-w-[240px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {row.contractName || '—'}
+                                {row.source?.costCenterName || row.contractName || '—'}
                               </td>
                               <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                                 <div className="flex flex-col items-center gap-0.5">
@@ -683,10 +683,10 @@ export default function DpContabilidadePage() {
                 </div>
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Contrato
+                    Unidade
                   </p>
                   <p className="mt-1 text-gray-900 dark:text-gray-100">
-                    {selected.contractName || '—'}
+                    {selected.source?.costCenterName || selected.contractName || '—'}
                   </p>
                 </div>
                 {selected.sourceDpRequestId ? (
@@ -729,7 +729,7 @@ export default function DpContabilidadePage() {
                 ) : null}
               </div>
 
-              {selected.source ? (
+              {selected.source?.details ? (
                 <div className="space-y-3">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Dados da solicitação nº {selected.source.displayNumber}

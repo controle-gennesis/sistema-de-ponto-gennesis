@@ -55,7 +55,8 @@ import {
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { useLogout } from '@/hooks/useLogout';
 import { usePermissions } from '@/hooks/usePermissions';
 import { authService } from '@/lib/auth';
@@ -230,12 +231,23 @@ const STATUS_CARDS: Array<{
 }> = [
   { filter: 'ALL', label: 'Todas', summaryKey: 'total', Icon: Users, iconBg: 'bg-blue-100 dark:bg-blue-900/30', iconColor: 'text-blue-600 dark:text-blue-400' },
   { filter: 'OPEN', label: 'Abertas', query: 'OPEN', summaryKey: 'open', Icon: Inbox, iconBg: 'bg-amber-100 dark:bg-amber-900/30', iconColor: 'text-amber-600 dark:text-amber-400' },
-  { filter: 'QUOTATION', label: 'Cotação', query: 'QUOTATION', summaryKey: 'quotation', Icon: FileSearch, iconBg: 'bg-indigo-100 dark:bg-indigo-900/30', iconColor: 'text-indigo-600 dark:text-indigo-400' },
+  { filter: 'QUOTATION', label: 'Em Cotação', query: 'QUOTATION', summaryKey: 'quotation', Icon: FileSearch, iconBg: 'bg-indigo-100 dark:bg-indigo-900/30', iconColor: 'text-indigo-600 dark:text-indigo-400' },
   { filter: 'AWAITING_PAYMENT', label: 'Pagamento', query: 'AWAITING_PAYMENT', summaryKey: 'awaitingPayment', Icon: CreditCard, iconBg: 'bg-violet-100 dark:bg-violet-900/30', iconColor: 'text-violet-600 dark:text-violet-400' },
-  { filter: 'AWAITING_RECEIPT', label: 'Recebimento', query: 'COMPLETED,AWAITING_RECEIPT', summaryKey: 'awaitingReceipt', Icon: PackageCheck, iconBg: 'bg-teal-100 dark:bg-teal-900/30', iconColor: 'text-teal-600 dark:text-teal-400' },
-  { filter: 'IN_USE', label: 'Em uso', query: 'IN_USE', summaryKey: 'inUse', Icon: Hammer, iconBg: 'bg-emerald-100 dark:bg-emerald-900/30', iconColor: 'text-emerald-600 dark:text-emerald-400' },
+  { filter: 'AWAITING_RECEIPT', label: 'Aguardando Recebimento', query: 'COMPLETED,AWAITING_RECEIPT', summaryKey: 'awaitingReceipt', Icon: PackageCheck, iconBg: 'bg-teal-100 dark:bg-teal-900/30', iconColor: 'text-teal-600 dark:text-teal-400' },
+  { filter: 'IN_USE', label: 'Em Uso', query: 'IN_USE', summaryKey: 'inUse', Icon: Hammer, iconBg: 'bg-emerald-100 dark:bg-emerald-900/30', iconColor: 'text-emerald-600 dark:text-emerald-400' },
   { filter: 'CANCELLED', label: 'Canceladas', query: 'CANCELLED,REJECTED', summaryKey: 'cancelled', Icon: XCircle, iconBg: 'bg-red-100 dark:bg-red-900/30', iconColor: 'text-red-600 dark:text-red-400' },
 ];
+
+/** Subtítulo da lista conforme a etapa escolhida (o nome, o ícone e a cor vêm de STATUS_CARDS). */
+const LIST_SUBTITLE_BY_FILTER: Record<StatusFilter, string> = {
+  ALL: 'Suas solicitações e as dos contratos liberados',
+  OPEN: 'Aguardando o Suprimentos iniciar a cotação',
+  QUOTATION: 'Cotação e ordem de compra em andamento',
+  AWAITING_PAYMENT: 'Ordem de compra emitida, pagamento pendente',
+  AWAITING_RECEIPT: 'Pagas, aguardando a confirmação de recebimento',
+  IN_USE: 'Equipamentos recebidos e em uso',
+  CANCELLED: 'Solicitações canceladas ou rejeitadas',
+};
 
 function fdAnexosOf(row: ToolRentalRequest): ReceiptAnexo[] {
   return (row.attachments || []).filter((anexo) => anexo.kind === 'fd' && anexo.url);
@@ -251,6 +263,8 @@ function SolicitarLocacoesFerramentasPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const listHeaderCard = STATUS_CARDS.find((c) => c.filter === statusFilter) ?? STATUS_CARDS[0]!;
+  const ListHeaderIcon = listHeaderCard.Icon;
   // Vem de ?contrato= quando a pessoa chega pelo atalho do contrato.
   const searchParams = useSearchParams();
   const [contractFilter, setContractFilter] = useState((searchParams?.get('contrato') || '').trim());
@@ -625,37 +639,55 @@ function SolicitarLocacoesFerramentasPage() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
-          {STATUS_CARDS.map((card) => (
-            <FilterStatCard
-              key={card.filter}
-              label={card.label}
-              count={summaryData?.[card.summaryKey] ?? 0}
-              icon={card.Icon}
-              iconBg={card.iconBg}
-              iconColor={card.iconColor}
-              isActive={statusFilter === card.filter}
-              onClick={() => {
-                setStatusFilter(card.filter);
-                setPage(1);
-              }}
-            />
-          ))}
+        <div id="secao-etapas-ferramentas" className="scroll-mt-4 bg-transparent px-2">
+          <nav
+            aria-label="Etapas dos pedidos de ferramentas"
+            className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+          >
+            {STATUS_CARDS.map((tab) => {
+              const active = statusFilter === tab.filter;
+              return (
+                <React.Fragment key={tab.filter}>
+                  <AppTabButton
+                    active={active}
+                    onClick={() => {
+                      setStatusFilter(tab.filter);
+                      setPage(1);
+                    }}
+                    className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                  >
+                    {tab.label}
+                    <span className="app-tab__badge">
+                      <TabCountBadge count={summaryData?.[tab.summaryKey] ?? 0} active={active} tone="red" />
+                    </span>
+                  </AppTabButton>
+                  {tab.filter === 'ALL' ? (
+                    <span
+                      aria-hidden
+                      className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                    >
+                      |
+                    </span>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
+          </nav>
         </div>
 
         <Card className={cadastroListClasses.card}>
           <CardHeader className={cadastroListClasses.cardHeader}>
             <div className={cadastroListClasses.cardHeaderRow}>
               <div className={cadastroListClasses.cardHeaderIconRow}>
-                <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                  <Wrench className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                <div className={`rounded-lg p-2 sm:p-3 ${listHeaderCard.iconBg}`}>
+                  <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeaderCard.iconColor}`} />
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                    Minhas Solicitações
+                    {statusFilter === 'ALL' ? 'Minhas Solicitações' : listHeaderCard.label}
                   </h2>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Suas solicitações e as dos contratos liberados
+                    {LIST_SUBTITLE_BY_FILTER[statusFilter]}
                   </p>
                 </div>
               </div>
