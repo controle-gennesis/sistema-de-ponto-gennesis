@@ -55,6 +55,7 @@ import {
   ClipboardList,
   ClipboardCheck,
   BadgeCheck,
+  FileSignature,
   CreditCard,
   HardDrive,
   SquareKanban,
@@ -1347,6 +1348,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: FileSpreadsheet,
             description: 'Montar os espelhos de nota fiscal',
             permission: isAdministrator || can(pk('/ponto/espelho-nf'))
+          },
+          {
+            name: 'Controle de Contratos',
+            section: 'Contratos',
+            href: '/ponto/controle-contratos',
+            icon: FileSignature,
+            description: 'Contratos por estado, com valores, aditivos e prazos',
+            permission: isAdministrator || can(pk('/ponto/controle-contratos'))
           },
           {
             name: 'Licitações',

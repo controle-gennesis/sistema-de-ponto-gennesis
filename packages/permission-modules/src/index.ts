@@ -172,6 +172,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/espelho-nf',
     category: 'Contratos e Licitações',
   },
+  { key: pathToModuleKey('/ponto/controle-contratos'), name: 'Controle de Contratos', href: '/ponto/controle-contratos', category: 'Contratos e Licitações' },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
   {
     key: pathToModuleKey('/ponto/licitacoes-pncp'),

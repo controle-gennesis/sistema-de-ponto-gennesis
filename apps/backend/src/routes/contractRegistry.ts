@@ -1,0 +1,22 @@
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth';
+import { requireModuleAccess } from '../middleware/permissionAuth';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
+import { ContractRegistryController } from '../controllers/ContractRegistryController';
+
+const router = Router();
+const controller = new ContractRegistryController();
+
+router.use(authenticate);
+router.use(requireModuleAccess(pathToModuleKey('/ponto/controle-contratos')));
+
+router.get('/', (req, res, next) => controller.list(req, res, next));
+router.get('/art-options', (req, res, next) => controller.artOptions(req, res, next));
+router.post('/', (req, res, next) => controller.create(req, res, next));
+router.patch('/:id', (req, res, next) => controller.update(req, res, next));
+router.post('/:id/addenda', (req, res, next) => controller.addAddendum(req, res, next));
+router.patch('/:id/addenda/:addendumId', (req, res, next) => controller.updateAddendum(req, res, next));
+router.delete('/:id/addenda/:addendumId', (req, res, next) => controller.removeAddendum(req, res, next));
+router.delete('/:id', (req, res, next) => controller.remove(req, res, next));
+
+export default router;

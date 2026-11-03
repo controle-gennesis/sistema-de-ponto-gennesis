@@ -904,6 +904,7 @@ export function useRoutePermission(route: string) {
     '/ponto/licitacoes': canAccessLicitacoesPage,
     '/ponto/licitacoes-pncp': canAccessLicitacoesPage,
     '/ponto/responsaveis-tecnicos': isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
+    '/ponto/controle-contratos': isAdministrator || can(pk('/ponto/controle-contratos')),
     '/ponto/controle-anuidade': isAdministrator || can(pk('/ponto/controle-anuidade')),
     '/ponto/controle-pagamentos-art': isAdministrator || can(pk('/ponto/controle-pagamentos-art')),
     '/ponto/contratos/medicao': isAdministrator || can(pk('/ponto/contratos/medicao')),
