@@ -26,6 +26,8 @@ import {
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { Button } from '@/components/ui/Button';
+import { usePermissions } from '@/hooks/usePermissions';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -46,6 +48,7 @@ import {
   formToApiPayload,
   type FichaDemandaApprovalFormState,
   type FichaDemandaApprovalRecord,
+  idMovRmExibicao,
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
@@ -213,6 +216,8 @@ function agruparFds(rows: FichaDemandaApprovalRecord[]): NivelCc[] {
  */
 const COL_VALOR = 'w-[11rem] min-w-[11rem] max-w-[11rem] px-3 text-right';
 const COL_ACAO = 'w-16 min-w-[4rem] max-w-[4rem]';
+/** Coluna Ação oculta por enquanto (ficou espremida); o clique na linha continua abrindo os detalhes. */
+const MOSTRAR_COLUNA_ACAO = false;
 
 /** Resultado do nível: faturamento estimado, custo estimado (40%), custo real e total pago em OCs. */
 function ResultadoNivel({ resultado }: { resultado: ResultadoFd }) {
@@ -234,7 +239,7 @@ function ResultadoNivel({ resultado }: { resultado: ResultadoFd }) {
       )}
       {item('Pago em OCs', resultado.pagoOcs, 'text-emerald-700 dark:text-emerald-400')}
       {/* Mesma largura da coluna Ação da tabela das FDs. */}
-      <div className={COL_ACAO} aria-hidden />
+      {MOSTRAR_COLUNA_ACAO ? <div className={COL_ACAO} aria-hidden /> : null}
     </div>
   );
 }
@@ -244,6 +249,7 @@ export default function AprovacaoFdsPage() {
   const searchParams = useSearchParams();
   const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
+  const { isAdministrator } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<CardFilter>('ALL');
   const [contratoFilter, setContratoFilter] = useState(contratoFiltro || 'ALL');
@@ -415,6 +421,7 @@ export default function AprovacaoFdsPage() {
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
       setDeleteId(null);
+      setDetailRecord(null);
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao excluir');
@@ -697,9 +704,11 @@ export default function AprovacaoFdsPage() {
                                         <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="OCs pagas (validadas pelo compras no G4), pelo total de cada OC">
                                           Pago em OCs
                                         </th>
-                                        <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
-                                          Ação
-                                        </th>
+                                        {MOSTRAR_COLUNA_ACAO ? (
+                                          <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
+                                            Ação
+                                          </th>
+                                        ) : null}
                                       </tr>
                                     </thead>
                                               <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -727,7 +736,7 @@ export default function AprovacaoFdsPage() {
                                           </td>
                                           <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
                                             <p className="text-gray-900 dark:text-gray-100">
-                                              {row.idMovRm?.trim() || '—'}
+                                              {idMovRmExibicao(row.idMovRm) || '—'}
                                             </p>
                                             <p className="text-xs text-gray-500 dark:text-gray-400">
                                               {row.numMovRm?.trim() || '—'}
@@ -778,6 +787,7 @@ export default function AprovacaoFdsPage() {
                                               <span className="text-gray-400 dark:text-gray-500">—</span>
                                             )}
                                           </td>
+                                          {MOSTRAR_COLUNA_ACAO ? (
                                           <td
                                             className={`${listTableRowClasses.actionTd} ${COL_ACAO} !px-0 text-center`}
                                             onClick={(e) => e.stopPropagation()}
@@ -805,6 +815,7 @@ export default function AprovacaoFdsPage() {
                                               </button>
                                             </div>
                                           </td>
+                                          ) : null}
                                         </tr>
                                                 ))}
                                               </tbody>
@@ -863,13 +874,13 @@ export default function AprovacaoFdsPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setRowActionMenu(null);
-                          if (rowForActionMenu.status !== 'WAITING_MANAGER') {
+                          if (!isAdministrator && rowForActionMenu.status !== 'WAITING_MANAGER') {
                             toast.error('Somente fichas aguardando aprovação podem ser excluídas.');
                             return;
                           }
                           setDeleteId(rowForActionMenu.id);
                         }}
-                        disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
+                        disabled={!isAdministrator && rowForActionMenu.status !== 'WAITING_MANAGER'}
                         className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
                       >
                         <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
@@ -888,6 +899,19 @@ export default function AprovacaoFdsPage() {
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
           onRecordUpdated={(updated) => setDetailRecord(updated)}
+          footer={
+            isAdministrator && detailRecord ? (
+              // Administrador exclui a FD em qualquer etapa (ex.: FDs de teste).
+              <div className="flex w-full items-center justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setDeleteId(detailRecord.id)}>
+                  Excluir FD
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setDetailRecord(null)}>
+                  Fechar
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
 
         <FichaDemandaApprovalFormModal

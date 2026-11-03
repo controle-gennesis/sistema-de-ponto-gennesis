@@ -3091,6 +3091,11 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
     secondTable: 'cost_centers',
   });
   await ensureUserAccessJunctionTable(prisma, {
+    table: 'user_orcamento_unlock_cost_centers',
+    secondCol: 'costCenterId',
+    secondTable: 'cost_centers',
+  });
+  await ensureUserAccessJunctionTable(prisma, {
     table: 'user_fd_approval_contracts',
     secondCol: 'contractId',
     secondTable: 'contracts',

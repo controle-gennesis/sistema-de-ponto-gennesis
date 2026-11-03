@@ -3,6 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
+import {
+  impedirTrancarPelaTela,
+  orcamentoTrancado,
+  preservarConteudoTrancado,
+  statusDaSessao,
+} from '../lib/orcamentoTrava';
 
 export interface OrcamentoData {
   servicos: unknown[];
@@ -92,6 +98,8 @@ const EMPTY_DATA: OrcamentoData = {
   composicoes: [],
   imports: []
 };
+
+const gravacaoFilaCompartilhada = new Map<string, Promise<unknown>>();
 
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
@@ -858,8 +866,11 @@ export class OrcamentoService {
   /**
    * Mescla sessão e/ou árvore de serviços no JSON do orçamento sem apagar o que não veio no patch.
    */
-  /** Fila de gravações por orçamento: duas pessoas salvando juntas não se atropelam. */
-  private readonly gravacaoFila = new Map<string, Promise<unknown>>();
+  /**
+   * Fila de gravações por orçamento: duas pessoas salvando juntas não se atropelam.
+   * Compartilhada entre as instâncias do serviço (a FD também troca o status do orçamento).
+   */
+  private readonly gravacaoFila = gravacaoFilaCompartilhada;
 
   /**
    * Salva com checagem de revisão: se `baseRevisao` não bate com a atual, outra pessoa salvou antes
@@ -875,6 +886,8 @@ export class OrcamentoService {
       autor?: { id: string; nome: string };
       /** Chamado assim que o arquivo novo foi gravado (antes das demais atualizações do índice). */
       aoGravarArquivo?: (revisao: number) => void;
+      /** Gravação da tela: respeita a trava do orçamento/FD (conteúdo protegido não muda). */
+      respeitarTrava?: boolean;
     } = {}
   ): Promise<
     | { ok: true; revisao: number }
@@ -899,10 +912,17 @@ export class OrcamentoService {
             ultimaAlteracao: arquivo?.ultimaAlteracao,
           };
         }
+        let patchFinal = patch;
+        if (opts.respeitarTrava) {
+          const gravado = { sessaoOrcamento: arquivo?.sessaoOrcamento };
+          patchFinal = orcamentoTrancado(statusDaSessao(gravado.sessaoOrcamento))
+            ? preservarConteudoTrancado(gravado, patch)
+            : impedirTrancarPelaTela(gravado, patch);
+        }
         const { revisao } = await this.mergeOrcamentoArquivo(
           centroCustoId,
           orcamentoId,
-          patch,
+          patchFinal,
           opts.autor,
           { existing: arquivo ?? undefined, aoGravarArquivo: opts.aoGravarArquivo }
         );
@@ -1033,9 +1053,34 @@ export class OrcamentoService {
     centroCustoId: string,
     orcamentoId: string,
     statusAprovacao: string,
-    fichaDemandaApprovalId?: string
+    fichaDemandaApprovalId?: string,
+    /** Registra no histórico de movimentos do orçamento (ex.: trancamento / destrancamento). */
+    movimento?: { tipo: string; usuario: string }
   ): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
+    // Mesma fila das gravações da tela: uma gravação em andamento não desfaz a troca de status.
+    const chave = `${centroCustoId}:${orcamentoId}`;
+    const anterior = this.gravacaoFila.get(chave) ?? Promise.resolve();
+    const atual = anterior
+      .catch(() => undefined)
+      .then(() =>
+        this.gravarStatusAprovacao(centroCustoId, orcamentoId, statusAprovacao, fichaDemandaApprovalId, movimento)
+      );
+    this.gravacaoFila.set(chave, atual);
+    try {
+      await atual;
+    } finally {
+      if (this.gravacaoFila.get(chave) === atual) this.gravacaoFila.delete(chave);
+    }
+  }
+
+  private async gravarStatusAprovacao(
+    centroCustoId: string,
+    orcamentoId: string,
+    statusAprovacao: string,
+    fichaDemandaApprovalId?: string,
+    movimento?: { tipo: string; usuario: string }
+  ): Promise<void> {
     const existing: Partial<OrcamentoData> =
       (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
     const sessaoRaw =
@@ -1053,6 +1098,14 @@ export class OrcamentoService {
           ...metaRaw,
           statusAprovacao,
           ...(fichaDemandaApprovalId ? { fichaDemandaApprovalId } : {}),
+          ...(movimento
+            ? {
+                historicoMovimentos: [
+                  ...(Array.isArray(metaRaw.historicoMovimentos) ? metaRaw.historicoMovimentos : []),
+                  { tipo: movimento.tipo, em: new Date().toISOString(), usuario: movimento.usuario || 'Usuário' },
+                ],
+              }
+            : {}),
         },
       },
     });
@@ -1137,7 +1190,11 @@ export class OrcamentoService {
       throw new Error('Só é possível versionar a versão atual (mais recente) da família.');
     }
 
-    const sourceFile = (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {
+    const arquivoOrigem = await this.readOrcamentoFile(centroCustoId, orcamentoId);
+    if (orcamentoTrancado(statusDaSessao(arquivoOrigem?.sessaoOrcamento))) {
+      throw new Error('Orçamento trancado: peça para destrancar antes de criar uma nova revisão.');
+    }
+    const sourceFile = arquivoOrigem ?? {
       servicos: [],
       composicoes: [],
       imports: [],

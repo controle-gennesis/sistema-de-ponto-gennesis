@@ -104,11 +104,12 @@ import {
   formToApiPayload,
   formatCurrencyDisplay,
   parseCurrencyToNumber,
-  FD_STATUS_LABELS,
+  fdStatusLabel,
   purchaseStatusLabel,
   type FichaDemandaApprovalFormState,
   type FichaDemandaApprovalRecord,
   type PoloFd,
+  idMovRmExibicao,
 } from '@/lib/fichaDemandaApproval';
 import {
   loadOrcafascioOrcamentosList,
@@ -3234,7 +3235,7 @@ const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
   rascunho: 'Rascunho',
   pronta: 'FD pronta',
   aguardando_aprovacao: 'Aguardando aprovação',
-  aprovado: 'Aprovado',
+  aprovado: 'Trancado',
   em_correcao: 'Reprovada',
   reprovado: 'Reprovado',
   finalizado: 'Finalizado',
@@ -3302,7 +3303,7 @@ function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
   return '';
 }
 
-type OrcamentoMovimentoTipo = 'importacao' | 'fechamento' | 'reabertura';
+type OrcamentoMovimentoTipo = 'importacao' | 'fechamento' | 'reabertura' | 'trancamento' | 'destrancamento';
 
 type OrcamentoMovimento = {
   tipo: OrcamentoMovimentoTipo;
@@ -3314,6 +3315,8 @@ const ROTULO_MOVIMENTO_ORCAMENTO: Record<OrcamentoMovimentoTipo, string> = {
   importacao: 'Importação',
   fechamento: 'Fechamento',
   reabertura: 'Reabertura',
+  trancamento: 'Trancamento (FD lançada)',
+  destrancamento: 'Destrancamento',
 };
 
 function parseHistoricoMovimentos(raw: unknown): OrcamentoMovimento[] | undefined {
@@ -3323,7 +3326,15 @@ function parseHistoricoMovimentos(raw: unknown): OrcamentoMovimento[] | undefine
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
     const tipo = row.tipo;
-    if (tipo !== 'importacao' && tipo !== 'fechamento' && tipo !== 'reabertura') continue;
+    if (
+      tipo !== 'importacao' &&
+      tipo !== 'fechamento' &&
+      tipo !== 'reabertura' &&
+      tipo !== 'trancamento' &&
+      tipo !== 'destrancamento'
+    ) {
+      continue;
+    }
     const em = typeof row.em === 'string' ? row.em.trim() : '';
     if (!em) continue;
     const usuario =
@@ -7814,7 +7825,11 @@ export function OrcamentoPageView({
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
   // O envio para aprovação cria a ficha de demanda: só aparece para quem acessa a página de Fichas de Demanda.
-  const { can: podeAcessarModulo, isAdministrator: usuarioAdministrador } = usePermissions();
+  const {
+    can: podeAcessarModulo,
+    isAdministrator: usuarioAdministrador,
+    canUnlockOrcamento,
+  } = usePermissions();
   const podeAcessarFichasDemanda =
     usuarioAdministrador || podeAcessarModulo(pathToModuleKey('/ponto/aprovacao-fds'));
   const queryClient = useQueryClient();
@@ -8824,7 +8839,11 @@ export function OrcamentoPageView({
   const aparenciaOrcamento = aparenciaDaAba(meta, abaAparenciaFromViewTab(orcamentoViewTab));
   const versaoCongelada = meta.congelado === true;
   const versaoNumero = meta.versao && meta.versao >= 1 ? meta.versao : 1;
-  const orcamentoFechado = normalizarStatusAprovacaoOrcamento(meta.statusAprovacao) === 'finalizado';
+  const statusMetaAtual = normalizarStatusAprovacaoOrcamento(meta.statusAprovacao);
+  /** Orçamento + FD trancados (FD lançada): só quem tem autorização destranca. */
+  const orcamentoTrancado = statusMetaAtual === 'aprovado';
+  const orcamentoFechado =
+    statusMetaAtual === 'finalizado' || statusMetaAtual === 'aguardando_aprovacao' || orcamentoTrancado;
   const gradeTravada = meta.gradeTravada === true || versaoCongelada || orcamentoFechado;
   const gradeTravadaRef = useRef(gradeTravada);
   gradeTravadaRef.current = gradeTravada;
@@ -8832,6 +8851,10 @@ export function OrcamentoPageView({
   const alternarGradeTravada = useCallback(() => {
     if (versaoCongelada) {
       toast.error('Esta revisão está congelada. Crie uma nova revisão para editar.');
+      return;
+    }
+    if (orcamentoTrancado) {
+      toast.error('Orçamento e FD trancados. Peça para quem tem autorização destrancar.');
       return;
     }
     if (orcamentoFechado) {
@@ -8851,7 +8874,7 @@ export function OrcamentoPageView({
     setMeta((m) => ({ ...m, gradeTravada: next ? true : undefined }));
     if (next) toast.success('Orçamento e memória travados.');
     else toast.success('Orçamento e memória liberados.');
-  }, [versaoCongelada, orcamentoFechado, meta.gradeTravada]);
+  }, [versaoCongelada, orcamentoFechado, orcamentoTrancado, meta.gradeTravada]);
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
 
   const dataFimOrcamento = useMemo(
@@ -10059,10 +10082,10 @@ export function OrcamentoPageView({
   };
 
   const pedirExclusaoOrcamento = (id: string, nome: string) => {
-    // FD já lançada para aprovação: o orçamento não pode mais ser excluído.
+    // FD já lançada: só o administrador ainda exclui o orçamento.
     const status = normalizarStatusAprovacaoOrcamento(listaOrcamentos.find((o) => o.id === id)?.statusAprovacao);
-    if (status === 'aguardando_aprovacao' || status === 'aprovado') {
-      toast.error('Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada para aprovação.');
+    if (!usuarioAdministrador && (status === 'aguardando_aprovacao' || status === 'aprovado')) {
+      toast.error('Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada.');
       return;
     }
     setOrcamentoExcluirConfirm({ id, nome });
@@ -14364,7 +14387,9 @@ export function OrcamentoPageView({
     statusAprovacaoAtivo === 'pronta' ||
     statusAprovacaoAtivo === 'em_correcao' ||
     statusAprovacaoAtivo === 'reprovado';
-  const podeEnviarFdAprovacao = statusAprovacaoAtivo === 'finalizado';
+  /** Lançar a FD tranca orçamento + FD; "aguardando aprovação" (fluxo antigo) fica destrancado e pode lançar. */
+  const podeEnviarFdAprovacao =
+    statusAprovacaoAtivo === 'finalizado' || statusAprovacaoAtivo === 'aguardando_aprovacao';
 
   // --- Pedido de material (FD aprovada sem RM) ---
   const [fdAprovadaRecord, setFdAprovadaRecord] = useState<{
@@ -14444,8 +14469,12 @@ export function OrcamentoPageView({
     fdAprovadaRecord.itensPedidos.length === 0 &&
     !!fdAprovadaRecord.numMovRm.trim() &&
     fdAprovadaRecord.numMovRm.trim() !== '-';
+  // Pedido de material só com orçamento e FD trancados.
   const podeFazerPedidoMaterial =
-    fdAprovadaRecord !== null && fdAprovadaRecord.status === 'APPROVED' && !fdRmManual;
+    statusAprovacaoAtivo === 'aprovado' &&
+    fdAprovadaRecord !== null &&
+    fdAprovadaRecord.status === 'APPROVED' &&
+    !fdRmManual;
 
   /** Todos os insumos da FD (MA/MO/LO), com etapa/subetapa/composição; cada linha é associada separadamente. */
   const insumosParaPedido = useMemo<FdInsumoLine[]>(() => {
@@ -17222,7 +17251,12 @@ export function OrcamentoPageView({
       toast.error('Esta revisão está somente leitura.');
       return;
     }
-    if (statusAprovacaoAtivo !== 'finalizado' || reabrindoOrcamento) return;
+    if (
+      (statusAprovacaoAtivo !== 'finalizado' && statusAprovacaoAtivo !== 'aguardando_aprovacao') ||
+      reabrindoOrcamento
+    ) {
+      return;
+    }
     setReabrindoOrcamento(true);
     const origemId = orcamentoAtivoId;
 
@@ -17284,7 +17318,6 @@ export function OrcamentoPageView({
           origemVersaoId: origemId,
           statusAprovacao: 'rascunho',
           gradeTravada: undefined,
-          fichaDemandaApprovalId: undefined,
         },
         'reabertura',
         currentUserName
@@ -17332,11 +17365,11 @@ export function OrcamentoPageView({
 
   const abrirEnvioFichaDemandaAprovacao = async () => {
     if (!orcamentoAtivoId) return;
-    if (statusAprovacaoAtivo !== 'finalizado') {
+    if (!podeEnviarFdAprovacao) {
       toast.error(
-        statusAprovacaoAtivo === 'aguardando_aprovacao' || statusAprovacaoAtivo === 'aprovado'
-          ? 'Este orçamento já foi enviado ou aprovado.'
-          : 'Finalize o orçamento antes de enviar para aprovação.'
+        statusAprovacaoAtivo === 'aprovado'
+          ? 'Orçamento e FD já estão trancados.'
+          : 'Finalize o orçamento antes de lançar a FD.'
       );
       return;
     }
@@ -17415,7 +17448,7 @@ export function OrcamentoPageView({
               ?.error ||
             (err as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast.error(msg || 'Não foi possível preparar o envio da ficha de demanda.');
+      toast.error(msg || 'Não foi possível preparar o lançamento da ficha de demanda.');
     } finally {
       setFdAprovacaoPreparando(false);
     }
@@ -17425,38 +17458,42 @@ export function OrcamentoPageView({
     if (!centroCustoId || !orcamentoAtivoId) return;
     setFdAprovacaoEnviando(true);
     try {
-      const existingFdId = (meta.fichaDemandaApprovalId || '').trim();
-      const payload = {
+      // Grava o que estiver pendente: depois de trancado, o conteúdo do orçamento e da FD não muda mais.
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      flushOrcamentoPersistencia();
+      await aguardarSalvamentoEmAndamento(orcamentoAtivoId);
+
+      // Sem aprovação do gestor: lança a FD e tranca orçamento + FD (a mesma FD é reaproveitada depois de destrancar).
+      const res = await api.post('/demand-sheet-approvals/orcamento/trancar', {
         ...formToApiPayload(form),
         orcamentoCentroCustoId: centroCustoId,
         orcamentoId: orcamentoAtivoId,
-      };
-      const res = existingFdId
-        ? await api.put(`/demand-sheet-approvals/${existingFdId}`, payload)
-        : await api.post('/demand-sheet-approvals', payload);
-      const createdId = String(res.data?.data?.id || '').trim() || undefined;
-      const nextMeta: OrcamentoMeta = {
-        ...meta,
-        statusAprovacao: 'aguardando_aprovacao',
-        ...(createdId ? { fichaDemandaApprovalId: createdId } : {}),
-      };
-      setMeta(nextMeta);
-      const nextSessao: SessaoOrcamentoPersist = {
-        ...sessaoRef.current,
-        meta: nextMeta,
-      };
-      sessaoRef.current = nextSessao;
-      persistToApi(servicos, imports, nextSessao);
+        fichaDemandaApprovalId: (meta.fichaDemandaApprovalId || '').trim() || undefined,
+      });
+      const fdId = String(res.data?.data?.id || '').trim() || undefined;
+      const recarregou = await recarregarDoServidor();
+      if (!recarregou) {
+        setMeta((prev) => ({
+          ...prev,
+          statusAprovacao: 'aprovado',
+          ...(fdId ? { fichaDemandaApprovalId: fdId } : {}),
+        }));
+      }
       setListaOrcamentos((prev) =>
         prev.map((o) =>
           o.id === orcamentoAtivoId
-            ? { ...o, statusAprovacao: 'aguardando_aprovacao', updatedAt: new Date().toISOString() }
+            ? { ...o, statusAprovacao: 'aprovado', updatedAt: new Date().toISOString() }
             : o
         )
       );
+      orcamentosListaCache.delete(centroCustoId);
+      void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
       setFdAprovacaoModalOpen(false);
       setFdAprovacaoInitialForm(null);
-      toast.success('Ficha de demanda enviada para aprovação.');
+      toast.success('Ficha de demanda lançada. Orçamento e FD trancados — o pedido de material está liberado.');
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
@@ -17464,9 +17501,43 @@ export function OrcamentoPageView({
               ?.error ||
             (err as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast.error(msg || 'Não foi possível enviar a ficha de demanda.');
+      toast.error(msg || 'Não foi possível lançar a ficha de demanda.');
     } finally {
       setFdAprovacaoEnviando(false);
+    }
+  };
+
+  const podeDestrancarOrcamento = canUnlockOrcamento(centroCustoId);
+  const [confirmDestrancarOrcamento, setConfirmDestrancarOrcamento] = useState(false);
+  const [destrancandoOrcamento, setDestrancandoOrcamento] = useState(false);
+
+  /** Destranca orçamento + FD (volta para Finalizado). Só administrador ou autorizado no centro de custo. */
+  const destrancarOrcamento = async () => {
+    if (!centroCustoId || !orcamentoAtivoId || destrancandoOrcamento) return;
+    setDestrancandoOrcamento(true);
+    try {
+      await aguardarSalvamentoEmAndamento(orcamentoAtivoId);
+      await api.post(`/orcamento/${centroCustoId}/orcamentos/${orcamentoAtivoId}/destrancar`, undefined, {
+        timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+      });
+      const recarregou = await recarregarDoServidor();
+      if (!recarregou) setMeta((prev) => ({ ...prev, statusAprovacao: 'finalizado' }));
+      setListaOrcamentos((prev) =>
+        prev.map((o) =>
+          o.id === orcamentoAtivoId
+            ? { ...o, statusAprovacao: 'finalizado', updatedAt: new Date().toISOString() }
+            : o
+        )
+      );
+      orcamentosListaCache.delete(centroCustoId);
+      void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+      toast.success('Orçamento e FD destrancados. Novos pedidos de material ficam bloqueados até trancar de novo.');
+      setConfirmDestrancarOrcamento(false);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+      toast.error(msg?.message || msg?.error || 'Não foi possível destrancar o orçamento.');
+    } finally {
+      setDestrancandoOrcamento(false);
     }
   };
 
@@ -18215,7 +18286,7 @@ export function OrcamentoPageView({
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">ID Mov RM</dt>
-                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.idMovRm || '—'}</dd>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{idMovRmExibicao(fichaDemandaRecord.idMovRm) || '—'}</dd>
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Faturamento estimado</dt>
@@ -18227,11 +18298,7 @@ export function OrcamentoPageView({
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</dt>
-                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{
-                            fichaDemandaRecord.status === 'CANCELLED' && fichaDemandaRecord.managerRejectionComment?.includes('exclusão de orçamento')
-                              ? 'FD Cancelada por exclusão de orçamento'
-                              : (FD_STATUS_LABELS[fichaDemandaRecord.status] || fichaDemandaRecord.status)
-                          }</dd>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fdStatusLabel(fichaDemandaRecord)}</dd>
                         </div>
                         <div className="min-w-0">
                           <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status compras</dt>
@@ -18764,6 +18831,8 @@ export function OrcamentoPageView({
                           );
                         })()}
                         <div data-orc-table-viewport className={gradeTableViewportCls} style={gradeZoomStyle}>
+                          {/* Orçamento trancado: a FD fica somente leitura (fieldset desabilita os campos da grade). */}
+                          <fieldset disabled={orcamentoTrancado} className="contents">
                           <table
                             className={`border-separate border-spacing-0 ${gradeTableCls}`}
                             style={{ tableLayout: 'fixed', width: fdColResize.widths.reduce((a, b) => a + b, 0) }}
@@ -19781,7 +19850,8 @@ export function OrcamentoPageView({
                               <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={colSpanFichaDemanda} />
                             </tbody>
                           </table>
-                        {menuCtxFichaDemanda && (
+                          </fieldset>
+                        {menuCtxFichaDemanda && !orcamentoTrancado && (
                           <ActionMenuOverlay
                             open
                             onClose={() => setMenuCtxFichaDemanda(null)}
@@ -21319,7 +21389,32 @@ export function OrcamentoPageView({
                   >
                     <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
-                  {!fichaDemandaOnly ? (
+                  {!fichaDemandaOnly && orcamentoTrancado && !versaoCongelada ? (
+                    podeDestrancarOrcamento ? (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDestrancarOrcamento(true)}
+                        disabled={destrancandoOrcamento}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-600 bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700 hover:border-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
+                        title="Destrancar orçamento e FD"
+                        aria-label="Destrancar orçamento e FD"
+                      >
+                        {destrancandoOrcamento ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        ) : (
+                          <Unlock className="h-4 w-4 shrink-0" aria-hidden />
+                        )}
+                      </button>
+                    ) : (
+                      <span
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        title="Orçamento e FD trancados. Só quem tem autorização pode destrancar."
+                        aria-label="Orçamento e FD trancados"
+                      >
+                        <Lock className="h-4 w-4 shrink-0" aria-hidden />
+                      </span>
+                    )
+                  ) : !fichaDemandaOnly ? (
                     orcamentoFechado && !versaoCongelada ? (
                       <button
                         type="button"
@@ -21383,14 +21478,13 @@ export function OrcamentoPageView({
                       }
                       className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-600 bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 hover:border-red-700 active:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:active:bg-red-700 dark:focus-visible:ring-offset-gray-900"
                       title={
-                        statusAprovacaoAtivo === 'aguardando_aprovacao' ||
                         statusAprovacaoAtivo === 'aprovado'
-                          ? 'Orçamento já enviado ou aprovado'
-                          : statusAprovacaoAtivo === 'finalizado'
-                            ? 'Enviar para aprovação'
-                            : 'Finalize o orçamento antes de enviar para aprovação'
+                          ? 'Orçamento e FD já trancados'
+                          : podeEnviarFdAprovacao
+                            ? 'Lançar FD e trancar orçamento'
+                            : 'Finalize o orçamento antes de lançar a FD'
                       }
-                      aria-label="Enviar para aprovação"
+                      aria-label="Lançar FD e trancar orçamento"
                     >
                       {fdAprovacaoPreparando ? (
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
@@ -21513,7 +21607,9 @@ export function OrcamentoPageView({
           void confirmarEnvioFichaDemandaAprovacao(form);
         }}
         isSaving={fdAprovacaoEnviando}
-        title="Enviar ficha de demanda para aprovação"
+        title="Lançar ficha de demanda"
+        aviso="Ao lançar, o orçamento e a FD ficam trancados: ninguém altera mais. Só o administrador ou quem tem autorização no centro de custo pode destrancar. O pedido de material é liberado logo após o lançamento."
+        textoSalvar="Lançar e trancar"
       />
 
       <FdPedidoMaterialModal
@@ -21666,6 +21762,49 @@ export function OrcamentoPageView({
                   : modoReabertura === 'mesma'
                     ? 'Reabrir esta versão'
                     : 'Criar revisão'}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {confirmDestrancarOrcamento && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (destrancandoOrcamento) return;
+              setConfirmDestrancarOrcamento(false);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <Unlock className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Destrancar orçamento e FD?
+            </h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              O orçamento volta para Finalizado e a FD pode ser alterada. Enquanto estiver destrancado, ninguém
+              faz pedido de material por esta FD. Para liberar os pedidos de novo, lance a FD outra vez — a
+              mesma FD é atualizada e os pedidos já feitos continuam nela.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmDestrancarOrcamento(false)}
+                disabled={destrancandoOrcamento}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-60 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void destrancarOrcamento()}
+                disabled={destrancandoOrcamento}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+              >
+                {destrancandoOrcamento ? 'Destrancando...' : 'Destrancar'}
               </button>
             </div>
           </div>

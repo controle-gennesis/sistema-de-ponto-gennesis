@@ -92,6 +92,8 @@ router.get(
 
 router.get('/', requireModuleAccess(fdModule), controller.list.bind(controller));
 router.post('/', requireModuleAccess(fdModule), controller.create.bind(controller));
+// FD do orçamento: lança sem aprovação e tranca orçamento + FD.
+router.post('/orcamento/trancar', requireModuleAccess(fdModule), controller.trancarOrcamento.bind(controller));
 
 router.post(
   '/import',

@@ -236,12 +236,39 @@ export interface FichaDemandaApprovalFormState {
   anexos: FdAnexo[];
 }
 
+/**
+ * ID Mov RM para exibir: só o ID de movimento do TOTVS. FDs antigas guardavam ali o ID interno das RMs
+ * geradas pela FD (código longo tipo "cmvih0xmo0007..."); esses códigos não são mostrados.
+ */
+export function idMovRmExibicao(valor: string | null | undefined): string {
+  return String(valor ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t && !/^c[a-z0-9]{20,}$/.test(t))
+    .join(', ');
+}
+
 export const FD_STATUS_LABELS: Record<DemandSheetApprovalStatus, string> = {
   WAITING_MANAGER: 'Pendente de aprovação',
   APPROVED: 'Aprovada',
   REJECTED: 'Reprovada',
   CANCELLED: 'Cancelada',
 };
+
+/**
+ * Rótulo do status da FD. FD lançada pelo orçamento não passa por aprovação: aparece como "Lançada".
+ */
+export function fdStatusLabel(
+  record: Pick<FichaDemandaApprovalRecord, 'status' | 'managerRejectionComment' | 'managerApproverNome' | 'orcamentoId'>
+): string {
+  if (record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')) {
+    return 'FD Cancelada por exclusão de orçamento';
+  }
+  if (record.status === 'APPROVED' && record.orcamentoId && !record.managerApproverNome?.trim()) {
+    return 'Lançada';
+  }
+  return FD_STATUS_LABELS[record.status] || record.status;
+}
 
 export function fdStatusBadgeClass(status: DemandSheetApprovalStatus): string {
   switch (status) {
@@ -330,7 +357,7 @@ export function recordToForm(record: FichaDemandaApprovalRecord): FichaDemandaAp
   return {
     rmFeita: !!(record.numMovRm || record.idMovRm),
     numMovRm: record.numMovRm,
-    idMovRm: record.idMovRm,
+    idMovRm: idMovRmExibicao(record.idMovRm),
     codigoPedido: record.codigoPedido,
     solicitanteId: record.solicitanteId,
     contratoId: record.contratoId,

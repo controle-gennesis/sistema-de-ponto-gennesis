@@ -8,6 +8,12 @@ import {
   type GerarSubServicosInput
 } from '../services/OrcamentoCronogramaSubServicoService';
 import { AuthRequest } from '../middleware/auth';
+import {
+  orcamentoTrancado,
+  statusDaSessao,
+  STATUS_ORCAMENTO_TRANCADO,
+  userCanUnlockOrcamento,
+} from '../lib/orcamentoTrava';
 
 const orcamentoService = new OrcamentoService();
 const cronogramaSubServicoService = new OrcamentoCronogramaSubServicoService();
@@ -92,6 +98,7 @@ export class OrcamentoController {
       }
       if (
         msg.includes('congelada') ||
+        msg.includes('trancado') ||
         msg.includes('versão atual') ||
         msg.includes('ID de orçamento inválido')
       ) {
@@ -159,6 +166,7 @@ export class OrcamentoController {
           {
             baseRevisao: typeof baseRevisao === 'number' ? baseRevisao : undefined,
             force: force === true,
+            respeitarTrava: true,
             autor: req.user ? { id: req.user.id, nome: autorNome } : undefined,
             // Os outros são avisados assim que o arquivo é gravado, sem esperar o resto do salvamento.
             aoGravarArquivo: (novaRevisao) => {
@@ -194,6 +202,38 @@ export class OrcamentoController {
     }
   }
 
+  /**
+   * Destranca orçamento + FD (volta para Finalizado). Só administrador ou quem tem
+   * Controle → Aprovações → Destrancar orçamento e FD neste centro de custo.
+   */
+  async destrancarOrcamento(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { centroCustoId, orcamentoId } = req.params;
+      if (!req.user) return res.status(401).json({ message: 'Usuário não autenticado' });
+      if (!centroCustoId || !orcamentoId) {
+        return res.status(400).json({ message: 'centroCustoId e orcamentoId são obrigatórios' });
+      }
+      const pode = await userCanUnlockOrcamento(req.user.id, req.user.isAdmin, centroCustoId);
+      if (!pode) {
+        return res.status(403).json({ message: 'Você não tem autorização para destrancar orçamentos deste centro de custo.' });
+      }
+      const raw = await orcamentoService.readOrcamentoFile(centroCustoId, orcamentoId);
+      if (!raw) return res.status(404).json({ message: 'Orçamento não encontrado' });
+      if (!orcamentoTrancado(statusDaSessao(raw.sessaoOrcamento))) {
+        return res.status(400).json({ message: 'Este orçamento não está trancado.' });
+      }
+      const nome =
+        (await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } }))?.name ?? '';
+      await orcamentoService.updateStatusAprovacao(centroCustoId, orcamentoId, 'finalizado', undefined, {
+        tipo: 'destrancamento',
+        usuario: nome,
+      });
+      return res.json({ success: true });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
   async renameOrcamento(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { centroCustoId, orcamentoId } = req.params;
@@ -221,7 +261,8 @@ export class OrcamentoController {
       if (!centroCustoId || !orcamentoId) {
         return res.status(400).json({ message: 'centroCustoId e orcamentoId são obrigatórios' });
       }
-      // FD já lançada para aprovação (aguardando aprovação ou aprovada): ninguém exclui o orçamento.
+      // FD já lançada (aguardando aprovação ou trancada): só o administrador exclui o orçamento.
+      const isAdmin = !!req.user?.isAdmin;
       const fdsLancadas = await prisma.demandSheetApproval.findMany({
         where: { status: { in: ['WAITING_MANAGER', 'APPROVED'] } },
         select: { id: true, anexos: true },
@@ -244,9 +285,12 @@ export class OrcamentoController {
       } catch {
         /* sem índice: vale a verificação pelas FDs */
       }
-      if (temFdLancada || statusOrcamento === 'aguardando_aprovacao' || statusOrcamento === 'aprovado') {
+      if (
+        !isAdmin &&
+        (temFdLancada || statusOrcamento === 'aguardando_aprovacao' || statusOrcamento === STATUS_ORCAMENTO_TRANCADO)
+      ) {
         return res.status(400).json({
-          message: 'Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada para aprovação.',
+          message: 'Não é possível excluir o orçamento: a Ficha de Demanda já foi lançada.',
         });
       }
 

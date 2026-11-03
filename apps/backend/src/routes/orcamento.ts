@@ -14,6 +14,9 @@ router.post('/:centroCustoId/orcamentos', (req, res, next) => controller.createO
 router.post('/:centroCustoId/orcamentos/:orcamentoId/versoes', (req, res, next) =>
   controller.createVersao(req as any, res, next)
 );
+router.post('/:centroCustoId/orcamentos/:orcamentoId/destrancar', (req, res, next) =>
+  controller.destrancarOrcamento(req as any, res, next)
+);
 router.patch('/:centroCustoId/orcamentos/:orcamentoId', (req, res, next) =>
   controller.renameOrcamento(req as any, res, next)
 );

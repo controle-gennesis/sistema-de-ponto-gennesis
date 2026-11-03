@@ -35,6 +35,12 @@ import {
   notifyRequesterCancelledWhatsApp,
   resolveActorName,
 } from '../lib/approvalWhatsAppNotify';
+import {
+  orcamentoPodeTrancar,
+  orcamentoTrancado,
+  statusDaSessao,
+  STATUS_ORCAMENTO_TRANCADO,
+} from '../lib/orcamentoTrava';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -399,6 +405,17 @@ async function syncOrcamentoStatusFromFd(
     console.warn('[DemandSheetApproval] Falha ao sincronizar status do orçamento:', err);
   }
 }
+
+/** FD lançada pelo orçamento: o orçamento de origem está trancado? (null = FD sem orçamento). */
+async function orcamentoDaFdTrancado(anexos: unknown): Promise<boolean | null> {
+  const ref = extractOrcamentoRefFromAnexos(anexos);
+  if (!ref) return null;
+  const arquivo = await orcamentoService.readOrcamentoFile(ref.centroCustoId, ref.orcamentoId);
+  return orcamentoTrancado(statusDaSessao(arquivo?.sessaoOrcamento));
+}
+
+const MSG_FD_TRANCADA =
+  'Orçamento e FD trancados. Só quem tem autorização para destrancar pode liberar alterações.';
 
 const PURCHASE_STATUS_VALUES = [
   'WAREHOUSE_DF',
@@ -863,16 +880,8 @@ export class DemandSheetApprovalController {
         : [];
       const centroRef = String(body.orcamentoCentroCustoId || '').trim();
       const orcRef = String(body.orcamentoId || '').trim();
-      if (centroRef && orcRef && !extractOrcamentoRefFromAnexos(anexos)) {
-        anexos.push({
-          id: ORCAMENTO_REF_KIND,
-          name: ORCAMENTO_REF_NAME,
-          kind: ORCAMENTO_REF_KIND,
-          centroCustoId: centroRef,
-          orcamentoId: orcRef,
-          fichaDemandaPct: 0,
-        });
-      }
+      // FD do orçamento não passa por aprovação: é lançada e tranca orçamento + FD.
+      if (centroRef && orcRef) return this.trancarOrcamento(req, res);
 
       const row = await prisma.demandSheetApproval.create({
         data: {
@@ -912,6 +921,142 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /**
+   * Lança a FD do orçamento sem aprovação do gestor e tranca orçamento + FD.
+   * Depois de destrancado, lançar de novo atualiza a mesma FD (RMs e OCs já feitas continuam nela).
+   */
+  async trancarOrcamento(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const canCreate =
+        req.user.isAdmin || (await userCanAccessFdModule(req.user.id, req.user.isAdmin));
+      if (!canCreate) {
+        throw createError('Sem permissão para lançar fichas de demanda', 403);
+      }
+
+      const body = formSchema.parse(req.body);
+      await assertLiberadoContractAccess(req, body.contratoId);
+
+      const raw = req.body as Record<string, unknown>;
+      const centroRef = String(raw.orcamentoCentroCustoId || '').trim();
+      const orcRef = String(raw.orcamentoId || '').trim();
+      const fdIdInformado = String(raw.fichaDemandaApprovalId || '').trim();
+      if (!centroRef || !orcRef) throw createError('Orçamento da ficha de demanda não informado', 400);
+
+      const arquivo = await orcamentoService.readOrcamentoFile(centroRef, orcRef);
+      if (!arquivo) throw createError('Orçamento não encontrado', 404);
+      const statusOrc = statusDaSessao(arquivo.sessaoOrcamento);
+      if (orcamentoTrancado(statusOrc)) throw createError('Este orçamento já está trancado.', 400);
+      if (!orcamentoPodeTrancar(statusOrc)) {
+        throw createError('Finalize o orçamento antes de lançar a ficha de demanda.', 400);
+      }
+
+      // FD que já existe: a da revisão anterior (informada pela tela) ou a já ligada a este orçamento.
+      let existing = fdIdInformado
+        ? await prisma.demandSheetApproval.findUnique({ where: { id: fdIdInformado } })
+        : null;
+      if (
+        existing &&
+        (existing.status === 'CANCELLED' ||
+          extractOrcamentoRefFromAnexos(existing.anexos)?.centroCustoId !== centroRef)
+      ) {
+        existing = null;
+      }
+      if (!existing) {
+        const candidatas = await prisma.demandSheetApproval.findMany({
+          where: { status: { not: 'CANCELLED' } },
+          select: { id: true, anexos: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        const achada = candidatas.find((fd) => {
+          const ref = extractOrcamentoRefFromAnexos(fd.anexos);
+          return ref?.centroCustoId === centroRef && ref.orcamentoId === orcRef;
+        });
+        if (achada) existing = await prisma.demandSheetApproval.findUnique({ where: { id: achada.id } });
+      }
+
+      const refAnterior = existing ? extractOrcamentoRefFromAnexos(existing.anexos) : null;
+      const novosAnexos: Array<Record<string, unknown>> = (Array.isArray(body.anexos) ? body.anexos : [])
+        .filter((a: unknown) => !isOrcamentoRefAnexo(a))
+        .map((a: Record<string, unknown>) => ({ ...a }));
+      // Trancar de novo: a planilha do orçamento/FD é trocada pela nova; os demais anexos (OCs, notas...) ficam.
+      const tiposNovos = new Set(novosAnexos.map((a) => String(a.kind || '')).filter(Boolean));
+      const anexosMantidos = (Array.isArray(existing?.anexos) ? (existing!.anexos as Array<Record<string, unknown>>) : [])
+        .filter((a) => !isOrcamentoRefAnexo(a) && !tiposNovos.has(String(a?.kind || '')));
+      const anexos: Array<Record<string, unknown>> = [...anexosMantidos, ...novosAnexos];
+      anexos.push({
+        id: ORCAMENTO_REF_KIND,
+        name: ORCAMENTO_REF_NAME,
+        kind: ORCAMENTO_REF_KIND,
+        centroCustoId: centroRef,
+        orcamentoId: orcRef,
+        fichaDemandaPct: refAnterior?.fichaDemandaPct ?? 0,
+      });
+
+      // RMs já pedidas por esta FD continuam nela: o Nº Mov. (REQs) não é sobrescrito pelo formulário.
+      const temPedidos = !!existing && parseItensPedidos(existing.itensPedidos).length > 0;
+      const dados = {
+        numMovRm: temPedidos ? existing!.numMovRm : body.numMovRm.trim(),
+        idMovRm: temPedidos ? existing!.idMovRm : body.idMovRm.trim(),
+        codigoPedido: body.codigoPedido.trim(),
+        contratoId: body.contratoId,
+        obra: body.obra.trim(),
+        codFichaDemanda: body.codFichaDemanda.trim(),
+        faturamentoEstimado: parseMoney(body.faturamentoEstimado),
+        custoEstimado: parseMoney(body.custoEstimado),
+        observacao: body.observacao.trim(),
+        dataHora: parseDataHora(body.dataHora),
+        polo: body.polo,
+        anexos: anexos as unknown as Prisma.InputJsonValue,
+      };
+      // Liberada sem gestor: o status APPROVED aqui só marca a FD como disponível para pedidos de material.
+      const liberacao = {
+        status: 'APPROVED' as const,
+        managerApprovedBy: null,
+        managerApprovedAt: new Date(),
+        managerApprovalComment: null,
+        managerRejectionReason: null,
+        managerRejectionComment: null,
+      };
+
+      const row = existing
+        ? await prisma.demandSheetApproval.update({
+            where: { id: existing.id },
+            data: { ...dados, ...liberacao },
+            include: includeDefault,
+          })
+        : await prisma.demandSheetApproval.create({
+            data: {
+              ...dados,
+              ...liberacao,
+              displayNumber: await nextFdDisplayNumber(),
+              solicitanteId: req.user.id,
+              createdBy: req.user.id,
+            },
+            include: includeDefault,
+          });
+
+      await orcamentoService.updateStatusAprovacao(centroRef, orcRef, STATUS_ORCAMENTO_TRANCADO, row.id, {
+        tipo: 'trancamento',
+        usuario: await resolveActorName(req.user.id),
+      });
+
+      return res.status(existing ? 200 : 201).json({ success: true, data: serializeRow(row) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Confira os campos obrigatórios da ficha' });
+      }
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({
+        error: `Erro ao lançar a ficha de demanda: ${(e as Error)?.message || 'erro desconhecido'}`,
+      });
+    }
+  }
+
   async update(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -920,6 +1065,7 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
+      if (await orcamentoDaFdTrancado(existing.anexos)) throw createError(MSG_FD_TRANCADA, 400);
       // Edição liberada enquanto aguarda aprovação, quando reprovada e na Fila (aprovada, ainda sem status de compras).
       const naFila = existing.status === 'APPROVED' && !existing.purchaseStatus;
       if (existing.status !== 'WAITING_MANAGER' && existing.status !== 'REJECTED' && !naFila) {
@@ -1021,6 +1167,7 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
+      if (await orcamentoDaFdTrancado(existing.anexos)) throw createError(MSG_FD_TRANCADA, 400);
 
       const body = formSchema.parse(req.body);
       const contract = await prisma.contract.findUnique({ where: { id: body.contratoId } });
@@ -1066,7 +1213,8 @@ export class DemandSheetApprovalController {
 
       const existing = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!existing) throw createError('Ficha de demanda não encontrada', 404);
-      if (existing.status !== 'WAITING_MANAGER') {
+      // Administrador exclui em qualquer etapa (ex.: FDs de teste); os demais só enquanto aguarda aprovação.
+      if (!req.user.isAdmin && existing.status !== 'WAITING_MANAGER') {
         throw createError('Somente fichas aguardando aprovação podem ser excluídas', 400);
       }
       if (!req.user.isAdmin && existing.createdBy !== req.user.id) {
@@ -1979,6 +2127,10 @@ export class DemandSheetApprovalController {
 
       if (!fd) throw createError('Ficha de demanda não encontrada', 404);
       if (fd.status !== 'APPROVED') throw createError('Ficha de demanda não está aprovada', 400);
+      // FD do orçamento: pedido de material só com orçamento e FD trancados.
+      if ((await orcamentoDaFdTrancado(fd.anexos)) === false) {
+        throw createError('Tranque o orçamento e a FD antes de pedir material.', 400);
+      }
       if (fd.pedidosEncerrados) throw createError('Os pedidos desta FD foram encerrados. Não é possível criar novos pedidos.', 400);
 
       const itensPedidos = parseItensPedidos(fd.itensPedidos);
@@ -2167,14 +2319,13 @@ export class DemandSheetApprovalController {
       }
       const itensAtualizados = [...itensPedidos, ...novos];
       const rmsAnteriores = itensPedidos.length > 0 ? fd.numMovRm.split(',').map((s) => s.trim()).filter(Boolean) : [];
-      const idsAnteriores = itensPedidos.length > 0 ? fd.idMovRm.split(',').map((s) => s.trim()).filter(Boolean) : [];
 
+      // idMovRm é o ID de movimento do TOTVS (informado na aprovação); o ID interno da RM não vai para ele.
       await prisma.demandSheetApproval.update({
         where: { id: fdId },
         data: {
           itensPedidos: itensAtualizados as unknown as Prisma.InputJsonValue,
           numMovRm: [...rmsAnteriores, rm.requestNumber].join(', '),
-          idMovRm: [...idsAnteriores, rm.id].join(', '),
         },
       });
 

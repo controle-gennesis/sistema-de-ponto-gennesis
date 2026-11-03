@@ -262,6 +262,10 @@ export type FichaDemandaApprovalFormModalProps = {
   hideContractField?: boolean;
   /** Obra já definida no orçamento de origem: mostrada sem edição. */
   obraBloqueada?: boolean;
+  /** Aviso no topo do formulário (ex.: lançar a FD tranca orçamento + FD). */
+  aviso?: string;
+  /** Texto do botão de confirmar no cadastro (padrão: "Enviar Ficha"). */
+  textoSalvar?: string;
 };
 
 export function FichaDemandaApprovalFormModal({
@@ -274,6 +278,8 @@ export function FichaDemandaApprovalFormModal({
   title,
   hideContractField = false,
   obraBloqueada = false,
+  aviso,
+  textoSalvar,
 }: FichaDemandaApprovalFormModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
@@ -503,6 +509,11 @@ export function FichaDemandaApprovalFormModal({
           className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
           autoComplete="off"
         >
+          {aviso ? (
+            <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+              {aviso}
+            </p>
+          ) : null}
           <div className="space-y-6">
             <div className="space-y-4">
               <SectionTitle>Dados do Movimento</SectionTitle>
@@ -801,7 +812,7 @@ export function FichaDemandaApprovalFormModal({
               ) : editingRecord ? (
                 'Salvar alterações'
               ) : (
-                'Enviar Ficha'
+                textoSalvar || 'Enviar Ficha'
               )}
             </button>
           </div>
