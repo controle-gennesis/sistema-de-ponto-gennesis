@@ -239,7 +239,7 @@ function numeroMemoriaIgual(atual: number | undefined, proximo: number): boolean
 
 /**
  * Total da memória de origem, colocado numa coluna só, conforme a unidade dela.
- * Metro → C. Metro quadrado → área. Metro cúbico → volume. O restante fica vazio.
+ * Metro → C. Metro quadrado → área. Metro cúbico → volume. Unidade (UN) → N.
  * Memórias incluídas dentro da origem entram com o valor ao vivo. Ciclo é ignorado.
  */
 export function snapshotMemoriaIncluida(
@@ -269,7 +269,7 @@ export function snapshotMemoriaIncluida(
     C: tipo === 'm' ? total : 0,
     L: 0,
     H: 0,
-    N: 0,
+    N: tipo === 'un' ? total : 0,
     aManual: tipo === 'm2' ? total : 0,
     vManual: tipo === 'm3' ? total : 0,
     subtotalManual: total,
@@ -283,18 +283,19 @@ function autoMemoriaDoSnapshot(snap: SnapshotMemoriaIncluida): NonNullable<Linha
     L: snap.L,
     H: snap.H,
     N: snap.N,
-    empolamento: snap.C || snap.aManual || snap.vManual ? 1 : 0,
+    empolamento: snap.C || snap.aManual || snap.vManual || snap.N ? 1 : 0,
     a: snap.aManual,
     v: snap.vManual,
     subtotal: snap.subtotalManual,
   };
 }
 
-/** Fórmula padrão do subtotal incluído: o total entra por C, A ou V. */
-function formulaSubtotalMemoria(snap: SnapshotMemoriaIncluida): string | undefined {
+/** Fórmula padrão do subtotal incluído: o total entra por C, A, V ou N (unidade). */
+export function formulaSubtotalMemoria(snap: SnapshotMemoriaIncluida): string | undefined {
   if (snap.vManual) return '=V*%';
   if (snap.aManual) return '=A*%';
   if (snap.C) return '=C*%';
+  if (snap.N) return '=N*%';
   return undefined;
 }
 

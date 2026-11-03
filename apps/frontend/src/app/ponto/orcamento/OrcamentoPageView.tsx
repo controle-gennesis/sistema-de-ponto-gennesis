@@ -217,6 +217,7 @@ import {
   volumeExibidoLinha,
   sincronizarLinhasMemoriaIncluidas,
   snapshotMemoriaIncluida,
+  formulaSubtotalMemoria,
   propagarFormulasMemoria
 } from './orcamentoMedicaoCalc';
 import type { MetaMemoriaIncluida } from './orcamentoMedicaoCalc';
@@ -14939,14 +14940,12 @@ export function OrcamentoPageView({
         L: snap.L,
         H: snap.H,
         N: snap.N,
-        empolamento: snap.C || snap.aManual || snap.vManual ? 1 : 0,
+        empolamento: snap.C || snap.aManual || snap.vManual || snap.N ? 1 : 0,
         aManual: snap.aManual,
         vManual: snap.vManual,
         subtotalManual: snap.subtotalManual,
-        formulas:
-          snap.vManual ? { subtotalManual: '=V*%' }
-          : snap.aManual ? { subtotalManual: '=A*%' }
-          : snap.C ? { subtotalManual: '=C*%' }
+        formulas: formulaSubtotalMemoria(snap)
+          ? { subtotalManual: formulaSubtotalMemoria(snap) }
           : undefined,
       });
     }
@@ -20045,19 +20044,11 @@ export function OrcamentoPageView({
                                 }
                               >
                                 {servicoGrupo.etapas.map(etapa => {
-                                  const mesmoTituloSubtitulo =
-                                    servicoGrupo.servicoNome.trim().toLowerCase() ===
-                                    etapa.subtituloNome.trim().toLowerCase();
                                   return (
                                     <div
                                       key={etapa.blocoKey || etapa.subtituloNome}
                                       className="flex flex-col gap-4"
                                     >
-                                      {!mesmoTituloSubtitulo && etapa.subtituloNome.trim() ? (
-                                        <div className="border-t border-gray-200 bg-slate-100 px-3 py-2 text-sm font-semibold uppercase text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                          {etapa.subtituloNome}
-                                        </div>
-                                      ) : null}
                                       {etapa.itens.map(row => {
                                         const rowIdx = idxPorKey.get(row.key) ?? 0;
                                         return (
