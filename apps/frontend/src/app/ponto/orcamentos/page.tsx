@@ -7,7 +7,6 @@ import {
   BadgeCheck,
   CheckCircle,
   Calculator,
-  ClipboardCheck,
   Clock,
   FileEdit,
   Filter,
@@ -102,12 +101,11 @@ type OrcamentoListItem = {
 
 const ITEMS_PER_PAGE = 20;
 
-type StatusCard = 'all' | Exclude<OrcamentoStatusAprovacao, 'reprovado'>;
+type StatusCard = 'all' | Exclude<OrcamentoStatusAprovacao, 'reprovado' | 'pronta'>;
 
 const STAGE_TABS: { card: StatusCard; label: string }[] = [
   { card: 'all', label: 'Todos' },
-  { card: 'rascunho', label: 'Rascunho' },
-  { card: 'pronta', label: 'FD Pronta' },
+  { card: 'rascunho', label: 'Em Elaboração' },
   { card: 'aguardando_aprovacao', label: 'Aguardando Aprovação' },
   { card: 'aprovado', label: 'Aprovado' },
   { card: 'em_correcao', label: 'Reprovado' },
@@ -125,18 +123,11 @@ const STATUS_LIST_HEADER: Record<StatusCard, ListHeaderInfo> = {
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   rascunho: {
-    title: 'Rascunho',
-    subtitle: 'Orçamentos ainda em elaboração',
+    title: 'Em Elaboração',
+    subtitle: 'Orçamentos em montagem, antes de serem enviados para aprovação',
     Icon: FileEdit,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
-  },
-  pronta: {
-    title: 'FD Pronta',
-    subtitle: 'Orçamentos com a ficha de demanda pronta',
-    Icon: ClipboardCheck,
-    iconBg: 'bg-sky-100 dark:bg-sky-900/30',
-    iconColor: 'text-sky-600 dark:text-sky-400',
   },
   aguardando_aprovacao: {
     title: 'Aguardando Aprovação',
@@ -171,11 +162,13 @@ const STATUS_LIST_HEADER: Record<StatusCard, ListHeaderInfo> = {
 function matchesStatusCard(status: OrcamentoStatusAprovacao, card: StatusCard): boolean {
   // "reprovado" é um status antigo, igual ao Reprovado (devolvida para correção): as duas ficam na mesma aba.
   if (card === 'em_correcao') return status === 'em_correcao' || status === 'reprovado';
+  // "pronta" (FD pronta) é um status antigo que nada mais grava: conta como Em Elaboração.
+  if (card === 'rascunho') return status === 'rascunho' || status === 'pronta';
   return card === 'all' || status === card;
 }
 
 const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
-  rascunho: 'Rascunho',
+  rascunho: 'Em Elaboração',
   pronta: 'FD Pronta',
   aguardando_aprovacao: 'Aguardando Aprovação',
   aprovado: 'Aprovado',
@@ -461,13 +454,12 @@ export default function OrcamentosPage() {
     const counts: Record<StatusCard, number> = {
       all: familiasAtuais.length,
       rascunho: 0,
-      pronta: 0,
       aguardando_aprovacao: 0,
       em_correcao: 0,
       aprovado: 0,
       finalizado: 0,
     };
-    for (const o of familiasAtuais) counts[o.status === 'reprovado' ? 'em_correcao' : o.status] += 1;
+    for (const o of familiasAtuais) counts[o.status === 'reprovado' ? 'em_correcao' : o.status === 'pronta' ? 'rascunho' : o.status] += 1;
     return counts;
   }, [familiasAtuais]);
 

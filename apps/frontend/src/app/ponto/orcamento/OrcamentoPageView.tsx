@@ -3232,7 +3232,7 @@ function parseVersaoMetaFromRaw(metaRaw: Record<string, unknown> | null | undefi
 }
 
 const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
-  rascunho: 'Rascunho',
+  rascunho: 'Em Elaboração',
   pronta: 'FD pronta',
   aguardando_aprovacao: 'Aguardando aprovação',
   aprovado: 'Aprovado',
