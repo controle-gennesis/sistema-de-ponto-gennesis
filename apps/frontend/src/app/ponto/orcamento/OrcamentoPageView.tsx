@@ -6870,13 +6870,6 @@ function unidadeComposicaoParaExibicao(und: string | undefined, tipoFallback: Ti
   return 'UN';
 }
 
-/** Verifica se a descrição indica composição de Carga Manual de Entulho (UI da memória). */
-function ehComposicaoCargaEntulho(descricao: string | undefined): boolean {
-  if (!descricao) return false;
-  const d = normalizarTextoBusca(descricao);
-  return d.includes('carga') && d.includes('entulho') && (d.includes('caminhao') || d.includes('basculante'));
-}
-
 type AppendComposicaoAoSubtituloResult =
   | { ok: true; next: ServicoPadrao[] }
   | { ok: false; reason: 'no-subtitle' | 'duplicate' };
@@ -16352,17 +16345,15 @@ export function OrcamentoPageView({
     if (loadingFromApi || gradeTravada || !memorialDisponivel || !orcamentoAtivoId) return;
     const token = `${orcamentoAtivoId}:${itensCalculados.map((row) => row.key).join('\n')}`;
     if (seedMemoriaTokenRef.current === token) return;
-    const faltam = itensCalculados.some((row) => {
-      if (ehComposicaoCargaEntulho(row.item.descricao)) return false;
-      return linhasMedicaoEfetivas(dimensoesPorItem[row.key]).length === 0;
-    });
+    const faltam = itensCalculados.some(
+      (row) => linhasMedicaoEfetivas(dimensoesPorItem[row.key]).length === 0
+    );
     seedMemoriaTokenRef.current = token;
     if (!faltam) return;
     setDimensoesPorItem((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const row of itensCalculados) {
-        if (ehComposicaoCargaEntulho(row.item.descricao)) continue;
         if (linhasMedicaoEfetivas(prev[row.key]).length > 0) continue;
         const tipo = row.tipoUnidade && row.tipoUnidade !== 'un' ? row.tipoUnidade : 'm3';
         const base = dimensoesComLinhasEfetivas(prev[row.key], tipo);
@@ -20109,9 +20100,6 @@ export function OrcamentoPageView({
                                                   linhas: linhasMedicaoEfetivas(raw),
                                                 };
                                               })()}
-                                              ehCargaEntulho={ehComposicaoCargaEntulho(
-                                                row.item.descricao
-                                              )}
                                               updateLinhaMedicao={updateLinhaMedicao}
                                               updateRotuloColunaMedicao={(campo, rotulo) =>
                                                 updateRotuloColunaMedicao(row.key, campo, rotulo)

@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Info, ListPlus, Plus, Trash2 } from 'lucide-react';
+import { ListPlus, Plus, Trash2 } from 'lucide-react';
 import {
   type CampoFormulaMedicao,
   type DimensoesItem,
@@ -53,7 +53,6 @@ type Props = {
   onUpdateLinhaContagem?: (idx: number, campo: 'descricao' | 'quantidade', valor: string | number) => void;
   onRemoveLinhaContagem?: (idx: number) => void;
   dim: DimensoesItem;
-  ehCargaEntulho: boolean;
   updateLinhaMedicao: (
     itemKey: string,
     idx: number,
@@ -1780,7 +1779,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   itemDescricao,
   unidadeMedida,
   dim,
-  ehCargaEntulho,
   updateLinhaMedicao,
   updateRotuloColunaMedicao,
   updateObservacaoMedicao,
@@ -3101,7 +3099,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             <p className="min-w-0 flex-1 whitespace-normal break-words text-left text-sm font-bold uppercase leading-relaxed text-gray-900 dark:text-gray-100">
               {itemDescricao}
             </p>
-            {onMemoriasIncluidasChange && !ehCargaEntulho && !readOnly ? (
+            {onMemoriasIncluidasChange && !readOnly ? (
               <button
                 type="button"
                 onClick={(e) => {
@@ -3254,12 +3252,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   /** Uma linha de cabeçalho das colunas de medição (dentro de &lt;thead&gt;). */
-  const renderHeaderRow = (ln0: LinhaMedicao) => {
-    const podeEditarC0 = ehCargaEntulho && !!ln0.editavelC;
-    const podeEditarL0 = ehCargaEntulho && !!ln0.editavelL;
-    const podeEditarH0 = ehCargaEntulho && !!ln0.editavelH;
-    const bloquearN0 = ehCargaEntulho;
-
+  const renderHeaderRow = (_ln0: LinhaMedicao) => {
     return (
       <tr className={gradeTableRowTrCls} data-linha-medicao={LINHA_ROTULOS}>
         <th className={thRestSticky} style={stickyHeaderTopStyle}>
@@ -3298,17 +3291,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             ariaLabel="Rótulo da coluna Descrição"
           />
         </CelulaCabecalho>
-        {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'th', LINHA_ROTULOS, true)}
-        {renderRotuloSelect('L', ehCargaEntulho && !podeEditarL0 ? 'Origem demolição' : undefined, 'th', LINHA_ROTULOS, true)}
-        {renderRotuloSelect('H', ehCargaEntulho && !podeEditarH0 ? 'Origem demolição' : undefined, 'th', LINHA_ROTULOS, true)}
-        {renderRotuloSelect(
-          'pct',
-          ehCargaEntulho ? 'Fator de empolamento — editável nesta linha' : 'Fator de empolamento / perdas',
-          'th',
-          LINHA_ROTULOS,
-          true
-        )}
-        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'th', LINHA_ROTULOS, true)}
+        {renderRotuloSelect('C', undefined, 'th', LINHA_ROTULOS, true)}
+        {renderRotuloSelect('L', undefined, 'th', LINHA_ROTULOS, true)}
+        {renderRotuloSelect('H', undefined, 'th', LINHA_ROTULOS, true)}
+        {renderRotuloSelect('pct', 'Fator de empolamento / perdas', 'th', LINHA_ROTULOS, true)}
+        {renderRotuloSelect('N', undefined, 'th', LINHA_ROTULOS, true)}
         {renderRotuloFixo('A', 'A', 'th', LINHA_ROTULOS, true)}
         {renderRotuloFixo('V', 'V', 'th', LINHA_ROTULOS, true)}
         {renderRotuloFixo('Subtotal', 'subtotal', 'th', LINHA_ROTULOS, true)}
@@ -3358,19 +3345,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     });
   };
 
-  const renderLinhaCabecalhoSecao = (ln: LinhaMedicao, idx: number, ln0Ref: LinhaMedicao) => {
-    const podeEditarC0 = ehCargaEntulho && !!ln0Ref.editavelC;
-    const podeEditarL0 = ehCargaEntulho && !!ln0Ref.editavelL;
-    const podeEditarH0 = ehCargaEntulho && !!ln0Ref.editavelH;
-    const bloquearN0 = ehCargaEntulho;
+  const renderLinhaCabecalhoSecao = (ln: LinhaMedicao, idx: number, _ln0Ref: LinhaMedicao) => {
     return (
       <tr
         key={idx}
         data-linha-medicao={idx}
         className={gradeTableRowTrCls}
-        onMouseDown={ehCargaEntulho ? undefined : marcarPressaoLinha}
-        onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
-        onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
+        onMouseDown={marcarPressaoLinha}
+        onClick={e => abrirMenuCtxMedicao(e, idx)}
+        onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={thRest}>
           <div className={rotuloFixoCls}>{dim.rotulosColunas?.detalhes?.trim() || 'DETALHES'}</div>
@@ -3399,16 +3382,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             onBlur={() => setDescAberta((atual) => (atual === idx ? null : atual))}
           />
         </CelulaCabecalho>
-        {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'td', idx)}
-        {renderRotuloSelect('L', ehCargaEntulho && !podeEditarL0 ? 'Origem demolição' : undefined, 'td', idx)}
-        {renderRotuloSelect('H', ehCargaEntulho && !podeEditarH0 ? 'Origem demolição' : undefined, 'td', idx)}
-        {renderRotuloSelect(
-          'pct',
-          ehCargaEntulho ? 'Fator de empolamento — editável nesta linha' : 'Fator de empolamento / perdas',
-          'td',
-          idx
-        )}
-        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'td', idx)}
+        {renderRotuloSelect('C', undefined, 'td', idx)}
+        {renderRotuloSelect('L', undefined, 'td', idx)}
+        {renderRotuloSelect('H', undefined, 'td', idx)}
+        {renderRotuloSelect('pct', 'Fator de empolamento / perdas', 'td', idx)}
+        {renderRotuloSelect('N', undefined, 'td', idx)}
         {renderRotuloFixo('A', 'A', 'td', idx, false)}
         {renderRotuloFixo('V', 'V', 'td', idx, false)}
         {renderRotuloFixo('Subtotal', 'subtotal', 'td', idx, false)}
@@ -4027,38 +4005,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   if (!linhasEfetivas?.length) {
     const colEmpty = contarColunasGrade();
-    if (ehCargaEntulho) {
-      return painelShell(
-        tabelaEnvoltorio(
-          <>
-            <thead>{renderCabecalhoServico(colEmpty)}</thead>
-            <tbody>
-              <tr className={gradeTableRowTrCls}>
-                <td
-                  colSpan={colEmpty + 1}
-                  className="border-b border-gray-200 bg-slate-50/60 px-6 py-8 text-center dark:border-gray-600 dark:bg-gray-900/50"
-                >
-                  <div className="flex justify-center">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-                      <Info className="h-5 w-5" strokeWidth={2} aria-hidden />
-                    </span>
-                  </div>
-                  <p className="mx-auto mt-3 max-w-lg text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-200">
-                    A carga manual de entulho não é medida aqui: o volume vem dos demais serviços do mesmo bloco
-                    (demolições, remoções, escavações etc.).
-                  </p>
-                  <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                    Inclua primeiro, na aba <span className="font-medium text-gray-800 dark:text-gray-200">Orçamento</span>, as
-                    composições que geram entulho e preencha as medições delas. As linhas desta carga aparecem
-                    automaticamente quando houver volume calculado.
-                  </p>
-                </td>
-              </tr>
-            </tbody>
-          </>
-        )
-      );
-    }
     return painelShell(
       tabelaEnvoltorio(
         <>
@@ -4092,33 +4038,14 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     );
   }
 
-  if (!ehCargaEntulho) {
-    const lnHeaderRef = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
-    const colCount = contarColunasGrade();
-    return painelShell(
-      tabelaEnvoltorio(
-        <>
-          <thead>
-            {renderCabecalhoServico(colCount)}
-            {renderHeaderRow(lnHeaderRef)}
-          </thead>
-          <tbody>
-            {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
-          </tbody>
-        </>
-      )
-    );
-  }
-
-  /** Carga de entulho: uma tabela contínua (sem sub-blocos nem faixa duplicada por composição). */
-  const lnHeaderCarga = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
-  const colCountCarga = contarColunasGrade();
+  const lnHeaderRef = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
+  const colCount = contarColunasGrade();
   return painelShell(
     tabelaEnvoltorio(
       <>
         <thead>
-          {renderCabecalhoServico(colCountCarga)}
-          {renderHeaderRow(lnHeaderCarga)}
+          {renderCabecalhoServico(colCount)}
+          {renderHeaderRow(lnHeaderRef)}
         </thead>
         <tbody>
           {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
