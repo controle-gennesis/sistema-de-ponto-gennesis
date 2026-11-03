@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { isAccountingDirectRequestType } from '../lib/dpRequestDetails';
+import { sendPushToUsers } from '../services/PushNotificationService';
 
 const REQUEST_TYPES = [
   'ADMISSAO',
@@ -70,6 +71,36 @@ async function loadActor(userId: string) {
     email: user.email,
     sector: user.employee?.department?.trim() || null,
   };
+}
+
+/** Registra no histórico da solicitação interna de origem o que a Contabilidade fez (sem mudar a etapa dela). */
+async function appendSourceHistoryNote(
+  tx: Prisma.TransactionClient,
+  sourceId: string,
+  actor: { id: string; name: string },
+  note: string
+) {
+  const source = await tx.dpRequest.findUnique({
+    where: { id: sourceId },
+    select: { id: true, status: true, statusHistory: true },
+  });
+  if (!source) return;
+  const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+  await tx.dpRequest.update({
+    where: { id: source.id },
+    data: {
+      statusHistory: [
+        ...history,
+        {
+          at: new Date().toISOString(),
+          status: source.status,
+          actorUserId: actor.id,
+          actorName: actor.name,
+          note,
+        },
+      ] as Prisma.InputJsonValue,
+    },
+  });
 }
 
 type RequestRow = Prisma.DpContabilidadeRequestGetPayload<{ include: { comments: true } }>;
@@ -308,19 +339,43 @@ export class DpContabilidadeController {
       });
       if (!existing) throw createError('Solicitação não encontrada.', 404);
 
-      await prisma.dpContabilidadeComment.create({
-        data: {
-          requestId: existing.id,
-          userId: actor.id,
-          userName: actor.name,
-          body,
-        },
+      const full = await prisma.dpContabilidadeRequest.findUnique({
+        where: { id: existing.id },
+        select: { createdByUserId: true, title: true },
       });
+      const sourceId =
+        (
+          await prisma.$queryRaw<Array<{ sourceDpRequestId: string | null }>>`
+            SELECT "sourceDpRequestId" FROM "dp_contabilidade_requests" WHERE id = ${existing.id}
+          `
+        )[0]?.sourceDpRequestId ?? null;
+      // Quem pediu também pode comentar; só a resposta de outra pessoa (Contabilidade) tira o pedido de "Aberta".
+      const respondidoPorOutro = full?.createdByUserId !== actor.id;
 
-      if (existing.status === 'OPEN') {
-        await prisma.dpContabilidadeRequest.update({
-          where: { id: existing.id },
-          data: { status: 'IN_PROGRESS' },
+      await prisma.$transaction(async (tx) => {
+        await tx.dpContabilidadeComment.create({
+          data: {
+            requestId: existing.id,
+            userId: actor.id,
+            userName: actor.name,
+            body,
+          },
+        });
+        if (existing.status === 'OPEN' && respondidoPorOutro) {
+          await tx.dpContabilidadeRequest.update({
+            where: { id: existing.id },
+            data: { status: 'IN_PROGRESS' },
+          });
+        }
+        if (sourceId && respondidoPorOutro) {
+          await appendSourceHistoryNote(tx, sourceId, actor, `Contabilidade: ${body}`);
+        }
+      });
+      if (respondidoPorOutro && full?.createdByUserId) {
+        void sendPushToUsers([full.createdByUserId], {
+          title: 'Resposta da Contabilidade',
+          body: `${full.title}: ${body.slice(0, 120)}`,
+          data: { type: 'dp-contabilidade', id: existing.id },
         });
       }
 
@@ -386,6 +441,22 @@ export class DpContabilidadeController {
         }
         // Pedido nascido de uma solicitação interna direta: o status volta para quem pediu.
         const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
+        const resumo =
+          status === 'CONCLUDED'
+            ? `Contabilidade concluiu o atendimento${comment ? `: ${comment}` : '.'}`
+            : status === 'CANCELLED'
+              ? `Contabilidade cancelou o atendimento: ${comment}`
+              : '';
+        if (sourceId && resumo) {
+          const origem = await tx.dpRequest.findUnique({
+            where: { id: sourceId },
+            select: { requestType: true },
+          });
+          // Tipos antigos (concluídos pelo DP e encaminhados): a etapa não muda, só o histórico ganha o retorno.
+          if (origem && !isAccountingDirectRequestType(origem.requestType)) {
+            await appendSourceHistoryNote(tx, sourceId, actor, resumo);
+          }
+        }
         if (sourceId && (status === 'CONCLUDED' || status === 'CANCELLED')) {
           const source = await tx.dpRequest.findUnique({
             where: { id: sourceId },
@@ -408,6 +479,7 @@ export class DpContabilidadeController {
                     status,
                     actorUserId: actor.id,
                     actorName: actor.name,
+                    ...(comment ? { note: comment } : {}),
                   },
                 ] as Prisma.InputJsonValue,
                 dpHandledBy: actor.id,
@@ -423,10 +495,21 @@ export class DpContabilidadeController {
           include: listInclude,
         });
       });
+      if (status === 'CONCLUDED' || status === 'CANCELLED') {
+        void sendPushToUsers([existing.createdByUserId], {
+          title: status === 'CONCLUDED' ? 'Contabilidade concluiu seu pedido' : 'Contabilidade cancelou seu pedido',
+          body: existing.title + (comment ? `: ${comment.slice(0, 120)}` : ''),
+          data: { type: 'dp-contabilidade', id: existing.id },
+        });
+      }
       res.json({ success: true, data: (await serializeWithSources([updated]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {
         next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
+        return;
+      }
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('Esta solicitação foi atualizada por outra pessoa. Atualize a lista e tente novamente.', 409));
         return;
       }
       next(err);

@@ -816,12 +816,7 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-adm-tst')),
     '/ponto/solicitacoes-contabilidade':
       isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-contabilidade')),
-    '/ponto/dp-contabilidade':
-      isAdministrator ||
-      isDepartmentPessoal ||
-      isDepartmentFinanceiro ||
-      isDepartmentContabil ||
-      can(pk('/ponto/dp-contabilidade')),
+    '/ponto/dp-contabilidade': isAdministrator || can(pk('/ponto/dp-contabilidade')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || can(pk('/ponto/gerenciar-feriados')),

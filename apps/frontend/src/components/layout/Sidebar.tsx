@@ -315,8 +315,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canAccessCollaborationTools,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
-    isDepartmentFinanceiro,
-    isDepartmentContabil,
   } = usePermissions();
   const { logoSrc, logoAlt } = useBrandingLogo();
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -468,10 +466,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const canSeeCentralAtendimentos =
     isAdministrator || can(pk('/ponto/conversas-whatsapp'));
   const canSeeAtendimentoContabil =
-    isAdministrator ||
-    isDepartmentPessoal ||
-    isDepartmentFinanceiro ||
-    isDepartmentContabil ||
+    isAdministrator ||
     can(pk('/ponto/dp-contabilidade'));
 
   const { data: chatUnreadCount = 0 } = useQuery({
@@ -1135,10 +1130,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: MessageSquare,
             description: 'Pedidos à Contabilidade e acompanhamento das respostas',
             permission:
-              isAdministrator ||
-              isDepartmentPessoal ||
-              isDepartmentFinanceiro ||
-              isDepartmentContabil ||
+              isAdministrator ||
               can(pk('/ponto/dp-contabilidade')),
           },
         ],

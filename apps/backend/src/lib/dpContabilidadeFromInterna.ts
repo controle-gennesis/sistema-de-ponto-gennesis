@@ -2,6 +2,8 @@ import { Prisma, type DpContabilidadeRequestType, type DpRequest } from '@prisma
 import { prisma } from './prisma';
 import { isAccountingDirectRequestType } from './dpRequestDetails';
 import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
+import { listDpContabilidadeUserIds } from './dpContabilidadeAccess';
+import { sendPushToUsers } from '../services/PushNotificationService';
 
 const INTERNA_TYPE_LABELS: Record<string, string> = {
   ADMISSAO: 'Admissão',
@@ -244,6 +246,15 @@ async function createLinkedAccountingRequest(
       SET "sourceDpRequestId" = ${row.id}
       WHERE id = ${created.id}
     `;
+    void listDpContabilidadeUserIds()
+      .then((ids) =>
+        sendPushToUsers(ids, {
+          title: 'Atendimento Contábil',
+          body: `Novo pedido: ${row.title?.trim() || INTERNA_TYPE_LABELS[row.requestType] || 'Solicitação interna'}`,
+          data: { type: 'dp-contabilidade', id: created.id },
+        }),
+      )
+      .catch(() => undefined);
     return true;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
