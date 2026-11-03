@@ -8,6 +8,7 @@ const router = Router();
 const controller = new DpRequestController();
 
 const myModule = pathToModuleKey('/ponto/solicitacoes-dp');
+const accountingModule = pathToModuleKey('/ponto/solicitacoes-contabilidade');
 const manageModule = pathToModuleKey('/ponto/gerenciar-solicitacoes-dp');
 const admTstManageModule = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst');
 
@@ -22,6 +23,11 @@ router.get(
 
 // Minhas solicitações (EMPLOYEE / DP usuário)
 router.get('/minhas', requireModuleAccess(myModule), controller.getMyRequests.bind(controller));
+router.get(
+  '/contabilidade',
+  requireModuleAccess(accountingModule),
+  controller.getAccountingRequests.bind(controller)
+);
 router.post('/', requireModuleAccess(myModule), controller.createRequest.bind(controller));
 router.put('/:id/requester-return', requireModuleAccess(myModule), controller.requesterReturn.bind(controller));
 

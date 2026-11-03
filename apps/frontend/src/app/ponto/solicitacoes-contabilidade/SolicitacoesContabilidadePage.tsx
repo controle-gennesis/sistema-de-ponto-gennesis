@@ -324,7 +324,7 @@ export function SolicitacoesContabilidadePage() {
   const { data: myResp, isLoading: loadingList } = useQuery({
     queryKey: ['dp-my-requests', 'contabilidade'],
     queryFn: async () => {
-      const res = await api.get('/solicitacoes-dp/minhas', { params: { status: 'all' } });
+      const res = await api.get('/solicitacoes-dp/contabilidade');
       return (res.data?.data ?? []) as ContabilRequest[];
     },
     enabled: !loadingUser,
