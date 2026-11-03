@@ -41,6 +41,8 @@ type Props = {
   unidadeMedida: string;
   /** Quantidade efetiva no orçamento (UN) — inclui regras como caçamba 4 m³ derivada da carga. */
   quantidadeUn?: number;
+  /** Valor unitário do serviço sem BDI, mostrado no cabeçalho do item. */
+  precoUnitarioSemBdi?: number | null;
   /** Caçamba 4 m³: quantidade vem da carga de entulho; não editar aqui. */
   quantidadeUnReadOnly?: boolean;
   onQuantidadeUnChange?: (n: number) => void;
@@ -1778,6 +1780,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   itemRotulo,
   itemDescricao,
   unidadeMedida,
+  precoUnitarioSemBdi,
   dim,
   updateLinhaMedicao,
   updateRotuloColunaMedicao,
@@ -2720,6 +2723,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const colarNaDescricao = (idx: number) => (e: React.ClipboardEvent<HTMLInputElement>) => {
     const texto = e.clipboardData.getData('text/plain');
     const copia = copiaCelulaMedicao;
+    if (descAberta !== idx && !readOnly) {
+      // Célula só selecionada (sem edição): o input é somente leitura, então colamos pela memória.
+      e.preventDefault();
+      e.currentTarget.blur();
+      colarTexto(idx, 0, texto);
+      return;
+    }
     const ehBloco =
       /[\t\n]/.test(texto.replace(/\r?\n$/, '')) ||
       (copia != null &&
@@ -2768,6 +2778,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   const handleDescricaoKeyDown = (idx: number) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'c' && descAberta !== idx) {
+      const texto = copiarCelula(idx, 'descricao');
+      void navigator.clipboard?.writeText(texto).catch(() => {});
+      return;
+    }
     if (e.key !== 'Enter' && e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
@@ -2944,6 +2959,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const [menuCtxMedicao, setMenuCtxMedicao] = useState<{ left: number; top: number; idx: number } | null>(null);
   const [somaTotalVisivel, setSomaTotalVisivel] = useState(false);
+  const [calcSemBdiVisivel, setCalcSemBdiVisivel] = useState(false);
+  const totalSemBdiCelulaRef = useRef<HTMLTableCellElement | null>(null);
   const [obsLocalDraft, setObsLocalDraft] = useState(dim.observacao ?? '');
   const tituloItemRowRef = useRef<HTMLTableRowElement | null>(null);
   const [tituloItemRowH, setTituloItemRowH] = useState(44);
@@ -2954,7 +2971,26 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   useEffect(() => {
     setSomaTotalVisivel(false);
+    setCalcSemBdiVisivel(false);
   }, [rowKey]);
+
+  useEffect(() => {
+    if (!calcSemBdiVisivel) return;
+    const sair = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setCalcSemBdiVisivel(false);
+    };
+    const fora = (ev: MouseEvent) => {
+      const alvo = ev.target as Node | null;
+      if (alvo && totalSemBdiCelulaRef.current?.contains(alvo)) return;
+      setCalcSemBdiVisivel(false);
+    };
+    document.addEventListener('keydown', sair);
+    document.addEventListener('mousedown', fora, true);
+    return () => {
+      document.removeEventListener('keydown', sair);
+      document.removeEventListener('mousedown', fora, true);
+    };
+  }, [calcSemBdiVisivel]);
 
   useEffect(() => {
     if (!somaTotalVisivel) return;
@@ -3071,6 +3107,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const lnFallback: LinhaMedicao = { C: 0, L: 0, H: 0, N: 0, empolamento: 0 };
 
+  const totalMemoriaQtd = (linhasEfetivas ?? [])
+    .filter(ln => !ln.cabecalhoSecao)
+    .reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipo), 0);
+
   const renderCabecalhoServico = (colCount: number, onAbrirMenu?: (e: React.MouseEvent) => void) => (
     <tr
       ref={tituloItemRowRef}
@@ -3125,8 +3165,74 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           {unidadeMedida.trim() || '—'}
         </span>
       </th>
+      {[
+        { rotulo: 'Quantidade', valor: totalMemoriaQtd, title: 'Total da memória de cálculo', calculo: false, cor: 0 },
+        { rotulo: 'Unitário s/ BDI', valor: precoUnitarioSemBdi, title: 'Valor unitário sem BDI', calculo: false, cor: 1 },
+        {
+          rotulo: 'Total s/ BDI',
+          valor: precoUnitarioSemBdi == null ? null : totalMemoriaQtd * precoUnitarioSemBdi,
+          title: 'Duplo clique para ver o cálculo (quantidade × unitário s/ BDI)',
+          calculo: true,
+          cor: -1,
+        },
+      ].map(c => (
+        <th
+          key={c.rotulo}
+          ref={c.calculo ? totalSemBdiCelulaRef : undefined}
+          className={`sticky top-0 z-30 ${MEMORIAL_TITLE_ROW_MIN_H} px-2 py-0 text-center align-middle !border-t-0 !border-b !border-r !border-gray-200 bg-white dark:!border-gray-600 dark:bg-gray-900 !shadow-none ${colMed} ${
+            !calcSemBdiVisivel
+              ? ''
+              : c.calculo
+                ? 'ring-2 ring-inset ring-red-600 dark:ring-red-400'
+                : (PALETA_FORMULA[c.cor]?.celula ?? '')
+          }`}
+          title={c.title}
+          onClick={e => e.stopPropagation()}
+          onContextMenu={e => e.stopPropagation()}
+          onDoubleClick={
+            c.calculo && c.valor != null
+              ? e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCalcSemBdiVisivel(v => !v);
+                }
+              : undefined
+          }
+        >
+          <div className="flex flex-col items-center justify-center leading-tight">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              {c.rotulo}
+            </span>
+            <span className="text-xs font-bold tabular-nums text-gray-800 dark:text-gray-100">
+              {c.valor == null ? '—' : formatMedicaoCentavos(c.valor)}
+            </span>
+          </div>
+          {c.calculo && calcSemBdiVisivel && totalSemBdiCelulaRef.current && precoUnitarioSemBdi != null ? (
+            <DicaFormulaCompleta
+              ancora={totalSemBdiCelulaRef.current}
+              segmentos={(() => {
+                const qtd = formatMedicaoCentavos(totalMemoriaQtd);
+                const unit = formatMedicaoCentavos(precoUnitarioSemBdi);
+                const neutro = 'text-gray-900 dark:text-gray-100';
+                return [
+                  { texto: '=', classe: neutro, iniFormula: 0, fimFormula: 1 },
+                  { texto: qtd, classe: PALETA_FORMULA[0]!.texto, iniFormula: 1, fimFormula: 1 + qtd.length },
+                  { texto: '*', classe: neutro, iniFormula: 1 + qtd.length, fimFormula: 2 + qtd.length },
+                  {
+                    texto: unit,
+                    classe: PALETA_FORMULA[1]!.texto,
+                    iniFormula: 2 + qtd.length,
+                    fimFormula: 2 + qtd.length + unit.length,
+                  },
+                ];
+              })()}
+              texto={`=${formatMedicaoCentavos(totalMemoriaQtd)}*${formatMedicaoCentavos(precoUnitarioSemBdi)}`}
+            />
+          ) : null}
+        </th>
+      ))}
       <th
-        colSpan={Math.max(1, colCount - 2)}
+        colSpan={Math.max(1, colCount - 5)}
         className={`sticky top-0 z-30 ${MEMORIAL_TITLE_ROW_MIN_H} relative !p-0 align-stretch !border-x-0 !border-t-0 !border-b !border-gray-200 dark:!border-gray-600 !shadow-none transition-colors ${
           observacaoPreenchida
             ? '!bg-amber-100 dark:!bg-yellow-500/25'
