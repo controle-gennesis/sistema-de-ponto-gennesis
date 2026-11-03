@@ -430,6 +430,13 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     group: 'Aprovações',
   },
   {
+    key: pathToModuleKey('/ponto/controle/destrancar-orcamento-fd'),
+    name: 'Destrancar orçamento e FD',
+    href: '/ponto/controle/destrancar-orcamento-fd',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
     key: pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
     name: 'Aprovar Requisições de Materiais',
     href: '/ponto/controle/aprovar-requisicoes-materiais',

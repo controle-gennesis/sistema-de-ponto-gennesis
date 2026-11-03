@@ -2,7 +2,7 @@
 
 import React from 'react';
 import {
-  FD_STATUS_LABELS,
+  fdStatusLabel,
   fdPurchaseStatusBadgeClass,
   fdStatusBadgeClass,
   purchaseStatusLabel,
@@ -41,9 +41,7 @@ export function FdStatusBadges({ record }: { record: FichaDemandaApprovalRecord 
 
   return (
     <span className={`${badgeBase} ${fdStatusBadgeClass(record.status)}`}>
-      {record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
-        ? 'FD Cancelada por exclusão de orçamento'
-        : FD_STATUS_LABELS[record.status]}
+      {fdStatusLabel(record)}
     </span>
   );
 }

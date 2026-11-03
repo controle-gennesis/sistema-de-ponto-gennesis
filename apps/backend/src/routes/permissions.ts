@@ -28,6 +28,7 @@ import { FUEL_APPROVE_MODULE_KEY } from '../lib/fuelApprovalAccess';
 import { EMPREITEIRO_APPROVE_MODULE_KEY } from '../lib/empreiteiroDailyApprovalAccess';
 
 const ESPELHO_NF_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
+const ORCAMENTO_UNLOCK_MODULE_KEY = pathToModuleKey('/ponto/controle/destrancar-orcamento-fd');
 
 function asStringIdArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -310,6 +311,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           empreiteiroApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           espelhoNfApprovalCostCenterIds: [],
+          orcamentoUnlockCostCenterIds: [],
           gestorCostCenterIds: [],
           isUnbUser: false,
           unbCostCenterIds: [],
@@ -423,6 +425,18 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       }
     );
 
+    const orcamentoUnlockCostCenterIds = await safePermissionRows<{ costCenterId: string }>(
+      'me/userOrcamentoUnlockCostCenter',
+      async () => {
+        const delegate = (prisma as any).userOrcamentoUnlockCostCenter;
+        if (!delegate?.findMany) return [];
+        return delegate.findMany({
+          where: { userId: meUserId },
+          select: { costCenterId: true },
+        });
+      }
+    );
+
     const gestorCostCenterIds = await getContractGestorCostCenterIds(meUserId);
     const unbCostCenterScope = await getUserUnbCostCenterScope(meUserId, false);
     const isUnbUser = unbCostCenterScope !== null;
@@ -452,6 +466,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         empreiteiroApprovalContractIds: empreiteiroApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         espelhoNfApprovalCostCenterIds: espelhoNfApprovalCostCenterIds.map((r) => r.costCenterId),
+        orcamentoUnlockCostCenterIds: orcamentoUnlockCostCenterIds.map((r) => r.costCenterId),
         gestorCostCenterIds,
         isUnbUser,
         unbCostCenterIds,
@@ -694,6 +709,17 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           });
         });
 
+    const orcamentoUnlockCostCenterIds = isAdmin
+      ? []
+      : await safePermissionRows<{ costCenterId: string }>('userOrcamentoUnlockCostCenter', async () => {
+          const delegate = (prisma as any).userOrcamentoUnlockCostCenter;
+          if (!delegate?.findMany) return [];
+          return delegate.findMany({
+            where: { userId },
+            select: { costCenterId: true },
+          });
+        });
+
     const contractModuleFlags = contractFlagsFromRows(contractPermRows);
     const allowedContractIds = contractPermRows
       .filter((r) => r.accessLiberado)
@@ -715,6 +741,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         empreiteiroApprovalContractIds: empreiteiroApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         espelhoNfApprovalCostCenterIds: espelhoNfApprovalCostCenterIds.map((r) => r.costCenterId),
+        orcamentoUnlockCostCenterIds: orcamentoUnlockCostCenterIds.map((r) => r.costCenterId),
         contractModuleFlags,
       },
     });
@@ -747,6 +774,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const shouldSyncViewCc = Array.isArray(rawViewCc);
     const rawEspelhoCc = req.body?.espelhoNfApprovalCostCenterIds;
     const shouldSyncEspelhoCc = Array.isArray(rawEspelhoCc);
+    const rawUnlockCc = req.body?.orcamentoUnlockCostCenterIds;
+    const shouldSyncUnlockCc = Array.isArray(rawUnlockCc);
     type ContractFlags = {
       orcamento?: boolean;
       relatorios?: boolean;
@@ -959,6 +988,20 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       }
     }
 
+    let unlockCcIdsToSave: string[] = [];
+    if (shouldSyncUnlockCc) {
+      const hasUnlockPerm = normalized.some((p) => p.module === ORCAMENTO_UNLOCK_MODULE_KEY);
+      unlockCcIdsToSave = hasUnlockPerm ? asStringIdArray(rawUnlockCc) : [];
+      if (unlockCcIdsToSave.length > 0) {
+        const existing = await prisma.costCenter.findMany({
+          where: { id: { in: unlockCcIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        unlockCcIdsToSave = unlockCcIdsToSave.filter((id) => ok.has(id));
+      }
+    }
+
     const canWriteReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
     const canWritePleitosFat = prismaModelHasField('UserContractPermission', 'accessPleitos');
     const canWriteLiberado = prismaModelHasField('UserContractPermission', 'accessLiberado');
@@ -986,6 +1029,10 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       shouldSyncEspelhoCc &&
       hasPrismaDelegate('userEspelhoNfApprovalCostCenter') &&
       (await publicTableExists('user_espelho_nf_approval_cost_centers'));
+    const canSyncUnlockCcTable =
+      shouldSyncUnlockCc &&
+      hasPrismaDelegate('userOrcamentoUnlockCostCenter') &&
+      (await publicTableExists('user_orcamento_unlock_cost_centers'));
 
     await prisma.$transaction(async (tx) => {
       // Serializa saves concorrentes do mesmo usuário (auto-save com debounce no front).
@@ -1128,6 +1175,19 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         if (espelhoCcIdsToSave.length > 0) {
           await tx.userEspelhoNfApprovalCostCenter.createMany({
             data: espelhoCcIdsToSave.map((costCenterId) => ({
+              userId,
+              costCenterId,
+              updatedBy: req.user!.id,
+            })),
+          });
+        }
+      }
+
+      if (canSyncUnlockCcTable) {
+        await tx.userOrcamentoUnlockCostCenter.deleteMany({ where: { userId } });
+        if (unlockCcIdsToSave.length > 0) {
+          await tx.userOrcamentoUnlockCostCenter.createMany({
+            data: unlockCcIdsToSave.map((costCenterId) => ({
               userId,
               costCenterId,
               updatedBy: req.user!.id,

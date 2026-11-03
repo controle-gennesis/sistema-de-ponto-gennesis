@@ -1192,6 +1192,9 @@ export class PurchaseOrderService {
     if (totvsDestination === 'TOTVS' && !stockLocation.totvsCodLoc) {
       throw new Error('Informe o local de estoque da OC.');
     }
+    if (totvsDestination === 'TOTVS' && data.paymentType === 'CARTAO') {
+      throw new Error('OC TOTVS não aceita pagamento no cartão. Escolha À vista ou Boleto.');
+    }
     const freightTypeRaw = (data.freightType || '').trim().toUpperCase();
     const freightType =
       totvsDestination === 'TOTVS'

@@ -154,6 +154,7 @@ export function usePermissions() {
   const espelhoNfApprovalCostCenterIds: string[] =
     permissionData?.espelhoNfApprovalCostCenterIds ?? [];
   const espelhoNfApprovalSeesAll = isAdministrator || !!permissionData?.isAdmin;
+  const orcamentoUnlockCostCenterIds: string[] = permissionData?.orcamentoUnlockCostCenterIds ?? [];
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
@@ -356,6 +357,14 @@ export function usePermissions() {
     isAdministrator ||
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-espelho-nf'));
+
+  /** Destrancar orçamento + FD: administrador ou Controle → Aprovações → Destrancar orçamento e FD no centro de custo. */
+  const canUnlockOrcamento = (costCenterId: string | null | undefined) =>
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    (!!costCenterId &&
+      can(pk('/ponto/controle/destrancar-orcamento-fd')) &&
+      orcamentoUnlockCostCenterIds.includes(String(costCenterId)));
 
   /**
    * Aprovar/devolver medições de entrega e aditivos de empreita: só o gestor do centro de custo
@@ -653,6 +662,7 @@ export function usePermissions() {
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
+    canUnlockOrcamento,
     canApproveEmpreiteiroDaily,
     canApproveOc,
     canApproveOcCompras,

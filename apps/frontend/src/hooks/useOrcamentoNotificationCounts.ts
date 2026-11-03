@@ -88,7 +88,8 @@ export function useOrcamentoNotificationCounts() {
             : [];
           for (const o of orcs) {
             if (!o.id) continue;
-            if (o.statusAprovacao === 'em_correcao' || o.statusAprovacao === 'aprovado') {
+            // "aprovado" agora é o orçamento trancado ao lançar a FD (ação do próprio usuário): sem aviso.
+            if (o.statusAprovacao === 'em_correcao') {
               avisos.push({ key: `${c.costCenterId}|${o.id}`, status: o.statusAprovacao });
             }
           }

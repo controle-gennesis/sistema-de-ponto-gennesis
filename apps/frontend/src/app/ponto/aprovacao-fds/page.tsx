@@ -29,6 +29,8 @@ import {
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { Button } from '@/components/ui/Button';
+import { usePermissions } from '@/hooks/usePermissions';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -49,6 +51,7 @@ import {
   formToApiPayload,
   type FichaDemandaApprovalFormState,
   type FichaDemandaApprovalRecord,
+  idMovRmExibicao,
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -179,6 +182,7 @@ export default function AprovacaoFdsPage() {
   const searchParams = useSearchParams();
   const contratoFiltro = (searchParams?.get('contrato') || '').trim();
   const queryClient = useQueryClient();
+  const { isAdministrator } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<CardFilter>('ALL');
   const [contratoFilter, setContratoFilter] = useState(contratoFiltro || 'ALL');
@@ -389,6 +393,7 @@ export default function AprovacaoFdsPage() {
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
       setDeleteId(null);
+      setDetailRecord(null);
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao excluir');
@@ -655,7 +660,7 @@ export default function AprovacaoFdsPage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
                               <p className="text-gray-900 dark:text-gray-100">
-                                {row.idMovRm?.trim() || '—'}
+                                {idMovRmExibicao(row.idMovRm) || '—'}
                               </p>
                               <p className="text-xs text-gray-500 dark:text-gray-400">
                                 {row.numMovRm?.trim() || '—'}
@@ -760,13 +765,13 @@ export default function AprovacaoFdsPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setRowActionMenu(null);
-                          if (rowForActionMenu.status !== 'WAITING_MANAGER') {
+                          if (!isAdministrator && rowForActionMenu.status !== 'WAITING_MANAGER') {
                             toast.error('Somente fichas aguardando aprovação podem ser excluídas.');
                             return;
                           }
                           setDeleteId(rowForActionMenu.id);
                         }}
-                        disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
+                        disabled={!isAdministrator && rowForActionMenu.status !== 'WAITING_MANAGER'}
                         className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
                       >
                         <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
@@ -785,6 +790,19 @@ export default function AprovacaoFdsPage() {
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
           onRecordUpdated={(updated) => setDetailRecord(updated)}
+          footer={
+            isAdministrator && detailRecord ? (
+              // Administrador exclui a FD em qualquer etapa (ex.: FDs de teste).
+              <div className="flex w-full items-center justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setDeleteId(detailRecord.id)}>
+                  Excluir FD
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setDetailRecord(null)}>
+                  Fechar
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
 
         <FichaDemandaApprovalFormModal

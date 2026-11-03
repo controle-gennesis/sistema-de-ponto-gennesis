@@ -91,6 +91,8 @@ model User {
   userDpRequestViewCostCenters              UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUser")
   updatedDpRequestViewCostCenters           UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUpdatedBy")
   userEspelhoNfApprovalCostCenters          UserEspelhoNfApprovalCostCenter[]    @relation("UserEspelhoNfApprovalCostCenterUser")
+  userOrcamentoUnlockCostCenters            UserOrcamentoUnlockCostCenter[]      @relation("UserOrcamentoUnlockCostCenterUser")
+  updatedOrcamentoUnlockCostCenters         UserOrcamentoUnlockCostCenter[]      @relation("UserOrcamentoUnlockCostCenterUpdatedBy")
   updatedEspelhoNfApprovalCostCenters       UserEspelhoNfApprovalCostCenter[]    @relation("UserEspelhoNfApprovalCostCenterUpdatedBy")
   stockMovements                            StockMovement[]
   stockShortfallsResolved                   StockShortfall[]                     @relation("StockShortfallResolver")
@@ -1228,6 +1230,7 @@ model CostCenter {
   dpRequestViewUsers        UserDpRequestViewCostCenter[]
   empreiteiroContracts      EmpreiteiroContract[]
   espelhoNfApprovalUsers    UserEspelhoNfApprovalCostCenter[]
+  orcamentoUnlockUsers      UserOrcamentoUnlockCostCenter[]
 
   @@index([code])
   @@index([isActive])
@@ -3167,6 +3170,26 @@ model UserEspelhoNfApprovalCostCenter {
   @@index([costCenterId])
   @@map("user_espelho_nf_approval_cost_centers")
 }
+
+/// Controle → Aprovações → Destrancar orçamento e FD: centros de custo em que o usuário pode destrancar.
+model UserOrcamentoUnlockCostCenter {
+  id           String   @id @default(cuid())
+  userId       String
+  costCenterId String
+  updatedBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation("UserOrcamentoUnlockCostCenterUser", fields: [userId], references: [id], onDelete: Cascade)
+  costCenter CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+  updater    User?      @relation("UserOrcamentoUnlockCostCenterUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, costCenterId])
+  @@index([userId])
+  @@index([costCenterId])
+  @@map("user_orcamento_unlock_cost_centers")
+}
+
 
 /// UsuÃ¡rios autorizados a ver a pÃ¡gina de um aprovador especÃ­fico no Fluig (fluxos G3/G5).
 model FluigWorkflowApproverViewer {

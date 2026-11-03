@@ -2,12 +2,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Pencil, Plus } from 'lucide-react';
+import { ExternalLink, Paperclip, Pencil, Plus } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/FileDropZone';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -22,14 +21,13 @@ import {
   anexosOrdemCompra,
   fdAnexoKindLabel,
   findAnexoByKind,
-  FD_STATUS_LABELS,
+  fdStatusLabel,
   formatCurrencyDisplay,
-  formToApiPayload,
-  type FichaDemandaApprovalFormState,
   inferFdAnexoKind,
   purchaseStatusLabel,
   type FdAnexo,
   type FichaDemandaApprovalRecord,
+  idMovRmExibicao,
 } from '@/lib/fichaDemandaApproval';
 
 type Props = {
@@ -113,7 +111,6 @@ export function FichaDemandaDetailModal({
 }: Props) {
   const queryClient = useQueryClient();
   const { isAdministrator } = usePermissions();
-  const [editFichaOpen, setEditFichaOpen] = useState(false);
   const [editandoContrato, setEditandoContrato] = useState(false);
   const [contratoEdit, setContratoEdit] = useState('');
   const [obraEdit, setObraEdit] = useState('');
@@ -137,7 +134,6 @@ export function FichaDemandaDetailModal({
     setCancelOpen(false);
     setCancelNote('');
     setEditandoContrato(false);
-    setEditFichaOpen(false);
   }, [record?.id]);
 
   const { data: contratosRes, isLoading: carregandoContratos } = useQuery({
@@ -181,31 +177,6 @@ export function FichaDemandaDetailModal({
     }
     return labeledToSelectOptions(options);
   }, [obrasEdit, obraEdit]);
-
-  const editFichaMutation = useMutation({
-    mutationFn: async (form: FichaDemandaApprovalFormState) => {
-      if (!record?.id) throw new Error('Ficha inválida');
-      const res = await api.patch(
-        `/demand-sheet-approvals/${record.id}/supplies-edit`,
-        formToApiPayload(form),
-      );
-      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
-    },
-    onSuccess: async (updated) => {
-      toast.success('Ficha de demanda atualizada');
-      setEditFichaOpen(false);
-      if (updated) onRecordUpdated?.(updated);
-      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
-      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
-    },
-    onError: (err: unknown) => {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-          : undefined;
-      toast.error(msg || 'Não foi possível atualizar a ficha.');
-    },
-  });
 
   const contratoObraMutation = useMutation({
     mutationFn: async () => {
@@ -535,11 +506,6 @@ export function FichaDemandaDetailModal({
     <div className="w-full">{footer}</div>
   ) : (
     <div className="flex w-full items-center justify-end gap-2">
-      {allowAddOrdemCompra ? (
-        <Button type="button" variant="outline" onClick={() => setEditFichaOpen(true)}>
-          Editar
-        </Button>
-      ) : null}
       {allowAddOrdemCompra && canCancel ? (
         <Button
           type="button"
@@ -693,7 +659,26 @@ export function FichaDemandaDetailModal({
           {orcamentoDaFd !== undefined && (
             <div className="sm:col-span-2">
               <Field label="Orçamento de origem">
-                {orcamentoDaFd?.nome || (orcamentoDaFd ? 'Orçamento não encontrado' : 'FD sem orçamento vinculado')}
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    {orcamentoDaFd?.nome || (orcamentoDaFd ? 'Orçamento não encontrado' : 'FD sem orçamento vinculado')}
+                  </span>
+                  {orcamentoDaFd?.nome && record.contratoId ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open(
+                          `/ponto/contratos/${record.contratoId}/orcamento/${orcamentoDaFd.orcamentoId}`,
+                          '_blank',
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-blue-400 dark:hover:bg-gray-700"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                      Abrir orçamento
+                    </button>
+                  ) : null}
+                </span>
               </Field>
             </div>
           )}
@@ -703,7 +688,7 @@ export function FichaDemandaDetailModal({
           {!temPedidosPelaFd && (
             <>
               <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>
-              <Field label="ID Mov RM">{record.idMovRm || '—'}</Field>
+              <Field label="ID Mov RM">{idMovRmExibicao(record.idMovRm) || '—'}</Field>
             </>
           )}
           <Field label="Nº da SC">{record.scNumero || '—'}</Field>
@@ -714,11 +699,7 @@ export function FichaDemandaDetailModal({
           </Field>
           <Field label="Custo estimado">{formatCurrencyDisplay(record.custoEstimado)}</Field>
           <Field label="Data/hora">{formatDateTime(record.dataHora)}</Field>
-          <Field label="Status">{
-            record.status === 'CANCELLED' && record.managerRejectionComment?.includes('exclusão de orçamento')
-              ? 'FD Cancelada por exclusão de orçamento'
-              : (FD_STATUS_LABELS[record.status] || record.status)
-          }</Field>
+          <Field label="Status">{fdStatusLabel(record)}</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
           {record.purchaseStatus === 'CANCELLED' && record.purchaseStatusUpdaterNome ? (
             <Field label="Cancelada por">
@@ -1033,16 +1014,6 @@ export function FichaDemandaDetailModal({
           </div>
         </div>
       </Modal>
-      <FichaDemandaApprovalFormModal
-        isOpen={editFichaOpen}
-        onClose={() => {
-          if (!editFichaMutation.isPending) setEditFichaOpen(false);
-        }}
-        editingRecord={record}
-        onSave={(form) => editFichaMutation.mutate(form)}
-        isSaving={editFichaMutation.isPending}
-        title="Editar ficha de demanda"
-      />
       <Modal
         isOpen={scModalOpen}
         onClose={() => {

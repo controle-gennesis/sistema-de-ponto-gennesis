@@ -43,6 +43,7 @@ import {
   purchaseStatusLabel,
   type DemandSheetPurchaseStatus,
   type FichaDemandaApprovalRecord,
+  idMovRmExibicao,
 } from '@/lib/fichaDemandaApproval';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
@@ -430,7 +431,7 @@ export default function FdsAprovadasPage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
                               <p className="text-gray-900 dark:text-gray-100">
-                                {row.idMovRm?.trim() || '—'}
+                                {idMovRmExibicao(row.idMovRm) || '—'}
                               </p>
                               <p className="text-xs text-gray-500 dark:text-gray-400">
                                 {row.numMovRm?.trim() || '—'}

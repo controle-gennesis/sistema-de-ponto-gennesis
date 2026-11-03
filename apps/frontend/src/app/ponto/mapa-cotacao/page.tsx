@@ -1153,6 +1153,9 @@ export default function MapaCotacaoPage() {
       // Destino pelo fluxo de OC do usuário: com os dois, escolha obrigatória no modal; com um, fixo nele.
       const ocDestination = destinoOcDoFornecedor(paymentDraftBySupplier[supplierId]?.destino);
       if (!ocDestination) throw new Error('Selecione o destino da OC (Conecta ou TOTVS).');
+      if (ocDestination === 'TOTVS' && paymentDraftBySupplier[supplierId]?.paymentType === OC_TYPE_CARTAO) {
+        throw new Error('OC TOTVS não aceita pagamento no cartão. Escolha À vista ou Boleto.');
+      }
       if (generatedOcSupplierIds.has(supplierId)) {
         throw new Error(
           'OC já gerada para este fornecedor neste mapa. Se devolveu um item à RM, recarregue ou monte a cotação de novo.'
@@ -1951,13 +1954,18 @@ export default function MapaCotacaoPage() {
                           aria-checked={active}
                           disabled={!selectable}
                           onClick={() =>
-                            setPaymentDraftBySupplier((prev) => ({
-                              ...prev,
-                              [sid]: {
-                                ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
-                                destino: option,
-                              },
-                            }))
+                            setPaymentDraftBySupplier((prev) => {
+                              const atual = prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
+                              // OC TOTVS não tem pagamento no cartão: volta para À vista.
+                              const semCartao =
+                                option === 'TOTVS' && atual.paymentType === OC_TYPE_CARTAO
+                                  ? {
+                                      paymentType: OC_TYPE_AVISTA,
+                                      paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
+                                    }
+                                  : {};
+                              return { ...prev, [sid]: { ...atual, destino: option, ...semCartao } };
+                            })
                           }
                           className={mapDestinationSegmentCls(active, selectable)}
                         >
@@ -2162,6 +2170,12 @@ export default function MapaCotacaoPage() {
                       type="button"
                       role="radio"
                       aria-checked={payType === OC_TYPE_CARTAO}
+                      disabled={destinoOcDoFornecedor(draft.destino) === 'TOTVS'}
+                      title={
+                        destinoOcDoFornecedor(draft.destino) === 'TOTVS'
+                          ? 'Disponível só para OC CONECTA. OC TOTVS não tem pagamento no cartão.'
+                          : undefined
+                      }
                       onClick={() => {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
@@ -2174,7 +2188,7 @@ export default function MapaCotacaoPage() {
                           },
                         }));
                       }}
-                      className={mapPaymentSegmentCls(payType === OC_TYPE_CARTAO)}
+                      className={`${mapPaymentSegmentCls(payType === OC_TYPE_CARTAO)} disabled:cursor-not-allowed disabled:opacity-40`}
                     >
                       Cartão
                     </button>
