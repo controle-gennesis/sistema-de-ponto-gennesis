@@ -41,6 +41,8 @@ export function FilterStatCard({
 }: FilterStatCardProps) {
   const clickable = typeof onClick === 'function';
   const compact = size === 'sm';
+  /** Valores longos (ex.: R$ 10.758.598.718,02) usam fonte menor e nunca estouram o card. */
+  const longValue = typeof count === 'string' && count.length > 11;
 
   const interactionProps = clickable
     ? {
@@ -92,9 +94,10 @@ export function FilterStatCard({
             />
           ) : (
             <p
+              title={typeof count === 'string' ? count : undefined}
               className={clsx(
-                'mt-0.5 font-bold tabular-nums text-gray-900 dark:text-gray-100',
-                compact ? 'text-lg' : 'text-xl'
+                'mt-0.5 truncate font-bold tabular-nums text-gray-900 dark:text-gray-100',
+                longValue ? 'text-base xl:text-lg' : compact ? 'text-lg' : 'text-xl'
               )}
             >
               {count}
@@ -142,9 +145,14 @@ export function FilterStatCard({
               {label}
             </p>
             <p
+              title={typeof count === 'string' ? count : undefined}
               className={clsx(
-                'mt-1 font-bold tabular-nums text-gray-900 dark:text-gray-100',
-                compact ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'
+                'mt-1 truncate font-bold tabular-nums text-gray-900 dark:text-gray-100',
+                longValue
+                  ? 'text-base sm:text-lg 2xl:text-xl'
+                  : compact
+                    ? 'text-lg sm:text-xl'
+                    : 'text-xl sm:text-2xl'
               )}
             >
               {loading ? (

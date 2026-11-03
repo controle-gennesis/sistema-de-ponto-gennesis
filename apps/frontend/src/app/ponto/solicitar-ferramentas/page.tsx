@@ -628,7 +628,6 @@ function SolicitarLocacoesFerramentasPage() {
         <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
           {STATUS_CARDS.map((card) => (
             <FilterStatCard
-              size="sm"
               key={card.filter}
               label={card.label}
               count={summaryData?.[card.summaryKey] ?? 0}

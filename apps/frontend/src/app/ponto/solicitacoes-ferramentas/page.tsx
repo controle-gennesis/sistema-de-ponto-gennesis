@@ -681,7 +681,6 @@ function SolicitacoesFerramentasPage() {
         <div className={pageStatCardsGrid6Class}>
           {stats.map((stat) => (
             <FilterStatCard
-              size="sm"
               key={stat.filter}
               label={stat.label}
               count={stat.value}
