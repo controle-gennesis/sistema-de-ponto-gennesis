@@ -1,5 +1,7 @@
 # Gennesis — Plataforma de Gestão Empresarial
 
+> 📖 **Quer entender como o sistema funciona por dentro?** Leia o [ARQUITETURA.md](ARQUITETURA.md): estrutura de pastas, banco de dados, rotas, permissões, integrações, deploy e como rodar localmente.
+
 ## 📋 Visão Geral
 
 Plataforma integrada da Gennesis para gestão do dia a dia de uma empresa de engenharia, reunindo em um único sistema:
