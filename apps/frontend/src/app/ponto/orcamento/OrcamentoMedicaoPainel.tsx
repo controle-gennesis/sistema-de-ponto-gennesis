@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ListPlus, Plus, Trash2 } from 'lucide-react';
+import { ListPlus, Plus, Trash2, X } from 'lucide-react';
 import {
   type CampoFormulaMedicao,
   type DimensoesItem,
@@ -127,6 +127,8 @@ const tdRest =
 /** Corpo da tabela: sem padding no td para o input cobrir a célula inteira (borda de foco = borda da célula). */
 const tdFirstBody =
   `${MEMORIAL_ROW_H} relative p-0 align-middle text-left border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colDesc}`;
+/** Descrição da memória: a linha cresce para a descrição quebrar em vez de ficar cortada. */
+const tdFirstBodyQuebra = tdFirstBody.replace(' max-h-[2.75rem]', '');
 const tdRestBody =
   `${MEMORIAL_ROW_H} relative p-0 align-middle border-b border-r border-gray-200 bg-white text-center focus-within:z-[4] dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const tdCalc =
@@ -135,6 +137,8 @@ const tdCalcBody =
   `${MEMORIAL_ROW_H} relative p-0 text-center tabular-nums text-sm font-bold text-gray-900 focus-within:z-[4] dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const inputCls = `${inputGradeCls} !min-h-0 !h-full !py-0 focus:!bg-transparent dark:focus:!bg-transparent`;
 /** O foco global zera o box-shadow do input; a borda vermelha fica no contêiner. */
+const caixaFocoDescricaoQuebraCls =
+  'relative min-h-[2.75rem] w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]';
 const caixaFocoDescricaoCls =
   'relative h-full w-full focus-within:z-[3] focus-within:shadow-[inset_0_0_0_2px_#dc2626] dark:focus-within:shadow-[inset_0_0_0_2px_#f87171]';
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
@@ -3785,9 +3789,18 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={tdItemCol} aria-hidden />
-        <td className={tdFirstBody} data-col-medicao={0}>
+        <td className={tdFirstBodyQuebra} data-col-medicao={0}>
           {marcasCelula(idx, 'descricao')}
-          <div className={caixaFocoDescricaoCls}>
+          <div className={caixaFocoDescricaoQuebraCls}>
+            {/* Texto quebrado: dá a altura da célula. O campo fica por cima e recebe cliques e teclas. */}
+            <div
+              aria-hidden
+              className={`flex min-h-[2.75rem] items-center whitespace-normal break-words px-3 py-2.5 text-left text-sm leading-snug sm:px-3.5 ${
+                descAberta === idx ? 'text-transparent' : 'text-gray-900 dark:text-gray-100'
+              }`}
+            >
+              {ln.descricao || ''}
+            </div>
             <MemorialCampoLocal
               committedValue={ln.descricao || ''}
               onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
@@ -3795,7 +3808,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               editando={descAberta === idx}
               onPedirEdicao={() => setDescAberta(idx)}
               title={linhaVinculada ? 'Vem da memória de origem. Apague para voltar ao automático.' : undefined}
-              className={`${inputCls} !px-3 text-left sm:!px-3.5`}
+              className={`${inputCls} !absolute inset-0 !px-3 text-left sm:!px-3.5 ${
+                descAberta === idx ? '' : '!text-transparent'
+              }`}
               inputRef={el => {
                 descInputRefs.current[idx] = el;
               }}
@@ -4076,20 +4091,16 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             >
               Incluir memória de cálculo
             </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Cada composição marcada entra como uma linha. Entra só o total do memorial dela: em C se for metro, na área se for m² e no volume se for m³.
-            </p>
             <div className="mt-4">
               <MultiSelectSearchDropdown
-                menuInline
                 listMaxHeight={280}
                 placeholder="Selecione as memórias"
                 searchPlaceholder="Buscar composição..."
                 emptyOptionsMessage="Nenhuma outra memória neste orçamento."
                 options={memoriasDisponiveis.map((m) => ({
                   value: m.key,
-                  label: `${m.rotulo} - ${m.descricao || 'Sem descrição'}`,
-                  description: m.unidade,
+                  label: `${m.rotulo} - ${m.descricao || 'Sem descrição'}`.toUpperCase(),
+                  description: m.unidade?.toUpperCase(),
                   searchText: `${m.rotulo} ${m.descricao} ${m.unidade ?? ''}`,
                 }))}
                 selected={linhasEfetivas
@@ -4097,6 +4108,41 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
                   .filter((k): k is string => Boolean(k))}
                 onChange={onMemoriasIncluidasChange}
               />
+              {(() => {
+                const chaves = linhasEfetivas
+                  .map((ln) => ln.origemMemoriaKey)
+                  .filter((k): k is string => Boolean(k));
+                const incluidas = chaves
+                  .map((k) => memoriasDisponiveis.find((m) => m.key === k))
+                  .filter((m): m is NonNullable<typeof m> => Boolean(m));
+                if (incluidas.length === 0) return null;
+                return (
+                  <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                    {incluidas.map((m) => (
+                      <li
+                        key={m.key}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40"
+                      >
+                        <span className="min-w-0 flex-1 text-xs font-semibold uppercase text-gray-800 dark:text-gray-100">
+                          {m.rotulo} - {m.descricao || 'Sem descrição'}
+                          {m.unidade ? (
+                            <span className="ml-1.5 font-normal text-gray-500 dark:text-gray-400">({m.unidade})</span>
+                          ) : null}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onMemoriasIncluidasChange(chaves.filter((k) => k !== m.key))}
+                          aria-label="Remover memória"
+                          title="Remover"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
             </div>
             <div className="mt-6 flex justify-end">
               <button

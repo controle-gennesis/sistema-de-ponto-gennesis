@@ -223,6 +223,18 @@ import {
 } from './orcamentoMedicaoCalc';
 import type { MetaMemoriaIncluida } from './orcamentoMedicaoCalc';
 import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula, RotulosColunasMedicao } from './orcamentoMedicaoTypes';
+import { OrcamentoMapaCotacaoPainel, type ComposicaoCotacao } from './OrcamentoMapaCotacaoPainel';
+import { absoluteUploadUrl } from '@/lib/apiOrigin';
+import {
+  chaveMapaCotacao,
+  isCodigoCotacao,
+  propostaMenorValor,
+  mapaCotacaoTemDados,
+  parseMapasCotacao,
+  type MapaCotacao,
+  type MapaCotacaoAnexo,
+  type MapasCotacao,
+} from './orcamentoMapaCotacao';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
@@ -3692,9 +3704,9 @@ function normalizeAparenciaAbasForSave(
 
 const APARENCIA_ABA_OPCOES: Array<{ value: AparenciaAbaOrcamento; label: string }> = [
   { value: 'montagem', label: 'Orçamento' },
-  { value: 'memorial', label: 'Memória de cálculo' },
+  { value: 'memorial', label: 'Memória de Cálculo' },
   { value: 'analitico', label: 'Analítico' },
-  { value: 'fichaDemanda', label: 'Ficha de demanda' },
+  { value: 'fichaDemanda', label: 'Ficha de Demanda' },
   { value: 'cronograma', label: 'Cronograma' },
 ];
 
@@ -4408,6 +4420,8 @@ interface SessaoOrcamentoPersist {
   >;
   /** Observações da Ficha de demanda (chave da linha). */
   fichaDemandaObservacoes?: Record<string, string>;
+  /** Mapa de Cotação das composições próprias "COTAÇÃO - n" (chave = código da composição). */
+  mapasCotacao?: MapasCotacao;
   /** Insumos manuais adicionados na Ficha de demanda, por chave da composição pai. */
   insumosAnaliticoManuais?: Record<string, InsumoAnaliticoManual[]>;
   meta?: OrcamentoMeta;
@@ -4771,6 +4785,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     colunasOcultasMontagem: [],
     moMatManualPorItem: {},
     fichaDemandaObservacoes: {},
+    mapasCotacao: {},
     insumosAnaliticoManuais: {},
     itensOcultosNoOrcamento: [],
     insumosAnaliticoOcultos: [],
@@ -4915,6 +4930,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
         (p as { moMatManualPorItem?: unknown }).moMatManualPorItem
       ),
       fichaDemandaObservacoes: parseObservacoesPorItem(p.fichaDemandaObservacoes),
+      mapasCotacao: parseMapasCotacao((p as { mapasCotacao?: unknown }).mapasCotacao),
       insumosAnaliticoManuais: parseInsumosAnaliticoManuais(p.insumosAnaliticoManuais),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       insumosAnaliticoOcultos: Array.isArray(p.insumosAnaliticoOcultos) ? p.insumosAnaliticoOcultos : [],
@@ -4955,6 +4971,7 @@ function sessaoTemDados(s: SessaoOrcamentoPersist | null | undefined): boolean {
     Object.keys(s.coresCelulaPorKey ?? {}).length > 0 ||
     Object.keys(s.moMatManualPorItem ?? {}).length > 0 ||
     Object.keys(s.fichaDemandaObservacoes ?? {}).length > 0 ||
+    mapaCotacaoTemDados(s.mapasCotacao) ||
     Object.keys(s.insumosAnaliticoManuais ?? {}).length > 0 ||
     cronogramaTemDados
   );
@@ -5319,6 +5336,7 @@ function parseOrcamentoDetailRaw(d: {
           colunasOcultasMontagem: parseColunasOcultasMontagem(so.colunasOcultasMontagem),
           moMatManualPorItem: parseMoMatManualPorItem(so.moMatManualPorItem),
           fichaDemandaObservacoes: parseObservacoesPorItem(so.fichaDemandaObservacoes),
+          mapasCotacao: parseMapasCotacao(so.mapasCotacao),
           insumosAnaliticoManuais: parseInsumosAnaliticoManuais(so.insumosAnaliticoManuais),
           itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
           insumosAnaliticoOcultos: Array.isArray(so.insumosAnaliticoOcultos) ? so.insumosAnaliticoOcultos : [],
@@ -7760,9 +7778,10 @@ const ORCAFASCIO_META_EXTRA_VAZIO = {
 const ABA_ROTULO_PRESENCA: Record<string, string> = {
   dados: 'Dados',
   montagem: 'Orçamento',
-  memorial: 'Memória de cálculo',
+  memorial: 'Memória de Cálculo',
+  mapaCotacao: 'Mapa de Cotação',
   analitico: 'Analítico',
-  planilhaAnalitica: 'Ficha de demanda',
+  planilhaAnalitica: 'Ficha de Demanda',
   cronograma: 'Cronograma',
 };
 
@@ -7865,6 +7884,7 @@ export function OrcamentoPageView({
   const [planilhaCompraOcAplicada, setPlanilhaCompraOcAplicada] = useState<Record<string, string>>({});
   const [planilhaTipoInsumo, setPlanilhaTipoInsumo] = useState<Record<string, 'MO' | 'MA' | 'LO'>>({});
   const [fichaDemandaObservacoes, setFichaDemandaObservacoes] = useState<Record<string, string>>({});
+  const [mapasCotacao, setMapasCotacao] = useState<MapasCotacao>({});
   const dimensoesPorItemDeferred = useDeferredValue(dimensoesPorItem);
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
@@ -8080,7 +8100,7 @@ export function OrcamentoPageView({
 
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
-    'dados' | 'montagem' | 'analitico' | 'memorial' | 'planilhaAnalitica' | 'cronograma'
+    'dados' | 'montagem' | 'analitico' | 'memorial' | 'mapaCotacao' | 'planilhaAnalitica' | 'cronograma'
   >(cronogramaOnly ? 'cronograma' : fichaDemandaOnly ? 'planilhaAnalitica' : 'montagem');
 
   useEffect(() => {
@@ -9182,6 +9202,7 @@ export function OrcamentoPageView({
       setColunasOcultasMontagem(parseColunasOcultasMontagem(s.colunasOcultasMontagem));
       setMoMatManualPorItem(parseMoMatManualPorItem(s.moMatManualPorItem));
       setFichaDemandaObservacoes(parseObservacoesPorItem(s.fichaDemandaObservacoes));
+      setMapasCotacao(parseMapasCotacao(s.mapasCotacao));
       setInsumosAnaliticoManuais(parseInsumosAnaliticoManuais(s.insumosAnaliticoManuais));
       setCronograma(normalizarCronograma(s.cronograma));
       setMeta(s.meta ? s.meta : sessaoVazia().meta!);
@@ -9522,6 +9543,7 @@ export function OrcamentoPageView({
       colunasOcultasMontagem,
       moMatManualPorItem,
       fichaDemandaObservacoes,
+      mapasCotacao,
       insumosAnaliticoManuais,
       meta,
       itensOcultosNoOrcamento,
@@ -9568,6 +9590,7 @@ export function OrcamentoPageView({
     colunasOcultasMontagem,
     moMatManualPorItem,
     fichaDemandaObservacoes,
+    mapasCotacao,
     insumosAnaliticoManuais,
     meta,
     itensOcultosNoOrcamento,
@@ -9610,6 +9633,7 @@ export function OrcamentoPageView({
     colunasOcultasMontagem,
     moMatManualPorItem,
     fichaDemandaObservacoes,
+    mapasCotacao,
     insumosAnaliticoManuais,
     meta,
     itensOcultosNoOrcamento,
@@ -16298,25 +16322,71 @@ export function OrcamentoPageView({
    */
   const memorialDisponivel = meta.usarMemoriaCalculo === true || meta?.importadoPlanilha !== true;
   const analiticoDisponivel = meta.temAnalitico !== false;
+
+  /** Composições próprias com código "COTAÇÃO - n": cada uma precisa do seu Mapa de Cotação. */
+  const composicoesCotacao = useMemo<ComposicaoCotacao[]>(() => {
+    const porChave = new Map<string, ComposicaoCotacao>();
+    for (const row of itensCalculados) {
+      if (!isCodigoCotacao(row.item.codigo)) continue;
+      const chave = chaveMapaCotacao(row.item.codigo);
+      const existente = porChave.get(chave);
+      if (existente) {
+        existente.usos += 1;
+        continue;
+      }
+      porChave.set(chave, {
+        item: rotuloItemComposicaoPorKey.get(row.key) ?? '',
+        banco: (row.item.banco || '').trim(),
+        codigo: row.item.codigo.trim(),
+        descricao: row.item.descricao || '',
+        unidade: unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade),
+        precoOrcamento: Number(row.item.precoUnitario) > 0 ? Number(row.item.precoUnitario) : null,
+        usos: 1,
+      });
+    }
+    return Array.from(porChave.values()).sort((a, b) =>
+      a.codigo.localeCompare(b.codigo, 'pt-BR', { numeric: true })
+    );
+  }, [itensCalculados, rotuloItemComposicaoPorKey]);
+  const mapaCotacaoDisponivel = composicoesCotacao.length > 0;
+
+  const atualizarMapaCotacao = useCallback((chave: string, mapa: MapaCotacao) => {
+    setMapasCotacao((prev) => ({ ...prev, [chave]: mapa }));
+  }, []);
+
+  const enviarAnexoMapaCotacao = useCallback(async (file: File): Promise<MapaCotacaoAnexo> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await api.post('/orcamento/mapa-cotacao/anexo', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    const data = res.data?.data as { url?: string; name?: string } | undefined;
+    if (!data?.url) throw new Error('Não foi possível enviar o print');
+    return { url: data.url, name: data.name || file.name };
+  }, []);
+
   const orcamentoAbasOptions = useMemo(() => {
     if (fichaDemandaOnly) {
       return [
         { value: 'dados' as const, label: 'Dados' },
-        { value: 'planilhaAnalitica' as const, label: 'Ficha de demanda' },
+        { value: 'planilhaAnalitica' as const, label: 'Ficha de Demanda' },
       ];
     }
     return [
       { value: 'dados' as const, label: 'Dados' },
       { value: 'montagem' as const, label: 'Orçamento' },
       ...(memorialDisponivel
-        ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
+        ? [{ value: 'memorial' as const, label: 'Memória de Cálculo' }]
+        : []),
+      ...(mapaCotacaoDisponivel
+        ? [{ value: 'mapaCotacao' as const, label: 'Mapa de Cotação' }]
         : []),
       ...(analiticoDisponivel
         ? [
             { value: 'analitico' as const, label: 'Analítico' },
             {
               value: 'planilhaAnalitica' as const,
-              label: 'Ficha de demanda',
+              label: 'Ficha de Demanda',
               disabled: !fichaDemandaLiberada(statusAprovacaoAtivo),
               title: fichaDemandaLiberada(statusAprovacaoAtivo)
                 ? undefined
@@ -16325,7 +16395,7 @@ export function OrcamentoPageView({
           ]
         : []),
     ];
-  }, [fichaDemandaOnly, memorialDisponivel, analiticoDisponivel, statusAprovacaoAtivo]);
+  }, [fichaDemandaOnly, memorialDisponivel, mapaCotacaoDisponivel, analiticoDisponivel, statusAprovacaoAtivo]);
 
   const gradeZoomAtivo =
     orcamentoViewTab === 'montagem' ||
@@ -16340,6 +16410,12 @@ export function OrcamentoPageView({
       setOrcamentoViewTab('montagem');
     }
   }, [memorialDisponivel, orcamentoViewTab]);
+
+  useEffect(() => {
+    if (!mapaCotacaoDisponivel && orcamentoViewTab === 'mapaCotacao') {
+      setOrcamentoViewTab('montagem');
+    }
+  }, [mapaCotacaoDisponivel, orcamentoViewTab]);
 
   useEffect(() => {
     if (!analiticoDisponivel && (orcamentoViewTab === 'analitico' || orcamentoViewTab === 'planilhaAnalitica')) {
@@ -17000,12 +17076,155 @@ export function OrcamentoPageView({
     };
   };
 
-  /** Pacote: Orçamento + Memória de cálculo + Analítico no mesmo .xlsx (a Ficha de demanda tem exportação própria). */
+  /** Mapa de Cotação das composições próprias "COTAÇÃO - n": 1 bloco por composição, com as 3 propostas e os prints. */
+  const montarSheetMapaCotacao = (): OrcamentoExcelSheetSpec | null => {
+    if (composicoesCotacao.length === 0) return null;
+    const NCOL = 9;
+    const COL_PROPOSTAS = [6, 7, 8];
+    const empty = () => Array.from({ length: NCOL }, () => '') as OrcamentoExcelRow['values'];
+    const VERDE = '#166534';
+    const VERMELHO = '#991B1B';
+    const rows: OrcamentoExcelRow[] = [];
+    const imagens: NonNullable<OrcamentoExcelSheetSpec['imagens']> = [];
+    const dataBr = (ymd: string) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
+    };
+
+    composicoesCotacao.forEach((comp, idx) => {
+      if (idx > 0) rows.push({ kind: 'blank', values: empty() });
+      const mapa: MapaCotacao = mapasCotacao[chaveMapaCotacao(comp.codigo)] ?? { propostas: [] };
+      const propostas = COL_PROPOSTAS.map((_, i) => mapa.propostas[i]);
+      const menor = propostaMenorValor({ propostas: mapa.propostas });
+      const linhaItem = rows.length;
+      const linhaValor = linhaItem + 1;
+
+      // Faixa da composição (padrão da memória): item, código, banco, descrição, unidade, valor adotado e fornecedores.
+      const itemValues = empty();
+      itemValues[0] = comp.item || '';
+      itemValues[1] = comp.codigo;
+      itemValues[2] = comp.banco;
+      itemValues[3] = (comp.descricao || '').toUpperCase();
+      itemValues[4] = comp.unidade;
+      itemValues[5] = menor?.valor ?? '';
+      COL_PROPOSTAS.forEach((col, i) => {
+        itemValues[col] = (propostas[i]?.fornecedor || '').trim().toUpperCase();
+      });
+      rows.push({
+        kind: 'item',
+        values: itemValues,
+        altura: 36,
+        formulas: { 5: `MIN(G{R${linhaValor}}:I{R${linhaValor}})` },
+        formats: { 5: 'currency' },
+        tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'label', 4: 'plain', 5: 'plain', 6: 'plain', 7: 'plain', 8: 'plain' },
+        cores: { 5: { fg: VERDE, bold: true } },
+      });
+
+      const linhaCampo = (
+        rotulo: string,
+        valor: (i: number) => OrcamentoExcelRow['values'][number],
+        extra?: Partial<OrcamentoExcelRow>
+      ) => {
+        const values = empty();
+        values[5] = rotulo;
+        COL_PROPOSTAS.forEach((col, i) => {
+          values[col] = valor(i);
+        });
+        rows.push({
+          kind: 'item',
+          values,
+          tones: { 5: 'label', 6: 'plain', 7: 'plain', 8: 'plain' },
+          ...extra,
+        });
+      };
+
+      // VALOR: menor proposta em verde, as demais em vermelho (como na planilha de referência).
+      linhaCampo('VALOR', (i) => propostas[i]?.valor ?? '', {
+        formats: { 6: 'currency', 7: 'currency', 8: 'currency' },
+        cores: Object.fromEntries(
+          COL_PROPOSTAS.map((col, i) => [
+            col,
+            { fg: menor && propostas[i]?.id === menor.id ? VERDE : VERMELHO, bold: true },
+          ])
+        ),
+      });
+      linhaCampo('CNPJ / CPF', (i) => propostas[i]?.cnpj || '');
+      const links: Record<number, string> = {};
+      COL_PROPOSTAS.forEach((col, i) => {
+        const site = (propostas[i]?.site || '').trim();
+        if (site) links[col] = /^https?:\/\//i.test(site) ? site : `https://${site}`;
+      });
+      linhaCampo('SITE', (i) => (propostas[i]?.site || '').trim(), { altura: 54, links });
+      linhaCampo('TELEFONE', (i) => propostas[i]?.telefone || '');
+      linhaCampo('DATA', (i) => (propostas[i]?.data ? dataBr(propostas[i]!.data) : ''));
+
+      // Prints das propostas (quadro de anexos).
+      if (propostas.some((p) => p?.anexo)) {
+        linhaCampo('PRINT', () => '', { altura: 190 });
+        const linhaPrint = rows.length - 1;
+        COL_PROPOSTAS.forEach((col, i) => {
+          const anexo = propostas[i]?.anexo;
+          if (anexo) imagens.push({ url: absoluteUploadUrl(anexo.url), row: linhaPrint, col });
+        });
+      }
+    });
+
+    return {
+      name: 'Mapa de Cotação',
+      title: 'Mapa de Cotação',
+      cabecalho: {
+        // Mesma logo da aba Orçamento, na lateral, e os dados da empresa ao lado (como na planilha de cotação).
+        logo: true,
+        linhas: [
+          [
+            { texto: '', de: 0, ate: 1, espacoLogo: true, linhasAbaixo: 4 },
+            { texto: 'RAZÃO SOCIAL: GENNESIS ENGENHARIA E CONSULTORIA LTDA', de: 2, ate: NCOL - 1, estilo: 'informacao' },
+          ],
+          [{ texto: 'SHIS QI 15, Sobreloja 55, Lago Sul -Brasília/DF', de: 2, ate: NCOL - 1, estilo: 'informacao' }],
+          [{ texto: 'CNPJ 17.851.596/0001-36', de: 2, ate: NCOL - 1, estilo: 'informacao' }],
+          [{ texto: 'E-mail: genneisisengenharia.confea@gmail.com', de: 2, ate: NCOL - 1, estilo: 'informacao' }],
+          [{ texto: 'Preposto : Ciro Guilherme', de: 2, ate: NCOL - 1, estilo: 'informacao' }],
+          [{ texto: 'MAPA DE COTAÇÃO - COMPOSIÇÕES PRÓPRIAS', de: 0, ate: NCOL - 1, estilo: 'barra' }],
+          [
+            {
+              texto:
+                'LEGENDA: VALOR ADOTADO = MENOR PROPOSTA - VERDE = MENOR VALOR - VERMELHO = DEMAIS PROPOSTAS - AS PROPOSTAS PODEM SER CONFERIDAS PELOS LINKS E PRINTS ANEXADOS',
+              de: 0,
+              ate: NCOL - 1,
+              estilo: 'legenda',
+            },
+          ],
+        ],
+        alturas: [26, 26, 26, 26, 26, 22, 30],
+      },
+      subtitle: 'Propostas de fornecedores das composições próprias, com o menor valor adotado',
+      autoFilter: false,
+      showHeader: true,
+      semZebra: true,
+      aparencia: aparenciaMemorial,
+      columns: [
+        { header: 'ITEM', width: 10, align: 'center' },
+        { header: 'CÓDIGO', width: 16, align: 'center' },
+        { header: 'BANCO', width: 12, align: 'center' },
+        { header: 'DESCRIÇÃO', width: 46, larguraFixa: true },
+        { header: 'UND', width: 8, align: 'center' },
+        { header: 'VALOR ADOTADO', width: 20, align: 'center', format: 'currency' },
+        { header: '1ª PROPOSTA', width: 30, align: 'center' },
+        { header: '2ª PROPOSTA', width: 30, align: 'center' },
+        { header: '3ª PROPOSTA', width: 30, align: 'center' },
+      ],
+      rows,
+      imagens,
+    };
+  };
+
+  /** Pacote: Orçamento + Memória de cálculo + Mapa de Cotação + Analítico no mesmo .xlsx (a Ficha de demanda tem exportação própria). */
   const exportarOrcamentoCompleto = async () => {
     const sheetMemoria = montarSheetMemoriaCalculo();
     const sheets = [
       montarSheetOrcamentoDetalhado({ vincularMemoria: true }),
       sheetMemoria,
+      montarSheetMapaCotacao(),
       montarSheetOrcamentoAnalitico(),
     ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
     if (!sheets.length) {
@@ -17018,7 +17237,11 @@ export function OrcamentoPageView({
       contrato: nomeContrato,
       aparencia: aparenciaMontagem,
     });
-    toast.success('Orçamento exportado (Orçamento, Memória de cálculo e Analítico).');
+    toast.success(
+      mapaCotacaoDisponivel
+        ? 'Orçamento exportado (Orçamento, Memória de cálculo, Mapa de Cotação e Analítico).'
+        : 'Orçamento exportado (Orçamento, Memória de cálculo e Analítico).'
+    );
   };
 
   /** Linhas e cores do cronograma, iguais às da tela (usadas no Excel e no PDF). */
@@ -17416,6 +17639,7 @@ export function OrcamentoPageView({
       const sheetsOrc = [
         montarSheetOrcamentoDetalhado({ vincularMemoria: true }),
         sheetMemoriaOrc,
+        montarSheetMapaCotacao(),
         montarSheetOrcamentoAnalitico(),
       ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
       if (sheetsOrc.length) {
@@ -17749,7 +17973,7 @@ export function OrcamentoPageView({
           className={
             orcamentoAtivoId
               ? !cronogramaOnly &&
-                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'mapaCotacao' || orcamentoViewTab === 'cronograma')
                 ? 'flex w-full min-w-0 flex-col'
                 : 'flex h-[calc(100dvh-6rem)] flex-col overflow-hidden lg:h-[calc(100dvh-8rem)]'
               : 'space-y-6'
@@ -18214,7 +18438,7 @@ export function OrcamentoPageView({
             <div
               className={
                 !cronogramaOnly &&
-                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'mapaCotacao' || orcamentoViewTab === 'cronograma')
                   ? 'flex w-full min-w-0 flex-col !animate-none [transform:none]'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !animate-none [transform:none]'
               }
@@ -18226,7 +18450,7 @@ export function OrcamentoPageView({
               padding="none"
               className={
                 !cronogramaOnly &&
-                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
+                (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'mapaCotacao' || orcamentoViewTab === 'cronograma')
                   ? 'flex w-full min-w-0 flex-col !border-0 !bg-transparent shadow-none dark:!bg-transparent'
                   : 'flex min-h-0 flex-1 flex-col overflow-hidden !border-0 !bg-transparent shadow-none dark:!bg-transparent'
               }
@@ -18238,7 +18462,7 @@ export function OrcamentoPageView({
               <CardContent
                 className={
                   !cronogramaOnly &&
-                  (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'cronograma')
+                  (orcamentoViewTab === 'memorial' || orcamentoViewTab === 'mapaCotacao' || orcamentoViewTab === 'cronograma')
                     ? 'flex w-full min-w-0 flex-col !p-0 !pt-0'
                     : 'flex min-h-0 flex-1 flex-col overflow-hidden !p-0 !pt-0'
                 }
@@ -18569,6 +18793,21 @@ export function OrcamentoPageView({
                       </div>
                     </div>
                   </section>
+                )}
+
+                {!loadingFromApi && orcamentoViewTab === 'mapaCotacao' && mapaCotacaoDisponivel && (
+                  <div
+                    className={gradeTravada ? 'pointer-events-none select-none' : undefined}
+                    aria-disabled={gradeTravada || undefined}
+                  >
+                    <OrcamentoMapaCotacaoPainel
+                      composicoes={composicoesCotacao}
+                      mapas={mapasCotacao}
+                      onChange={atualizarMapaCotacao}
+                      readOnly={gradeTravada}
+                      onUploadAnexo={enviarAnexoMapaCotacao}
+                    />
+                  </div>
                 )}
 
                 {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'analitico' && (

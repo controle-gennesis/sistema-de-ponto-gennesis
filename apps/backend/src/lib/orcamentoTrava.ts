@@ -62,6 +62,7 @@ const SESSAO_PROTEGIDA = [
   'observacoesPorItem',
   'moMatManualPorItem',
   'fichaDemandaObservacoes',
+  'mapasCotacao',
   'insumosAnaliticoManuais',
   'itensOcultosNoOrcamento',
   'insumosAnaliticoOcultos',
