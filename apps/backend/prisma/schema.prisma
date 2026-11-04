@@ -6043,11 +6043,29 @@ model ContractRegistryEntry {
   updatedBy      String?
 
   addenda ContractRegistryAddendum[]
+  cats    ContractRegistryCat[]
 
   @@index([contractorName])
   @@index([contractNumber])
   @@index([endDate])
   @@map("contract_registry_entries")
+}
+
+/// CAT (Certidão de Acervo Técnico) de um contrato do Controle de Contratos.
+model ContractRegistryCat {
+  id           String    @id @default(cuid())
+  registryId   String
+  catNumber    String
+  professional String?
+  protocol     String?
+  issuedAt     DateTime? @db.Date
+  createdAt    DateTime  @default(now())
+  createdBy    String?
+
+  registry ContractRegistryEntry @relation(fields: [registryId], references: [id], onDelete: Cascade)
+
+  @@index([registryId, issuedAt])
+  @@map("contract_registry_cats")
 }
 
 /// Aditivos de um contrato do Controle de Contratos (valor pode ser zero em aditivo de prazo).

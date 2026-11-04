@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle,
   CalendarCheck,
   CalendarClock,
+  CalendarDays,
   CheckCircle2,
+  BadgeCheck,
   FilePlus2,
   FileSignature,
   Filter,
@@ -30,15 +32,15 @@ import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/ui/pageLayout';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { DatePickerField } from '@/components/ui/DatePickerField';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { formatCurrencyInputBrFromNumber, maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 
-type ArtEntry = { art: string; professional: string };
-const EMPTY_ART: ArtEntry = { art: '', professional: '' };
+type ArtEntry = { art: string; professional: string; baixada: string };
+const EMPTY_ART: ArtEntry = { art: '', professional: '', baixada: '' };
+const BAIXADA_OPTIONS = ['SIM', 'NÃO'];
 
 type RegistryRow = {
   id: string;
@@ -67,6 +69,13 @@ type RegistryRow = {
     note: string | null;
   }>;
   addendaTotal: number;
+  cats: Array<{
+    id: string;
+    catNumber: string;
+    professional: string | null;
+    protocol: string | null;
+    issuedAt: string | null;
+  }>;
 };
 
 type RegistryForm = {
@@ -154,6 +163,98 @@ function errMessage(e: unknown, fallback: string): string {
   return (e as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback;
 }
 
+const ymdToBr = (ymd: string) => {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+};
+
+/** dd/mm/aaaa → aaaa-mm-dd, ou null se não for uma data real. */
+function brToYmd(text: string): string | null {
+  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(y, mo - 1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+/** Máscara dd/mm/aaaa a partir do que foi digitado ou colado. */
+function maskDateBr(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+/** Campo de data que aceita digitar (dd/mm/aaaa) e também escolher no calendário. Valor em aaaa-mm-dd. */
+function TypedDateField({
+  value,
+  onChange,
+  placeholder = 'dd/mm/aaaa',
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (ymd: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const [text, setText] = useState(ymdToBr(value));
+  const nativeRef = useRef<HTMLInputElement>(null);
+
+  // Mantém o texto em sincronia quando o valor muda por fora (editar, limpar o formulário).
+  useEffect(() => {
+    if ((brToYmd(text) ?? '') !== (value || '')) setText(ymdToBr(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const invalid = text.length === 10 && brToYmd(text) === null;
+
+  return (
+    <div className="relative">
+      <input
+        value={text}
+        onChange={(e) => {
+          const masked = maskDateBr(e.target.value);
+          setText(masked);
+          if (masked === '') onChange('');
+          else {
+            const ymd = brToYmd(masked);
+            if (ymd) onChange(ymd);
+          }
+        }}
+        onBlur={() => {
+          // Texto incompleto ou inválido volta para a última data válida.
+          if (text !== '' && brToYmd(text) === null) setText(ymdToBr(value));
+        }}
+        inputMode="numeric"
+        placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
+        aria-invalid={invalid}
+        maxLength={10}
+        className={`${FORM_FIELD_INPUT_CLS} pr-10 ${invalid ? 'border-red-500' : ''}`}
+      />
+      <button
+        type="button"
+        onClick={() => nativeRef.current?.showPicker?.()}
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+        title="Escolher no calendário"
+        aria-label="Escolher no calendário"
+      >
+        <CalendarDays className="h-4 w-4" />
+      </button>
+      <input
+        ref={nativeRef}
+        type="date"
+        tabIndex={-1}
+        aria-hidden
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className="pointer-events-none absolute bottom-0 right-2 h-0 w-0 opacity-0"
+      />
+    </div>
+  );
+}
+
 /** Lista editável de ARTs: cada linha tem a ART (da página ART's / Protocolos) e o profissional dela. */
 function ArtsEditor({
   value,
@@ -174,7 +275,7 @@ function ArtsEditor({
           const options = artOptions.map((a) => ({ value: a.art, label: a.art }));
           if (row.art && !options.some((o) => o.value === row.art)) options.unshift({ value: row.art, label: row.art });
           return (
-            <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_120px_auto]">
               <StringSingleSelectDropdown
                 value={row.art}
                 onChange={(v) => {
@@ -194,6 +295,17 @@ function ArtsEditor({
                 onChange={(e) => update(i, { professional: e.target.value })}
                 placeholder="Profissional (preenchido ao escolher a ART)"
                 className={FORM_FIELD_INPUT_CLS}
+              />
+              <StringSingleSelectDropdown
+                value={row.baixada}
+                onChange={(v) => update(i, { baixada: v })}
+                options={BAIXADA_OPTIONS}
+                allowEmpty
+                emptyOptionLabel="Sem informação"
+                placeholder="Baixada"
+                disableSearch
+                matchTriggerWidth
+                className="w-full"
               />
               <button
                 type="button"
@@ -220,6 +332,9 @@ function ArtsEditor({
 }
 
 const cleanArts = (arts: ArtEntry[]) => arts.filter((a) => a.art.trim() || a.professional.trim());
+/** Uma linha por ART, com "—" quando o campo está vazio (mantém o alinhamento entre colunas). */
+const artsLinesAll = (arts: ArtEntry[], field: 'art' | 'professional' | 'baixada') =>
+  arts.map((a) => a[field] || '—').join('\n');
 const artsLines = (arts: ArtEntry[], field: 'art' | 'professional') =>
   arts.map((a) => a[field]).filter(Boolean).join('\n');
 
@@ -245,7 +360,12 @@ function ControleContratosPage() {
   const [editing, setEditing] = useState<RegistryRow | 'new' | null>(null);
   const [form, setForm] = useState<RegistryForm>(EMPTY_FORM);
   const [viewingId, setViewingId] = useState<string | null>(null);
-  const [viewTab, setViewTab] = useState<'info' | 'aditivos'>('info');
+  const [viewTab, setViewTab] = useState<'info' | 'aditivos' | 'cat'>('info');
+  const [catNumber, setCatNumber] = useState('');
+  const [catProfessional, setCatProfessional] = useState('');
+  const [catProtocol, setCatProtocol] = useState('');
+  const [catIssuedAt, setCatIssuedAt] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [addSignedAt, setAddSignedAt] = useState('');
   const [addStart, setAddStart] = useState('');
   const [addEnd, setAddEnd] = useState('');
@@ -262,8 +382,9 @@ function ControleContratosPage() {
     queryFn: async () =>
       (((await api.get('/contract-registry')).data?.data ?? []) as RegistryRow[]).map((r) => ({
         ...r,
-        arts: r.arts ?? [],
-        addenda: (r.addenda ?? []).map((x) => ({ ...x, arts: x.arts ?? [] })),
+        arts: (r.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })),
+        cats: r.cats ?? [],
+        addenda: (r.addenda ?? []).map((x) => ({ ...x, arts: (x.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })) })),
         addendaTotal: r.addendaTotal ?? 0,
       })),
     enabled: !!user,
@@ -352,12 +473,46 @@ function ControleContratosPage() {
       setAddAmount('');
       setAddNumber('');
       setAddNote('');
-      setAddArts(viewing?.arts.length ? viewing.arts.map((a) => ({ ...a })) : [{ ...EMPTY_ART }]);
-      setAddDocument(viewing?.document ?? '');
-      setAddGuarantee(viewing?.guarantee ?? '');
+      setAddArts([{ ...EMPTY_ART }]);
+      setAddDocument('');
+      setAddGuarantee('');
       void queryClient.invalidateQueries({ queryKey: ['contract-registry'] });
     },
     onError: (e) => toast.error(errMessage(e, 'Não foi possível adicionar o aditivo.')),
+  });
+
+  const resetCatForm = () => {
+    setEditingCatId(null);
+    setCatNumber('');
+    setCatProfessional('');
+    setCatProtocol('');
+    setCatIssuedAt('');
+  };
+
+  const saveCatMutation = useMutation({
+    mutationFn: async () => {
+      if (!viewingId) return;
+      const payload = { catNumber, professional: catProfessional, protocol: catProtocol, issuedAt: catIssuedAt || null };
+      if (editingCatId) await api.patch(`/contract-registry/${viewingId}/cats/${editingCatId}`, payload);
+      else await api.post(`/contract-registry/${viewingId}/cats`, payload);
+    },
+    onSuccess: () => {
+      toast.success(editingCatId ? 'CAT atualizada.' : 'CAT adicionada.');
+      resetCatForm();
+      void queryClient.invalidateQueries({ queryKey: ['contract-registry'] });
+    },
+    onError: (e) => toast.error(errMessage(e, 'Não foi possível salvar a CAT.')),
+  });
+
+  const deleteCatMutation = useMutation({
+    mutationFn: async (catId: string) => {
+      await api.delete(`/contract-registry/${viewingId}/cats/${catId}`);
+    },
+    onSuccess: () => {
+      toast.success('CAT removida.');
+      void queryClient.invalidateQueries({ queryKey: ['contract-registry'] });
+    },
+    onError: (e) => toast.error(errMessage(e, 'Não foi possível remover a CAT.')),
   });
 
   const deleteAddendumMutation = useMutation({
@@ -381,9 +536,9 @@ function ControleContratosPage() {
     setAddAmount('');
     setAddNumber('');
     setAddNote('');
-    setAddArts(viewing?.arts.length ? viewing.arts.map((a) => ({ ...a })) : [{ ...EMPTY_ART }]);
-    setAddDocument(viewing?.document ?? '');
-    setAddGuarantee(viewing?.guarantee ?? '');
+    setAddArts([{ ...EMPTY_ART }]);
+    setAddDocument('');
+    setAddGuarantee('');
   };
 
   const startEditAddendum = (a: RegistryRow['addenda'][number]) => {
@@ -399,12 +554,13 @@ function ControleContratosPage() {
     setAddNote(a.note ?? '');
   };
 
-  // O aditivo já nasce com a ART e o profissional do contrato (dá para trocar).
+  // Ao abrir outro contrato, o formulário do aditivo começa em branco.
   useEffect(() => {
-    setAddArts(viewing?.arts.length ? viewing.arts.map((a) => ({ ...a })) : [{ ...EMPTY_ART }]);
-    setAddDocument(viewing?.document ?? '');
-    setAddGuarantee(viewing?.guarantee ?? '');
+    setAddArts([{ ...EMPTY_ART }]);
+    setAddDocument('');
+    setAddGuarantee('');
     setEditingAddendumId(null);
+    resetCatForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingId]);
 
@@ -706,6 +862,7 @@ function ControleContratosPage() {
               {([
                 ['info', 'Informações gerais', Info, null],
                 ['aditivos', 'Aditivos', FilePlus2, viewing.addenda.length],
+                ['cat', 'CAT', BadgeCheck, viewing.cats.length],
               ] as const).map(([key, label, Icon, count]) => (
                 <button
                   key={key}
@@ -734,7 +891,7 @@ function ControleContratosPage() {
                     {[
                       ['Contratante', viewing.contractorName],
                       ['Nº do contrato', viewing.contractNumber],
-                      ['ARTs', viewing.arts.map((a) => (a.professional ? `${a.art || 'Sem número'} — ${a.professional}` : a.art)).filter(Boolean).join('\n') || '—'],
+                      ['ARTs', viewing.arts.map((a) => [a.professional ? `${a.art || 'Sem número'} — ${a.professional}` : a.art, a.baixada ? `Baixada: ${a.baixada}` : ''].filter(Boolean).join(' · ')).filter(Boolean).join('\n') || '—'],
                       ['CPF/CNPJ', viewing.document || '—'],
                       ['Estado', viewing.uf ? `${UF_NAMES[viewing.uf] ?? viewing.uf} (${viewing.uf})` : '—'],
                       ['Assinado em', dateBr(viewing.signedAt)],
@@ -767,7 +924,7 @@ function ControleContratosPage() {
                   </dl>
                 </div>
               </div>
-            ) : (
+            ) : viewTab === 'aditivos' ? (
               <div className="space-y-4">
                 <form
                   onSubmit={(e) => {
@@ -790,15 +947,15 @@ function ControleContratosPage() {
                   </label>
                   <div>
                     <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Assinado em</span>
-                    <DatePickerField value={addSignedAt} onChange={setAddSignedAt} placeholder="dd/mm/aaaa" aria-label="Assinado em" />
+                    <TypedDateField value={addSignedAt} onChange={setAddSignedAt} ariaLabel="Assinado em" />
                   </div>
                   <div>
                     <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Início</span>
-                    <DatePickerField value={addStart} onChange={setAddStart} placeholder="dd/mm/aaaa" aria-label="Início do aditivo" />
+                    <TypedDateField value={addStart} onChange={setAddStart} ariaLabel="Início do aditivo" />
                   </div>
                   <div>
                     <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Término</span>
-                    <DatePickerField value={addEnd} onChange={setAddEnd} placeholder="dd/mm/aaaa" aria-label="Término do aditivo" />
+                    <TypedDateField value={addEnd} onChange={setAddEnd} ariaLabel="Término do aditivo" />
                   </div>
                   <div>
                     <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Garantia</span>
@@ -844,20 +1001,14 @@ function ControleContratosPage() {
                   </div>
                 </form>
 
-                {viewing.addenda.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-10 text-center dark:border-gray-600">
-                    <FilePlus2 className="h-10 w-10 text-gray-400" />
-                    <p className="text-base font-semibold text-gray-600 dark:text-gray-300">Nenhum aditivo cadastrado</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Os aditivos aparecerão aqui quando forem adicionados ao contrato.</p>
-                  </div>
-                ) : (
                   <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
-                    <table className="w-full min-w-[960px] text-sm">
+                    <table className="w-full min-w-[1040px] text-sm">
                       <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-500 dark:bg-gray-900/40 dark:text-gray-400">
                         <tr>
                           <th className="px-3 py-2 text-center font-medium">Contrato / Aditivo</th>
                           <th className="px-3 py-2 text-center font-medium">ART</th>
                           <th className="px-3 py-2 text-left font-medium">Profissional</th>
+                          <th className="px-3 py-2 text-center font-medium">Baixada</th>
                           <th className="px-3 py-2 text-center font-medium">CPF/CNPJ</th>
                           <th className="px-3 py-2 text-center font-medium">Assinado em</th>
                           <th className="px-3 py-2 text-center font-medium">Valor</th>
@@ -869,11 +1020,40 @@ function ControleContratosPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        <tr className="bg-gray-50 text-gray-900 dark:bg-gray-900/30 dark:text-gray-100">
+                          <td className="whitespace-nowrap px-3 py-2 text-center font-bold">CONTRATO</td>
+                          <td className="whitespace-pre-line px-3 py-2 text-center">{artsLines(viewing.arts, 'art') || '—'}</td>
+                          <td className="whitespace-pre-line px-3 py-2">{artsLines(viewing.arts, 'professional') || '—'}</td>
+                          <td className="whitespace-pre-line px-3 py-2 text-center">{viewing.arts.length ? artsLinesAll(viewing.arts, 'baixada') : '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center">{viewing.document || '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center">{dateBr(viewing.signedAt)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">{viewing.value != null ? brl(viewing.value) : '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center">{dateBr(viewing.startDate)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center">{dateBr(viewing.endDate)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center">{viewing.guarantee || '—'}</td>
+                          <td className="max-w-[220px] truncate px-3 py-2 text-gray-600 dark:text-gray-300" title={viewing.notes ?? ''}>{viewing.notes || '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const r = viewing;
+                                setViewingId(null);
+                                openEdit(r);
+                              }}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                              title="Editar dados do contrato"
+                              aria-label="Editar dados do contrato"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
                         {viewing.addenda.map((a) => (
                           <tr key={a.id} className="text-gray-900 dark:text-gray-100">
                             <td className="whitespace-nowrap px-3 py-2 text-center font-medium">{a.addendumNumber || '—'}</td>
                             <td className="whitespace-pre-line px-3 py-2 text-center">{artsLines(a.arts, 'art') || '—'}</td>
                             <td className="whitespace-pre-line px-3 py-2">{artsLines(a.arts, 'professional') || '—'}</td>
+                            <td className="whitespace-pre-line px-3 py-2 text-center">{a.arts.length ? artsLinesAll(a.arts, 'baixada') : '—'}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-center">{a.document || '—'}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-center">{dateBr(a.signedAt)}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">{Math.abs(a.amount) < 1e-9 ? 'Sem valor' : `${a.amount >= 0 ? '+' : ''}${brl(a.amount)}`}</td>
@@ -899,6 +1079,131 @@ function ControleContratosPage() {
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                                 title="Excluir aditivo"
                                 aria-label="Excluir aditivo"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                {viewing.addenda.length === 0 ? (
+                  <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+                    Nenhum aditivo cadastrado. Os aditivos aparecerão abaixo do contrato.
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    saveCatMutation.mutate();
+                  }}
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                >
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Nº CAT *</span>
+                    <input value={catNumber} onChange={(e) => setCatNumber(e.target.value)} className={FORM_FIELD_INPUT_CLS} />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Profissional</span>
+                    <input
+                      list="cat-professionals"
+                      value={catProfessional}
+                      onChange={(e) => setCatProfessional(e.target.value)}
+                      className={FORM_FIELD_INPUT_CLS}
+                    />
+                    <datalist id="cat-professionals">
+                      {Array.from(
+                        new Set(
+                          [...viewing.arts, ...viewing.addenda.flatMap((a) => a.arts)].map((a) => a.professional).filter(Boolean),
+                        ),
+                      ).map((p) => (
+                        <option key={p} value={p} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Protocolo</span>
+                    <input value={catProtocol} onChange={(e) => setCatProtocol(e.target.value)} className={FORM_FIELD_INPUT_CLS} />
+                  </label>
+                  <div>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Data de emissão</span>
+                    <TypedDateField value={catIssuedAt} onChange={setCatIssuedAt} ariaLabel="Data de emissão da CAT" />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 sm:col-span-2">
+                    {editingCatId ? (
+                      <button
+                        type="button"
+                        onClick={resetCatForm}
+                        disabled={saveCatMutation.isPending}
+                        className="h-10 rounded-lg bg-gray-100 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                      >
+                        Cancelar edição
+                      </button>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={saveCatMutation.isPending}
+                      className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {saveCatMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editingCatId ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      {editingCatId ? 'Salvar alterações' : 'Adicionar CAT'}
+                    </button>
+                  </div>
+                </form>
+
+                {viewing.cats.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-10 text-center dark:border-gray-600">
+                    <BadgeCheck className="h-10 w-10 text-gray-400" />
+                    <p className="text-base font-semibold text-gray-600 dark:text-gray-300">Nenhuma CAT cadastrada</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">As CATs aparecerão aqui quando forem adicionadas ao contrato.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                    <table className="w-full min-w-[640px] text-sm">
+                      <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-500 dark:bg-gray-900/40 dark:text-gray-400">
+                        <tr>
+                          <th className="px-3 py-2 text-center font-medium">Nº CAT</th>
+                          <th className="px-3 py-2 text-left font-medium">Profissional</th>
+                          <th className="px-3 py-2 text-center font-medium">Protocolo</th>
+                          <th className="px-3 py-2 text-center font-medium">Data de emissão</th>
+                          <th className="px-3 py-2 text-right font-medium">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        {viewing.cats.map((c) => (
+                          <tr key={c.id} className="text-gray-900 dark:text-gray-100">
+                            <td className="whitespace-nowrap px-3 py-2 text-center font-medium">{c.catNumber}</td>
+                            <td className="px-3 py-2">{c.professional || '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center">{c.protocol || '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center">{dateBr(c.issuedAt)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCatId(c.id);
+                                  setCatNumber(c.catNumber);
+                                  setCatProfessional(c.professional ?? '');
+                                  setCatProtocol(c.protocol ?? '');
+                                  setCatIssuedAt(c.issuedAt ?? '');
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                                title="Editar CAT"
+                                aria-label="Editar CAT"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm('Excluir esta CAT?')) deleteCatMutation.mutate(c.id);
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                title="Excluir CAT"
+                                aria-label="Excluir CAT"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -1012,15 +1317,15 @@ function ControleContratosPage() {
             </label>
             <div>
               <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Assinado em</span>
-              <DatePickerField value={form.signedAt} onChange={(v) => set('signedAt', v)} placeholder="dd/mm/aaaa" aria-label="Assinado em" />
+              <TypedDateField value={form.signedAt} onChange={(v) => set('signedAt', v)} ariaLabel="Assinado em" />
             </div>
             <div>
               <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Início</span>
-              <DatePickerField value={form.startDate} onChange={(v) => set('startDate', v)} placeholder="dd/mm/aaaa" aria-label="Início" />
+              <TypedDateField value={form.startDate} onChange={(v) => set('startDate', v)} ariaLabel="Início" />
             </div>
             <div>
               <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Término</span>
-              <DatePickerField value={form.endDate} onChange={(v) => set('endDate', v)} placeholder="dd/mm/aaaa" aria-label="Término" />
+              <TypedDateField value={form.endDate} onChange={(v) => set('endDate', v)} ariaLabel="Término" />
             </div>
             <ArtsEditor value={form.arts} onChange={(next) => set('arts', next)} artOptions={artOptions} />
             <div className="sm:col-span-3">

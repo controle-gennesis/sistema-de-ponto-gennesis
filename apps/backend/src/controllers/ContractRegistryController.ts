@@ -5,7 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { parseBoletoDate, parseBoletoValue } from '../lib/boletoControlImport';
 
-type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true } }>;
+type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true; cats: true } }>;
 
 const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const dateFromYmd = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00.000Z`) : null);
@@ -22,7 +22,15 @@ function parseUf(raw: unknown): string | null {
   return /^[A-Z]{2}$/.test(v) ? v : null;
 }
 
-type ArtEntry = { art: string; professional: string };
+type ArtEntry = { art: string; professional: string; baixada: '' | 'SIM' | 'NÃO' };
+
+/** SIM / NÃO (aceita "nao" sem acento); qualquer outra coisa = não informado. */
+function parseBaixada(raw: unknown): '' | 'SIM' | 'NÃO' {
+  const v = String(raw ?? '').trim().toUpperCase();
+  if (v === 'SIM') return 'SIM';
+  if (v === 'NÃO' || v === 'NAO') return 'NÃO';
+  return '';
+}
 
 /** Lista de ARTs [{ art, professional }] vinda do corpo ou do banco; descarta linhas vazias e ARTs repetidas. */
 function parseArts(raw: unknown): ArtEntry[] {
@@ -33,12 +41,13 @@ function parseArts(raw: unknown): ArtEntry[] {
     const o = (item ?? {}) as Record<string, unknown>;
     const art = str(o.art, 60) ?? '';
     const professional = str(o.professional, 120) ?? '';
+    const baixada = parseBaixada(o.baixada);
     if (!art && !professional) continue;
     if (art) {
       if (seen.has(art)) continue;
       seen.add(art);
     }
-    out.push({ art, professional });
+    out.push({ art, professional, baixada });
   }
   return out;
 }
@@ -112,12 +121,41 @@ function serialize(r: Row) {
       note: a.note,
     })),
     addendaTotal: r.addenda.reduce((s, a) => s + Number(a.amount), 0),
+    cats: r.cats.map((c) => ({
+      id: c.id,
+      catNumber: c.catNumber,
+      professional: c.professional,
+      protocol: c.protocol,
+      issuedAt: ymd(c.issuedAt),
+    })),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
 }
 
-const withAddenda = { addenda: { orderBy: [{ effectiveDate: 'asc' as const }, { createdAt: 'asc' as const }] } };
+const withAddenda = {
+  addenda: { orderBy: [{ effectiveDate: 'asc' as const }, { createdAt: 'asc' as const }] },
+  cats: { orderBy: [{ issuedAt: 'asc' as const }, { createdAt: 'asc' as const }] },
+};
+
+/** Valida o corpo de uma CAT (usado ao criar e ao editar). */
+function readCatBody(body: Record<string, unknown>) {
+  const catNumber = str(body.catNumber, 80);
+  if (!catNumber) throw createError('Informe o Nº da CAT', 400);
+  let issuedAt: Date | null = null;
+  const raw = body.issuedAt;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    const parsed = parseBoletoDate(raw);
+    if (!parsed) throw createError('Data de emissão inválida', 400);
+    issuedAt = dateFromYmd(parsed);
+  }
+  return {
+    catNumber,
+    professional: str(body.professional, 120),
+    protocol: str(body.protocol, 120),
+    issuedAt,
+  };
+}
 
 function readBody(body: Record<string, unknown>, partial: boolean): Prisma.ContractRegistryEntryUncheckedUpdateInput {
   const data: Prisma.ContractRegistryEntryUncheckedUpdateInput = {};
@@ -267,6 +305,50 @@ export class ContractRegistryController {
       if (!addendum) throw createError('Aditivo não encontrado', 404);
       const fields = readAddendumBody((req.body ?? {}) as Record<string, unknown>);
       await prisma.contractRegistryAddendum.update({ where: { id: addendum.id }, data: fields });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
+      res.json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async addCat(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const entry = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!entry) throw createError('Registro não encontrado', 404);
+      const fields = readCatBody((req.body ?? {}) as Record<string, unknown>);
+      await prisma.contractRegistryCat.create({ data: { registryId: entry.id, ...fields, createdBy: req.user?.id } });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: entry.id }, include: withAddenda });
+      res.status(201).json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateCat(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const cat = await prisma.contractRegistryCat.findFirst({
+        where: { id: req.params.catId, registryId: req.params.id },
+        select: { id: true },
+      });
+      if (!cat) throw createError('CAT não encontrada', 404);
+      const fields = readCatBody((req.body ?? {}) as Record<string, unknown>);
+      await prisma.contractRegistryCat.update({ where: { id: cat.id }, data: fields });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
+      res.json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async removeCat(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const cat = await prisma.contractRegistryCat.findFirst({
+        where: { id: req.params.catId, registryId: req.params.id },
+        select: { id: true },
+      });
+      if (!cat) throw createError('CAT não encontrada', 404);
+      await prisma.contractRegistryCat.delete({ where: { id: cat.id } });
       const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
       res.json({ success: true, data: serialize(updated!) });
     } catch (error) {
