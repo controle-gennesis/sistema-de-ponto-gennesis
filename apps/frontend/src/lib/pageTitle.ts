@@ -289,6 +289,14 @@ export function appendBreadcrumbEntity(
   const moduleIdx = crumbs.findIndex((c) => Boolean(c.href));
   const base =
     moduleIdx >= 0 ? crumbs.slice(0, moduleIdx + 1) : crumbs.slice(0, 1);
+  // Entidade com o mesmo nome de um crumb da rota e `onClick`: o crumb passa a voltar por estado (sem mudar a URL).
+  const comClique = new Map(entities.filter((e) => e.onClick).map((e) => [e.label, e.onClick as () => void]));
+  for (let i = 0; i < base.length; i += 1) {
+    const clique = comClique.get(base[i]!.label);
+    if (clique) {
+      base[i] = { label: base[i]!.label, onClick: clique };
+    }
+  }
   const baseLabels = new Set(base.map((c) => c.label));
   const toInsert = entities.filter((e) => !baseLabels.has(e.label));
   if (toInsert.length === 0) return crumbs;

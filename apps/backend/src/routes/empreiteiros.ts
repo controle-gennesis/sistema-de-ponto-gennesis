@@ -137,6 +137,12 @@ router.post('/:id/daily-measurements/:measurementId/return', (req, res, next) =>
 router.delete('/:id/daily-measurements/:measurementId', (req, res, next) =>
   controller.deleteDailyMeasurement(req as any, res as any, next)
 );
+router.get('/:id/fluig-parcelas', (req, res, next) =>
+  controller.fluigParcelas(req as any, res as any, next)
+);
+router.get('/:id/fluig-solicitacoes', (req, res, next) =>
+  controller.fluigSolicitacoes(req as any, res as any, next)
+);
 router.get('/:id', (req, res, next) => controller.getById(req as any, res as any, next));
 router.post('/', (req, res, next) => controller.create(req as any, res as any, next));
 router.post('/:id/unlink', (req, res, next) => controller.unlink(req as any, res as any, next));

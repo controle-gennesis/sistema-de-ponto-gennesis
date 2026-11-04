@@ -5,6 +5,8 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 import { PhotoService } from '../services/PhotoService';
+import { buscarStatusFluigPorNumeros, listarSolicitacoesFluigDaEmpreita } from '../lib/empreiteiroFluigSolicitacoes';
+import { hashPassword } from '../lib/passwordHash';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import {
   getEmpreiteiroGestorCostCenterIds,
@@ -332,6 +334,7 @@ function serializeInstallment(row: {
   measurementId: string | null;
   note: string | null;
   proofFiles?: Prisma.JsonValue | null;
+  fluigRequestNumber?: string | null;
 }) {
   return {
     id: row.id,
@@ -346,6 +349,7 @@ function serializeInstallment(row: {
     measurementId: row.measurementId,
     note: row.note,
     proofFiles: Array.isArray(row.proofFiles) ? row.proofFiles : [],
+    fluigRequestNumber: row.fluigRequestNumber ?? null,
   };
 }
 
@@ -1998,6 +2002,41 @@ export class EmpreiteiroController {
     }
   }
 
+  /** Solicitações do Fluig (G5) de serviços tomados desta empreita, lidas do espelho local. */
+  async fluigSolicitacoes(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      await assertCanAccessEmpreiteiro(req, id);
+      const item = await prisma.empreiteiro.findUnique({
+        where: { id },
+        select: { name: true, tradeName: true, document: true, cpf: true },
+      });
+      if (!item) throw createError('Empreita não encontrada', 404);
+      const data = await listarSolicitacoesFluigDaEmpreita(item);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Fase e vencimento no Fluig das solicitações informadas nas parcelas desta empreita. */
+  async fluigParcelas(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      await assertCanAccessEmpreiteiro(req, id);
+      const parcelas = await prisma.empreiteiroContractInstallment.findMany({
+        where: { empreiteiroContract: { empreiteiroId: id }, fluigRequestNumber: { not: null } },
+        select: { fluigRequestNumber: true },
+      });
+      const data = await buscarStatusFluigPorNumeros(
+        parcelas.map((p) => p.fluigRequestNumber).filter((n): n is string => Boolean(n))
+      );
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await assertCanManageEmpreiteiros(req);
@@ -2006,6 +2045,8 @@ export class EmpreiteiroController {
       const phone = digits(req.body?.phone);
       const specialty = str(req.body?.specialty);
       const email = optionalStr(req.body?.email)?.toLowerCase() ?? null;
+      // O login do empreiteiro é CPF + senha; o e-mail do usuário é interno quando não informado.
+      const emailLoginInterno = `${cpf}@empreiteiro.gennesis.local`;
 
       if (!name) throw createError('Nome é obrigatório', 400);
       if (phone.length < 10) throw createError('Telefone é obrigatório', 400);
@@ -2023,15 +2064,58 @@ export class EmpreiteiroController {
       });
       if (duplicate) throw createError('Já existe uma empreita com este CPF ou CNPJ', 400);
 
-      const linkUserId = str(req.body?.userId) || null;
-      if (!linkUserId) throw createError('Selecione o login do empreiteiro para vincular', 400);
-      await assertLinkableEmpreiteiroUser(linkUserId);
+      // O login (e-mail + senha) é criado aqui mesmo. Vincular um login já existente continua aceito (`userId`).
+      const linkUserIdBody = str(req.body?.userId) || null;
+      let passwordHash: string | null = null;
+      if (linkUserIdBody) {
+        await assertLinkableEmpreiteiroUser(linkUserIdBody);
+      } else {
+        const passwordBody = typeof req.body?.password === 'string' ? req.body.password : '';
+        if (passwordBody.length < 6) throw createError('Senha deve ter pelo menos 6 caracteres', 400);
+        const existingUser = await prisma.user.findFirst({
+          where: { OR: [...(email ? [{ email }] : []), { cpf }, { email: emailLoginInterno }] },
+          select: { id: true },
+        });
+        if (existingUser) throw createError('Já existe um usuário com este CPF ou e-mail', 400);
+        passwordHash = await hashPassword(passwordBody);
+      }
 
-      // Foto vem do perfil do login vinculado (cadastro em Funcionários).
-      const linkedPhoto = await profilePhotoFromUser(linkUserId);
+      const fotoEnviada = typeof req.body?.photo === 'string' ? req.body.photo.trim() : '';
+      // Foto: a enviada no cadastro vale; senão vem do perfil do login vinculado, quando houver.
+      const linkedPhoto = linkUserIdBody
+        ? await profilePhotoFromUser(linkUserIdBody)
+        : { photoUrl: null, photoKey: null };
       const files = parsePaymentFiles(req.body?.files);
 
       const created = await prisma.$transaction(async (tx) => {
+        let linkUserId = linkUserIdBody;
+        if (!linkUserId) {
+          const novoLogin = await tx.user.create({
+            data: {
+              email: email || emailLoginInterno,
+              password: passwordHash as string,
+              name: optionalStr(req.body?.contactName) || name,
+              cpf,
+              role: 'EMPLOYEE',
+            },
+            select: { id: true },
+          });
+          linkUserId = novoLogin.id;
+        }
+        let fotoFinal: { photoUrl: string | null; photoKey: string | null } = linkedPhoto;
+        if (fotoEnviada.startsWith('data:image/')) {
+          const up = await photoService.uploadPhotoFromBase64(
+            fotoEnviada,
+            linkUserId,
+            parseImageContentType(fotoEnviada)
+          );
+          fotoFinal = { photoUrl: up.url, photoKey: up.key };
+          // O login ganha a mesma foto de perfil.
+          await tx.user.update({
+            where: { id: linkUserId },
+            data: { profilePhotoUrl: up.url, profilePhotoKey: up.key },
+          });
+        }
         const row = await tx.empreiteiro.create({
           data: {
             name,
@@ -2051,8 +2135,8 @@ export class EmpreiteiroController {
             bank: optionalStr(req.body?.bank),
             agency: optionalStr(req.body?.agency),
             account: optionalStr(req.body?.account),
-            photoUrl: linkedPhoto.photoUrl,
-            photoKey: linkedPhoto.photoKey,
+            photoUrl: fotoFinal.photoUrl,
+            photoKey: fotoFinal.photoKey,
             files: files as Prisma.InputJsonValue,
             userId: linkUserId,
           },
@@ -2064,7 +2148,7 @@ export class EmpreiteiroController {
       res.status(201).json({
         success: true,
         data: serializeEmpreiteiro(created),
-        message: 'Empreita criada e vinculada ao login',
+        message: 'Empreita criada com o login de acesso',
       });
     } catch (error) {
       next(error);
@@ -2236,12 +2320,80 @@ export class EmpreiteiroController {
           ? parseDateField(req.body.endDate, 'Data de fim')
           : item.endDate;
 
+      let fotoNova: { photoUrl: string | null; photoKey: string | null } | undefined;
+      if (req.body?.photo !== undefined) {
+        fotoNova = await resolvePhotoFields(req.body.photo, item.userId || item.id, {
+          photoUrl: item.photoUrl,
+          photoKey: item.photoKey,
+        });
+        if (fotoNova) {
+          data.photoUrl = fotoNova.photoUrl;
+          data.photoKey = fotoNova.photoKey;
+        }
+      }
+
+      // O login acompanha os dados da empreita: CPF (e e-mail, quando informado) viram o acesso do usuário.
+      let loginPatch: { cpf?: string; email?: string } | null = null;
+      if (item.userId) {
+        const loginUser = await prisma.user.findUnique({
+          where: { id: item.userId },
+          select: { cpf: true, email: true },
+        });
+        if (loginUser) {
+          const patch: { cpf?: string; email?: string } = {};
+          const cpfDigits = String(nextCpf || '').replace(/\D/g, '');
+          if (cpfDigits.length === 11 && String(loginUser.cpf || '').replace(/\D/g, '') !== cpfDigits) {
+            const masked = `${cpfDigits.slice(0, 3)}.${cpfDigits.slice(3, 6)}.${cpfDigits.slice(6, 9)}-${cpfDigits.slice(9)}`;
+            const cpfEmUso = await prisma.user.findFirst({
+              where: { id: { not: item.userId }, OR: [{ cpf: cpfDigits }, { cpf: masked }] },
+              select: { id: true },
+            });
+            if (cpfEmUso) throw createError('Já existe um usuário com este CPF', 400);
+            patch.cpf = cpfDigits;
+          }
+          const emailInformado = optionalStr(req.body?.email)?.toLowerCase();
+          if (emailInformado && emailInformado.includes('@') && emailInformado !== loginUser.email) {
+            const emailEmUso = await prisma.user.findFirst({
+              where: { id: { not: item.userId }, email: emailInformado },
+              select: { id: true },
+            });
+            if (emailEmUso) throw createError('Já existe um usuário com este e-mail', 400);
+            patch.email = emailInformado;
+          }
+          if (Object.keys(patch).length > 0) loginPatch = patch;
+        }
+      }
+
+      const novaSenha = typeof req.body?.password === 'string' ? req.body.password : '';
+      let novaSenhaHash: string | null = null;
+      if (novaSenha) {
+        if (novaSenha.length < 6) throw createError('Senha deve ter pelo menos 6 caracteres', 400);
+        if (!item.userId) throw createError('Esta empreita não tem login para redefinir a senha', 400);
+        novaSenhaHash = await hashPassword(novaSenha);
+      }
+
       const updated = await prisma.$transaction(async (tx) => {
         await tx.empreiteiro.update({
           where: { id },
           data,
           include: empreiteiroInclude,
         });
+        if (fotoNova && item.userId) {
+          await tx.user.update({
+            where: { id: item.userId },
+            data: { profilePhotoUrl: fotoNova.photoUrl, profilePhotoKey: fotoNova.photoKey },
+          });
+        }
+        if (loginPatch && item.userId) {
+          await tx.user.update({ where: { id: item.userId }, data: loginPatch });
+        }
+        if (novaSenhaHash && item.userId) {
+          // tokenVersion invalida as sessões abertas com a senha antiga.
+          await tx.user.update({
+            where: { id: item.userId },
+            data: { password: novaSenhaHash, tokenVersion: { increment: 1 } },
+          });
+        }
         if (nextLinkUserId) {
           await ensureEmpreiteiroModuleAccess(tx, nextLinkUserId);
         }
@@ -3189,6 +3341,30 @@ export class EmpreiteiroController {
         },
       });
       if (!installment) throw createError('Parcela não encontrada', 404);
+
+      // Número da solicitação no Fluig: o status e o vencimento da parcela passam a vir de lá.
+      if (req.body?.fluigRequestNumber !== undefined) {
+        const numero = String(req.body.fluigRequestNumber ?? '').replace(/[^0-9]/g, '');
+        if (String(req.body.fluigRequestNumber ?? '').trim() && !numero) {
+          throw createError('Informe apenas o número da solicitação do Fluig', 400);
+        }
+        if (numero.length > 20) throw createError('Número da solicitação inválido', 400);
+        await prisma.empreiteiroContractInstallment.update({
+          where: { id: installmentId },
+          data: { fluigRequestNumber: numero || null } as Prisma.EmpreiteiroContractInstallmentUpdateInput,
+        });
+        const empreiteiroAtual = await prisma.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
+        const contagens = await measurementCountsForEmpreiteiro(id);
+        res.json({
+          success: true,
+          data: serializeEmpreiteiro(empreiteiroAtual, contagens),
+          message: numero ? 'Solicitação do Fluig vinculada à parcela' : 'Solicitação removida da parcela',
+        });
+        return;
+      }
 
       const nextStatus = normalizeInstallmentStatus(req.body?.status);
       if (nextStatus === 'PENDING') {

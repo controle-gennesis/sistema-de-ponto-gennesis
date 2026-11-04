@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
@@ -29,6 +30,7 @@ import {
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
 import { Modal } from '@/components/ui/Modal';
+import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
@@ -224,8 +226,8 @@ const MENU_ITEM_CLASS =
 const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 
 const inputClass =
-  'w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-100 dark:focus:border-red-500';
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
 function todayYmd() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
@@ -304,6 +306,8 @@ export function EmpreiteiroDailyMeasurements({
   canEdit,
   canApprove = false,
   onPreviewPhoto,
+  hideSummary = false,
+  actionsContainer,
 }: {
   empreiteiroId: string;
   empreiteiroName?: string;
@@ -317,6 +321,13 @@ export function EmpreiteiroDailyMeasurements({
   /** Fiscal/interno: aprovar ou devolver a entrega. */
   canApprove?: boolean;
   onPreviewPhoto: (url?: string | null, alt?: string) => void;
+  /** Esconde filtro de contrato e resumo financeiro (a página que embute a lista já mostra isso). */
+  hideSummary?: boolean;
+  /**
+   * Onde desenhar o botão de nova medição e o aviso (ex.: cabeçalho do cartão).
+   * `undefined` = na própria linha da lista; `null` = aguardando o elemento existir.
+   */
+  actionsContainer?: HTMLElement | null;
 }) {
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -671,22 +682,44 @@ export function EmpreiteiroDailyMeasurements({
   const menuCanEdit = Boolean(menuItem && canEdit && menuStatus !== 'APPROVED');
   const menuCanDelete = Boolean(menuItem && canEdit && (menuStatus !== 'APPROVED' || canApprove));
 
+  const acoesMedicao = (
+    <div className="flex flex-shrink-0 items-center gap-2">
+      <span className="group/info relative inline-flex">
+        <button
+          type="button"
+          aria-label="Pagamento condicionado à entrega"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+        >
+          <Info className="h-4 w-4" aria-hidden />
+        </button>
+        <span
+          role="tooltip"
+          className="pointer-events-none invisible absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-left opacity-0 shadow-xl transition-opacity duration-150 group-hover/info:visible group-hover/info:opacity-100 group-focus-within/info:visible group-focus-within/info:opacity-100 dark:border-gray-600 dark:bg-gray-800"
+        >
+          <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">
+            Pagamento condicionado à entrega
+          </span>
+          <span className="mt-1 block text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+            A entrega só é computada após a baixa realizada pelo responsável direto.
+          </span>
+        </span>
+      </span>
+      {canAddDay ? (
+        <button
+          type="button"
+          onClick={openNew}
+          className="flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+        >
+          <Plus className="h-4 w-4 shrink-0" />
+          Nova Medição de Entrega
+        </button>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="space-y-5">
-      <div className="flex items-start gap-3 rounded-2xl border border-red-200/70 bg-gradient-to-r from-red-50/80 to-white px-4 py-3 dark:border-red-900/40 dark:from-red-950/30 dark:to-gray-900/50">
-        <div className="mt-0.5 shrink-0 rounded-xl bg-red-100 p-2 dark:bg-red-950/60">
-          <Info className="h-4 w-4 text-red-600 dark:text-red-400" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            O pagamento está sempre condicionado à entrega.
-          </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
-            A entrega só é computada após a baixa realizada pelo responsável direto.
-          </p>
-        </div>
-      </div>
-      {contractChips.length > 1 ? (
+      {contractChips.length > 1 && !hideSummary ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Filtrar por contrato
@@ -720,6 +753,7 @@ export function EmpreiteiroDailyMeasurements({
       ) : null}
 
       {(() => {
+        if (hideSummary) return null;
         const financeContract =
           filterContract ||
           (contracts.length === 1 ? contracts[0] : null) ||
@@ -772,7 +806,9 @@ export function EmpreiteiroDailyMeasurements({
         );
       })()}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {actionsContainer === undefined ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+        {isLoading || items.length > 0 ? (
         <div className="min-w-0">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {isLoading
@@ -803,44 +839,29 @@ export function EmpreiteiroDailyMeasurements({
               : 'Medição de cada entrega — separado das notas de pagamento.'}
           </p>
         </div>
-        {canAddDay && !formOpen ? (
-          <button
-            type="button"
-            onClick={openNew}
-            className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
-          >
-            <Plus className="h-4 w-4" />
-            Nova medição de entrega
-          </button>
-        ) : null}
-      </div>
+        ) : (
+          <div />
+        )}
+          {acoesMedicao}
+        </div>
+      ) : actionsContainer ? (
+        createPortal(acoesMedicao, actionsContainer)
+      ) : null}
 
-      {formOpen ? (
-        <section className="overflow-hidden rounded-2xl border border-red-200/70 bg-gradient-to-b from-red-50/80 to-white shadow-sm dark:border-red-900/40 dark:from-red-950/30 dark:to-gray-900/80">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-100 px-4 py-3 dark:border-red-900/40 sm:px-5">
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                {editing
-                  ? normalizeStatus(editing.status) === 'CORRECTION'
-                    ? 'Corrigir e reenviar'
-                    : 'Editar entrega'
-                  : 'Nova medição de entrega'}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Foto da equipe + fotos do serviço são obrigatórias. A entrega vai para aprovação do
-                fiscal.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={closeForm}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              Fechar
-            </button>
-          </div>
-
-          <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-2">
+      <Modal
+        isOpen={formOpen}
+        onClose={closeForm}
+        title={
+          editing
+            ? normalizeStatus(editing.status) === 'CORRECTION'
+              ? 'Corrigir e Reenviar'
+              : 'Editar Entrega'
+            : 'Nova Medição de Entrega'
+        }
+        size="xl"
+      >
+        <div className="space-y-5">
+          <div className="grid gap-5 lg:grid-cols-2">
             <div className="space-y-4">
               <div>
                 <label className={labelClass}>Data da entrega</label>
@@ -908,14 +929,14 @@ export function EmpreiteiroDailyMeasurements({
                           key={id}
                           type="button"
                           onClick={() => toggleWorker(id)}
-                          className={`rounded-full border px-3 py-1.5 text-left text-sm transition ${
+                          className={`rounded-lg border px-3 py-1.5 text-left text-sm transition ${
                             active
-                              ? 'border-red-500 bg-red-600 text-white shadow-sm'
-                              : 'border-gray-200 bg-white text-gray-700 hover:border-red-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200'
+                              ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
+                              : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
                           }`}
                         >
                           <span className="font-medium">{member.name}</span>
-                          <span className={`ml-1 text-xs ${active ? 'text-red-100' : 'text-gray-400'}`}>
+                          <span className={`ml-1 text-xs ${active ? 'text-red-400' : 'text-gray-400'}`}>
                             {member.role}
                           </span>
                         </button>
@@ -927,11 +948,8 @@ export function EmpreiteiroDailyMeasurements({
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-xl border border-gray-200/80 bg-white/70 p-3 dark:border-gray-700 dark:bg-gray-950/40">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  <Camera className="h-3.5 w-3.5 text-red-600" />
-                  Foto da equipe
-                </div>
+              <div>
+                <label className={labelClass}>Foto da equipe *</label>
                 <TeamLivePhotoCapture
                   value={form.teamPhoto}
                   onChange={(teamPhoto) => setForm((prev) => ({ ...prev, teamPhoto }))}
@@ -939,11 +957,8 @@ export function EmpreiteiroDailyMeasurements({
                   onPreview={onPreviewPhoto}
                 />
               </div>
-              <div className="rounded-xl border border-gray-200/80 bg-white/70 p-3 dark:border-gray-700 dark:bg-gray-950/40">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  <ImageIcon className="h-3.5 w-3.5 text-red-600" />
-                  Fotos do serviço
-                </div>
+              <div>
+                <label className={labelClass}>Fotos do serviço *</label>
                 <LiveGeoPhotosField
                   values={form.photos}
                   onChange={(photos) => setForm((prev) => ({ ...prev, photos }))}
@@ -954,11 +969,11 @@ export function EmpreiteiroDailyMeasurements({
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-end gap-2 border-t border-red-100 bg-white/50 px-4 py-3 dark:border-red-900/40 dark:bg-gray-950/30 sm:px-5">
+          <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button
               type="button"
               onClick={closeForm}
-              className="rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             >
               Cancelar
             </button>
@@ -973,17 +988,17 @@ export function EmpreiteiroDailyMeasurements({
                 form.photos.length === 0
               }
               onClick={() => saveMutation.mutate()}
-              className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
               {saveMutation.isPending
                 ? 'Enviando…'
                 : editing && normalizeStatus(editing.status) === 'CORRECTION'
-                  ? 'Reenviar para aprovação'
-                  : 'Enviar para aprovação'}
+                  ? 'Reenviar para Aprovação'
+                  : 'Enviar para Aprovação'}
             </button>
           </div>
-        </section>
-      ) : null}
+        </div>
+      </Modal>
 
       {isLoading ? (
         <div className="space-y-3">
@@ -994,32 +1009,18 @@ export function EmpreiteiroDailyMeasurements({
             />
           ))}
         </div>
-      ) : items.length === 0 && !formOpen ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 px-6 py-14 text-center dark:border-gray-600">
-          <div className="mb-3 rounded-2xl bg-red-50 p-3 dark:bg-red-950/40">
-            <CalendarDays className="h-7 w-7 text-red-600 dark:text-red-400" />
-          </div>
-          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
-            Nenhuma entrega registrada ainda
-          </p>
-          <p className="mt-1 max-w-sm text-xs text-gray-500 dark:text-gray-400">
-            Registre a primeira entrega com a equipe, o serviço feito e as fotos do local.
-          </p>
-          {canAddDay ? (
-            <button
-              type="button"
-              onClick={openNew}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-            >
-              <Plus className="h-4 w-4" />
-              Registrar nova medição de entrega
-            </button>
-          ) : filterClosed ? (
-            <p className="mt-4 text-xs font-medium text-gray-500 dark:text-gray-400">
-              Contrato concluído — novas entregas bloqueadas.
-            </p>
-          ) : null}
-        </div>
+      ) : items.length === 0 ? (
+        <CadastroListEmpty
+          icon={CalendarDays}
+          title="Nenhuma entrega encontrada"
+          hint={
+            filterClosed
+              ? 'Contrato concluído — novas entregas bloqueadas'
+              : canAddDay
+                ? 'Use “Nova medição de entrega” para registrar a primeira'
+                : 'Nenhuma entrega registrada ainda'
+          }
+        />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/55">
           <div className="mb-2 flex flex-col gap-1 px-3 pt-3 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-6">

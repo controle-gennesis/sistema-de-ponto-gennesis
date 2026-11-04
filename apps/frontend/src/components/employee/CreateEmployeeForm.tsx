@@ -293,7 +293,8 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
   // Estado para controlar a etapa atual do formulário
   const [currentStep, setCurrentStep] = useState(1);
-  const [personKind, setPersonKind] = useState<'FUNCIONARIO' | 'EMPREITEIRO'>('FUNCIONARIO');
+  // O cadastro de empreiteiro (com o login) é feito em Empreitas; aqui é só funcionário.
+  const [personKind] = useState<'FUNCIONARIO' | 'EMPREITEIRO'>('FUNCIONARIO');
   const [profilePhoto, setProfilePhoto] = useState('');
   const [empData, setEmpData] = useState({
     companyName: '',
@@ -1260,54 +1261,6 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
           {/* Etapa 1: Dados Pessoais */}
           {currentStep === 1 && (
           <div className="space-y-6">
-            <div>
-              <p className={FIELD_LABEL_CLS}>Tipo de cadastro *</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPersonKind('FUNCIONARIO');
-                    setCurrentStep(1);
-                  }}
-                  className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
-                    !isEmpreiteiro
-                      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
-                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
-                  }`}
-                >
-                  <span className="flex items-center gap-2 font-semibold">
-                    <User className="h-4 w-4" />
-                    Funcionário
-                  </span>
-                  <span className="mt-1 block text-xs opacity-80">CLT, folha e ponto</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPersonKind('EMPREITEIRO');
-                    setCurrentStep(1);
-                    setProfilePhoto('');
-                  }}
-                  className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
-                    isEmpreiteiro
-                      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
-                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
-                  }`}
-                >
-                  <span className="flex items-center gap-2 font-semibold">
-                    <HardHat className="h-4 w-4" />
-                    Empreiteiro
-                  </span>
-                  <span className="mt-1 block text-xs opacity-80">Só o login; dados em Empreitas</span>
-                </button>
-              </div>
-              {isEmpreiteiro ? (
-                <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-                  Cria só o acesso. Depois, em <strong>Empreitas</strong>, cadastre a empreita e
-                  vincule este login para ele ver o cadastro ao entrar.
-                </p>
-              ) : null}
-            </div>
             <div className={FIELD_GRID_CLS}>
               <div>
                 <label className={FIELD_LABEL_CLS}>

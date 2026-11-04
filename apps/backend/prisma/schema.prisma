@@ -2631,6 +2631,8 @@ model EmpreiteiroContractInstallment {
   note                  String?
   /// Comprovante(s) de pagamento: [{ url, name, key? }]
   proofFiles            Json      @default("[]")
+  /// Número da solicitação desta parcela no Fluig (status e vencimento vêm de lá).
+  fluigRequestNumber    String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

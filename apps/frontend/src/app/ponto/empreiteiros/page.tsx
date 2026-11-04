@@ -8,7 +8,10 @@ import {
   ArrowLeft,
   Building2,
   Camera,
+  CheckCircle2,
   ClipboardList,
+  ExternalLink,
+  Link2,
   FileText,
   HardHat,
   Link2Off,
@@ -17,27 +20,33 @@ import {
   Pencil,
   Phone,
   Plus,
+  Info,
   Search,
   Trash2,
+  TrendingUp,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 import {
   CadastroListEmpty,
   CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
 } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import {
   RowActionMenuCell,
   RowActionMenuPortal,
   cadastroListClasses,
 } from '@/components/ui/RowActionMenu';
-import { ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { PageStack } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -54,10 +63,22 @@ import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { Modal } from '@/components/ui/Modal';
+import { buildFluigWorkflowProcessViewUrl } from '@/lib/fluigWorkflowApproval';
+import { faseExibicao } from './EmpreiteiroFluigSolicitacoesModal';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
+import { FileDropZone } from '@/components/ui/FileDropZone';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
 import { EmpreiteiroDailyMeasurements, ContractFinanceStats } from './EmpreiteiroDailyMeasurements';
+import {
+  EmpreiteiroFluigResumoCards,
+  EmpreiteiroFluigSolicitacoesPainel,
+} from './EmpreiteiroFluigSolicitacoesModal';
+import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 
 type DocumentKind = 'CPF' | 'CNPJ';
 
@@ -84,6 +105,8 @@ interface ServiceInstallment {
   status: InstallmentStatus | string;
   measurementId?: string | null;
   proofFiles?: PaymentFile[];
+  /** Número da solicitação desta parcela no Fluig (status e vencimento vêm de lá). */
+  fluigRequestNumber?: string | null;
 }
 
 interface ServiceAddendum {
@@ -393,6 +416,7 @@ function teamDraftsFromContracts(
 
 const emptyForm = {
   userId: '',
+  password: '',
   name: '',
   tradeName: '',
   cpf: '',
@@ -428,14 +452,41 @@ const inputClass =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
+/** Reduz a foto (lado maior 800px, JPEG) para o envio não estourar o tempo limite; em caso de falha mantém a original. */
+async function reduzirImagem(dataUrl: string, maxLado = 800): Promise<string> {
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('imagem inválida'));
+      el.src = dataUrl;
+    });
+    const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * escala));
+    canvas.height = Math.max(1, Math.round(img.height * escala));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return dataUrl;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch {
+    return dataUrl;
+  }
+}
+
 function TeamMemberPhotoField({
   value,
   onChange,
   alt,
+  redondo = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   alt: string;
+  /** Foto circular e maior (cadastro da empreita). */
+  redondo?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -450,14 +501,14 @@ function TeamMemberPhotoField({
         reader.onerror = () => reject(new Error('Não foi possível ler a foto'));
         reader.readAsDataURL(file);
       });
-      onChange(dataUrl);
+      onChange(await reduzirImagem(dataUrl));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="relative h-14 w-14 shrink-0">
+    <div className={`relative shrink-0 ${redondo ? 'h-20 w-20' : 'h-14 w-14'}`}>
       <input
         ref={inputRef}
         type="file"
@@ -474,14 +525,16 @@ function TeamMemberPhotoField({
         type="button"
         disabled={loading}
         onClick={() => inputRef.current?.click()}
-        className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-red-50 text-red-600 ring-1 ring-black/5 transition hover:bg-red-100 disabled:opacity-60 dark:bg-red-950/50 dark:text-red-300"
+        className={`flex items-center justify-center overflow-hidden bg-red-50 text-red-600 ring-1 ring-black/5 transition hover:bg-red-100 disabled:opacity-60 dark:bg-red-950/50 dark:text-red-300 ${
+          redondo ? 'h-20 w-20 rounded-full' : 'h-14 w-14 rounded-2xl'
+        }`}
         aria-label={value ? 'Trocar foto' : 'Adicionar foto'}
       >
         {value ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={value} alt={alt} className="h-full w-full object-cover" />
         ) : (
-          <Camera className="h-5 w-5" />
+          <Camera className={redondo ? 'h-6 w-6' : 'h-5 w-5'} />
         )}
       </button>
       {value ? (
@@ -529,7 +582,7 @@ export default function EmpreiteirosPage() {
   const [newServiceParcelCount, setNewServiceParcelCount] = useState('6');
   const [newServiceParcelAmounts, setNewServiceParcelAmounts] = useState<string[]>([]);
   const [newServiceFiles, setNewServiceFiles] = useState<PaymentFile[]>([]);
-  const [newServiceCostCenterId, setNewServiceCostCenterId] = useState('');
+  const [newServiceContractId, setNewServiceContractId] = useState('');
   const [newContractStart, setNewContractStart] = useState('');
   const [newContractEnd, setNewContractEnd] = useState('');
   const [newContractStatus, setNewContractStatus] =
@@ -553,7 +606,7 @@ export default function EmpreiteirosPage() {
   const [editServiceDescription, setEditServiceDescription] = useState('');
   const [editServicePlannedValue, setEditServicePlannedValue] = useState('');
   const [editServiceLocation, setEditServiceLocation] = useState('');
-  const [editServiceCostCenterId, setEditServiceCostCenterId] = useState('');
+  const [editServiceContractId, setEditServiceContractId] = useState('');
   const [editServiceStart, setEditServiceStart] = useState('');
   const [editServiceEnd, setEditServiceEnd] = useState('');
   const [editServiceStatus, setEditServiceStatus] =
@@ -665,6 +718,19 @@ export default function EmpreiteirosPage() {
   const [openTeamLinkIds, setOpenTeamLinkIds] = useState<Record<string, boolean>>({});
   const [openParcelLinkIds, setOpenParcelLinkIds] = useState<Record<string, boolean>>({});
   const [serviceDetailLinkId, setServiceDetailLinkId] = useState<string | null>(null);
+  const [anexoModalLinkId, setAnexoModalLinkId] = useState<string | null>(null);
+  const [medActionsEl, setMedActionsEl] = useState<HTMLDivElement | null>(null);
+  const [fluigModal, setFluigModal] = useState<{ linkId: string; parcelId: string; number: number } | null>(null);
+  const [fluigNumeroInput, setFluigNumeroInput] = useState('');
+  const [savingFluigNumero, setSavingFluigNumero] = useState(false);
+  const [teamModal, setTeamModal] = useState<{ linkId: string; index: number | null } | null>(null);
+  const [teamModalForm, setTeamModalForm] = useState<TeamMemberForm>(() => emptyTeamMember());
+  const [abaServico, setAbaServico] = useState<'parcelas' | 'aditivos' | 'anexos' | 'equipe' | 'medicoes' | 'dados'>('parcelas');
+  useEffect(() => {
+    setAbaServico(isLinkedEmpreiteiro ? 'equipe' : 'parcelas');
+  }, [serviceDetailLinkId, isLinkedEmpreiteiro]);
+  const [abaDetalhe, setAbaDetalhe] = useState<'contratos' | 'medicoes' | 'fluig' | 'dados'>('contratos');
+  const [listPage, setListPage] = useState(1);
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
   const [empSkipAutoDetail, setEmpSkipAutoDetail] = useState(false);
 
@@ -678,28 +744,6 @@ export default function EmpreiteirosPage() {
     },
   });
 
-  const { data: linkableUsersData } = useQuery({
-    queryKey: ['empreiteiros-linkable-users', editingItem?.id || 'new', showForm],
-    queryFn: async () => {
-      const res = await api.get('/empreiteiros/linkable-users', {
-        params: editingItem?.id ? { empreiteiroId: editingItem.id } : undefined,
-      });
-      return (res.data?.data || []) as LinkableLogin[];
-    },
-    enabled: showForm && (canCreate || canManageCadastro),
-  });
-
-  const linkableLoginOptions = useMemo(
-    () =>
-      labeledToSelectOptions(
-        (linkableUsersData || []).map((u) => ({
-          value: u.id,
-          label: `${u.name}${u.email ? ` · ${u.email}` : ''}`,
-        }))
-      ),
-    [linkableUsersData]
-  );
-
   const costCenterSelectOptions = useMemo(
     () =>
       labeledToSelectOptions(
@@ -711,6 +755,24 @@ export default function EmpreiteirosPage() {
           }))
       ),
     [costCenters]
+  );
+
+  const { data: contratosData } = useQuery({
+    queryKey: ['contracts-para-empreitas'],
+    queryFn: async () => {
+      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      return res.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+  const contractSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        ((contratosData?.data ?? []) as Array<{ id: string; name?: string | null; number?: string | null }>)
+          .filter((c) => c.id && (c.name || c.number))
+          .map((c) => ({ value: c.id, label: c.name || String(c.number || '') }))
+      ),
+    [contratosData]
   );
 
   const specialtySelectOptions = useMemo(
@@ -770,8 +832,11 @@ export default function EmpreiteirosPage() {
       const res = await api.patch(`/empreiteiros/${id}`, payload);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      if (data?.data?.id) {
+        setViewingItem((prev) => (prev && prev.id === data.data.id ? data.data : prev));
+      }
       setShowForm(false);
       resetForm();
       toast.success('Empreita atualizada!');
@@ -841,6 +906,7 @@ export default function EmpreiteirosPage() {
   };
 
   const openDetails = (item: EmpreiteiroRow) => {
+    setAbaDetalhe('contratos');
     setEmpSkipAutoDetail(false);
     setPageSection('detalhe');
     setViewingItem(item);
@@ -879,8 +945,8 @@ export default function EmpreiteirosPage() {
       toast.error('Informe o nome do contrato de serviço');
       return;
     }
-    if (!newServiceCostCenterId.trim()) {
-      toast.error('Selecione o centro de custo do serviço');
+    if (!newServiceContractId.trim()) {
+      toast.error('Selecione o contrato do serviço');
       return;
     }
     if (newContractStart && newContractEnd && newContractEnd < newContractStart) {
@@ -951,7 +1017,7 @@ export default function EmpreiteirosPage() {
         location: newServiceLocation.trim() || null,
         parcelCount,
         ...(installments ? { installments } : {}),
-        costCenterId: newServiceCostCenterId || null,
+        contractId: newServiceContractId || null,
         startDate: newContractStart || null,
         endDate: newContractEnd || null,
         status: newContractStatus,
@@ -971,7 +1037,7 @@ export default function EmpreiteirosPage() {
       setNewServiceDescription('');
       setNewServicePlannedValue('');
       setNewServiceLocation('');
-      setNewServiceCostCenterId('');
+      setNewServiceContractId('');
       setNewServicePayMode(null);
       setNewServicePayDate('');
       setNewServiceParcelCount('6');
@@ -1284,7 +1350,7 @@ export default function EmpreiteirosPage() {
         : ''
     );
     setEditServiceLocation(link.location || '');
-    setEditServiceCostCenterId(link.costCenterId || link.costCenter?.id || '');
+    setEditServiceContractId(link.contractId || '');
     setEditServiceStart(toDateInputValue(link.startDate));
     setEditServiceEnd(toDateInputValue(link.endDate));
     setEditServiceStatus(
@@ -1325,8 +1391,8 @@ export default function EmpreiteirosPage() {
       toast.error('Informe o nome do contrato de serviço');
       return;
     }
-    if (!editServiceCostCenterId.trim()) {
-      toast.error('Selecione o centro de custo do serviço');
+    if (!editServiceContractId.trim()) {
+      toast.error('Selecione o contrato do serviço');
       return;
     }
     if (editServiceStart && editServiceEnd && editServiceEnd < editServiceStart) {
@@ -1403,7 +1469,7 @@ export default function EmpreiteirosPage() {
           description: editServiceDescription.trim() || null,
           plannedValue,
           location: editServiceLocation.trim() || null,
-          costCenterId: editServiceCostCenterId || null,
+          contractId: editServiceContractId || null,
           startDate: editServiceStart || null,
           endDate: editServiceEnd || null,
           status: editServiceStatus,
@@ -1650,11 +1716,15 @@ export default function EmpreiteirosPage() {
   const handleEdit = (item: EmpreiteiroRow) => {
     if (!canManageCadastro) return;
     setPreviewPhoto(null);
-    setViewingItem(null);
-    setPageSection('cadastro');
+    // Vindo da página da empreita, o formulário abre por cima sem voltar para a lista.
+    if (pageSection !== 'detalhe') {
+      setViewingItem(null);
+      setPageSection('cadastro');
+    }
     setEditingItem(item);
     setForm({
       userId: item.userId || '',
+      password: '',
       name: item.name || '',
       tradeName: item.tradeName || '',
       cpf: (() => {
@@ -1687,7 +1757,14 @@ export default function EmpreiteirosPage() {
   };
 
   const buildPayload = () => ({
-    userId: form.userId.trim() || null,
+    ...(editingItem && form.userId.trim() ? { userId: form.userId.trim() } : {}),
+    ...(form.password ? { password: form.password } : {}),
+    // Foto: só vai quando foi trocada (imagem nova) ou removida.
+    ...(form.photo.startsWith('data:image/')
+      ? { photo: form.photo }
+      : editingItem?.photoUrl && !form.photo
+        ? { photo: '' }
+        : {}),
     name: form.name.trim(),
     tradeName: form.tradeName.trim() || null,
     cpf: onlyDigits(form.cpf),
@@ -1709,10 +1786,6 @@ export default function EmpreiteirosPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const payload = buildPayload();
-    if (!payload.userId) {
-      toast.error('Selecione o login do empreiteiro para vincular');
-      return;
-    }
     if (!payload.name) {
       toast.error('Nome é obrigatório');
       return;
@@ -1731,6 +1804,15 @@ export default function EmpreiteirosPage() {
     }
     if (payload.phone.length < 10) {
       toast.error('Telefone é obrigatório');
+      return;
+    }
+    if (!editingItem) {
+      if (!form.password || form.password.length < 6) {
+        toast.error('A senha deve ter pelo menos 6 caracteres');
+        return;
+      }
+    } else if (form.password && form.password.length < 6) {
+      toast.error('A nova senha deve ter pelo menos 6 caracteres');
       return;
     }
     if (editingItem) {
@@ -1769,14 +1851,34 @@ export default function EmpreiteirosPage() {
     (isOwnEmpreiteiroAccount ? ownEmpreitaItem : null);
   const showMedicaoPage = pageSection === 'medicao' && Boolean(medicaoTargetItem);
   const showDetailPage = pageSection === 'detalhe' && Boolean(viewingItem);
+  /** Contrato de serviço aberto como página própria (dentro da empreita). */
+  const servicePageLink =
+    showDetailPage && viewingItem && serviceDetailLinkId
+      ? (viewingItem.contracts || []).find((c) => c.id === serviceDetailLinkId) || null
+      : null;
   const breadcrumbEmpreitaName = showDetailPage
     ? viewingItem?.name
     : showMedicaoPage
       ? medicaoTargetItem?.name
       : null;
+  const medicaoServicoCrumb =
+    showMedicaoPage && medicaoContractFilterId
+      ? (medicaoTargetItem?.contracts || []).find((l) => l.id === medicaoContractFilterId) || null
+      : null;
   useBreadcrumbEntity(
     showMedicaoPage && breadcrumbEmpreitaName
       ? [
+          ...(isOwnEmpreiteiroAccount
+            ? []
+            : [
+                {
+                  label: 'Empreitas',
+                  onClick: () => {
+                    setMedicaoContractFilterId(null);
+                    closeDetails();
+                  },
+                },
+              ]),
           {
             label: breadcrumbEmpreitaName,
             // Volta para a empreita (a tela troca de seção por estado, não por URL).
@@ -1787,12 +1889,132 @@ export default function EmpreiteirosPage() {
                 }
               : undefined,
           },
+          ...(medicaoServicoCrumb && medicaoTargetItem
+            ? [
+                {
+                  label: medicaoServicoCrumb.contratoNome || medicaoServicoCrumb.name || 'Contrato de serviço',
+                  onClick: () => {
+                    setMedicaoContractFilterId(null);
+                    openDetails(medicaoTargetItem);
+                    setServiceDetailLinkId(medicaoServicoCrumb.id);
+                  },
+                },
+              ]
+            : []),
           { label: 'Medições de entrega' },
         ]
-      : breadcrumbEmpreitaName
-        ? { label: breadcrumbEmpreitaName }
-        : null,
+      : servicePageLink && breadcrumbEmpreitaName
+        ? [
+            { label: 'Empreitas', onClick: closeDetails },
+            { label: breadcrumbEmpreitaName, onClick: closeServiceDetailModal },
+            { label: servicePageLink.contratoNome || servicePageLink.name || 'Contrato de serviço' },
+          ]
+        : showDetailPage && breadcrumbEmpreitaName
+        ? [{ label: 'Empreitas', onClick: closeDetails }, { label: breadcrumbEmpreitaName }]
+        : breadcrumbEmpreitaName
+          ? { label: breadcrumbEmpreitaName }
+          : null,
   );
+
+  // Botão voltar do navegador: a tela troca de seção por estado, então cada nível aberto
+  // (empreita, serviço/medições) ganha uma entrada no histórico e o "voltar" desfaz um nível.
+  const navLevel = showMedicaoPage ? 2 : servicePageLink ? 2 : showDetailPage ? 1 : 0;
+  const navLevelRef = useRef(0);
+  const navFromPopRef = useRef(false);
+  const navPopHandlerRef = useRef<(target: number) => void>(() => undefined);
+  navPopHandlerRef.current = (target: number) => {
+    if (target > navLevelRef.current) {
+      // Avançar do navegador: reabre a empreita/serviço indicados na URL.
+      const params = new URLSearchParams(window.location.search);
+      const alvo = items.find((row) => row.id === params.get('empreita'));
+      if (!alvo) return;
+      navFromPopRef.current = true;
+      if (navLevelRef.current < 1) openDetails(alvo);
+      const servicoId = params.get('servico');
+      if (target >= 2 && servicoId && (alvo.contracts || []).some((c) => c.id === servicoId)) {
+        setServiceDetailLinkId(servicoId);
+      }
+      return;
+    }
+    if (target === navLevelRef.current) return;
+    navFromPopRef.current = true;
+    if (target <= 0) {
+      setMedicaoContractFilterId(null);
+      closeDetails();
+      return;
+    }
+    if (showMedicaoPage && medicaoTargetItem) {
+      setMedicaoContractFilterId(null);
+      openDetails(medicaoTargetItem);
+      return;
+    }
+    setServiceDetailLinkId(null);
+  };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prev = navLevelRef.current;
+    if (navFromPopRef.current) {
+      navFromPopRef.current = false;
+    } else if (navLevel > prev) {
+      // A URL acompanha a navegação: ?empreita=ID e, no segundo nível, &servico=ID (ou &medicoes=1).
+      const empreitaId = viewingItem?.id || medicaoTargetItem?.id || '';
+      for (let l = prev + 1; l <= navLevel; l += 1) {
+        const params = new URLSearchParams();
+        if (empreitaId) params.set('empreita', empreitaId);
+        if (l >= 2) {
+          if (servicePageLink?.id) params.set('servico', servicePageLink.id);
+          else if (showMedicaoPage) params.set('medicoes', '1');
+        }
+        const query = params.toString();
+        window.history.pushState(
+          { ...(window.history.state || {}), empLevel: l },
+          '',
+          `${window.location.pathname}${query ? `?${query}` : ''}`
+        );
+      }
+    } else if (navLevel < prev) {
+      // Voltou por breadcrumb/botão da tela: descarta as entradas extras do histórico.
+      window.history.go(-(prev - navLevel));
+      navFromPopRef.current = true;
+    }
+    navLevelRef.current = navLevel;
+  }, [navLevel]);
+  const deepLinkTratadoRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || deepLinkTratadoRef.current) return;
+    if (isLoading || isLinkedEmpreiteiro) return;
+    const params = new URLSearchParams(window.location.search);
+    const empreitaId = params.get('empreita');
+    deepLinkTratadoRef.current = true;
+    if (!empreitaId) return;
+    const alvo = items.find((row) => row.id === empreitaId);
+    // Volta a URL para a lista; os níveis abaixo são empilhados de novo ao abrir a empreita.
+    window.history.replaceState(
+      { ...(window.history.state || {}), empLevel: 0 },
+      '',
+      window.location.pathname
+    );
+    if (!alvo) return;
+    openDetails(alvo);
+    const servicoId = params.get('servico');
+    if (servicoId && (alvo.contracts || []).some((c) => c.id === servicoId)) {
+      setServiceDetailLinkId(servicoId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, isLinkedEmpreiteiro, items]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPop = (event: PopStateEvent) => {
+      const target = Number((event.state as { empLevel?: number } | null)?.empLevel ?? 0);
+      if (navFromPopRef.current && target >= navLevelRef.current) {
+        navFromPopRef.current = false;
+        return;
+      }
+      navPopHandlerRef.current(target);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const openMedicaoPage = (item?: EmpreiteiroRow | null, contractId?: string | null) => {
     const target =
@@ -1811,6 +2033,112 @@ export default function EmpreiteirosPage() {
     setViewingItem(null);
   };
 
+  const renderMedicoesCard = (target: EmpreiteiroRow, comSeletor: boolean, lockContractId?: string) => (
+            <Card className={cadastroListClasses.card}>
+              <CardHeader className={cadastroListClasses.cardHeader}>
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                      <ClipboardList className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        {lockContractId ? 'Medições de Entrega' : target.name}
+                      </h3>
+                      <p className="truncate text-sm text-gray-600 dark:text-gray-400">
+                        {lockContractId
+                          ? 'Entregas registradas neste serviço'
+                          : medicaoFilterContract
+                          ? [
+                              medicaoFilterContract.contratoNome,
+                              medicaoFilterContract.centroCustoNome,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')
+                          : (target.contractsCount ||
+                                target.contracts?.length ||
+                                0) > 1
+                            ? 'Todos os contratos'
+                            : target.contratoNome || 'Medição de entrega da empreita'}
+                      </p>
+                    </div>
+                  </div>
+                  {lockContractId ? <div ref={setMedActionsEl} className="flex shrink-0 items-center gap-2" /> : null}
+                  {comSeletor && !isOwnEmpreiteiroAccount && items.length > 1 ? (
+                    <div className="w-full min-w-0 sm:max-w-xs">
+                      <StringSingleSelectDropdown
+                        value={target.id}
+                        onChange={(value) => {
+                          setMedicaoEmpreitaId(value);
+                          setMedicaoContractFilterId(null);
+                        }}
+                        options={labeledToSelectOptions(
+                          items.map((row) => ({
+                            value: row.id,
+                            label: row.contratoNome
+                              ? `${row.name} · ${row.contratoNome}`
+                              : row.name,
+                          }))
+                        )}
+                        placeholder="Selecionar empreita"
+                        matchTriggerWidth
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className={cadastroListClasses.cardContent}>
+                <EmpreiteiroDailyMeasurements
+                  empreiteiroId={target.id}
+                  empreiteiroName={target.name || ''}
+                  contracts={(target.contracts || [])
+                    .filter((link) => !lockContractId || link.id === lockContractId)
+                    .map((link) => ({
+                    contractId: link.id,
+                    contratoNome: link.contratoNome || link.name || 'Contrato de serviço',
+                    description: link.description,
+                    centroCustoNome: link.centroCustoNome,
+                    isActive: link.isActive,
+                    status: link.status,
+                    plannedValue: link.plannedValue,
+                    currentValue: link.currentValue,
+                    executedAmountTotal: link.executedAmountTotal ?? 0,
+                    team: (link.team || []).map((member) => ({
+                      id: member.id,
+                      name: member.name,
+                      role: member.role,
+                    })),
+                    installments: (link.installments || []).map((p) => ({
+                      amount: p.amount,
+                      status: p.status,
+                    })),
+                  }))}
+                  defaultContractId={
+                    lockContractId ||
+                    medicaoContractFilterId ||
+                    (target.contracts || []).find((c) => c.isActive)?.id ||
+                    (target.contracts || [])[0]?.id ||
+                    ''
+                  }
+                  filterContractId={lockContractId || medicaoContractFilterId}
+                  onClearContractFilter={() => (lockContractId ? undefined : setMedicaoContractFilterId(null))}
+                  onSelectContractFilter={(contractId) =>
+                    lockContractId ? undefined : setMedicaoContractFilterId(contractId)
+                  }
+                  canEdit={
+                    isOwnEmpreiteiroAccount
+                      ? canEditDaily
+                      : canManageCadastro || canEditDaily
+                  }
+                  canApprove={canApproveDaily}
+                  onPreviewPhoto={openPreviewPhoto}
+                  hideSummary={Boolean(lockContractId)}
+                  actionsContainer={lockContractId ? medActionsEl : undefined}
+                />
+              </CardContent>
+            </Card>
+  );
+
   const medicaoFilterContract = medicaoContractFilterId
     ? (medicaoTargetItem?.contracts || []).find(
         (link) => link.id === medicaoContractFilterId
@@ -1825,6 +2153,22 @@ export default function EmpreiteirosPage() {
     isRowMenuOpen,
   } = useRowActionMenu(items);
 
+  const LISTA_POR_PAGINA = 20;
+  const listaTotalPaginas = Math.max(1, Math.ceil(items.length / LISTA_POR_PAGINA));
+  const listaOffset = (listPage - 1) * LISTA_POR_PAGINA;
+  const itensDaPagina = items.slice(listaOffset, listaOffset + LISTA_POR_PAGINA);
+  const { startItem: listaInicio, endItem: listaFim } = getCadastroListRange(
+    listPage,
+    LISTA_POR_PAGINA,
+    items.length
+  );
+  useEffect(() => {
+    setListPage(1);
+  }, [searchTerm]);
+  useEffect(() => {
+    if (listPage > listaTotalPaginas) setListPage(listaTotalPaginas);
+  }, [listPage, listaTotalPaginas]);
+
   const contractLinksForMenu = viewingItem?.contracts ?? [];
   const {
     rowActionMenu: contractRowActionMenu,
@@ -1834,21 +2178,147 @@ export default function EmpreiteirosPage() {
     isRowMenuOpen: isContractRowMenuOpen,
   } = useRowActionMenu(contractLinksForMenu);
 
+  const equipeMenuRows = (viewingItem?.contracts || []).flatMap((link) =>
+    (contractTeamDraftById[link.id] ?? teamDraftFromMembers(link.team)).map((member, index) => ({
+      id: `${link.id}::${index}`,
+      linkId: link.id,
+      index,
+      member,
+    }))
+  );
+  const {
+    rowActionMenu: equipeRowActionMenu,
+    rowForActionMenu: equipeRowForActionMenu,
+    toggleRowActionMenu: toggleEquipeRowActionMenu,
+    closeRowActionMenu: closeEquipeRowActionMenu,
+    isRowMenuOpen: isEquipeRowMenuOpen,
+  } = useRowActionMenu(equipeMenuRows);
+
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const saving = createMutation.isPending || updateMutation.isPending;
 
-  const renderContractTeamSection = (link: EmpreiteiroContractLink) => {
+  const numerosFluigDasParcelas = (viewingItem?.contracts || [])
+    .flatMap((c) => c.installments || [])
+    .map((p) => p.fluigRequestNumber || '')
+    .filter(Boolean)
+    .join(',');
+  const { data: fluigParcelasData } = useQuery({
+    queryKey: ['empreiteiro-fluig-parcelas', viewingItem?.id, numerosFluigDasParcelas],
+    queryFn: async () => {
+      const res = await api.get(`/empreiteiros/${viewingItem!.id}/fluig-parcelas`);
+      return (res.data?.data ?? {}) as Record<string, { fase: string; vencimento: string | null; pagamento: string | null }>;
+    },
+    enabled: Boolean(viewingItem?.id) && numerosFluigDasParcelas.length > 0,
+    staleTime: 60_000,
+  });
+
+  const abrirModalFluig = (linkId: string, parcel: ServiceInstallment) => {
+    setFluigNumeroInput(parcel.fluigRequestNumber || '');
+    setFluigModal({ linkId, parcelId: parcel.id, number: parcel.number });
+  };
+
+  const salvarSolicitacaoFluig = async () => {
+    if (!fluigModal || !viewingItem) return;
+    const numero = fluigNumeroInput.replace(/[^0-9]/g, '');
+    if (!numero) {
+      toast.error('Informe o número da solicitação do Fluig');
+      return;
+    }
+    setSavingFluigNumero(true);
+    try {
+      const res = await api.patch(
+        `/empreiteiros/${viewingItem.id}/contracts/${fluigModal.linkId}/installments/${fluigModal.parcelId}`,
+        { fluigRequestNumber: numero }
+      );
+      const data = res.data?.data as EmpreiteiroRow | undefined;
+      if (data?.id) applySelfUpdate(data);
+      toast.success(res.data?.message || 'Solicitação vinculada à parcela');
+      setFluigModal(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível salvar a solicitação');
+    } finally {
+      setSavingFluigNumero(false);
+    }
+  };
+
+  const validarPessoa = (member: TeamMemberForm): string | null => {
+    if (!member.name.trim()) return 'Nome da pessoa é obrigatório';
+    if (!member.role.trim()) return 'Função da pessoa é obrigatória';
+    const document = onlyDigits(member.document);
+    if (document && document.length !== 11) return 'CPF da pessoa deve ter 11 dígitos';
+    return null;
+  };
+
+  /** Salva a equipe do serviço com a lista informada; devolve se deu certo. */
+  const salvarEquipeDoServico = async (linkId: string, draft: TeamMemberForm[]): Promise<boolean> => {
+    if (!viewingItem || !canEditTeamOnDetail) return false;
+    setSavingTeamLinkId(linkId);
+    try {
+      const res = await api.patch(`/empreiteiros/${viewingItem.id}/contracts/${linkId}/team`, {
+        team: draft.map((member) => ({
+          name: member.name.trim(),
+          role: member.role.trim(),
+          phone: onlyDigits(member.phone),
+          document: onlyDigits(member.document),
+          photo: member.photo || null,
+        })),
+      });
+      const data = res.data?.data as EmpreiteiroRow | undefined;
+      if (data?.id) applySelfUpdate(data);
+      toast.success(res.data?.message || 'Equipe do contrato atualizada');
+      return true;
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível salvar a equipe');
+      return false;
+    } finally {
+      setSavingTeamLinkId(null);
+    }
+  };
+
+  const abrirModalPessoa = (linkId: string, index: number | null, atual?: TeamMemberForm) => {
+    setTeamModalForm(atual ? { ...atual } : emptyTeamMember());
+    setTeamModal({ linkId, index });
+  };
+
+  const confirmarModalPessoa = async () => {
+    if (!teamModal) return;
+    const erro = validarPessoa(teamModalForm);
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    const link = (viewingItem?.contracts || []).find((c) => c.id === teamModal.linkId);
+    const atual = contractTeamDraftById[teamModal.linkId] ?? teamDraftFromMembers(link?.team);
+    const proxima =
+      teamModal.index === null
+        ? [...atual, teamModalForm]
+        : atual.map((m, i) => (i === teamModal.index ? teamModalForm : m));
+    if (await salvarEquipeDoServico(teamModal.linkId, proxima)) setTeamModal(null);
+  };
+
+  const removerPessoaDoServico = async (linkId: string, index: number) => {
+    if (!window.confirm('Remover esta pessoa da equipe do serviço?')) return;
+    const link = (viewingItem?.contracts || []).find((c) => c.id === linkId);
+    const atual = contractTeamDraftById[linkId] ?? teamDraftFromMembers(link?.team);
+    await salvarEquipeDoServico(
+      linkId,
+      atual.filter((_, i) => i !== index)
+    );
+  };
+
+  const renderContractTeamSection = (link: EmpreiteiroContractLink, embedded = false) => {
     const draft = contractTeamDraftById[link.id] ?? teamDraftFromMembers(link.team);
     const savedTeam = link.team || [];
     const saving = savingTeamLinkId === link.id;
     const teamCount = Math.max(savedTeam.length, draft.length);
-    const teamOpen = Boolean(openTeamLinkIds[link.id]);
+    const teamOpen = embedded || Boolean(openTeamLinkIds[link.id]);
     return (
       <div
-        className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800"
+        className={embedded ? '' : 'mt-4 border-t border-gray-100 pt-4 dark:border-gray-800'}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
+        {embedded ? null : (
         <button
           type="button"
           onClick={() =>
@@ -1862,6 +2332,7 @@ export default function EmpreiteirosPage() {
             {teamCount}
           </span>
         </button>
+        )}
         {teamOpen ? (
         <>
         {canEditTeamOnDetail ? (
@@ -2043,6 +2514,7 @@ export default function EmpreiteirosPage() {
     <ProtectedRoute route="/ponto/empreiteiros">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
+          {showMedicaoPage ? (
           <div className="relative flex flex-col items-center gap-4 text-center">
             <div className="min-w-0 w-full">
               {showMedicaoPage || showDetailPage ? (
@@ -2096,368 +2568,223 @@ export default function EmpreiteirosPage() {
                           : 'Mão de obra por contrato e especialidade'}
               </p>
             </div>
-            {!showMedicaoPage &&
-            !showDetailPage &&
-            (canCreate || items.length > 0 || (isOwnEmpreiteiroAccount && ownEmpreitaItem)) ? (
-              <div className="flex flex-wrap justify-center gap-2 sm:absolute sm:right-0 sm:top-0 sm:justify-end">
-                {canCreate ? (
-                  <button
-                    type="button"
-                    onClick={openCreateForm}
-                    className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Cadastrar empreita
-                  </button>
-                ) : null}
-                {isOwnEmpreiteiroAccount && ownEmpreitaItem ? (
-                  <button
-                    type="button"
-                    onClick={() => openDetails(ownEmpreitaItem)}
-                    className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-                  >
-                    <Users className="h-4 w-4" />
-                    Contratos e equipe
-                  </button>
-                ) : null}
-                {items.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => openMedicaoPage()}
-                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold shadow-sm transition ${
-                      canCreate
-                        ? 'border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'
-                        : 'bg-red-600 text-white hover:bg-red-700'
-                    }`}
-                  >
-                    <ClipboardList className="h-4 w-4" />
-                    {isOwnEmpreiteiroAccount ? 'Medição de entrega' : 'Medições de entrega'}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
+          ) : showDetailPage ? null : (
+            <ListPageHeader
+              title="Empreitas"
+              description={
+                isOwnEmpreiteiroAccount
+              ? 'Sua equipe e medições de entrega nos serviços vinculados'
+              : 'Acompanhe as empreitas e seus contratos de serviço'
+              }
+            />
+          )}
 
           {showMedicaoPage && medicaoTargetItem ? (
-            <Card className={cadastroListClasses.card}>
-              <CardHeader className={cadastroListClasses.cardHeader}>
-                <div className={cadastroListClasses.cardHeaderRow}>
-                  <div className={cadastroListClasses.cardHeaderIconRow}>
-                    <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                      <ClipboardList className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {medicaoTargetItem.name}
-                      </h3>
-                      <p className="truncate text-sm text-gray-600 dark:text-gray-400">
-                        {medicaoFilterContract
-                          ? [
-                              medicaoFilterContract.contratoNome,
-                              medicaoFilterContract.centroCustoNome,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')
-                          : (medicaoTargetItem.contractsCount ||
-                                medicaoTargetItem.contracts?.length ||
-                                0) > 1
-                            ? 'Todos os contratos'
-                            : medicaoTargetItem.contratoNome || 'Medição de entrega da empreita'}
-                      </p>
-                    </div>
-                  </div>
-                  {!isOwnEmpreiteiroAccount && items.length > 1 ? (
-                    <div className="w-full min-w-0 sm:max-w-xs">
-                      <StringSingleSelectDropdown
-                        value={medicaoTargetItem.id}
-                        onChange={(value) => {
-                          setMedicaoEmpreitaId(value);
-                          setMedicaoContractFilterId(null);
-                        }}
-                        options={labeledToSelectOptions(
-                          items.map((row) => ({
-                            value: row.id,
-                            label: row.contratoNome
-                              ? `${row.name} · ${row.contratoNome}`
-                              : row.name,
-                          }))
-                        )}
-                        placeholder="Selecionar empreita"
-                        matchTriggerWidth
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </CardHeader>
-              <CardContent className={cadastroListClasses.cardContent}>
-                <EmpreiteiroDailyMeasurements
-                  empreiteiroId={medicaoTargetItem.id}
-                  empreiteiroName={medicaoTargetItem.name || ''}
-                  contracts={(medicaoTargetItem.contracts || []).map((link) => ({
-                    contractId: link.id,
-                    contratoNome: link.contratoNome || link.name || 'Contrato de serviço',
-                    description: link.description,
-                    centroCustoNome: link.centroCustoNome,
-                    isActive: link.isActive,
-                    status: link.status,
-                    plannedValue: link.plannedValue,
-                    currentValue: link.currentValue,
-                    executedAmountTotal: link.executedAmountTotal ?? 0,
-                    team: (link.team || []).map((member) => ({
-                      id: member.id,
-                      name: member.name,
-                      role: member.role,
-                    })),
-                    installments: (link.installments || []).map((p) => ({
-                      amount: p.amount,
-                      status: p.status,
-                    })),
-                  }))}
-                  defaultContractId={
-                    medicaoContractFilterId ||
-                    (medicaoTargetItem.contracts || []).find((c) => c.isActive)?.id ||
-                    (medicaoTargetItem.contracts || [])[0]?.id ||
-                    ''
-                  }
-                  filterContractId={medicaoContractFilterId}
-                  onClearContractFilter={() => setMedicaoContractFilterId(null)}
-                  onSelectContractFilter={(contractId) =>
-                    setMedicaoContractFilterId(contractId)
-                  }
-                  canEdit={
-                    isOwnEmpreiteiroAccount
-                      ? canEditDaily
-                      : canManageCadastro || canEditDaily
-                  }
-                  canApprove={canApproveDaily}
-                  onPreviewPhoto={openPreviewPhoto}
-                />
-              </CardContent>
-            </Card>
+            renderMedicoesCard(medicaoTargetItem, true)
           ) : showDetailPage ? null : (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {isLoading
-                  ? 'Carregando…'
-                  : `${items.length} empreita${items.length === 1 ? '' : 's'}`}
-              </p>
-              {isLinkedEmpreiteiro ? null : (
-                <div className="relative w-full sm:max-w-sm">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                  <input
-                    type="text"
-                    placeholder="Buscar nome, documento ou centro de custo…"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/30 dark:border-gray-600 dark:bg-gray-900/70 dark:text-gray-100"
-                  />
-                  {searchTerm ? (
+          <Card className="w-full">
+            <CardHeader className="border-b-0 pb-1">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <HardHat className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Empreitas</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {isOwnEmpreiteiroAccount ? 'Seu cadastro, contratos e equipe' : 'Empreitas cadastradas e seus contratos'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  {isLinkedEmpreiteiro ? null : (
+                    <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        placeholder="Buscar nome, documento ou centro de custo..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                      {searchTerm ? (
+                        <button
+                          type="button"
+                          onClick={() => setSearchTerm('')}
+                          aria-label="Limpar busca"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                  {isOwnEmpreiteiroAccount && ownEmpreitaItem ? (
                     <button
                       type="button"
-                      onClick={() => setSearchTerm('')}
-                      aria-label="Limpar busca"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      onClick={() => openDetails(ownEmpreitaItem)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
-                      <X className="h-4 w-4" />
+                      <Users className="h-4 w-4" />
+                      Contratos e equipe
                     </button>
                   ) : null}
-                </div>
-              )}
-            </div>
-
-            {isLoading ? (
-              <CadastroListLoading message="Carregando empreitas..." />
-            ) : items.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-10 dark:border-gray-600 dark:bg-gray-900/30">
-                <CadastroListEmpty
-                  icon={HardHat}
-                  title="Nenhuma empreita encontrada"
-                  hint={
-                    isLinkedEmpreiteiro
-                      ? ownEmpreiteiroId
-                        ? 'Seu cadastro de empreita não está disponível. Fale com a Gennesis.'
-                        : 'A Gennesis ainda não vinculou uma empreita ao seu login. Aguarde o cadastro.'
-                      : searchTerm.trim()
-                        ? 'Tente ajustar a busca'
-                        : canCreate
-                          ? 'Cadastre a empreita e vincule o login criado em Funcionários'
-                          : 'Sem permissão para cadastrar. Peça acesso de criar em Empreitas.'
-                  }
-                />
-                {canCreate && !searchTerm.trim() ? (
-                  <div className="mt-4 flex justify-center">
+                  {canCreate ? (
                     <button
                       type="button"
                       onClick={openCreateForm}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
+                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                     >
-                      <Plus className="h-4 w-4" />
-                      Cadastrar empreita
+                      <Plus className="h-4 w-4 shrink-0" />
+                      <span>Nova Empreita</span>
                     </button>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {items.map((it) => {
-                  const teamSize =
-                    (it.contracts || []).reduce(
-                      (sum, link) => sum + (link.teamCount ?? link.team?.length ?? 0),
-                      0
-                    ) ||
-                    it.teamCount ||
-                    it.team?.length ||
-                    0;
-                  const photo = resolveApiMediaUrl(it.photoUrl);
-                  const cityUf = [it.city, it.state].filter(Boolean).join(' / ');
-                  const extraFields = [
-                    it.email ? { label: 'E-mail', value: it.email } : null,
-                    cityUf ? { label: 'Cidade / UF', value: cityUf } : null,
-                    it.pixKey ? { label: 'PIX', value: it.pixKey } : null,
-                    it.bank ? { label: 'Banco', value: it.bank } : null,
-                    it.agency ? { label: 'Agência', value: it.agency } : null,
-                    it.account ? { label: 'Conta', value: it.account } : null,
-                  ].filter((field): field is { label: string; value: string } => Boolean(field));
-                  return (
-                    <article
-                      key={it.id}
-                      className="group relative flex flex-col overflow-hidden rounded-2xl border border-gray-200/90 bg-white shadow-sm transition hover:border-red-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900/55 dark:hover:border-red-900/60"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openDetails(it)}
-                        className="flex flex-1 flex-col p-4 text-left sm:p-5"
-                      >
-                        <div className="flex items-start gap-3">
-                          {photo ? (
-                            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-gray-200 ring-1 ring-black/5 dark:bg-gray-700">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={photo}
-                                alt=""
-                                className="h-full w-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-                          ) : (
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-300">
-                              <HardHat className="h-6 w-6" />
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <h3 className="truncate text-base font-semibold text-gray-900 group-hover:text-red-700 dark:text-gray-50 dark:group-hover:text-red-300">
-                                  {it.name}
-                                </h3>
-                                <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                                  {formatEmpreiteiroDocs(it)}
-                                </p>
-                              </div>
-                              <span
-                                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                  it.isActive
-                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                                }`}
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {isLoading ? (
+                  <CadastroListLoading message="Carregando empreitas..." />
+                ) : items.length === 0 ? (
+                  <CadastroListEmpty
+                    icon={HardHat}
+                    title="Nenhuma empreita encontrada"
+                    hint={
+                      isLinkedEmpreiteiro
+                        ? ownEmpreiteiroId
+                          ? 'Seu cadastro de empreita não está disponível. Fale com a Gennesis.'
+                          : 'A Gennesis ainda não vinculou uma empreita ao seu login. Aguarde o cadastro.'
+                        : searchTerm.trim()
+                          ? 'Tente ajustar a busca'
+                          : canCreate
+                            ? 'Cadastre a primeira empreita'
+                            : 'Sem permissão para cadastrar. Peça acesso de criar em Empreitas.'
+                    }
+                  />
+                ) : (
+                  <>
+                    <CadastroListSummary
+                      startItem={listaInicio}
+                      endItem={listaFim}
+                      total={items.length}
+                      itemLabel="empreita"
+                      itemLabelPlural="empreitas"
+                      currentPage={listPage}
+                      totalPages={listaTotalPaginas}
+                    />
+                    <div className="table-scroll">
+                      <table className="w-full text-sm">
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className={cadastroListClasses.th}>Empreita</th>
+                            <th className={cadastroListClasses.thCenter}>Especialidade</th>
+                            <th className={cadastroListClasses.thCenter}>Contratos</th>
+                            <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
+                            <th className={cadastroListClasses.thCenter}>Contato</th>
+                            <th className={cadastroListClasses.thCenter}>Status</th>
+                            {showActions ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                          {itensDaPagina.map((it) => {
+                            const teamSize =
+                              (it.contracts || []).reduce(
+                                (sum, link) => sum + (link.teamCount ?? link.team?.length ?? 0),
+                                0
+                              ) ||
+                              it.teamCount ||
+                              it.team?.length ||
+                              0;
+                            const photo = resolveApiMediaUrl(it.photoUrl);
+                            const links = it.contracts || [];
+                            const nContratos = links.length || it.contractsCount || 0;
+                            const contratado = links.reduce(
+                              (sum, l) => sum + (l.currentValue ?? l.plannedValue ?? 0),
+                              0
+                            );
+                            return (
+                              <tr
+                                key={it.id}
+                                onClick={() => openDetails(it)}
+                                className={getListTableRowClassName(true)}
                               >
-                                {it.isActive ? 'Ativo' : 'Inativo'}
-                              </span>
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {it.specialty ? (
-                                <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                  {it.specialty}
-                                </span>
-                              ) : null}
-                              <span
-                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                  it.userId
-                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-                                }`}
-                              >
-                                {it.userId
-                                  ? it.userName || it.contactName || 'Login vinculado'
-                                  : it.contactName || 'Sem login'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                                <td className="px-3 py-3 align-middle text-left text-sm sm:px-6">
+                                  <div className="flex items-center gap-3">
+                                    {photo ? (
+                                      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                          src={photo}
+                                          alt=""
+                                          className="h-full w-full object-cover"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+                                        <HardHat className="h-6 w-6" />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <ListRowNavigableLabel className="font-medium">{it.name}</ListRowNavigableLabel>
+                                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                        {empreiteiroCnpjDigits(it) ? maskCnpjInput(empreiteiroCnpjDigits(it)) : '—'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                  {it.specialty || '—'}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                  {nContratos > 0 ? `${nContratos} ${nContratos === 1 ? 'contrato' : 'contratos'}` : 'Nenhum'}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                                  {formatMoneyBr(contratado > 0 ? contratado : 0)}
+                                </td>
+                                <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="whitespace-nowrap">{formatPhoneDisplay(it.phone) || '—'}</span>
+                                    {it.email ? (
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">{it.email}</span>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 align-middle text-center sm:px-6">
+                                  <span
+                                    className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                                      it.isActive
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                                    }`}
+                                  >
+                                    {it.isActive ? 'Ativo' : 'Inativo'}
+                                  </span>
+                                </td>
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(it.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(it.id, e.currentTarget as HTMLButtonElement)
+                                    }
+                                  />
+                                ) : null}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
 
-                        <div className="mt-4 space-y-2 border-t border-gray-100 pt-3 dark:border-gray-800">
-                          <p className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-                            <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                            <span className="line-clamp-2">
-                              {it.centroCustoNome || 'Sem centro de custo'}
-                            </span>
-                          </p>
-                          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-gray-600 dark:text-gray-400">
-                            <span className="inline-flex items-center gap-1.5">
-                              <Phone className="h-3.5 w-3.5 text-gray-400" />
-                              {formatPhoneDisplay(it.phone) || '—'}
-                            </span>
-                            <span className="inline-flex items-center gap-1.5">
-                              <Users className="h-3.5 w-3.5 text-gray-400" />
-                              {teamSize > 0 ? `${teamSize} na equipe` : 'Sem equipe'}
-                            </span>
-                          </div>
-                          {extraFields.length > 0 ? (
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-1">
-                              {extraFields.map((field) => (
-                                <div key={field.label} className="min-w-0">
-                                  <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-                                    {field.label}
-                                  </p>
-                                  <p className="truncate text-xs text-gray-700 dark:text-gray-300">
-                                    {field.value}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </button>
-
-                      <div className="flex items-center gap-2 border-t border-gray-100 px-3 py-2.5 dark:border-gray-800">
-                        {isOwnEmpreiteiroAccount ? (
-                          <button
-                            type="button"
-                            onClick={() => openDetails(it)}
-                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-                          >
-                            <Users className="h-3.5 w-3.5" />
-                            Contratos e equipe
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => openMedicaoPage(it)}
-                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                        >
-                          <ClipboardList className="h-3.5 w-3.5" />
-                          Medição de entrega
-                        </button>
-                        {showActions ? (
-                          <button
-                            type="button"
-                            aria-label="Mais ações"
-                            aria-expanded={isRowMenuOpen(it.id)}
-                            onClick={(e) =>
-                              toggleRowActionMenu(it.id, e.currentTarget as HTMLButtonElement)
-                            }
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 text-gray-500 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
+                    <ListPagination
+                      currentPage={listPage}
+                      totalPages={listaTotalPaginas}
+                      onPageChange={setListPage}
+                    />
+                  </>
+                )}
 
             {rowActionMenu && rowForActionMenu ? (
               <RowActionMenuPortal
@@ -2490,7 +2817,9 @@ export default function EmpreiteirosPage() {
                 ]}
               />
             ) : null}
-          </div>
+              </div>
+            </CardContent>
+          </Card>
           )}
         </PageStack>
 
@@ -2512,31 +2841,19 @@ export default function EmpreiteirosPage() {
               </div>
               <form onSubmit={handleSubmit} className="space-y-4 p-6">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="sm:col-span-2 rounded-xl border border-sky-200 bg-sky-50/80 p-4 dark:border-sky-900 dark:bg-sky-950/30">
-                    <label className={labelClass}>Login de acesso *</label>
-                    <StringSingleSelectDropdown
-                      value={form.userId}
-                      onChange={(value) => {
-                        const selected = (linkableUsersData || []).find((u) => u.id === value);
-                        patchForm({
-                          userId: value,
-                          contactName: selected?.name || '',
-                          email: selected?.email || '',
-                          ...(selected?.cpf
-                            ? { cpf: formatCpfInput(onlyDigits(selected.cpf)) }
-                            : {}),
-                        });
-                      }}
-                      options={linkableLoginOptions}
-                      placeholder="Selecione o login do empreiteiro"
-                      emptyOptionLabel="Selecione o login do empreiteiro"
-                      searchPlaceholder="Pesquisar por nome ou e-mail..."
-                      matchTriggerWidth
+                  <div className="flex items-center gap-4 sm:col-span-2">
+                    <TeamMemberPhotoField
+                      value={form.photo}
+                      onChange={(value) => patchForm({ photo: value })}
+                      alt="Foto da empreita"
+                      redondo
                     />
-                    <p className="mt-2 text-xs text-sky-900/80 dark:text-sky-200/80">
-                      Continuação do login criado em Funcionários. A foto dele aparece no card.
-                      Centro de custo, prazo e equipe ficam em cada contrato de serviço.
-                    </p>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Foto da empreita</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Opcional. Aparece na lista, no cadastro e no perfil do login.
+                      </p>
+                    </div>
                   </div>
                   <div>
                     <label className={labelClass}>Nome / razão social *</label>
@@ -2620,9 +2937,27 @@ export default function EmpreiteirosPage() {
                       value={form.email}
                       onChange={(e) => patchForm({ email: e.target.value })}
                       placeholder="email@exemplo.com"
+                      autoComplete="off"
                       className={inputClass}
                     />
                   </div>
+                  {!editingItem || form.userId ? (
+                    <div>
+                      <label className={labelClass}>{editingItem ? 'Nova senha' : 'Senha *'}</label>
+                      <input
+                        type="password"
+                        required={!editingItem}
+                        value={form.password}
+                        onChange={(e) => patchForm({ password: e.target.value })}
+                        placeholder={editingItem ? 'Deixe em branco para manter' : 'Mínimo de 6 caracteres'}
+                        autoComplete="new-password"
+                        className={inputClass}
+                      />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        O empreiteiro entra no sistema com o CPF e esta senha.
+                      </p>
+                    </div>
+                  ) : null}
                   <div>
                     <label className={labelClass}>Cidade</label>
                     <input
@@ -2749,517 +3084,9 @@ export default function EmpreiteirosPage() {
         ) : null}
 
         {showDetailPage && viewingItem ? (
-          <Card className={cadastroListClasses.card}>
-            <CardContent className={`${cadastroListClasses.cardContent} space-y-6`}>
-                <div className="flex flex-wrap items-start gap-4">
-                  {resolveApiMediaUrl(viewingItem.photoUrl) ? (
-                    <button
-                      type="button"
-                      onClick={() => openPreviewPhoto(viewingItem.photoUrl, viewingItem.name)}
-                      className="rounded-full ring-offset-2 ring-offset-white hover:ring-2 hover:ring-red-500 dark:ring-offset-gray-800"
-                      aria-label={`Ver foto de ${viewingItem.name} em tamanho maior`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={resolveApiMediaUrl(viewingItem.photoUrl)}
-                        alt={viewingItem.name}
-                        className="h-20 w-20 cursor-zoom-in rounded-full object-cover"
-                      />
-                    </button>
-                  ) : (
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
-                      <HardHat className="h-8 w-8" />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {viewingItem.name}
-                    </p>
-                    {viewingItem.tradeName ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {viewingItem.tradeName}
-                      </p>
-                    ) : null}
-                    <span
-                      className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        viewingItem.isActive
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      {viewingItem.isActive ? 'Ativo' : 'Inativo'}
-                    </span>
-                    {isOwnEmpreiteiroAccount ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openMedicaoPage(viewingItem)}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
-                        >
-                          <ClipboardList className="h-3.5 w-3.5" />
-                          Medição de entrega
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        Contratos de serviço
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {isOwnEmpreiteiroAccount
-                          ? 'Cadastre a equipe de cada serviço e consulte medições'
-                          : 'Serviços com valor, equipe própria e medições de cada um'}
-                      </p>
-                    </div>
-                    {canManageCadastro ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingServiceId(null);
-                          setAddingContract((open) => !open);
-                        }}
-                        className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        {addingContract ? 'Cancelar' : 'Adicionar serviço'}
-                      </button>
-                    ) : null}
-                  </div>
-                  {addingContract ? (
-                    <div className="mb-3 space-y-3 rounded-xl border border-dashed border-red-300 bg-red-50/40 p-3 dark:border-red-900/50 dark:bg-red-950/20">
-                      <div>
-                        <label className={labelClass}>Nome do serviço *</label>
-                        <input
-                          type="text"
-                          value={newServiceName}
-                          onChange={(e) => setNewServiceName(e.target.value)}
-                          placeholder=""
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Descrição</label>
-                        <textarea
-                          value={newServiceDescription}
-                          onChange={(e) => setNewServiceDescription(e.target.value)}
-                          rows={2}
-                          placeholder=""
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Valor planejado (R$)</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={newServicePlannedValue}
-                          onChange={(e) =>
-                            setNewServicePlannedValue(maskCurrencyInputBrOrEmpty(e.target.value))
-                          }
-                          placeholder="R$ 0,00"
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Centro de custo *</label>
-                        <StringSingleSelectDropdown
-                          value={newServiceCostCenterId}
-                          onChange={setNewServiceCostCenterId}
-                          options={costCenterSelectOptions}
-                          placeholder="Selecione o centro de custo"
-                          emptyOptionLabel="Selecione o centro de custo"
-                          searchPlaceholder="Pesquisar centro de custo..."
-                          matchTriggerWidth
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Local de execução</label>
-                        <input
-                          type="text"
-                          value={newServiceLocation}
-                          onChange={(e) => setNewServiceLocation(e.target.value)}
-                          placeholder=""
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Forma de pagamento</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(
-                            [
-                              { value: 'avista' as const, label: 'À vista' },
-                              { value: 'parcelado' as const, label: 'Parcelado' },
-                            ] as const
-                          ).map((opt) => {
-                            const active = newServicePayMode === opt.value;
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => {
-                                  setNewServicePayMode((prev) => {
-                                    const next = prev === opt.value ? null : opt.value;
-                                    if (next === 'parcelado') {
-                                      const n = Math.floor(Number(newServiceParcelCount)) || 6;
-                                      setNewServiceParcelCount(String(n));
-                                      setNewServiceParcelAmounts(
-                                        buildEqualParcelAmountInputs(
-                                          parseCurrencyInputBr(newServicePlannedValue),
-                                          n
-                                        )
-                                      );
-                                    } else {
-                                      setNewServiceParcelAmounts([]);
-                                    }
-                                    return next;
-                                  });
-                                }}
-                                className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
-                                  active
-                                    ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
-                                    : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
-                                }`}
-                              >
-                                {opt.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {newServicePayMode === 'avista' ? (
-                          <div className="mt-2 max-w-xs">
-                            <label className={labelClass}>Data do pagamento</label>
-                            <input
-                              type="date"
-                              value={newServicePayDate}
-                              onChange={(e) => setNewServicePayDate(e.target.value)}
-                              className={inputClass}
-                            />
-                            <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                              1 parcela com o valor total — a baixa na aprovação libera a parcela
-                              com esse valor; pago só ao anexar o comprovante.
-                            </p>
-                          </div>
-                        ) : null}
-                        {newServicePayMode === 'parcelado' ? (
-                          <div className="mt-2 space-y-2">
-                            <label className={labelClass}>Nº de parcelas</label>
-                            <input
-                              type="number"
-                              min={2}
-                              max={60}
-                              value={newServiceParcelCount}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setNewServiceParcelCount(value);
-                                const n = Math.floor(Number(value));
-                                if (Number.isFinite(n) && n >= 2 && n <= 60) {
-                                  setNewServiceParcelAmounts(
-                                    buildEqualParcelAmountInputs(
-                                      parseCurrencyInputBr(newServicePlannedValue),
-                                      n
-                                    )
-                                  );
-                                } else {
-                                  setNewServiceParcelAmounts([]);
-                                }
-                              }}
-                              placeholder=""
-                              className={inputClass}
-                            />
-                            {(() => {
-                              const n = Math.floor(Number(newServiceParcelCount.trim()));
-                              if (!Number.isFinite(n) || n < 2 || n > 60) return null;
-                              const amounts =
-                                newServiceParcelAmounts.length === n
-                                  ? newServiceParcelAmounts
-                                  : buildEqualParcelAmountInputs(
-                                      parseCurrencyInputBr(newServicePlannedValue),
-                                      n
-                                    );
-                              const sum = amounts.reduce(
-                                (acc, raw) => acc + (parseCurrencyInputBr(raw) || 0),
-                                0
-                              );
-                              const planned = parseCurrencyInputBr(newServicePlannedValue);
-                              return (
-                                <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                      Valor de cada parcela
-                                    </p>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setNewServiceParcelAmounts(
-                                          buildEqualParcelAmountInputs(planned, n)
-                                        )
-                                      }
-                                      className="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                                    >
-                                      Dividir igualmente
-                                    </button>
-                                  </div>
-                                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                    {amounts.map((amount, index) => (
-                                      <div key={`new-parcel-${index}`}>
-                                        <label className="mb-1 block text-[11px] text-gray-500 dark:text-gray-400">
-                                          Parcela {index + 1}
-                                        </label>
-                                        <input
-                                          type="text"
-                                          inputMode="numeric"
-                                          value={amount}
-                                          onChange={(e) => {
-                                            setNewServiceParcelAmounts(
-                                              redistributeParcelAmounts(
-                                                amounts,
-                                                index,
-                                                e.target.value,
-                                                planned
-                                              )
-                                            );
-                                          }}
-                                          placeholder="R$ 0,00"
-                                          className={inputClass}
-                                        />
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    Soma: {formatMoneyBr(sum) || 'R$ 0,00'}
-                                    {planned != null
-                                      ? ` · Planejado: ${formatMoneyBr(planned)}`
-                                      : ''}
-                                    . Ao mudar uma, as outras dividem o que sobra.
-                                  </p>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className={labelClass}>Início</label>
-                          <input
-                            type="date"
-                            value={newContractStart}
-                            onChange={(e) => setNewContractStart(e.target.value)}
-                            className={inputClass}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass}>Fim</label>
-                          <input
-                            type="date"
-                            value={newContractEnd}
-                            onChange={(e) => setNewContractEnd(e.target.value)}
-                            className={inputClass}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className={labelClass}>Status</label>
-                        <select
-                          value={newContractStatus}
-                          onChange={(e) =>
-                            setNewContractStatus(e.target.value as EmpreiteiroContractStatus)
-                          }
-                          className={inputClass}
-                        >
-                          {CONTRACT_STATUS_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className={labelClass}>Anexo do contrato</label>
-                        <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
-                          PDF ou Word do contrato assinado
-                        </p>
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx,image/*,application/pdf"
-                          className="hidden"
-                          id="empreiteiro-new-service-file"
-                          disabled={uploadingFile}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            e.target.value = '';
-                            void uploadNewServiceFile(file);
-                          }}
-                        />
-                        <div className="space-y-2">
-                          {newServiceFiles.map((file, fileIndex) => {
-                            const href = resolveApiMediaUrl(file.url) || file.url;
-                            return (
-                              <div
-                                key={`${file.url}-${fileIndex}`}
-                                className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-900/60"
-                              >
-                                <FileText className="h-4 w-4 shrink-0 text-gray-500" />
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="min-w-0 flex-1 truncate text-sm text-red-700 hover:underline dark:text-red-300"
-                                >
-                                  {file.name || 'contrato'}
-                                </a>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setNewServiceFiles((prev) =>
-                                      prev.filter((_, i) => i !== fileIndex)
-                                    )
-                                  }
-                                  className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                                  aria-label="Remover anexo"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            );
-                          })}
-                          <button
-                            type="button"
-                            disabled={uploadingFile}
-                            onClick={() =>
-                              document.getElementById('empreiteiro-new-service-file')?.click()
-                            }
-                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 text-sm font-medium text-gray-600 hover:bg-white disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-                          >
-                            <Paperclip className="h-4 w-4" />
-                            {uploadingFile ? 'Enviando…' : 'Anexar contrato'}
-                          </button>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={savingContractLink || !newServiceName.trim()}
-                        onClick={() => void handleAddContractLink()}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {savingContractLink ? 'Salvando…' : 'Criar contrato de serviço'}
-                      </button>
-                    </div>
-                  ) : null}
-                  {(viewingItem.contracts || []).length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                      Nenhum contrato de serviço. Use “Adicionar serviço” para cadastrar.
-                    </p>
-                  ) : (
-                    <>
-                      <div className="table-scroll">
-                        <table className={`${cadastroListClasses.table} text-sm`}>
-                          <thead className="border-b border-gray-200 dark:border-gray-700">
-                            <tr>
-                              <th className={cadastroListClasses.th}>Serviço</th>
-                              <th className={cadastroListClasses.th}>Local / CC</th>
-                              <th className={cadastroListClasses.th}>Período</th>
-                              <th className={cadastroListClasses.th}>Valor</th>
-                              <th className={cadastroListClasses.th}>Status</th>
-                              <th className={cadastroListClasses.th}>Pagamento</th>
-                              {canManageCadastro ? (
-                                <th className={listTableRowClasses.actionTh}>Ação</th>
-                              ) : null}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                            {(viewingItem.contracts || []).map((link) => {
-                              const statusMeta = contractStatusMeta(link.status);
-                              const contractValue =
-                                link.currentValue != null && Number.isFinite(link.currentValue)
-                                  ? link.currentValue
-                                  : link.plannedValue != null && Number.isFinite(link.plannedValue)
-                                    ? link.plannedValue
-                                    : null;
-                              const localCc = [
-                                link.location,
-                                link.centroCustoNome || link.costCenter?.name,
-                              ]
-                                .filter(Boolean)
-                                .join(' · ');
-                              return (
-                                <tr
-                                  key={link.id}
-                                  className={`${listTableRowClasses.tr} cursor-pointer`}
-                                  onClick={() => setServiceDetailLinkId(link.id)}
-                                >
-                                  <td className={cadastroListClasses.td}>
-                                    <ListRowNavigableLabel>
-                                      {link.contratoNome || link.name || 'Contrato de serviço'}
-                                    </ListRowNavigableLabel>
-                                  </td>
-                                  <td className={cadastroListClasses.td}>
-                                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                                      {localCc || '—'}
-                                    </span>
-                                  </td>
-                                  <td className={cadastroListClasses.td}>
-                                    <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                                      {formatDateBr(link.startDate)} – {formatDateBr(link.endDate)}
-                                    </span>
-                                  </td>
-                                  <td className={cadastroListClasses.td}>
-                                    <span className="whitespace-nowrap text-sm tabular-nums text-gray-900 dark:text-gray-100">
-                                      {formatMoneyBr(contractValue) || '—'}
-                                    </span>
-                                  </td>
-                                  <td className={cadastroListClasses.td}>
-                                    <span
-                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
-                                    >
-                                      {statusMeta.label}
-                                    </span>
-                                  </td>
-                                  <td className={cadastroListClasses.td}>
-                                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                                      {paymentLabelForLink(link)}
-                                    </span>
-                                  </td>
-                                  {canManageCadastro ? (
-                                    <RowActionMenuCell
-                                      isOpen={isContractRowMenuOpen(link.id)}
-                                      onToggle={(e) =>
-                                        toggleContractRowActionMenu(
-                                          link.id,
-                                          e.currentTarget as HTMLButtonElement
-                                        )
-                                      }
-                                    />
-                                  ) : null}
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                      {contractRowActionMenu && contractRowForActionMenu ? (
-                        <RowActionMenuPortal
-                          menu={contractRowActionMenu}
-                          onClose={closeContractRowActionMenu}
-                          onEdit={() => openEditService(contractRowForActionMenu)}
-                          onDelete={() => {
-                            void handleDeleteContractLink(contractRowForActionMenu);
-                          }}
-                        />
-                      ) : null}
-                    </>
-                  )}
-
-                  {serviceDetailLinkId
-                    ? (() => {
-                        const link = (viewingItem.contracts || []).find(
-                          (c) => c.id === serviceDetailLinkId
-                        );
+          <div className="space-y-6">
+            {servicePageLink ? (() => {
+                        const link = servicePageLink;
                         if (!link) return null;
                         const statusMeta = contractStatusMeta(link.status);
                         const contractValue =
@@ -3297,88 +3124,90 @@ export default function EmpreiteirosPage() {
                           0
                         );
                         return (
-                          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
-                            <div
-                              className="absolute inset-0 bg-black/50"
-                              onClick={closeServiceDetailModal}
-                            />
-                            <div className="relative mx-auto flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800">
-                              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
-                                <div className="min-w-0">
-                                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                    {link.contratoNome || link.name || 'Contrato de serviço'}
-                                  </h3>
-                                  {link.description?.trim() ? (
-                                    <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-300">
-                                      {link.description.trim()}
-                                    </p>
-                                  ) : null}
-                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                    {[
-                                      link.location,
-                                      link.centroCustoNome || link.costCenter?.name,
-                                      `${formatDateBr(link.startDate)} – ${formatDateBr(link.endDate)}`,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(' · ')}
-                                  </p>
-                                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                    <span
-                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
-                                    >
-                                      {statusMeta.label}
-                                    </span>
-                                    <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                                      {paymentLabelForLink(link)}
-                                    </span>
-                                    {canManageCadastro ? (
-                                      <select
-                                        disabled={savingContractLink}
-                                        value={String(link.status || 'IN_PROGRESS').toUpperCase()}
-                                        onChange={(e) => {
-                                          void handleUpdateContractStatus(
-                                            link.id,
-                                            e.target.value as EmpreiteiroContractStatus
-                                          );
-                                        }}
-                                        className="max-w-[9.5rem] rounded-lg border border-gray-300 bg-white px-1.5 py-1 text-[11px] font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
-                                        aria-label="Alterar status do contrato"
+                          <div className="space-y-6">
+                            <div className="space-y-4">
+                              <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+                                <div className="flex min-w-0 items-center gap-4">
+                                  <div className="min-w-0">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                                      <h1 className="truncate text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                                        {link.contratoNome || link.name || 'Contrato de serviço'}
+                                      </h1>
+                                      <span
+                                        className={`inline-flex shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusMeta.className}`}
                                       >
-                                        {CONTRACT_STATUS_OPTIONS.map((opt) => (
-                                          <option key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                          </option>
-                                        ))}
-                                      </select>
+                                        {statusMeta.label}
+                                      </span>
+                                    </div>
+                                    {link.location ? (
+                                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{link.location}</p>
                                     ) : null}
+                                    {link.centroCustoNome || link.costCenter?.name ? (
+                                      <p
+                                        className={`${link.location ? '' : 'mt-1 '}text-sm text-gray-600 dark:text-gray-400`}
+                                      >
+                                        {link.centroCustoNome || link.costCenter?.name}
+                                      </p>
+                                    ) : null}
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                                      {`${formatDateBr(link.startDate)} à ${formatDateBr(link.endDate)}`}
+                                    </p>
                                   </div>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => openMedicaoPage(viewingItem, link.id)}
-                                    className="inline-flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                                  >
-                                    <ClipboardList className="h-3.5 w-3.5" />
-                                    Ver medições
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={closeServiceDetailModal}
-                                    className="rounded p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                    aria-label="Fechar"
-                                  >
-                                    <X className="h-5 w-5" />
-                                  </button>
+                                <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                                  {[
+                                    { rotulo: 'Contrato', valor: formatMoneyBr(contractValue) || '—', Icon: FileText },
+                                    { rotulo: 'Executado', valor: executedPct != null ? `${executedPct}%` : '—', Icon: TrendingUp },
+                                    { rotulo: 'Pago', valor: formatMoneyBr(paidTotal) || 'R$ 0,00', Icon: CheckCircle2 },
+                                    { rotulo: 'Saldo', valor: formatMoneyBr(saldoValue) || '—', Icon: Wallet },
+                                  ].map((k) => (
+                                    <div key={k.rotulo} className="flex items-center gap-3">
+                                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                        <k.Icon className="h-4 w-4" />
+                                      </span>
+                                      <div>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">{k.rotulo}</p>
+                                        <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{k.valor}</p>
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
-                              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-{editingServiceId === link.id ? (
-                            <div
-                              className="mt-3 space-y-3 rounded-xl border border-dashed border-sky-300 bg-sky-50/40 p-3 dark:border-sky-900/50 dark:bg-sky-950/20"
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
+                              <AppUnderlineTabList aria-label="Seções do contrato de serviço" centered={false} className="mt-1">
+                                {(
+                                  [
+                                    ...(isOwnEmpreiteiroAccount
+                                      ? []
+                                      : [
+                                          { id: 'parcelas', label: 'Parcelas' },
+                                          { id: 'aditivos', label: 'Aditivos' },
+                                          { id: 'anexos', label: 'Anexos' },
+                                        ]),
+                                    { id: 'equipe', label: 'Equipe' },
+                                    { id: 'medicoes', label: 'Medições' },
+                                    { id: 'dados', label: 'Dados' },
+                                  ] as const
+                                ).map((aba) => (
+                                  <AppUnderlineTabButton
+                                    key={aba.id}
+                                    active={abaServico === aba.id}
+                                    onClick={() => setAbaServico(aba.id as typeof abaServico)}
+                                    className="whitespace-nowrap px-3 py-2.5 text-sm"
+                                  >
+                                    {aba.label}
+                                  </AppUnderlineTabButton>
+                                ))}
+                              </AppUnderlineTabList>
+                            </div>
+
+
+                            <Modal
+                            isOpen={editingServiceId === link.id}
+                            onClose={() => setEditingServiceId(null)}
+                            title="Editar Serviço"
+                            size="lg"
+                          >
+                            <div className="space-y-4">
                               <div>
                                 <label className={labelClass}>Nome do serviço *</label>
                                 <input
@@ -3413,14 +3242,14 @@ export default function EmpreiteirosPage() {
                                 />
                               </div>
                               <div>
-                                <label className={labelClass}>Centro de custo *</label>
+                                <label className={labelClass}>Contrato *</label>
                                 <StringSingleSelectDropdown
-                                  value={editServiceCostCenterId}
-                                  onChange={setEditServiceCostCenterId}
-                                  options={costCenterSelectOptions}
-                                  placeholder="Selecione o centro de custo"
-                                  emptyOptionLabel="Selecione o centro de custo"
-                                  searchPlaceholder="Pesquisar centro de custo..."
+                                  value={editServiceContractId}
+                                  onChange={setEditServiceContractId}
+                                  options={contractSelectOptions}
+                                  placeholder="Selecione o contrato"
+                                  emptyOptionLabel="Selecione o contrato"
+                                  searchPlaceholder="Pesquisar contrato..."
                                   matchTriggerWidth
                                 />
                               </div>
@@ -3531,15 +3360,11 @@ export default function EmpreiteirosPage() {
                                           onChange={(e) => setEditServicePayDate(e.target.value)}
                                           className={inputClass}
                                         />
-                                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                                          1 parcela com o valor total — a baixa na aprovação libera
-                                          a parcela; pago ao anexar comprovante.
-                                        </p>
                                       </div>
                                     ) : null}
                                     {editServicePayMode === 'parcelado' ? (
                                       <div className="mt-2 space-y-2">
-                                        <label className={labelClass}>Nº de parcelas</label>
+                                        <label className={labelClass}>Número de parcelas</label>
                                         <input
                                           type="number"
                                           min={2}
@@ -3624,13 +3449,6 @@ export default function EmpreiteirosPage() {
                                                   </div>
                                                 ))}
                                               </div>
-                                              <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                Soma: {formatMoneyBr(sum) || 'R$ 0,00'}
-                                                {planned != null
-                                                  ? ` · Planejado: ${formatMoneyBr(planned)}`
-                                                  : ''}
-                                                . Ao mudar uma, as outras dividem o que sobra.
-                                              </p>
                                             </div>
                                           );
                                         })()}
@@ -3663,205 +3481,337 @@ export default function EmpreiteirosPage() {
                                 </button>
                               </div>
                             </div>
-                          ) : null}
+                          </Modal>
 
-                          <div className="mt-4">
-                            <ContractFinanceStats
-                              items={[
-                                {
-                                  label: 'Contrato',
-                                  value: formatMoneyBr(contractValue) || '—',
-                                },
-                                {
-                                  label: 'Executado',
-                                  value: executedPct != null ? `${executedPct}%` : '—',
-                                },
-                                {
-                                  label: 'Pago',
-                                  value: formatMoneyBr(paidTotal) || 'R$ 0,00',
-                                },
-                                {
-                                  label: 'Saldo',
-                                  value: formatMoneyBr(saldoValue) || '—',
-                                },
-                              ]}
-                            />
+                            {!isOwnEmpreiteiroAccount && abaServico === 'parcelas' ? (
+                              <Card className={cadastroListClasses.card}>
+                                <CardHeader className="border-b-0 pb-1">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                                <Wallet className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Parcelas</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">Pagamentos previstos e liberados deste serviço</p>
+                              </div>
+                            </div>
                           </div>
-
-                          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                            {measurementLabel}
-                            {(link.teamCount ?? link.team?.length ?? 0) > 0
-                              ? ` · ${link.teamCount ?? link.team?.length} na equipe`
-                              : ' · Sem equipe'}
-                            {(link.addendaCount || 0) > 0
-                              ? ` · ${link.addendaCount} aditivo${
-                                  (link.addendaCount || 0) === 1 ? '' : 's'
-                                }`
-                              : ''}
-                            {(link.plannedValue != null || (link.addendaTotal || 0) !== 0) &&
-                            (link.addendaCount || 0) > 0
-                              ? ` · original ${formatMoneyBr(link.plannedValue) || '—'}`
-                              : ''}
-                            {(link.addendaPendingCount || 0) > 0
-                              ? ` · ${link.addendaPendingCount} aditivo${
-                                  (link.addendaPendingCount || 0) === 1 ? '' : 's'
-                                } aguardando aprovação`
-                              : ''}
-                          </p>
-
-                          <>
-                          {!isOwnEmpreiteiroAccount ? (
-                          <div
-                            className="mt-4 space-y-4 border-t border-gray-100 pt-4 dark:border-gray-800"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
+                        </CardHeader>
+                                <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
+                                  {(link.installments || []).length === 0 ? (
+                                    <CadastroListEmpty
+                                      icon={Wallet}
+                                      title="Nenhuma parcela encontrada"
+                                      hint="Defina a forma de pagamento ao editar o serviço"
+                                    />
+                                  ) : null}
+                          {(link.installments || []).length > 0 ? (
+                            <div className="table-scroll">
+                              <table className={`${cadastroListClasses.table} text-sm`}>
+                                <thead className="border-b border-gray-200 dark:border-gray-700">
+                                  <tr>
+                                    <th className={`${cadastroListClasses.th} w-24 text-center`}>Parcela</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Vencimento</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Status</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Ação</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                  {(link.installments || []).map((parcel) => {
+                                    const meta = installmentStatusMeta(parcel.status);
+                                    const statusKey = String(parcel.status || '').toUpperCase();
+                                    return (
+                                      <tr key={parcel.id}>
+                                        <td className={`${cadastroListClasses.td} w-24 text-center font-medium`}>
+                                          {parcel.number}ª
+                                        </td>
+                                        <td className={`${cadastroListClasses.td} text-center tabular-nums`}>
+                                          {formatMoneyBr(parcel.amount) || '—'}
+                                        </td>
+                                        {(() => {
+                                          const numeroFluig = parcel.fluigRequestNumber || '';
+                                          const noFluig = numeroFluig ? fluigParcelasData?.[numeroFluig] : undefined;
+                                          const fase = noFluig?.fase ? faseExibicao(noFluig.fase) : null;
+                                          return (
+                                            <>
+                                              <td className={`${cadastroListClasses.td} whitespace-nowrap text-center`}>
+                                                {noFluig?.vencimento ? formatDateBr(noFluig.vencimento) : '—'}
+                                              </td>
+                                              <td className={`${cadastroListClasses.td} text-center`}>
+                                                {!numeroFluig ? (
+                                                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                                    Sem solicitação
+                                                  </span>
+                                                ) : fase ? (
+                                                  <span
+                                                    className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                                                      fase.finalizada
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                        : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                                                    }`}
+                                                  >
+                                                    {fase.texto}
+                                                  </span>
+                                                ) : (
+                                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                                    Não encontrada no Fluig
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className={`${cadastroListClasses.td} text-center`}>
+                                                {numeroFluig ? (
+                                                  <div className="flex items-center justify-center gap-2">
+                                                    <a
+                                                      href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+                                                      title="Abrir no Fluig"
+                                                    >
+                                                      Solicitação {numeroFluig}
+                                                      <ExternalLink className="h-3.5 w-3.5" />
+                                                    </a>
+                                                    {canManageCadastro ? (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => abrirModalFluig(link.id, parcel)}
+                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700"
+                                                        aria-label="Alterar solicitação"
+                                                        title="Alterar solicitação"
+                                                      >
+                                                        <Pencil className="h-4 w-4" />
+                                                      </button>
+                                                    ) : null}
+                                                  </div>
+                                                ) : canManageCadastro ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => abrirModalFluig(link.id, parcel)}
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                                                    aria-label="Informar solicitação do Fluig"
+                                                    title="Informar solicitação do Fluig"
+                                                  >
+                                                    <Link2 className="h-4 w-4" />
+                                                  </button>
+                                                ) : (
+                                                  '—'
+                                                )}
+                                              </td>
+                                            </>
+                                          );
+                                        })()}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : null}
+                          <Modal
+                            isOpen={fluigModal?.linkId === link.id}
+                            onClose={() => setFluigModal(null)}
+                            title={`Parcela ${fluigModal?.number ?? ''}`}
+                            size="md"
                           >
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                Aditivos
-                              </p>
-                              {canManageCadastro ? (
+                            <div className="space-y-4">
+                              <div>
+                                <label className={labelClass}>Número da solicitação *</label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={fluigNumeroInput}
+                                  onChange={(e) => setFluigNumeroInput(e.target.value.replace(/[^0-9]/g, ''))}
+                                  placeholder="Ex.: 123456"
+                                  className={inputClass}
+                                  autoFocus
+                                />
+                              </div>
+                              <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                                 <button
                                   type="button"
-                                  disabled={savingContractLink}
-                                  onClick={() => {
-                                    if (addingAddendumForId === link.id) {
-                                      resetAddendumForm();
-                                      return;
-                                    }
-                                    resetAddendumForm();
-                                    setAddingAddendumForId(link.id);
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                                  onClick={() => setFluigModal(null)}
+                                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                                 >
-                                  <Plus className="h-3.5 w-3.5" />
-                                  {addingAddendumForId === link.id ? 'Cancelar' : 'Adicionar aditivo'}
+                                  Cancelar
                                 </button>
-                              ) : null}
+                                <button
+                                  type="button"
+                                  disabled={savingFluigNumero || !fluigNumeroInput.trim()}
+                                  onClick={() => void salvarSolicitacaoFluig()}
+                                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                >
+                                  {savingFluigNumero ? 'Salvando…' : 'Salvar'}
+                                </button>
+                              </div>
                             </div>
-                            {(link.addenda || []).length === 0 ? (
-                              <p className="rounded-xl border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                                Nenhum aditivo neste contrato.
-                              </p>
-                            ) : (
-                              <div className="space-y-1">
-                                {(link.addenda || []).map((ad) => {
-                                  const hrefFiles = ad.files || [];
-                                  return (
-                                    <div
-                                      key={ad.id}
-                                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800/80"
-                                    >
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="font-semibold text-gray-800 dark:text-gray-100">
-                                          Aditivo nº {ad.number}
-                                        </span>
-                                        <span
-                                          className={
-                                            ad.amount >= 0
-                                              ? 'font-semibold text-emerald-700 dark:text-emerald-300'
-                                              : 'font-semibold text-red-700 dark:text-red-300'
-                                          }
-                                        >
-                                          {ad.amount >= 0 ? '+' : ''}
-                                          {formatMoneyBr(ad.amount)}
-                                        </span>
-                                        <span className="text-gray-400">
-                                          {formatDateBr(ad.effectiveDate)}
-                                        </span>
+                          </Modal>
+
+                                </CardContent>
+                              </Card>
+                            ) : null}
+
+                            {!isOwnEmpreiteiroAccount && abaServico === 'aditivos' ? (
+                              <Card className={cadastroListClasses.card}>
+                                <CardHeader className="border-b-0 pb-1">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                                <ClipboardList className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Aditivos</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">Alterações de valor e prazo do contrato de serviço</p>
+                              </div>
+                            </div>
+                            {canManageCadastro ? (
+                              <button
+                                type="button"
+                                disabled={savingContractLink}
+                                onClick={() => {
+                                  if (addingAddendumForId === link.id) {
+                                    resetAddendumForm();
+                                    return;
+                                  }
+                                  resetAddendumForm();
+                                  setAddingAddendumForId(link.id);
+                                }}
+                                className="flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                              >
+                                <Plus className="h-4 w-4 shrink-0" />
+                                <span>{addingAddendumForId === link.id ? 'Cancelar' : 'Adicionar Aditivo'}</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        </CardHeader>
+                                <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
+                          {(link.addenda || []).length === 0 ? (
+                            <CadastroListEmpty
+                              icon={ClipboardList}
+                              title="Nenhum aditivo encontrado"
+                              hint={canManageCadastro ? 'Use “Adicionar Aditivo” para cadastrar o primeiro' : 'Nenhum aditivo neste contrato'}
+                            />
+                          ) : (
+                            <div className="table-scroll">
+                              <table className={`${cadastroListClasses.table} text-sm`}>
+                                <thead className="border-b border-gray-200 dark:border-gray-700">
+                                  <tr>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Nº</th>
+                                    <th className={cadastroListClasses.th}>Motivo</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Data</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Status</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Ação</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                  {(link.addenda || []).map((ad) => (
+                                    <tr key={ad.id}>
+                                      <td className={`${cadastroListClasses.td} text-center font-medium`}>{ad.number}º</td>
+                                      <td className={cadastroListClasses.td}>
+                                        <p className="text-gray-900 dark:text-gray-100">{ad.reason}</p>
+                                        {[
+                                          ad.servicesAdded ? `+ Serviços: ${ad.servicesAdded}` : null,
+                                          ad.servicesRemoved ? `− Serviços: ${ad.servicesRemoved}` : null,
+                                          ad.approvedByName ? `Aprovado por: ${ad.approvedByName}` : null,
+                                          ad.status === 'CORRECTION' && ad.correctionNote
+                                            ? `Motivo da devolução: ${ad.correctionNote}`
+                                            : null,
+                                        ]
+                                          .filter(Boolean)
+                                          .map((line) => (
+                                            <p key={String(line)} className="text-xs text-gray-500 dark:text-gray-400">
+                                              {line}
+                                            </p>
+                                          ))}
+                                        {(ad.files || []).map((file, fi) => (
+                                          <a
+                                            key={`${file.url}-${fi}`}
+                                            href={resolveApiMediaUrl(file.url) || file.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="mt-0.5 inline-flex items-center gap-1 text-xs text-red-700 hover:underline dark:text-red-300"
+                                          >
+                                            <Paperclip className="h-3 w-3" />
+                                            {file.name || 'contrato atualizado'}
+                                          </a>
+                                        ))}
+                                      </td>
+                                      <td
+                                        className={`${cadastroListClasses.td} whitespace-nowrap text-center font-semibold tabular-nums ${
+                                          ad.amount >= 0
+                                            ? 'text-emerald-700 dark:text-emerald-300'
+                                            : 'text-red-700 dark:text-red-300'
+                                        }`}
+                                      >
+                                        {ad.amount >= 0 ? '+' : ''}
+                                        {formatMoneyBr(ad.amount)}
+                                      </td>
+                                      <td className={`${cadastroListClasses.td} whitespace-nowrap text-center`}>
+                                        {formatDateBr(ad.effectiveDate)}
+                                      </td>
+                                      <td className={`${cadastroListClasses.td} text-center`}>
                                         {ad.status === 'PENDING' ? (
-                                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
                                             Aguardando aprovação
                                           </span>
                                         ) : ad.status === 'CORRECTION' ? (
-                                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800 dark:bg-red-900/30 dark:text-red-300">
                                             Devolvido
                                           </span>
-                                        ) : null}
+                                        ) : (
+                                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                            Aprovado
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className={`${cadastroListClasses.td} text-center`}>
                                         {canManageCadastro &&
                                         (ad.status === 'CORRECTION' || ad.number === lastAddendumNumber) ? (
-                                          <div className="ml-auto flex items-center gap-2">
+                                          <div className="flex items-center justify-center gap-1">
                                             {ad.status === 'CORRECTION' ? (
                                               <button
                                                 type="button"
                                                 disabled={savingContractLink}
                                                 onClick={() => startEditAddendum(link.id, ad)}
-                                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700"
+                                                aria-label="Corrigir e reenviar"
+                                                title="Corrigir e reenviar"
                                               >
-                                                <Pencil className="h-3 w-3" />
-                                                Corrigir e reenviar
+                                                <Pencil className="h-4 w-4" />
                                               </button>
                                             ) : null}
                                             {ad.number === lastAddendumNumber ? (
                                               <button
                                                 type="button"
                                                 disabled={savingContractLink}
-                                                onClick={() =>
-                                                  void handleDeleteAddendum(link.id, ad.id)
-                                                }
-                                                className="text-gray-400 hover:text-red-600"
+                                                onClick={() => void handleDeleteAddendum(link.id, ad.id)}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 hover:text-red-600"
                                                 aria-label="Excluir aditivo"
+                                                title="Excluir aditivo"
                                               >
-                                                <Trash2 className="h-3.5 w-3.5" />
+                                                <Trash2 className="h-4 w-4" />
                                               </button>
                                             ) : null}
                                           </div>
-                                        ) : null}
-                                      </div>
-                                      <p className="mt-0.5 text-gray-600 dark:text-gray-300">
-                                        {ad.reason}
-                                      </p>
-                                      {[
-                                        ad.servicesAdded
-                                          ? `+ Serviços: ${ad.servicesAdded}`
-                                          : null,
-                                        ad.servicesRemoved
-                                          ? `− Serviços: ${ad.servicesRemoved}`
-                                          : null,
-                                        ad.approvedByName
-                                          ? `Aprovado por: ${ad.approvedByName}`
-                                          : null,
-                                        ad.status === 'CORRECTION' && ad.correctionNote
-                                          ? `Motivo da devolução: ${ad.correctionNote}`
-                                          : null,
-                                      ]
-                                        .filter(Boolean)
-                                        .map((line) => (
-                                          <p
-                                            key={String(line)}
-                                            className="text-[11px] text-gray-500 dark:text-gray-400"
-                                          >
-                                            {line}
-                                          </p>
-                                        ))}
-                                      {hrefFiles.map((file, fi) => {
-                                        const href = resolveApiMediaUrl(file.url) || file.url;
-                                        return (
-                                          <a
-                                            key={`${file.url}-${fi}`}
-                                            href={href}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline dark:text-red-300"
-                                          >
-                                            <Paperclip className="h-3 w-3" />
-                                            {file.name || 'contrato atualizado'}
-                                          </a>
-                                        );
-                                      })}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {addingAddendumForId === link.id ? (
-                              <div className="space-y-2 rounded-lg border border-dashed border-red-300 bg-red-50/30 p-2.5 dark:border-red-900/50 dark:bg-red-950/20">
-                                {editingAddendum ? (
-                                  <p className="text-xs font-semibold text-red-700 dark:text-red-300">
-                                    Corrigindo aditivo nº {editingAddendum.number}
-                                  </p>
-                                ) : null}
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          <Modal
+                            isOpen={addingAddendumForId === link.id}
+                            onClose={resetAddendumForm}
+                            title={editingAddendum ? `Corrigir Aditivo nº ${editingAddendum.number}` : 'Novo Aditivo'}
+                            size="lg"
+                          >
+                            <div className="space-y-4">
                                 <div>
                                   <label className={labelClass}>Motivo *</label>
                                   <input
@@ -3869,10 +3819,10 @@ export default function EmpreiteirosPage() {
                                     value={addendumReason}
                                     onChange={(e) => setAddendumReason(e.target.value)}
                                     className={inputClass}
-                                    placeholder=""
+                                    placeholder="Descreva o motivo do aditivo"
                                   />
                                 </div>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                   <div>
                                     <label className={labelClass}>Valor (R$) *</label>
                                     <input
@@ -3897,12 +3847,7 @@ export default function EmpreiteirosPage() {
                                   </div>
                                   <div>
                                     <label className={labelClass}>Data</label>
-                                    <input
-                                      type="date"
-                                      value={addendumDate}
-                                      onChange={(e) => setAddendumDate(e.target.value)}
-                                      className={inputClass}
-                                    />
+                                    <DatePickerField value={addendumDate} onChange={setAddendumDate} />
                                   </div>
                                 </div>
                                 <div>
@@ -3912,38 +3857,19 @@ export default function EmpreiteirosPage() {
                                     value={addendumServicesAdded}
                                     onChange={(e) => setAddendumServicesAdded(e.target.value)}
                                     className={inputClass}
+                                    placeholder="Ex.: Reboco do Bloco C"
                                   />
                                 </div>
                                 <div>
                                   <label className={labelClass}>Contrato atualizado</label>
-                                  <input
-                                    type="file"
-                                    accept=".pdf,.doc,.docx,image/*,application/pdf"
-                                    className="hidden"
-                                    id={`empreiteiro-addendum-file-${link.id}`}
-                                    disabled={uploadingFile}
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      e.target.value = '';
-                                      void uploadAddendumFile(file);
-                                    }}
-                                  />
                                   <div className="space-y-1">
-                                    <button
-                                      type="button"
-                                      disabled={uploadingFile}
-                                      onClick={() =>
-                                        document
-                                          .getElementById(`empreiteiro-addendum-file-${link.id}`)
-                                          ?.click()
-                                      }
-                                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                                    >
-                                      <Paperclip className="h-3.5 w-3.5" />
-                                      {uploadingFile
-                                        ? 'Enviando…'
-                                        : 'Anexar o novo contrato atualizado'}
-                                    </button>
+                                    <FileDropZone
+                                      label="Anexar contrato atualizado"
+                                      hint="Clique ou arraste PDF, Word ou imagem"
+                                      accept=".pdf,.doc,.docx,image/*,application/pdf"
+                                      uploading={uploadingFile}
+                                      onFiles={(files) => void uploadAddendumFile(files[0])}
+                                    />
                                     {addendumFiles.length > 0 ? (
                                       <ul className="space-y-1">
                                         {addendumFiles.map((file, fileIndex) => (
@@ -3969,88 +3895,52 @@ export default function EmpreiteirosPage() {
                                         ))}
                                       </ul>
                                     ) : null}
-                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                      Depois de aprovado, o arquivo aparece em Contrato, junto com os que já estão anexados.
-                                    </p>
                                   </div>
                                 </div>
                                 <div>
                                   <label className={labelClass}>Como aplicar o valor</label>
-                                  <div className="mt-1 flex flex-wrap gap-1.5">
-                                    {(
-                                      [
-                                        { value: 'new' as const, label: 'Nova condição de pagamento' },
-                                        {
-                                          value: 'redistribute' as const,
-                                          label: 'Redistribuir nas parcelas que faltam',
-                                        },
-                                      ] as const
-                                    ).map((opt) => {
-                                      const active = addendumPayMode === opt.value;
-                                      return (
-                                        <button
-                                          key={opt.value}
-                                          type="button"
-                                          onClick={() => setAddendumPayMode(opt.value)}
-                                          className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
-                                            active
-                                              ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
-                                              : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
-                                          }`}
-                                        >
-                                          {opt.label}
-                                        </button>
-                                      );
-                                    })}
+                                  <div className="mt-1 flex gap-2">
+                                    <ButtonSeg
+                                      active={addendumPayMode === 'new'}
+                                      label="Nova condição de pagamento"
+                                      onClick={() => setAddendumPayMode('new')}
+                                    />
+                                    <ButtonSeg
+                                      active={addendumPayMode === 'redistribute'}
+                                      label="Redistribuir nas parcelas"
+                                      onClick={() => setAddendumPayMode('redistribute')}
+                                    />
                                   </div>
                                   {addendumPayMode === 'new' ? (
                                     <div className="mt-2">
                                       <label className={labelClass}>Forma de pagamento</label>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {(
-                                          [
-                                            { value: 'avista' as const, label: 'À vista' },
-                                            { value: 'parcelado' as const, label: 'Parcelado' },
-                                          ] as const
-                                        ).map((opt) => {
-                                          const active = addendumScheduleMode === opt.value;
-                                          return (
-                                            <button
-                                              key={opt.value}
-                                              type="button"
-                                              onClick={() => {
-                                                setAddendumScheduleMode(opt.value);
-                                                if (opt.value === 'parcelado') {
-                                                  const n = Math.floor(Number(addendumParcelCount)) || 6;
-                                                  setAddendumParcelCount(String(n));
-                                                  setAddendumParcelAmounts(
-                                                    buildEqualParcelAmountInputs(
-                                                      parseCurrencyInputBr(addendumAmount),
-                                                      n
-                                                    )
-                                                  );
-                                                } else {
-                                                  setAddendumParcelAmounts([]);
-                                                }
-                                              }}
-                                              className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
-                                                active
-                                                  ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300'
-                                                  : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
-                                              }`}
-                                            >
-                                              {opt.label}
-                                            </button>
-                                          );
-                                        })}
+                                      <div className="flex gap-2">
+                                        <ButtonSeg
+                                          active={addendumScheduleMode === 'avista'}
+                                          label="À vista"
+                                          onClick={() => {
+                                            setAddendumScheduleMode('avista');
+                                            setAddendumParcelAmounts([]);
+                                          }}
+                                        />
+                                        <ButtonSeg
+                                          active={addendumScheduleMode === 'parcelado'}
+                                          label="Parcelado"
+                                          onClick={() => {
+                                            setAddendumScheduleMode('parcelado');
+                                            const n = Math.floor(Number(addendumParcelCount)) || 6;
+                                            setAddendumParcelCount(String(n));
+                                            setAddendumParcelAmounts(
+                                              buildEqualParcelAmountInputs(parseCurrencyInputBr(addendumAmount), n)
+                                            );
+                                          }}
+                                        />
                                       </div>
                                       {addendumScheduleMode === 'avista' ? (
-                                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                                          1 parcela nova com o valor do aditivo.
-                                        </p>
+                                        <></>
                                       ) : (
                                         <div className="mt-2 space-y-2">
-                                          <label className={labelClass}>Nº de parcelas</label>
+                                          <label className={labelClass}>Número de parcelas</label>
                                           <input
                                             type="number"
                                             min={2}
@@ -4129,13 +4019,6 @@ export default function EmpreiteirosPage() {
                                                     </div>
                                                   ))}
                                                 </div>
-                                                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                  Soma: {formatMoneyBr(sum) || 'R$ 0,00'}
-                                                  {total != null
-                                                    ? ` · Aditivo: ${formatMoneyBr(total)}`
-                                                    : ''}
-                                                  . Ao mudar uma, as outras dividem o que sobra.
-                                                </p>
                                               </div>
                                             );
                                           })()}
@@ -4143,285 +4026,1075 @@ export default function EmpreiteirosPage() {
                                       )}
                                     </div>
                                   ) : (
-                                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                                      O valor é dividido por igual nas parcelas que ainda não foram pagas.
-                                    </p>
+                                    <></>
                                   )}
                                 </div>
+                              <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                                <button type="button" onClick={resetAddendumForm} className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">
+                                  Cancelar
+                                </button>
                                 <button
                                   type="button"
                                   disabled={savingContractLink || !addendumReason.trim()}
                                   onClick={() => void handleAddAddendum(link.id)}
-                                  className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                 >
                                   {savingContractLink
                                     ? 'Enviando…'
                                     : editingAddendum
-                                      ? 'Reenviar para aprovação'
-                                      : 'Enviar para aprovação'}
+                                      ? 'Reenviar para Aprovação'
+                                      : 'Enviar para Aprovação'}
                                 </button>
                               </div>
+                            </div>
+                          </Modal>
+
+                                </CardContent>
+                              </Card>
+                            ) : null}
+
+                            {!isOwnEmpreiteiroAccount && abaServico === 'anexos' ? (
+                              <Card className={cadastroListClasses.card}>
+                                <CardHeader className="border-b-0 pb-1">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                                <Paperclip className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Anexos do Contrato</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">Contrato assinado e demais documentos</p>
+                              </div>
+                            </div>
+                            {canManageCadastro ? (
+                              <button type="button" onClick={() => setAnexoModalLinkId(link.id)} className="flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40">
+                                <Plus className="h-4 w-4 shrink-0" />
+                                <span>Anexar Contrato</span>
+                              </button>
                             ) : null}
                           </div>
-                          {(link.installments || []).length > 0 ? (
-                            <div className="space-y-2">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                Parcelas
-                                <span className="ml-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-                                  {(link.installments || []).length}
-                                </span>
-                              </p>
-                              <div className="space-y-2">
-                                {(openParcelLinkIds[link.id]
-                                  ? link.installments || []
-                                  : (link.installments || []).slice(0, 2)
-                                ).map((parcel) => {
-                                  const meta = installmentStatusMeta(parcel.status);
-                                  const statusKey = String(parcel.status || '').toUpperCase();
-                                  return (
-                                    <div
-                                      key={parcel.id}
-                                      className="flex flex-wrap items-center gap-3 rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50"
-                                    >
-                                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-xs font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                                        {parcel.number}ª
-                                      </span>
-                                      <div className="min-w-0">
-                                        <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                                          {formatMoneyBr(parcel.amount) || '—'}
-                                        </p>
-                                        {parcel.dueDate ? (
-                                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                            Vence em {formatDateBr(parcel.dueDate)}
-                                          </p>
-                                        ) : null}
-                                      </div>
-                                      <span
-                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}
-                                      >
-                                        {meta.label}
-                                      </span>
-                                      {canManageCadastro && statusKey === 'PENDING' ? (
-                                        <button
-                                          type="button"
-                                          disabled={savingContractLink}
-                                          onClick={() =>
-                                            void handleReleaseInstallment(link.id, parcel.id)
-                                          }
-                                          className="ml-auto inline-flex items-center rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70"
+                        </CardHeader>
+                                <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
+                          {(link.files || []).length === 0 ? (
+                            <CadastroListEmpty
+                              icon={Paperclip}
+                              title="Nenhum anexo encontrado"
+                              hint={canManageCadastro ? 'Use “Anexar Contrato” para enviar o primeiro' : 'Nenhum contrato anexado'}
+                            />
+                          ) : (
+                            <div className="table-scroll">
+                              <table className={`${cadastroListClasses.table} text-sm`}>
+                                <thead className="border-b border-gray-200 dark:border-gray-700">
+                                  <tr>
+                                    <th className={cadastroListClasses.th}>Arquivo</th>
+                                    {canManageCadastro ? (
+                                      <th className={`${cadastroListClasses.th} text-center`}>Ação</th>
+                                    ) : null}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                  {(link.files || []).map((file, fileIndex) => (
+                                    <tr key={`${file.url}-${fileIndex}`}>
+                                      <td className={cadastroListClasses.td}>
+                                        <a
+                                          href={resolveApiMediaUrl(file.url) || file.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center gap-2 text-gray-900 hover:text-red-700 dark:text-gray-100 dark:hover:text-red-300"
                                         >
-                                          Liberar pagamento
-                                        </button>
+                                          <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
+                                          <span className="truncate">{file.name || 'contrato'}</span>
+                                        </a>
+                                      </td>
+                                      {canManageCadastro ? (
+                                        <td className={`${cadastroListClasses.td} text-center`}>
+                                          <button
+                                            type="button"
+                                            onClick={() => void removeServiceContractFile(link.id, link.files, fileIndex)}
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 hover:text-red-600"
+                                            aria-label="Remover anexo"
+                                            title="Remover anexo"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </td>
                                       ) : null}
-                                      {canManageCadastro && statusKey === 'RELEASED' ? (
-                                        <>
-                                          <input
-                                            type="file"
-                                            accept=".pdf,.doc,.docx,image/*,application/pdf"
-                                            className="hidden"
-                                            id={`empreiteiro-parcel-proof-${parcel.id}`}
-                                            disabled={uploadingFile || savingContractLink}
-                                            onChange={(e) => {
-                                              const file = e.target.files?.[0];
-                                              e.target.value = '';
-                                              void handleAttachInstallmentProof(
-                                                link.id,
-                                                parcel.id,
-                                                file
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          <Modal
+                            isOpen={anexoModalLinkId === link.id}
+                            onClose={() => setAnexoModalLinkId(null)}
+                            title="Anexar Contrato"
+                            size="md"
+                          >
+                            <FileDropZone
+                              label="Anexar contrato"
+                              hint="Clique ou arraste PDF, Word ou imagem do contrato"
+                              accept=".pdf,.doc,.docx,image/*,application/pdf"
+                              uploading={uploadingFile}
+                              disabled={savingContractLink}
+                              onFiles={(files) => {
+                                void uploadServiceContractFile(link.id, link.files, files[0]).then(() =>
+                                  setAnexoModalLinkId(null)
+                                );
+                              }}
+                            />
+                          </Modal>
+
+                                </CardContent>
+                              </Card>
+                            ) : null}
+
+                            {abaServico === 'medicoes' ? (
+                              <>
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+                                  <FilterStatCard
+                                    label="Contrato"
+                                    count={formatMoneyBr(contractValue) || '—'}
+                                    icon={FileText}
+                                    iconBg="bg-violet-100 dark:bg-violet-900/30"
+                                    iconColor="text-violet-600 dark:text-violet-400"
+                                  />
+                                  <FilterStatCard
+                                    label="Executado"
+                                    count={executedPct != null ? `${executedPct}%` : '—'}
+                                    icon={TrendingUp}
+                                    iconBg="bg-blue-100 dark:bg-blue-900/30"
+                                    iconColor="text-blue-600 dark:text-blue-400"
+                                  />
+                                  <FilterStatCard
+                                    label="Pago"
+                                    count={formatMoneyBr(paidTotal) || 'R$ 0,00'}
+                                    icon={CheckCircle2}
+                                    iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+                                    iconColor="text-emerald-600 dark:text-emerald-400"
+                                  />
+                                  <FilterStatCard
+                                    label="Saldo"
+                                    count={formatMoneyBr(saldoValue) || '—'}
+                                    icon={Wallet}
+                                    iconBg="bg-amber-100 dark:bg-amber-900/30"
+                                    iconColor="text-amber-600 dark:text-amber-400"
+                                  />
+                                </div>
+                                {renderMedicoesCard(viewingItem, false, link.id)}
+                              </>
+                            ) : null}
+
+                            {abaServico === 'dados' ? (
+                              <Card className={cadastroListClasses.card}>
+                                <CardHeader className="border-b-0 pb-1">
+                                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="flex items-center space-x-3">
+                                      <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                                        <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                                      </div>
+                                      <div>
+                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Dados do Serviço</h3>
+                                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                                          Informações, valores e situação do contrato de serviço
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {canManageCadastro ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditService(link)}
+                                        className="flex h-10 flex-shrink-0 items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                                      >
+                                        Editar
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </CardHeader>
+                                <CardContent className={`${cadastroListClasses.cardContent} space-y-6`}>
+                                  <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    {[
+                                      { rotulo: 'Serviço', valor: link.contratoNome || link.name },
+                                      { rotulo: 'Contrato', valor: link.centroCustoNome || link.costCenter?.name },
+                                      { rotulo: 'Local de execução', valor: link.location },
+                                      {
+                                        rotulo: 'Período',
+                                        valor: `${formatDateBr(link.startDate)} à ${formatDateBr(link.endDate)}`,
+                                      },
+                                      { rotulo: 'Valor planejado', valor: formatMoneyBr(link.plannedValue) },
+                                      { rotulo: 'Valor atual (com aditivos)', valor: formatMoneyBr(contractValue) },
+                                      { rotulo: 'Forma de pagamento', valor: paymentLabelForLink(link) },
+                                      { rotulo: 'Descrição', valor: link.description?.trim() },
+                                    ].map((campo) => (
+                                      <div key={campo.rotulo} className="min-w-0">
+                                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                          {campo.rotulo}
+                                        </dt>
+                                        <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100">
+                                          {campo.valor || '—'}
+                                        </dd>
+                                      </div>
+                                    ))}
+                                  </dl>
+                                  {canManageCadastro ? (
+                                    <div className="max-w-xs">
+                                      <label className={labelClass}>Status do serviço</label>
+                                      <StringSingleSelectDropdown
+                                        value={String(link.status || 'IN_PROGRESS').toUpperCase()}
+                                        onChange={(value) => {
+                                          if (!value) return;
+                                          void handleUpdateContractStatus(link.id, value as EmpreiteiroContractStatus);
+                                        }}
+                                        options={labeledToSelectOptions(
+                                          CONTRACT_STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))
+                                        )}
+                                        placeholder="Selecione o status"
+                                        matchTriggerWidth
+                                      />
+                                    </div>
+                                  ) : null}
+                                </CardContent>
+                              </Card>
+                            ) : null}
+
+
+                            {abaServico === 'equipe' ? (
+                              <Card className={cadastroListClasses.card}>
+                                <CardHeader className="border-b-0 pb-1">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                                <Users className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Equipe do Serviço</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">Pessoas que atuam neste serviço</p>
+                              </div>
+                            </div>
+                            {canEditTeamOnDetail ? (
+                              <button type="button" onClick={() => abrirModalPessoa(link.id, null)} className="flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40">
+                                <Plus className="h-4 w-4 shrink-0" />
+                                <span>Adicionar Pessoa</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        </CardHeader>
+                                <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
+                                  {(() => {
+                                    const equipe = contractTeamDraftById[link.id] ?? teamDraftFromMembers(link.team);
+                                    if (equipe.length === 0) {
+                                      return (
+                                        <CadastroListEmpty
+                                          icon={Users}
+                                          title="Nenhuma pessoa encontrada"
+                                          hint={
+                                            canEditTeamOnDetail
+                                              ? 'Use “Adicionar Pessoa” para cadastrar a primeira'
+                                              : 'Nenhuma pessoa neste serviço'
+                                          }
+                                        />
+                                      );
+                                    }
+                                    return (
+                                      <div className="table-scroll">
+                                        <table className={`${cadastroListClasses.table} text-sm`}>
+                                          <thead className="border-b border-gray-200 dark:border-gray-700">
+                                            <tr>
+                                              <th className={cadastroListClasses.th}>Pessoa</th>
+                                              <th className={`${cadastroListClasses.th} text-center`}>Função</th>
+                                              <th className={`${cadastroListClasses.th} text-center`}>Telefone</th>
+                                              {canEditTeamOnDetail ? (
+                                                <th className={listTableRowClasses.actionTh}>Ação</th>
+                                              ) : null}
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                            {equipe.map((member, index) => (
+                                              <tr key={`${link.id}-pessoa-${index}`}>
+                                                <td className={cadastroListClasses.td}>
+                                                  <div className="flex items-center gap-3">
+                                                    {member.photo ? (
+                                                      // eslint-disable-next-line @next/next/no-img-element
+                                                      <img
+                                                        src={member.photo}
+                                                        alt={member.name}
+                                                        className="h-10 w-10 shrink-0 rounded-full object-cover"
+                                                      />
+                                                    ) : (
+                                                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+                                                        <HardHat className="h-5 w-5" />
+                                                      </div>
+                                                    )}
+                                                    <div className="min-w-0">
+                                                      <p className="font-medium text-gray-900 dark:text-gray-100">
+                                                        {member.name}
+                                                      </p>
+                                                      {member.document ? (
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                          {member.document}
+                                                        </p>
+                                                      ) : null}
+                                                    </div>
+                                                  </div>
+                                                </td>
+                                                <td className={`${cadastroListClasses.td} text-center`}>{member.role || '—'}</td>
+                                                <td className={`${cadastroListClasses.td} whitespace-nowrap text-center`}>
+                                                  {member.phone || '—'}
+                                                </td>
+                                                {canEditTeamOnDetail ? (
+                                                  <RowActionMenuCell
+                                                    isOpen={isEquipeRowMenuOpen(`${link.id}::${index}`)}
+                                                    onToggle={(e) =>
+                                                      toggleEquipeRowActionMenu(
+                                                        `${link.id}::${index}`,
+                                                        e.currentTarget as HTMLButtonElement
+                                                      )
+                                                    }
+                                                  />
+                                                ) : null}
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                        {equipeRowActionMenu && equipeRowForActionMenu?.linkId === link.id ? (
+                                          <RowActionMenuPortal
+                                            menu={equipeRowActionMenu}
+                                            onClose={closeEquipeRowActionMenu}
+                                            onEdit={() =>
+                                              abrirModalPessoa(
+                                                equipeRowForActionMenu.linkId,
+                                                equipeRowForActionMenu.index,
+                                                equipeRowForActionMenu.member
+                                              )
+                                            }
+                                            onDelete={() => {
+                                              void removerPessoaDoServico(
+                                                equipeRowForActionMenu.linkId,
+                                                equipeRowForActionMenu.index
                                               );
                                             }}
                                           />
-                                          <button
-                                            type="button"
-                                            disabled={uploadingFile || savingContractLink}
-                                            onClick={() =>
-                                              document
-                                                .getElementById(
-                                                  `empreiteiro-parcel-proof-${parcel.id}`
-                                                )
-                                                ?.click()
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
+                                  <Modal
+                                    isOpen={teamModal?.linkId === link.id}
+                                    onClose={() => setTeamModal(null)}
+                                    title={teamModal?.index === null ? 'Nova Pessoa' : 'Editar Pessoa'}
+                                    size="lg"
+                                  >
+                                    <div className="space-y-4">
+                                      <div className="flex items-center gap-4">
+                                        <TeamMemberPhotoField
+                                          value={teamModalForm.photo}
+                                          onChange={(value) => setTeamModalForm((prev) => ({ ...prev, photo: value }))}
+                                          alt="Foto da pessoa"
+                                          redondo
+                                        />
+                                        <div>
+                                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Foto</p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">Opcional</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                        <div>
+                                          <label className={labelClass}>Nome *</label>
+                                          <input
+                                            type="text"
+                                            value={teamModalForm.name}
+                                            onChange={(e) => setTeamModalForm((prev) => ({ ...prev, name: e.target.value }))}
+                                            placeholder="Nome completo"
+                                            className={inputClass}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className={labelClass}>Função *</label>
+                                          <StringSingleSelectDropdown
+                                            value={teamModalForm.role}
+                                            onChange={(value) => setTeamModalForm((prev) => ({ ...prev, role: value }))}
+                                            options={teamRoleSelectOptions}
+                                            placeholder="Selecione a função"
+                                            emptyOptionLabel="Selecione a função"
+                                            matchTriggerWidth
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className={labelClass}>Telefone</label>
+                                          <input
+                                            type="text"
+                                            value={teamModalForm.phone}
+                                            onChange={(e) =>
+                                              setTeamModalForm((prev) => ({ ...prev, phone: maskPhoneInput(e.target.value) }))
                                             }
-                                            className="ml-auto inline-flex items-center rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/70"
-                                          >
-                                            Anexar comprovante
-                                          </button>
-                                        </>
-                                      ) : null}
-                                      {statusKey === 'PAID' &&
-                                      (parcel.proofFiles || []).length > 0 ? (
-                                        <a
-                                          href={
-                                            resolveApiMediaUrl(parcel.proofFiles![0].url) ||
-                                            parcel.proofFiles![0].url
-                                          }
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="ml-auto inline-flex items-center rounded-xl bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/70"
+                                            placeholder="(00) 90000-0000"
+                                            className={inputClass}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className={labelClass}>CPF</label>
+                                          <input
+                                            type="text"
+                                            value={teamModalForm.document}
+                                            onChange={(e) =>
+                                              setTeamModalForm((prev) => ({ ...prev, document: formatCpfInput(e.target.value) }))
+                                            }
+                                            placeholder="000.000.000-00"
+                                            className={inputClass}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                                        <button type="button" onClick={() => setTeamModal(null)} className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">
+                                          Cancelar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={savingTeamLinkId === link.id}
+                                          onClick={() => void confirmarModalPessoa()}
+                                          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                         >
-                                          Ver comprovante
-                                        </a>
-                                      ) : null}
+                                          {savingTeamLinkId === link.id ? 'Salvando…' : 'Salvar'}
+                                        </button>
+                                      </div>
                                     </div>
-                                  );
-                                })}
-                                {(link.installments || []).length > 2 ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setOpenParcelLinkIds((prev) => ({
-                                        ...prev,
-                                        [link.id]: !prev[link.id],
-                                      }))
-                                    }
-                                    className="inline-flex items-center rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                                  >
-                                    {openParcelLinkIds[link.id]
-                                      ? 'Mostrar menos'
-                                      : `Ver mais ${(link.installments || []).length - 2} parcelas`}
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-                          <div className="space-y-2">
-                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                              Contrato
-                            </p>
-                            <input
-                              type="file"
-                              accept=".pdf,.doc,.docx,image/*,application/pdf"
-                              className="hidden"
-                              id={`empreiteiro-service-file-${link.id}`}
-                              disabled={uploadingFile || !canManageCadastro}
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                e.target.value = '';
-                                void uploadServiceContractFile(link.id, link.files, file);
-                              }}
-                            />
-                            {(
-                              [
-                                ...(link.files || []).map((file, fileIndex) => ({
-                                  file,
-                                  pending: false,
-                                  fileIndex,
-                                })),
-                                ...(addingAddendumForId === link.id
-                                  ? addendumFiles.map((file, fileIndex) => ({
-                                      file,
-                                      pending: true,
-                                      fileIndex,
-                                    }))
-                                  : []),
-                              ] as const
-                            ).map(({ file, pending, fileIndex }) => {
-                              const href = resolveApiMediaUrl(file.url) || file.url;
-                              return (
-                                <div
-                                  key={`${pending ? 'novo' : 'salvo'}-${file.url}-${fileIndex}`}
-                                  className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50"
-                                >
-                                  <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="min-w-0 flex-1 truncate text-sm text-gray-800 hover:text-red-700 dark:text-gray-100 dark:hover:text-red-300"
-                                    title={file.name || 'contrato'}
-                                  >
-                                    {file.name || 'contrato'}
-                                  </a>
-                                  {canManageCadastro ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (pending) {
-                                          setAddendumFiles((prev) =>
-                                            prev.filter((_, i) => i !== fileIndex)
-                                          );
-                                          return;
-                                        }
-                                        void removeServiceContractFile(
-                                          link.id,
-                                          link.files,
-                                          fileIndex
-                                        );
-                                      }}
-                                      className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                                      aria-label="Remover anexo"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                            {canManageCadastro && addingAddendumForId !== link.id ? (
-                              <button
-                                type="button"
-                                disabled={uploadingFile || savingContractLink}
-                                onClick={() =>
-                                  document
-                                    .getElementById(`empreiteiro-service-file-${link.id}`)
-                                    ?.click()
-                                }
-                                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-                              >
-                                <Paperclip className="h-3.5 w-3.5" />
-                                {(link.files || []).length > 0
-                                  ? 'Anexar outro'
-                                  : 'Anexar contrato'}
-                              </button>
-                            ) : (link.files || []).length +
-                              (addingAddendumForId === link.id ? addendumFiles.length : 0) ===
-                            0 ? (
-                              <p className="rounded-xl border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                                Nenhum contrato anexado.
-                              </p>
+                                  </Modal>
+                                </CardContent>
+                              </Card>
                             ) : null}
                           </div>
-                          </div>
-                          ) : null}
-                          {renderContractTeamSection(link)}
-                          </>
-                              </div>
-                            </div>
-                          </AppModalOverlay>
                         );
-                      })()
-                    : null}
+                      })() : null}
+            {servicePageLink ? null : (
+            <>
+            {(() => {
+              const links = viewingItem.contracts || [];
+              const contratado = links.reduce(
+                (sum, l) => sum + (l.currentValue ?? l.plannedValue ?? 0),
+                0
+              );
+              const executado = links.reduce((sum, l) => sum + (l.executedAmountTotal ?? 0), 0);
+              const kpis = [
+                { rotulo: 'Contratado', valor: formatMoneyBr(contratado) || 'R$ 0,00', Icon: Wallet },
+                { rotulo: 'Executado', valor: formatMoneyBr(executado) || 'R$ 0,00', Icon: TrendingUp },
+                { rotulo: 'Contratos', valor: String(links.length), Icon: FileText },
+              ];
+              return (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+                    <div className="flex min-w-0 items-center gap-4">
+                      {resolveApiMediaUrl(viewingItem.photoUrl) ? (
+                        <button
+                          type="button"
+                          onClick={() => openPreviewPhoto(viewingItem.photoUrl, viewingItem.name)}
+                          className="shrink-0 rounded-full ring-offset-2 ring-offset-white hover:ring-2 hover:ring-red-500 dark:ring-offset-gray-900"
+                          aria-label={`Ver foto de ${viewingItem.name} em tamanho maior`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={resolveApiMediaUrl(viewingItem.photoUrl)}
+                            alt={viewingItem.name}
+                            className="h-20 w-20 cursor-zoom-in rounded-full object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500">
+                          <HardHat className="h-8 w-8" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                          <h1 className="truncate text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                            {viewingItem.name}
+                          </h1>
+                          <span
+                            className={`inline-flex shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+                              viewingItem.isActive
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                            }`}
+                          >
+                            {viewingItem.isActive ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </div>
+                        {empreiteiroCnpjDigits(viewingItem) ? (
+                          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                            {maskCnpjInput(empreiteiroCnpjDigits(viewingItem))}
+                          </p>
+                        ) : null}
+                        {viewingItem.specialty ? (
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{viewingItem.specialty}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                      {kpis.map((k) => (
+                        <div key={k.rotulo} className="flex items-center gap-3">
+                          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                            <k.Icon className="h-4 w-4" />
+                          </span>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{k.rotulo}</p>
+                            <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{k.valor}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <AppUnderlineTabList aria-label="Seções da empreita" centered={false} className="mt-1">
+                    {(
+                      [
+                        { id: 'contratos', label: 'Contratos de Serviço' },
+                        ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'fluig', label: 'Solicitações Fluig' }]),
+                        { id: 'dados', label: 'Dados' },
+                      ] as const
+                    ).map((aba) => (
+                      <AppUnderlineTabButton
+                        key={aba.id}
+                        active={abaDetalhe === aba.id}
+                        onClick={() => setAbaDetalhe(aba.id as typeof abaDetalhe)}
+                        className="whitespace-nowrap px-3 py-2.5 text-sm"
+                      >
+                        {aba.label}
+                      </AppUnderlineTabButton>
+                    ))}
+                  </AppUnderlineTabList>
+                </div>
+              );
+            })()}
+
+            {abaDetalhe === 'contratos' ? (
+              <Card className={cadastroListClasses.card}>
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                        <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          Contratos de Serviço
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {isOwnEmpreiteiroAccount
+                            ? 'Cadastre a equipe de cada serviço e consulte medições'
+                            : 'Serviços com valor, equipe própria e medições de cada um'}
+                        </p>
+                      </div>
+                    </div>
+                    {canManageCadastro ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingServiceId(null);
+                          setAddingContract(true);
+                        }}
+                        className="flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <span>Adicionar Serviço</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </CardHeader>
+                <CardContent className={`${cadastroListClasses.cardContent} space-y-6`}>
+                <div>
+                  <Modal
+                    isOpen={addingContract}
+                    onClose={() => setAddingContract(false)}
+                    title="Novo Contrato de Serviço"
+                    size="lg"
+                  >
+                    <div className="space-y-4">
+                      <div>
+                        <label className={labelClass}>Nome do serviço *</label>
+                        <input
+                          type="text"
+                          value={newServiceName}
+                          onChange={(e) => setNewServiceName(e.target.value)}
+                          placeholder="Ex.: Alvenaria do Bloco B"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Descrição</label>
+                        <textarea
+                          value={newServiceDescription}
+                          onChange={(e) => setNewServiceDescription(e.target.value)}
+                          rows={3}
+                          placeholder="Descreva o escopo do serviço"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className={labelClass}>Contrato *</label>
+                        <StringSingleSelectDropdown
+                          value={newServiceContractId}
+                          onChange={setNewServiceContractId}
+                          options={contractSelectOptions}
+                          placeholder="Selecione o contrato"
+                          emptyOptionLabel="Selecione o contrato"
+                          searchPlaceholder="Pesquisar contrato..."
+                          matchTriggerWidth
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Local de execução</label>
+                        <input
+                          type="text"
+                          value={newServiceLocation}
+                          onChange={(e) => setNewServiceLocation(e.target.value)}
+                          placeholder="Ex.: Bloco B, 2º pavimento"
+                          className={inputClass}
+                        />
+                      </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className={labelClass}>Valor planejado (R$)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={newServicePlannedValue}
+                          onChange={(e) =>
+                            setNewServicePlannedValue(maskCurrencyInputBrOrEmpty(e.target.value))
+                          }
+                          placeholder="R$ 0,00"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Status</label>
+                        <StringSingleSelectDropdown
+                          value={newContractStatus}
+                          onChange={(value) => setNewContractStatus((value || 'IN_PROGRESS') as EmpreiteiroContractStatus)}
+                          options={labeledToSelectOptions(CONTRACT_STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })))}
+                          placeholder="Selecione o status"
+                          matchTriggerWidth
+                        />
+                      </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className={labelClass}>Início</label>
+                          <DatePickerField value={newContractStart} onChange={setNewContractStart} />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Fim</label>
+                          <DatePickerField value={newContractEnd} onChange={setNewContractEnd} />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Forma de pagamento</label>
+                        <div className="flex gap-2">
+                          {(
+                            [
+                              { value: 'avista' as const, label: 'À vista' },
+                              { value: 'parcelado' as const, label: 'Parcelado' },
+                            ] as const
+                          ).map((opt) => (
+                            <ButtonSeg
+                              key={opt.value}
+                              active={newServicePayMode === opt.value}
+                              label={opt.label}
+                              onClick={() => {
+                                setNewServicePayMode((prev) => {
+                                  const next = prev === opt.value ? null : opt.value;
+                                  if (next === 'parcelado') {
+                                    const n = Math.floor(Number(newServiceParcelCount)) || 6;
+                                    setNewServiceParcelCount(String(n));
+                                    setNewServiceParcelAmounts(
+                                      buildEqualParcelAmountInputs(
+                                        parseCurrencyInputBr(newServicePlannedValue),
+                                        n
+                                      )
+                                    );
+                                  } else {
+                                    setNewServiceParcelAmounts([]);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            />
+                          ))}
+                        </div>
+                        {newServicePayMode === 'avista' ? (
+                          <div className="mt-4 space-y-2">
+                            <label className={labelClass}>Data do pagamento</label>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                            <DatePickerField value={newServicePayDate} onChange={setNewServicePayDate} />
+                            </div>
+                            </div>
+                          </div>
+                        ) : null}
+                        {newServicePayMode === 'parcelado' ? (
+                          <div className="mt-4 space-y-4">
+                            <div className="sm:w-[calc(50%-0.5rem)]">
+                            <label className={labelClass}>Número de parcelas</label>
+                            <input
+                              type="number"
+                              min={2}
+                              max={60}
+                              value={newServiceParcelCount}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setNewServiceParcelCount(value);
+                                const n = Math.floor(Number(value));
+                                if (Number.isFinite(n) && n >= 2 && n <= 60) {
+                                  setNewServiceParcelAmounts(
+                                    buildEqualParcelAmountInputs(
+                                      parseCurrencyInputBr(newServicePlannedValue),
+                                      n
+                                    )
+                                  );
+                                } else {
+                                  setNewServiceParcelAmounts([]);
+                                }
+                              }}
+                              placeholder="Ex.: 6"
+                              className={`${inputClass} h-10 text-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+                            />
+                            </div>
+                            {(() => {
+                              const n = Math.floor(Number(newServiceParcelCount.trim()));
+                              if (!Number.isFinite(n) || n < 2 || n > 60) return null;
+                              const amounts =
+                                newServiceParcelAmounts.length === n
+                                  ? newServiceParcelAmounts
+                                  : buildEqualParcelAmountInputs(
+                                      parseCurrencyInputBr(newServicePlannedValue),
+                                      n
+                                    );
+                              const sum = amounts.reduce(
+                                (acc, raw) => acc + (parseCurrencyInputBr(raw) || 0),
+                                0
+                              );
+                              const planned = parseCurrencyInputBr(newServicePlannedValue);
+                              return (
+                                <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                                      Valor de cada parcela
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setNewServiceParcelAmounts(
+                                          buildEqualParcelAmountInputs(planned, n)
+                                        )
+                                      }
+                                      className="text-xs font-semibold text-red-600 hover:underline dark:text-red-400"
+                                    >
+                                      Dividir igualmente
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                    {amounts.map((amount, index) => (
+                                      <div key={`new-parcel-${index}`}>
+                                        <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                                          Parcela {index + 1}
+                                        </label>
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={amount}
+                                          onChange={(e) => {
+                                            setNewServiceParcelAmounts(
+                                              redistributeParcelAmounts(
+                                                amounts,
+                                                index,
+                                                e.target.value,
+                                                planned
+                                              )
+                                            );
+                                          }}
+                                          placeholder="R$ 0,00"
+                                          className={`${inputClass} py-1.5 text-sm`}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div>
+                        <label className={labelClass}>Anexo do contrato</label>
+                        <div className="space-y-2">
+                          {newServiceFiles.map((file, fileIndex) => {
+                            const href = resolveApiMediaUrl(file.url) || file.url;
+                            return (
+                              <div
+                                key={`${file.url}-${fileIndex}`}
+                                className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-900/60"
+                              >
+                                <FileText className="h-4 w-4 shrink-0 text-gray-500" />
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="min-w-0 flex-1 truncate text-sm text-red-700 hover:underline dark:text-red-300"
+                                >
+                                  {file.name || 'contrato'}
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setNewServiceFiles((prev) =>
+                                      prev.filter((_, i) => i !== fileIndex)
+                                    )
+                                  }
+                                  className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                  aria-label="Remover anexo"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          <FileDropZone
+                            label="Anexar contrato"
+                            hint="Clique ou arraste PDF, Word ou imagem do contrato assinado"
+                            accept=".pdf,.doc,.docx,image/*,application/pdf"
+                            multiple
+                            uploading={uploadingFile}
+                            onFiles={(files) => {
+                              for (const file of files) void uploadNewServiceFile(file);
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => setAddingContract(false)}
+                          className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingContractLink || !newServiceName.trim()}
+                          onClick={() => void handleAddContractLink()}
+                          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {savingContractLink ? 'Salvando…' : 'Criar Contrato'}
+                        </button>
+                      </div>
+                    </div>
+                  </Modal>
+                  {(viewingItem.contracts || []).length === 0 ? (
+                    <CadastroListEmpty
+                      icon={FileText}
+                      title="Nenhum contrato de serviço encontrado"
+                      hint={
+                        canManageCadastro
+                          ? 'Use “Adicionar Serviço” para cadastrar o primeiro'
+                          : 'Nenhum serviço cadastrado para esta empreita'
+                      }
+                    />
+                  ) : (
+                    <>
+                      <div className="table-scroll">
+                        <table className={`${cadastroListClasses.table} text-sm`}>
+                          <thead className="border-b border-gray-200 dark:border-gray-700">
+                            <tr>
+                              <th className={cadastroListClasses.th}>Serviço</th>
+                              <th className={`${cadastroListClasses.th} text-center`}>Contrato</th>
+                              <th className={`${cadastroListClasses.th} text-center`}>Período</th>
+                              <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
+                              <th className={`${cadastroListClasses.th} text-center`}>Equipe</th>
+                              <th className={`${cadastroListClasses.th} text-center`}>Status</th>
+                              {canManageCadastro ? (
+                                <th className={listTableRowClasses.actionTh}>Ação</th>
+                              ) : null}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                            {(viewingItem.contracts || []).map((link) => {
+                              const statusMeta = contractStatusMeta(link.status);
+                              const contractValue =
+                                link.currentValue != null && Number.isFinite(link.currentValue)
+                                  ? link.currentValue
+                                  : link.plannedValue != null && Number.isFinite(link.plannedValue)
+                                    ? link.plannedValue
+                                    : null;
+                              const localCc = [
+                                link.location,
+                                link.centroCustoNome || link.costCenter?.name,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ');
+                              return (
+                                <tr
+                                  key={link.id}
+                                  className={`${listTableRowClasses.tr} cursor-pointer`}
+                                  onClick={() => setServiceDetailLinkId(link.id)}
+                                >
+                                  <td className={cadastroListClasses.td}>
+                                    <ListRowNavigableLabel>
+                                      {link.contratoNome || link.name || 'Contrato de serviço'}
+                                    </ListRowNavigableLabel>
+                                  </td>
+                                  <td className={`${cadastroListClasses.td} text-center`}>
+                                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                                      {link.centroCustoNome || link.costCenter?.name || '—'}
+                                    </span>
+                                  </td>
+                                  <td className={`${cadastroListClasses.td} text-center`}>
+                                    <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                                      {formatDateBr(link.startDate)} à {formatDateBr(link.endDate)}
+                                    </span>
+                                  </td>
+                                  <td className={`${cadastroListClasses.td} text-center`}>
+                                    <span className="whitespace-nowrap text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                                      {formatMoneyBr(contractValue) || '—'}
+                                    </span>
+                                  </td>
+                                  <td className={`${cadastroListClasses.td} text-center`}>
+                                    <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                                      {(() => {
+                                        const n = link.teamCount ?? link.team?.length ?? 0;
+                                        return n > 0 ? `${n} ${n === 1 ? 'pessoa' : 'pessoas'}` : 'Sem equipe';
+                                      })()}
+                                    </span>
+                                  </td>
+                                  <td className={`${cadastroListClasses.td} text-center`}>
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusMeta.className}`}
+                                    >
+                                      {statusMeta.label}
+                                    </span>
+                                  </td>
+                                  {canManageCadastro ? (
+                                    <RowActionMenuCell
+                                      isOpen={isContractRowMenuOpen(link.id)}
+                                      onToggle={(e) =>
+                                        toggleContractRowActionMenu(
+                                          link.id,
+                                          e.currentTarget as HTMLButtonElement
+                                        )
+                                      }
+                                    />
+                                  ) : null}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      {contractRowActionMenu && contractRowForActionMenu ? (
+                        <RowActionMenuPortal
+                          menu={contractRowActionMenu}
+                          onClose={closeContractRowActionMenu}
+                          onEdit={() => openEditService(contractRowForActionMenu)}
+                          onDelete={() => {
+                            void handleDeleteContractLink(contractRowForActionMenu);
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  )}
+
                 </div>
 
-              <div className="flex flex-wrap justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={closeDetails}
-                  className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                >
-                  Voltar
-                </button>
-                {isOwnEmpreiteiroAccount ? (
-                  <button
-                    type="button"
-                    onClick={() => openMedicaoPage(viewingItem)}
-                    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700"
-                  >
-                    <ClipboardList className="h-4 w-4" />
-                    Medição de entrega
-                  </button>
-                ) : null}
-                {canManageCadastro ? (
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(viewingItem)}
-                    className="rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700"
-                  >
-                    Editar
-                  </button>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            ) : null}
+
+
+            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+              <EmpreiteiroFluigResumoCards empreiteiroId={viewingItem.id} />
+            ) : null}
+
+            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+              <Card className={cadastroListClasses.card}>
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="flex items-center space-x-3">
+                    <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                      <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações no Fluig</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Serviços tomados desta empreita, ligados pelo CPF ou CNPJ
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <EmpreiteiroFluigSolicitacoesPainel empreiteiroId={viewingItem.id} />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {abaDetalhe === 'dados' ? (
+              <Card className={cadastroListClasses.card}>
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                        <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Dados da Empreita</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          Documento, contato, dados bancários e login de acesso
+                        </p>
+                      </div>
+                    </div>
+                    {canManageCadastro ? (
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(viewingItem)}
+                        className="flex h-10 flex-shrink-0 items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                      >
+                        Editar
+                      </button>
+                    ) : null}
+                  </div>
+                </CardHeader>
+                <CardContent className={`${cadastroListClasses.cardContent} space-y-6`}>
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {[
+                      { rotulo: 'CPF / CNPJ', valor: formatEmpreiteiroDocs(viewingItem) },
+                      { rotulo: 'Especialidade', valor: viewingItem.specialty },
+                      { rotulo: 'Responsável', valor: viewingItem.contactName },
+                      { rotulo: 'Telefone / WhatsApp', valor: formatPhoneDisplay(viewingItem.phone) },
+                      { rotulo: 'E-mail', valor: viewingItem.email },
+                      {
+                        rotulo: 'Cidade / UF',
+                        valor: [viewingItem.city, viewingItem.state].filter(Boolean).join(' / '),
+                      },
+                      { rotulo: 'PIX', valor: viewingItem.pixKey },
+                      { rotulo: 'Banco', valor: viewingItem.bank },
+                      { rotulo: 'Agência', valor: viewingItem.agency },
+                      { rotulo: 'Conta', valor: viewingItem.account },
+                      {
+                        rotulo: 'Login vinculado',
+                        valor: viewingItem.userId ? viewingItem.userName || 'Vinculado' : 'Sem login',
+                      },
+                    ].map((campo) => (
+                      <div key={campo.rotulo} className="min-w-0">
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          {campo.rotulo}
+                        </dt>
+                        <dd className="mt-1 break-words text-sm text-gray-900 dark:text-gray-100">
+                          {campo.valor || '—'}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </CardContent>
+              </Card>
+            ) : null}
+            </>
+            )}
+          </div>
         ) : null}
 
         {previewPhoto && typeof document !== 'undefined'

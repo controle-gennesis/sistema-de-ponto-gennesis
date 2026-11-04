@@ -403,9 +403,8 @@ export function EmployeeList({
         poloFilter !== 'all' ||
         categoriaFinanceiraFilter !== 'all';
 
-      if (isEmpreiteiroRow(emp)) {
-        return modalityFilter === 'EMPREITEIRO' || !extrasActive;
-      }
+      // Empreiteiros são geridos na página de Empreitas, não nesta lista.
+      if (isEmpreiteiroRow(emp)) return false;
       
       if (costCenterFilter !== 'all' && 
           (!emp.employee?.costCenter || !emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()))) {
@@ -586,7 +585,6 @@ export function EmployeeList({
   const modalityFilterSelectOptions = useMemo(
     () => [
       ...filterOptionsWithAll(['Todos', ...MODALITIES_LIST], 'Todas'),
-      ...labeledToSelectOptions([{ value: 'EMPREITEIRO', label: 'Empreitas' }]),
     ],
     []
   );
