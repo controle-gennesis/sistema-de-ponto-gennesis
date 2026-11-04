@@ -2996,10 +2996,84 @@ export class EmpreiteiroController {
           })
         : [];
       const approverNameById = new Map(approvers.map((user) => [user.id, user.name]));
+
+      // Resumo financeiro do contrato de serviço de cada medição (para o gestor decidir a baixa).
+      const serviceContractIds = [
+        ...new Set(items.map((row) => row.empreiteiroContractId).filter((v): v is string => Boolean(v))),
+      ];
+      const financeByContractId = new Map<
+        string,
+        {
+          contractValue: number;
+          executedTotal: number;
+          paidTotal: number;
+          releasedTotal: number;
+          installmentsCount: number;
+          installmentsPaid: number;
+          installmentsReleased: number;
+          installmentsPending: number;
+        }
+      >();
+      if (serviceContractIds.length) {
+        const contracts = await prisma.empreiteiroContract.findMany({
+          where: { id: { in: serviceContractIds } },
+          select: {
+            id: true,
+            plannedValue: true,
+            addenda: { select: { amount: true, status: true } },
+            installments: { select: { amount: true, status: true, fluigRequestNumber: true } },
+            dailyMeasurements: { where: { status: 'APPROVED' }, select: { executedAmount: true } },
+          },
+        });
+        // Parcela concluída no Fluig (data de pagamento ou etapa final 117) conta como paga.
+        const numerosFluig = contracts.flatMap((c) =>
+          c.installments.map((p) => p.fluigRequestNumber).filter((n): n is string => Boolean(n))
+        );
+        let statusFluig: Awaited<ReturnType<typeof buscarStatusFluigPorNumeros>> = {};
+        try {
+          statusFluig = await buscarStatusFluigPorNumeros(numerosFluig);
+        } catch {
+          statusFluig = {};
+        }
+        const pagaNoFluig = (numero: string | null) => {
+          const s = numero ? statusFluig[String(numero).replace(/\D/g, '')] : undefined;
+          return Boolean(s && (s.pagamento || /(^|[^0-9])117([^0-9]|$)/.test(s.fase || '')));
+        };
+        for (const c of contracts) {
+          const base = c.plannedValue != null ? Number(c.plannedValue) : 0;
+          const addenda = c.addenda
+            .filter((a) => isAddendumApproved(a.status))
+            .reduce((sum, a) => sum + (a.amount != null ? Number(a.amount) : 0), 0);
+          // Status efetivo: paga no Fluig vale como PAID.
+          const effective = (p: { status: string; fluigRequestNumber: string | null }) =>
+            pagaNoFluig(p.fluigRequestNumber) ? 'PAID' : String(p.status || '').toUpperCase();
+          const sumBy = (status: string) =>
+            c.installments
+              .filter((p) => effective(p) === status)
+              .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const countBy = (status: string) => c.installments.filter((p) => effective(p) === status).length;
+          financeByContractId.set(c.id, {
+            contractValue: Number((base + addenda).toFixed(2)),
+            executedTotal: Number(
+              c.dailyMeasurements.reduce((sum, m) => sum + (Number(m.executedAmount) || 0), 0).toFixed(2)
+            ),
+            paidTotal: Number(sumBy('PAID').toFixed(2)),
+            releasedTotal: Number(sumBy('RELEASED').toFixed(2)),
+            installmentsCount: c.installments.length,
+            installmentsPaid: countBy('PAID'),
+            installmentsReleased: countBy('RELEASED'),
+            installmentsPending: countBy('PENDING'),
+          });
+        }
+      }
+
       res.json({
         success: true,
         data: items.map((row) => ({
           ...serializeDailyMeasurement(row),
+          serviceFinance: row.empreiteiroContractId
+            ? financeByContractId.get(row.empreiteiroContractId) ?? null
+            : null,
           approvedBy: row.approvedBy ? approverNameById.get(row.approvedBy) || null : null,
           empreiteiro: {
             id: row.empreiteiro.id,

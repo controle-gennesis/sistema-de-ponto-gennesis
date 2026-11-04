@@ -22,8 +22,21 @@ import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import type { DailyMeasurement } from './EmpreiteiroDailyMeasurements';
 import type { TeamGeoPhoto } from './TeamLivePhotoCapture';
 
+export type ServiceFinance = {
+  contractValue: number;
+  executedTotal: number;
+  paidTotal: number;
+  releasedTotal: number;
+  installmentsCount: number;
+  installmentsPaid: number;
+  installmentsReleased: number;
+  installmentsPending: number;
+};
+
 type PendingItem = DailyMeasurement & {
   empreiteiroId: string;
+  /** Resumo financeiro do contrato de serviço (valor, executado, pago, parcelas). */
+  serviceFinance?: ServiceFinance | null;
   empreiteiro: {
     id: string;
     name: string;

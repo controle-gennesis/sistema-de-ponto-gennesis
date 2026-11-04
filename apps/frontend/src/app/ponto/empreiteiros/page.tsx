@@ -3098,7 +3098,14 @@ export default function EmpreiteirosPage() {
                         let paidTotal = 0;
                         for (const parcel of link.installments || []) {
                           const amount = Number(parcel.amount) || 0;
-                          if (String(parcel.status || '').toUpperCase() === 'PAID') {
+                          // Paga: marcada como PAID no sistema OU concluída no Fluig (etapa final / data de pagamento).
+                          const noFluig = parcel.fluigRequestNumber
+                            ? fluigParcelasData?.[parcel.fluigRequestNumber]
+                            : undefined;
+                          const pagaNoFluig = Boolean(
+                            noFluig && (noFluig.pagamento || (noFluig.fase && faseExibicao(noFluig.fase).finalizada)),
+                          );
+                          if (String(parcel.status || '').toUpperCase() === 'PAID' || pagaNoFluig) {
                             paidTotal += amount;
                           }
                         }
