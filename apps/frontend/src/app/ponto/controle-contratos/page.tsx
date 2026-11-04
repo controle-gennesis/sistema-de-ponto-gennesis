@@ -231,12 +231,12 @@ function TypedDateField({
         aria-label={ariaLabel ?? placeholder}
         aria-invalid={invalid}
         maxLength={10}
-        className={`${FORM_FIELD_INPUT_CLS} pr-10 ${invalid ? 'border-red-500' : ''}`}
+        className={`${FORM_FIELD_INPUT_CLS} block pr-10 ${invalid ? 'border-red-500' : ''}`}
       />
       <button
         type="button"
         onClick={() => nativeRef.current?.showPicker?.()}
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+        className="absolute inset-y-0 right-2 my-auto flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
         title="Escolher no calendário"
         aria-label="Escolher no calendário"
       >
@@ -249,7 +249,8 @@ function TypedDateField({
         aria-hidden
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        className="pointer-events-none absolute bottom-0 right-2 h-0 w-0 opacity-0"
+        style={{ position: 'absolute', bottom: 0, right: 8, width: 0, height: 0, padding: 0, border: 0 }}
+        className="pointer-events-none opacity-0"
       />
     </div>
   );
@@ -586,7 +587,13 @@ function ControleContratosPage() {
       .map(([uf, rows]) => ({
         uf,
         label: uf === NO_UF ? 'Sem estado definido' : `${UF_NAMES[uf] ?? uf} (${uf})`,
-        rows: rows.slice().sort((a, b) => a.contractorName.localeCompare(b.contractorName, 'pt-BR')),
+        rows: rows.slice().sort((a, b) => {
+          // Assinatura mais recente primeiro; sem data de assinatura vai para o fim.
+          const sa = a.signedAt ?? '';
+          const sb = b.signedAt ?? '';
+          if (sa !== sb) return !sa ? 1 : !sb ? -1 : sb.localeCompare(sa);
+          return a.contractorName.localeCompare(b.contractorName, 'pt-BR');
+        }),
       }))
       .sort((a, b) => {
         if (a.uf === NO_UF) return 1;
@@ -973,7 +980,7 @@ function ControleContratosPage() {
                   </div>
                   <ArtsEditor value={addArts} onChange={setAddArts} artOptions={artOptions} />
                   <label className="block sm:col-span-3">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Observações (obrigatória se não houver valor, ex.: aditivo de prazo)</span>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Observações</span>
                     <input value={addNote} onChange={(e) => setAddNote(e.target.value)} className={FORM_FIELD_INPUT_CLS} />
                   </label>
                   <div className="flex items-center justify-between gap-3 sm:col-span-3">
