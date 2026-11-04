@@ -14,6 +14,8 @@ import {
   FileCheck2,
   Filter,
   Hourglass,
+  List,
+  ListTree,
   MoreVertical,
   Plus,
   Search,
@@ -55,9 +57,12 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 
 const ROW_ACTION_MENU_WIDTH_PX = 224;
+const ITEMS_PER_PAGE = 20;
 
 type CardFilter = 'ALL' | 'IN_APPROVAL' | 'PENDING' | 'QUOTATION' | 'FINISHED' | 'CANCELLED';
 
@@ -101,21 +106,21 @@ const CARD_STYLE: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   IN_APPROVAL: {
-    label: 'Aprovação',
+    label: 'Aguardando Aprovação',
     subtitle: 'Fichas aguardando a aprovação do gestor',
     Icon: FileCheck2,
     iconBg: 'bg-violet-100 dark:bg-violet-900/30',
     iconColor: 'text-violet-600 dark:text-violet-400',
   },
   PENDING: {
-    label: 'Fila',
+    label: 'Em Fila',
     subtitle: 'Fichas aprovadas aguardando a criação da solicitação de compra',
     Icon: Hourglass,
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
   },
   QUOTATION: {
-    label: 'Cotação',
+    label: 'Em Cotação',
     subtitle: 'Fichas em cotação, com uma ou mais ordens de compra',
     Icon: Timer,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
@@ -252,6 +257,25 @@ export default function AprovacaoFdsPage() {
   const { isAdministrator } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<CardFilter>('ALL');
+  const [modoLista, setModoLista] = useState<'agrupada' | 'direta'>('agrupada');
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem('fds-modo-lista') === 'direta') setModoLista('direta');
+    } catch {
+      /* sem storage: fica no agrupado */
+    }
+  }, []);
+  const alternarModoLista = () =>
+    setModoLista((atual) => {
+      const proximo = atual === 'agrupada' ? 'direta' : 'agrupada';
+      try {
+        window.localStorage.setItem('fds-modo-lista', proximo);
+      } catch {
+        /* sem storage */
+      }
+      return proximo;
+    });
   const [contratoFilter, setContratoFilter] = useState(contratoFiltro || 'ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   /** Níveis abertos (centro de custo, obra e OS), pela chave do nível. */
@@ -330,6 +354,17 @@ export default function AprovacaoFdsPage() {
   const ListHeaderIcon = listHeader.Icon;
   const totalFiltered = records.length;
   const isListEmpty = !loadingList && totalFiltered === 0;
+  const totalPaginas = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
+  const inicioPagina = (paginaAtual - 1) * ITEMS_PER_PAGE;
+  const linhasDaPagina = records.slice(inicioPagina, inicioPagina + ITEMS_PER_PAGE);
+  const itemInicial = totalFiltered === 0 ? 0 : inicioPagina + 1;
+  const itemFinal = Math.min(inicioPagina + ITEMS_PER_PAGE, totalFiltered);
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [searchTerm, statusFilter, contratoFilter, modoLista]);
+  useEffect(() => {
+    if (paginaAtual > totalPaginas) setPaginaAtual(totalPaginas);
+  }, [paginaAtual, totalPaginas]);
   const niveis = useMemo(() => agruparFds(records), [records]);
   const resultadoGeral = useMemo(() => somarResultado(records), [records]);
   // Com busca, abre todos os níveis até as FDs encontradas.
@@ -342,6 +377,167 @@ export default function AprovacaoFdsPage() {
       else next.add(key);
       return next;
     });
+
+  /** Tabela de FDs (a mesma na lista agrupada e na lista direta). */
+  const renderTabelaFds = (rows: typeof records, semBorda = false) => (
+    <div className={semBorda ? 'table-scroll' : 'table-scroll border-t border-gray-200 dark:border-gray-700'}>
+                                            <table className="w-full text-sm">
+                                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                                      <tr>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          ID
+                                        </th>
+                                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Código da FD
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          ID / Nº Mov.
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Pedido
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Contrato
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Solicitante
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Polo
+                                        </th>
+                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                                          Status
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
+                                          Faturamento estimado
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
+                                          Custo estimado (40%)
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="Custo real da FD (espelho da Ficha de Demanda)">
+                                          Custo real
+                                        </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="OCs pagas (validadas pelo compras no G4), pelo total de cada OC">
+                                          Pago em OCs
+                                        </th>
+                                        {MOSTRAR_COLUNA_ACAO ? (
+                                          <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
+                                            Ação
+                                          </th>
+                                        ) : null}
+                                      </tr>
+                                    </thead>
+                                              <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                                {rows.map((row) => (
+                                        <tr
+                                          key={row.id}
+                                          onClick={() => openDetail(row)}
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                              event.preventDefault();
+                                              openDetail(row);
+                                            }
+                                          }}
+                                          tabIndex={0}
+                                          role="button"
+                                          className={getListTableRowClassName(true, listTableRowClasses.tr)}
+                                        >
+                                          <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.displayNumber ?? '—'}
+                                          </td>
+                                          <td className="px-3 py-4 text-left sm:px-6">
+                                            <ListRowNavigableLabel className="text-sm font-medium">
+                                              {row.codFichaDemanda}
+                                            </ListRowNavigableLabel>
+                                          </td>
+                                          <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
+                                            <p className="text-gray-900 dark:text-gray-100">
+                                              {idMovRmExibicao(row.idMovRm) || '—'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                              {row.numMovRm?.trim() || '—'}
+                                            </p>
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.codigoPedido}
+                                          </td>
+                                          <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.contratoNome}
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.solicitanteNome}
+                                          </td>
+                                          <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                                            {row.polo}
+                                          </td>
+                                          <td className="px-3 py-4 text-center sm:px-6">
+                                            <FdStatusBadges record={row} />
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-gray-900 dark:text-gray-100`}>
+                                            {formatCurrencyDisplay(row.faturamentoEstimado)}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-amber-600 dark:text-amber-400`}>
+                                            {formatCurrencyDisplay(row.custoEstimado)}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
+                                            {row.custoReal != null && row.custoReal > 0 ? (
+                                              <span
+                                                className={
+                                                  row.custoReal > Number(row.custoEstimado)
+                                                    ? 'font-medium text-red-600 dark:text-red-400'
+                                                    : 'font-medium text-blue-600 dark:text-blue-400'
+                                                }
+                                              >
+                                                {formatCurrencyDisplay(row.custoReal)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
+                                            {row.totalPagoOcs ? (
+                                              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                                                {formatCurrencyDisplay(row.totalPagoOcs)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          {MOSTRAR_COLUNA_ACAO ? (
+                                          <td
+                                            className={`${listTableRowClasses.actionTd} ${COL_ACAO} !px-0 text-center`}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <div className="flex justify-center">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                                  setRowActionMenu((prev) => {
+                                                    if (prev?.rowId === row.id) return null;
+                                                    let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+                                                    left = Math.max(
+                                                      8,
+                                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
+                                                    );
+                                                    return { rowId: row.id, top: rect.bottom + 4, left };
+                                                  });
+                                                }}
+                                                className={rowActionMenuButtonClass(rowActionMenu?.rowId === row.id)}
+                                                aria-label="Menu de ações"
+                                              >
+                                                <MoreVertical className="h-4 w-4" />
+                                              </button>
+                                            </div>
+                                          </td>
+                                          ) : null}
+                                        </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+  );
 
   const rowForActionMenu = rowActionMenu
     ? records.find((r) => r.id === rowActionMenu.rowId) ?? null
@@ -477,24 +673,37 @@ export default function AprovacaoFdsPage() {
             description="Cadastre e acompanhe as fichas de demanda."
           />
 
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
-            {CARD_ORDER.map((card) => {
-              const style = CARD_STYLE[card];
-              return (
-                <FilterStatCard
-                  size="sm"
-                  key={card}
-                  label={style.label}
-                  count={statusCounts[card]}
-                  icon={style.Icon}
-                  iconBg={style.iconBg}
-                  iconColor={style.iconColor}
-                  loading={loadingList}
-                  isActive={statusFilter === card}
-                  onClick={() => setStatusFilter((prev) => (prev === card ? 'ALL' : card))}
-                />
-              );
-            })}
+          <div id="secao-etapas-fichas" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas das fichas de demanda"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {CARD_ORDER.map((card) => {
+                const active = statusFilter === card;
+                return (
+                  <React.Fragment key={card}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStatusFilter(card)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {CARD_STYLE[card].label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={statusCounts[card] ?? 0} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {card === 'ALL' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
@@ -554,6 +763,20 @@ export default function AprovacaoFdsPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={alternarModoLista}
+                    className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      modoLista === 'direta'
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label={modoLista === 'direta' ? 'Mostrar lista agrupada' : 'Mostrar lista direta'}
+                    title={modoLista === 'direta' ? 'Voltar para a lista agrupada' : 'Lista direta, sem agrupar'}
+                    aria-pressed={modoLista === 'direta'}
+                  >
+                    {modoLista === 'direta' ? <ListTree className="h-4 w-4" /> : <List className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setShowImport(true)}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     aria-label="Importar"
@@ -587,12 +810,33 @@ export default function AprovacaoFdsPage() {
                 </div>
               ) : (
                 <>
+                  {modoLista === 'agrupada' ? (
                   <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 py-3 pl-4 pr-0 dark:border-gray-700 dark:bg-gray-900/40 lg:flex-row lg:items-center lg:justify-between">
                     <span className="text-sm text-gray-700 dark:text-gray-300">
                       <strong>Resultado geral</strong> · {totalFiltered} {totalFiltered === 1 ? 'ficha' : 'fichas'}
                     </span>
                     <ResultadoNivel resultado={resultadoGeral} />
                   </div>
+                  ) : null}
+                  {modoLista === 'direta' ? (
+                    <>
+                      <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                        <span>
+                          Mostrando {itemInicial} a {itemFinal} de {totalFiltered}{' '}
+                          {totalFiltered === 1 ? 'ficha' : 'fichas'}
+                        </span>
+                        <span>
+                          Página {paginaAtual} de {totalPaginas}
+                        </span>
+                      </div>
+                      {renderTabelaFds(linhasDaPagina, true)}
+                      <ListPagination
+                        currentPage={paginaAtual}
+                        totalPages={totalPaginas}
+                        onPageChange={setPaginaAtual}
+                      />
+                    </>
+                  ) : (
                   <div className="space-y-2">
                     {niveis.map((cc) => (
                       <div key={cc.key} className="rounded-lg border border-gray-200 dark:border-gray-700">
@@ -663,165 +907,7 @@ export default function AprovacaoFdsPage() {
                           </span>
                           <ResultadoNivel resultado={os.resultado} />
                         </button>
-                                        {estaAberto(os.key) && (
-                                          <div className="table-scroll border-t border-gray-200 dark:border-gray-700">
-                                            <table className="w-full text-sm">
-                                    <thead className="border-b border-gray-200 dark:border-gray-700">
-                                      <tr>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          ID
-                                        </th>
-                                        <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Código da FD
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          ID / Nº Mov.
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Pedido
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Contrato
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Solicitante
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Polo
-                                        </th>
-                                        <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                                          Status
-                                        </th>
-                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
-                                          Faturamento estimado
-                                        </th>
-                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}>
-                                          Custo estimado (40%)
-                                        </th>
-                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="Custo real da FD (espelho da Ficha de Demanda)">
-                                          Custo real
-                                        </th>
-                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="OCs pagas (validadas pelo compras no G4), pelo total de cada OC">
-                                          Pago em OCs
-                                        </th>
-                                        {MOSTRAR_COLUNA_ACAO ? (
-                                          <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
-                                            Ação
-                                          </th>
-                                        ) : null}
-                                      </tr>
-                                    </thead>
-                                              <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                                                {os.rows.map((row) => (
-                                        <tr
-                                          key={row.id}
-                                          onClick={() => openDetail(row)}
-                                          onKeyDown={(event) => {
-                                            if (event.key === 'Enter' || event.key === ' ') {
-                                              event.preventDefault();
-                                              openDetail(row);
-                                            }
-                                          }}
-                                          tabIndex={0}
-                                          role="button"
-                                          className={getListTableRowClassName(true, listTableRowClasses.tr)}
-                                        >
-                                          <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
-                                            {row.displayNumber ?? '—'}
-                                          </td>
-                                          <td className="px-3 py-4 text-left sm:px-6">
-                                            <ListRowNavigableLabel className="text-sm font-medium">
-                                              {row.codFichaDemanda}
-                                            </ListRowNavigableLabel>
-                                          </td>
-                                          <td className="whitespace-nowrap px-3 py-4 text-center tabular-nums sm:px-6">
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                              {idMovRmExibicao(row.idMovRm) || '—'}
-                                            </p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                              {row.numMovRm?.trim() || '—'}
-                                            </p>
-                                          </td>
-                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
-                                            {row.codigoPedido}
-                                          </td>
-                                          <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
-                                            {row.contratoNome}
-                                          </td>
-                                          <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
-                                            {row.solicitanteNome}
-                                          </td>
-                                          <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
-                                            {row.polo}
-                                          </td>
-                                          <td className="px-3 py-4 text-center sm:px-6">
-                                            <FdStatusBadges record={row} />
-                                          </td>
-                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-gray-900 dark:text-gray-100`}>
-                                            {formatCurrencyDisplay(row.faturamentoEstimado)}
-                                          </td>
-                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums text-amber-600 dark:text-amber-400`}>
-                                            {formatCurrencyDisplay(row.custoEstimado)}
-                                          </td>
-                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
-                                            {row.custoReal != null && row.custoReal > 0 ? (
-                                              <span
-                                                className={
-                                                  row.custoReal > Number(row.custoEstimado)
-                                                    ? 'font-medium text-red-600 dark:text-red-400'
-                                                    : 'font-medium text-blue-600 dark:text-blue-400'
-                                                }
-                                              >
-                                                {formatCurrencyDisplay(row.custoReal)}
-                                              </span>
-                                            ) : (
-                                              <span className="text-gray-400 dark:text-gray-500">—</span>
-                                            )}
-                                          </td>
-                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
-                                            {row.totalPagoOcs ? (
-                                              <span className="font-medium text-emerald-700 dark:text-emerald-400">
-                                                {formatCurrencyDisplay(row.totalPagoOcs)}
-                                              </span>
-                                            ) : (
-                                              <span className="text-gray-400 dark:text-gray-500">—</span>
-                                            )}
-                                          </td>
-                                          {MOSTRAR_COLUNA_ACAO ? (
-                                          <td
-                                            className={`${listTableRowClasses.actionTd} ${COL_ACAO} !px-0 text-center`}
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <div className="flex justify-center">
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                                  setRowActionMenu((prev) => {
-                                                    if (prev?.rowId === row.id) return null;
-                                                    let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
-                                                    left = Math.max(
-                                                      8,
-                                                      Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8)
-                                                    );
-                                                    return { rowId: row.id, top: rect.bottom + 4, left };
-                                                  });
-                                                }}
-                                                className={rowActionMenuButtonClass(rowActionMenu?.rowId === row.id)}
-                                                aria-label="Menu de ações"
-                                              >
-                                                <MoreVertical className="h-4 w-4" />
-                                              </button>
-                                            </div>
-                                          </td>
-                                          ) : null}
-                                        </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        )}
+                                        {estaAberto(os.key) && renderTabelaFds(os.rows)}
                                       </div>
                                     ))}
                                   </div>
@@ -833,6 +919,7 @@ export default function AprovacaoFdsPage() {
                       </div>
                     ))}
                   </div>
+                  )}
 
                   {rowActionMenu && rowForActionMenu && (
                     <ActionMenuOverlay
