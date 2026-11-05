@@ -15,7 +15,7 @@ const uploadMapaCotacao = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-/** Print/imagem de uma proposta do Mapa de Cotação (composições próprias "COTAÇÃO - n"). */
+/** Print/imagem de uma proposta do Mapa de Cotação (composições próprias com "COMP. COTAÇÃO"). */
 router.post(
   '/mapa-cotacao/anexo',
   (req: AuthRequest, res: Response, next: NextFunction) => {

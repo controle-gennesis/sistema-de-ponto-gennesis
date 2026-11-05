@@ -121,6 +121,8 @@ export type OrcamentoExcelCabecalho = {
   linhas: OrcamentoExcelCabecalhoCelula[][];
   /** Altura por linha (padrão 20). */
   alturas?: number[];
+  /** Remove a linha fina em branco que separa o quadro do restante da planilha. */
+  semRespiro?: boolean;
   /** Coloca a logo da Gennesis no canto superior esquerdo (sobre as células vazias da 1ª linha). */
   logo?: boolean;
   /** Qual logo usar (padrão `orcamento`). A Memória de cálculo usa `nome`. */
@@ -181,6 +183,32 @@ export type OrcamentoExcelAparencia = {
   composicaoTexto?: string;
   fonte?: string;
 };
+
+/** Estima em quantas linhas um texto quebra numa célula com a largura (em caracteres do Excel) dada. */
+function estimarLinhas(texto: string, larguraColuna: number, tamFonte: number, negrito = false): number {
+  const porLinha = Math.max(4, Math.floor((larguraColuna * 0.92 * 11) / (tamFonte * (negrito ? 1.12 : 1))));
+  let linhas = 0;
+  for (const paragrafo of String(texto ?? '').split(/\r?\n/)) {
+    let atual = 0;
+    let n = 1;
+    for (const palavra of paragrafo.split(/\s+/).filter(Boolean)) {
+      const tam = palavra.length;
+      if (tam > porLinha) {
+        n += Math.ceil((atual + tam) / porLinha) - (atual ? 0 : 1);
+        atual = tam % porLinha;
+        continue;
+      }
+      if (atual === 0) atual = tam;
+      else if (atual + 1 + tam <= porLinha) atual += 1 + tam;
+      else {
+        n += 1;
+        atual = tam;
+      }
+    }
+    linhas += n;
+  }
+  return Math.max(1, linhas);
+}
 
 function colunaEhDescricao(header?: string): boolean {
   const h = String(header ?? '')
@@ -312,7 +340,7 @@ async function fillWorkbook(
     const showHeader = spec.showHeader !== false;
     const cabecalho = spec.cabecalho;
     /** Linhas ocupadas acima do cabeçalho das colunas: o quadro de identificação e uma linha de respiro. */
-    const offsetCabecalho = cabecalho ? cabecalho.linhas.length + 1 : 0;
+    const offsetCabecalho = cabecalho ? cabecalho.linhas.length + (cabecalho.semRespiro ? 0 : 1) : 0;
     const linhaHeaderColunas = offsetCabecalho + 1;
     const sheet = workbook.addWorksheet(spec.name.slice(0, 31), {
       // Abre em «Visualização de Quebra de Página» (fora da área de impressão fica cinza), em 70%, sem linhas de grade (fundo branco).
@@ -340,7 +368,12 @@ async function fillWorkbook(
     });
 
     spec.columns.forEach((col, i) => {
-      sheet.getColumn(i + 1).width = col.width ?? 14;
+      const largura = col.width ?? 14;
+      // Cabeçalho das colunas numa linha só: a coluna cresce o necessário para caber o título.
+      const minimoCabecalho = showHeader
+        ? Math.ceil(String(col.header ?? '').replace(/\s*[\u000d\u000a]+\s*/g, ' ').length * 1.4) + 3
+        : 0;
+      sheet.getColumn(i + 1).width = Math.max(largura, minimoCabecalho);
     });
 
     if (cabecalho) {
@@ -351,6 +384,15 @@ async function fillWorkbook(
           const de = celula.de + 1;
           const ate = Math.min(celula.ate, colCount - 1) + 1;
           const extra = Math.max(0, celula.linhasAbaixo ?? 0);
+          if (extra === 0 && celula.texto) {
+            let larguraTotal = 0;
+            for (let c = de; c <= ate; c++) larguraTotal += sheet.getColumn(c).width ?? 14;
+            const tamFonte = celula.estilo === 'legenda' ? 11 : 12;
+            const linhasNecessarias = estimarLinhas(String(celula.texto), larguraTotal, tamFonte, Boolean(celula.rotulo));
+            const alturaNecessaria = linhasNecessarias * (tamFonte * 1.45) + 8;
+            const linhaAtual = sheet.getRow(linha);
+            if (alturaNecessaria > (linhaAtual.height ?? 20)) linhaAtual.height = Math.ceil(alturaNecessaria);
+          }
           for (let r = linha; r <= linha + extra; r++) {
             for (let c = de; c <= ate; c++) {
               const cell = sheet.getCell(r, c);
@@ -385,7 +427,7 @@ async function fillWorkbook(
                 : celula.estilo === 'informacao'
                   ? { name: 'Times New Roman', size: 11, bold: true, color: { argb: TITLE_TEXT } }
                 : celula.estilo === 'legenda'
-                  ? { name: FONTE_LEGENDA, size: 9, italic: true, color: { argb: TITLE_TEXT } }
+                  ? { name: FONTE_LEGENDA, size: 11, italic: true, color: { argb: TITLE_TEXT } }
                 : {
                     name: fontName,
                     size: 12,
@@ -404,18 +446,19 @@ async function fillWorkbook(
           if (ate > de || extra > 0) sheet.mergeCells(linha, de, linha + extra, ate);
         }
       });
-      sheet.getRow(cabecalho.linhas.length + 1).height = 10;
+      if (!cabecalho.semRespiro) sheet.getRow(cabecalho.linhas.length + 1).height = 10;
     }
 
     if (showHeader) {
       const headerRow = sheet.getRow(linhaHeaderColunas);
-      headerRow.height = 30;
+      headerRow.height = 42;
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
-        cell.value = String(col.header ?? '').toUpperCase();
+        // Título numa linha só: a quebra manual do texto vira espaço (senão as palavras se juntam).
+        cell.value = String(col.header ?? '').replace(/\s*[\u000d\u000a]+\s*/g, ' ').toUpperCase();
         cell.font = { name: fontName, size: 12, bold: true, color: { argb: headerFg } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true, shrinkToFit: false };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false, shrinkToFit: false };
         applyThinBorder(cell);
       });
     }
@@ -580,7 +623,29 @@ async function fillWorkbook(
           cell.font = { ...f, name: f.name ?? fontName, size: f.size ?? tamItem, underline: true, color: { argb: 'FF2563EB' } };
         }
       }
-      if (rowSpec.altura != null) row.height = rowSpec.altura;
+      if (rowSpec.altura != null) {
+        row.height = rowSpec.altura;
+      } else if (kind !== 'blank' && kind !== 'servico') {
+        // Sem altura fixa: cresce o necessário para o texto quebrado caber inteiro.
+        let maxLinhas = 1;
+        for (let c = 0; c < colCount; c++) {
+          const valor = rowSpec.values[c];
+          if (typeof valor !== 'string' || !valor) continue;
+          const col = spec.columns[c];
+          const mergeTo = rowSpec.merge?.[0] === c ? rowSpec.merge[1] : c;
+          const quebra =
+            kind === 'legenda' ||
+            kind === 'section' ||
+            colunaEhDescricao(col?.header) ||
+            (mergeTo !== c && colunaEhDescricao(spec.columns[mergeTo]?.header));
+          if (!quebra) continue;
+          let larguraTotal = 0;
+          for (let k = c; k <= mergeTo; k++) larguraTotal += sheet.getColumn(k + 1).width ?? 14;
+          maxLinhas = Math.max(maxLinhas, estimarLinhas(valor, larguraTotal, tamItem));
+        }
+        const necessaria = maxLinhas * (tamItem * 1.45) + 10;
+        if (necessaria > (row.height ?? 30)) row.height = Math.ceil(necessaria);
+      }
       if (rowSpec.rowSpan) {
         // Mescla só depois de todas as linhas: escrever numa célula coberta apagaria o valor da principal.
         for (const [col, n] of Object.entries(rowSpec.rowSpan)) {
