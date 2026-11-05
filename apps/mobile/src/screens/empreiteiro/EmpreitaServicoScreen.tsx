@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -15,7 +16,9 @@ import {
   AlignLeft,
   Briefcase,
   Building2,
+  Camera,
   CalendarDays,
+  ChevronRight,
   ClipboardList,
   FileText,
   IdCard,
@@ -38,6 +41,7 @@ import {
   statusMedicao,
   statusServico,
   type EmpreiteiroMember,
+  type DailyMeasurement,
 } from '../../services/empreiteiros';
 import { ServiceIcon } from './ServiceIcon';
 import {
@@ -52,7 +56,9 @@ import {
   SummaryCard,
   UnderlineTabs,
 } from './EmpreiteiroUi';
+import MedicaoDetalheModal from './MedicaoDetalheModal';
 import MedicaoFormModal from './MedicaoFormModal';
+import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import PessoaModal, { type PessoaForm } from './PessoaModal';
 import type { RootStackParamList } from '../../../App';
 
@@ -73,6 +79,7 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
   const [buscaMedicao, setBuscaMedicao] = useState('');
   const [buscaEquipe, setBuscaEquipe] = useState('');
   const [medicaoAberta, setMedicaoAberta] = useState(false);
+  const [medicaoDetalhe, setMedicaoDetalhe] = useState<DailyMeasurement | null>(null);
   const [pessoaModal, setPessoaModal] = useState<{ index: number | null } | null>(null);
 
   const empreiteiroQuery = useQuery({
@@ -282,21 +289,66 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
                 <View style={{ gap: 10 }}>
                   {medicoesFiltradas.map((m) => {
                     const sm = statusMedicao(m.status);
+                    const devolvida = String(m.status).toUpperCase() === 'CORRECTION';
+                    const capa = resolveMediaUrl(m.teamPhoto?.url ?? m.photos?.[0]?.url);
                     return (
-                      <View key={m.id} style={[styles.card, cardBox]}>
-                        <View style={styles.cardRow}>
-                          <Text style={{ color: colors.text, fontWeight: '700' }}>{formatDateBr(m.workDate)}</Text>
-                          <Badge label={sm.label} tone={sm.tone} />
+                      <TouchableOpacity
+                        key={m.id}
+                        activeOpacity={0.8}
+                        onPress={() => setMedicaoDetalhe(m)}
+                        style={[styles.card, cardBox, { borderWidth: 0, shadowOpacity: 0, shadowRadius: 0, elevation: 0, gap: 12 }]}
+                      >
+                        <View style={styles.medTopo}>
+                          <View style={[styles.medCapa, { backgroundColor: colors.border }]}>
+                            {capa ? (
+                              // A foto tirada pelo web traz uma faixa de carimbo embaixo: a miniatura mostra só a parte de cima.
+                              <Image source={{ uri: capa }} style={styles.medCapaImg} resizeMode="cover" />
+                            ) : (
+                              <View style={styles.medCapaVazia}>
+                                <Camera size={22} color={colors.textSecondary} strokeWidth={1.8} />
+                              </View>
+                            )}
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.medDataText, { color: colors.text }]}>{formatDateBr(m.workDate)}</Text>
+                            <Text
+                              style={[styles.medDescricao, { color: colors.textSecondary, marginTop: 4 }]}
+                              numberOfLines={2}
+                            >
+                              {m.description || 'Sem descrição'}
+                            </Text>
+                          </View>
+                          <ChevronRight size={20} color={colors.textSecondary} />
                         </View>
-                        <Text style={{ color: colors.text, marginTop: 6 }}>{m.description}</Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>
-                          {m.photos?.length ?? 0} {(m.photos?.length ?? 0) === 1 ? 'foto' : 'fotos'}
-                          {m.workers?.length ? ` · ${m.workers.length} ${m.workers.length === 1 ? 'pessoa' : 'pessoas'}` : ''}
-                        </Text>
-                        {String(m.status).toUpperCase() === 'CORRECTION' && m.correctionNote ? (
-                          <Text style={{ color: '#991b1b', fontSize: 12, marginTop: 6 }}>Devolvida: {m.correctionNote}</Text>
+                        {devolvida && m.correctionNote ? (
+                          <Text style={styles.medDevolvida} numberOfLines={2}>
+                            Devolvida: {m.correctionNote}
+                          </Text>
                         ) : null}
-                      </View>
+                        <View style={[styles.medDivider, { backgroundColor: colors.border }]} />
+                        <View style={styles.cardRow}>
+                          <View style={styles.medData}>
+                            <Camera size={14} color={colors.textSecondary} strokeWidth={1.9} />
+                            <Text style={[styles.medRodapeText, { color: colors.textSecondary }]}>
+                              {m.photos?.length ?? 0} {(m.photos?.length ?? 0) === 1 ? 'foto' : 'fotos'}
+                            </Text>
+                          </View>
+                          <View style={styles.medData}>
+                            <Users size={14} color={colors.textSecondary} strokeWidth={1.9} />
+                            <Text style={[styles.medRodapeText, { color: colors.textSecondary }]}>
+                              {m.workers?.length ?? 0} {(m.workers?.length ?? 0) === 1 ? 'pessoa' : 'pessoas'}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.cardRow}>
+                          <Badge label={sm.label} tone={sm.tone} />
+                          {Number(m.executedAmount) > 0 ? (
+                            <Text style={[styles.medValor, { color: colors.text }]} numberOfLines={1}>
+                              {formatMoney(m.executedAmount)}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
                     );
                   })}
                 </View>
@@ -323,7 +375,7 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
               ) : (
                 <View style={{ gap: 10 }}>
                   {equipeFiltrada.map(({ m, i }) => (
-                    <View key={m.id ?? `${m.name}-${i}`} style={[styles.pessoa, cardBox, { shadowOpacity: 0, shadowRadius: 0, elevation: 0 }]}>
+                    <View key={m.id ?? `${m.name}-${i}`} style={[styles.pessoa, cardBox, { borderWidth: 0, shadowOpacity: 0, shadowRadius: 0, elevation: 0 }]}>
                       <Avatar uri={m.photoUrl} size={52} />
                       <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
                         <View style={styles.pessoaTitulo}>
@@ -381,6 +433,12 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
         </ScrollView>
       )}
 
+      <MedicaoDetalheModal
+        visible={medicaoDetalhe !== null}
+        medicao={medicaoDetalhe}
+        onClose={() => setMedicaoDetalhe(null)}
+      />
+
       {servico ? (
         <MedicaoFormModal
           visible={medicaoAberta}
@@ -433,6 +491,18 @@ const styles = StyleSheet.create({
   name: { flex: 1, fontSize: 20, fontWeight: '800' },
   kpis: { flexDirection: 'row', gap: 10, padding: 12, marginTop: 14 },
   card: { padding: 14 },
+  medTopo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  medCapa: { width: 64, height: 64, borderRadius: 14, overflow: 'hidden' },
+  medCapaImg: { position: 'absolute', top: 0, left: 0, width: 64, height: 94 },
+  medCapaVazia: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  medData: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  medDataText: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+  medValor: { fontSize: 16, fontWeight: '800', letterSpacing: -0.3 },
+  medDescricao: { fontSize: 14, lineHeight: 20 },
+  medDevolvida: { color: '#991b1b', fontSize: 12.5, lineHeight: 17 },
+  medDivider: { height: StyleSheet.hairlineWidth },
+  medRodape: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  medRodapeText: { fontSize: 13, fontWeight: '500' },
   cardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   empty: { alignItems: 'center', paddingVertical: 36 },
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingVertical: 12 },

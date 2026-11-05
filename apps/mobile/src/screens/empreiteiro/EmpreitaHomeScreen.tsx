@@ -160,19 +160,19 @@ export default function EmpreitaHomeScreen({ navigation }: Props) {
                             {formatDateBr(s.startDate)} à {formatDateBr(s.endDate)}
                           </Text>
                         </View>
-                        <Text style={[styles.cardValue, { color: colors.text }]}>
-                          {formatMoney(s.currentValue ?? s.plannedValue)}
-                        </Text>
+                        <View style={styles.cardMeta}>
+                          <Users size={14} color={colors.textSecondary} strokeWidth={1.9} />
+                          <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '500' }}>
+                            {n > 0 ? `${n} ${n === 1 ? 'pessoa' : 'pessoas'}` : 'Sem equipe'}
+                          </Text>
+                        </View>
                       </View>
 
                       <View style={styles.cardRow}>
                         <Badge label={st.label} tone={st.tone} />
-                        <View style={styles.cardMeta}>
-                          <Users size={14} color={colors.textSecondary} />
-                          <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                            {n > 0 ? `${n} ${n === 1 ? 'pessoa' : 'pessoas'}` : 'Sem equipe'}
-                          </Text>
-                        </View>
+                        <Text style={[styles.cardValue, { color: colors.text }]}>
+                          {formatMoney(s.currentValue ?? s.plannedValue)}
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   );

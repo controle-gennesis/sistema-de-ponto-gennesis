@@ -2,6 +2,7 @@ import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import type { GeoPhoto } from '../../services/empreiteiros';
+import { uploadMultipartFile } from '../../utils/uploadMultipartFile';
 
 async function posicaoAtual(): Promise<{ latitude: number; longitude: number; accuracy: number | null } | null> {
   const perm = await Location.requestForegroundPermissionsAsync();
@@ -40,21 +41,39 @@ export async function capturarFotoComLocal(fonte: 'camera' | 'galeria'): Promise
 
   const options: ImagePicker.ImagePickerOptions = {
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    quality: 0.5,
-    base64: true,
+    quality: 0.6,
   };
   const result =
     fonte === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
-  if (result.canceled || !result.assets[0]?.base64) return null;
+  if (result.canceled || !result.assets[0]?.uri) return null;
 
   const pos = await posicaoAtual();
   if (!pos) return null;
 
   const asset = result.assets[0];
   const mime = asset.mimeType || 'image/jpeg';
+  const nome = asset.fileName || `foto-${Date.now()}.jpg`;
+  // A API só aceita fotos já enviadas (URL), não o arquivo embutido no JSON.
+  let enviada: { url?: string; name?: string; key?: string };
+  try {
+    enviada = await uploadMultipartFile<{ url?: string; name?: string; key?: string }>({
+      path: '/api/empreiteiros/upload-file',
+      fieldName: 'file',
+      file: { uri: asset.uri, name: nome, type: mime },
+    });
+  } catch (error) {
+    Alert.alert('Foto', error instanceof Error ? error.message : 'Não foi possível enviar a foto.');
+    return null;
+  }
+  if (!enviada?.url) {
+    Alert.alert('Foto', 'Não foi possível enviar a foto.');
+    return null;
+  }
   return {
-    url: `data:${mime};base64,${asset.base64}`,
-    name: asset.fileName || `foto-${Date.now()}.jpg`,
+    url: enviada.url,
+    name: enviada.name || nome,
+    key: enviada.key,
+    previewUri: asset.uri,
     latitude: pos.latitude,
     longitude: pos.longitude,
     accuracy: pos.accuracy,

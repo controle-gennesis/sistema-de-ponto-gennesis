@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import { Camera, ImagePlus, X } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 import DateField, { formatDateValue } from '../../components/DateField';
@@ -39,6 +41,12 @@ export default function MedicaoFormModal({
   const [teamPhoto, setTeamPhoto] = useState<GeoPhoto | null>(null);
   const [photos, setPhotos] = useState<GeoPhoto[]>([]);
   const [saving, setSaving] = useState(false);
+  const [larguraFotos, setLarguraFotos] = useState(0);
+  const [fotoAberta, setFotoAberta] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const [enviandoFoto, setEnviandoFoto] = useState<'equipe' | 'servico' | null>(null);
+  // 3 miniaturas por linha, ocupando toda a largura (2 vãos de 10).
+  const lado = larguraFotos > 0 ? Math.floor((larguraFotos - 20) / 3) : 92;
 
   const membrosComId = team.filter((m) => m.id);
 
@@ -49,6 +57,7 @@ export default function MedicaoFormModal({
     setWorkerIds([]);
     setTeamPhoto(null);
     setPhotos([]);
+    setFotoAberta(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -56,10 +65,16 @@ export default function MedicaoFormModal({
     setWorkerIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const adicionarFoto = async (alvo: 'equipe' | 'servico', fonte: 'camera' | 'galeria') => {
-    const foto = await capturarFotoComLocal(fonte);
-    if (!foto) return;
-    if (alvo === 'equipe') setTeamPhoto(foto);
-    else setPhotos((prev) => [...prev, foto]);
+    if (enviandoFoto) return;
+    setEnviandoFoto(alvo);
+    try {
+      const foto = await capturarFotoComLocal(fonte);
+      if (!foto) return;
+      if (alvo === 'equipe') setTeamPhoto(foto);
+      else setPhotos((prev) => [...prev, foto]);
+    } finally {
+      setEnviandoFoto(null);
+    }
   };
 
   const enviar = async () => {
@@ -101,14 +116,33 @@ export default function MedicaoFormModal({
 
   const botoesFoto = (alvo: 'equipe' | 'servico') => (
     <View style={styles.photoActions}>
-      <TouchableOpacity style={styles.secondaryBtn} onPress={() => void adicionarFoto(alvo, 'camera')} activeOpacity={0.75}>
-        <Camera size={16} color={colors.primary} strokeWidth={2.2} />
-        <Text style={styles.secondaryBtnText}>Câmera</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.secondaryBtn} onPress={() => void adicionarFoto(alvo, 'galeria')} activeOpacity={0.75}>
-        <ImagePlus size={16} color={colors.primary} strokeWidth={2.2} />
-        <Text style={styles.secondaryBtnText}>Galeria</Text>
-      </TouchableOpacity>
+      {enviandoFoto === alvo ? (
+        <View style={[styles.secondaryBtn, { opacity: 0.8 }]}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.secondaryBtnText}>Enviando foto…</Text>
+        </View>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={[styles.secondaryBtn, enviandoFoto ? { opacity: 0.5 } : null]}
+            disabled={Boolean(enviandoFoto)}
+            onPress={() => void adicionarFoto(alvo, 'camera')}
+            activeOpacity={0.75}
+          >
+            <Camera size={16} color={colors.primary} strokeWidth={2.2} />
+            <Text style={styles.secondaryBtnText}>Câmera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.secondaryBtn, enviandoFoto ? { opacity: 0.5 } : null]}
+            disabled={Boolean(enviandoFoto)}
+            onPress={() => void adicionarFoto(alvo, 'galeria')}
+            activeOpacity={0.75}
+          >
+            <ImagePlus size={16} color={colors.primary} strokeWidth={2.2} />
+            <Text style={styles.secondaryBtnText}>Galeria</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 
@@ -121,6 +155,22 @@ export default function MedicaoFormModal({
       submitLabel="Enviar para aprovação"
       submitting={saving}
       onSubmit={() => void enviar()}
+      overlay={
+        fotoAberta ? (
+          <View style={visualizador.root}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setFotoAberta(null)} />
+            <Image source={{ uri: fotoAberta }} style={visualizador.imagem} resizeMode="contain" />
+            <TouchableOpacity
+              style={[visualizador.fechar, { top: Math.max(insets.top, 12) + 8 }]}
+              onPress={() => setFotoAberta(null)}
+              hitSlop={8}
+              accessibilityLabel="Fechar foto"
+            >
+              <X size={22} color="#fff" strokeWidth={2.4} />
+            </TouchableOpacity>
+          </View>
+        ) : null
+      }
     >
       <SectionTitle>Detalhes</SectionTitle>
       <DateField label="Data da entrega" value={workDate} onChange={setWorkDate} />
@@ -168,7 +218,16 @@ export default function MedicaoFormModal({
       <FormLabel label="Foto da equipe" required />
       {teamPhoto ? (
         <View style={styles.photoWrap}>
-          <Image source={{ uri: teamPhoto.url }} style={styles.photoPreview} />
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => setFotoAberta(teamPhoto.previewUri ?? resolveMediaUrl(teamPhoto.url) ?? teamPhoto.url)}
+            accessibilityLabel="Ver foto da equipe"
+          >
+            <Image
+              source={{ uri: teamPhoto.previewUri ?? resolveMediaUrl(teamPhoto.url) ?? teamPhoto.url }}
+              style={styles.photoPreview}
+            />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.photoClear} onPress={() => setTeamPhoto(null)} accessibilityLabel="Remover foto">
             <X size={16} color="#fff" strokeWidth={2.4} />
           </TouchableOpacity>
@@ -186,10 +245,19 @@ export default function MedicaoFormModal({
 
       <FormLabel label="Fotos do serviço" required />
       {photos.length > 0 ? (
-        <View style={styles.thumbs}>
+        <View style={styles.thumbs} onLayout={(e) => setLarguraFotos(e.nativeEvent.layout.width)}>
           {photos.map((p, i) => (
-            <View key={`${p.name}-${i}`} style={styles.photoWrap}>
-              <Image source={{ uri: p.url }} style={styles.thumb} />
+            <View key={`${p.name}-${i}`} style={[styles.photoWrap, { marginBottom: 0 }]}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setFotoAberta(p.previewUri ?? resolveMediaUrl(p.url) ?? p.url)}
+                accessibilityLabel="Ver foto"
+              >
+                <Image
+                  source={{ uri: p.previewUri ?? resolveMediaUrl(p.url) ?? p.url }}
+                  style={[styles.thumb, { width: lado, height: lado }]}
+                />
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.photoClear, { top: 6, right: 6, width: 24, height: 24, borderRadius: 12 }]}
                 onPress={() => setPhotos((prev) => prev.filter((_, idx) => idx !== i))}
@@ -213,3 +281,28 @@ export default function MedicaoFormModal({
     </FormModal>
   );
 }
+
+const visualizador = StyleSheet.create({
+  root: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.94)',
+    justifyContent: 'center',
+    zIndex: 99999,
+    elevation: 99999,
+  },
+  imagem: { width: '100%', height: '80%' },
+  fechar: {
+    position: 'absolute',
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

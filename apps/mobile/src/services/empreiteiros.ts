@@ -63,6 +63,8 @@ export type GeoPhoto = {
   accuracy?: number | null;
   capturedAt: string;
   address?: string | null;
+  /** Arquivo local, só para mostrar a miniatura na hora (não é enviado à API). */
+  previewUri?: string;
 };
 
 export type DailyMeasurement = {
@@ -72,9 +74,12 @@ export type DailyMeasurement = {
   contractId?: string | null;
   status?: string | null;
   correctionNote?: string | null;
-  photos: Array<{ url: string; name?: string }>;
-  teamPhoto: { url: string; name?: string } | null;
+  photos: Array<{ url: string; name?: string; capturedAt?: string | null; address?: string | null }>;
+  teamPhoto: { url: string; name?: string; capturedAt?: string | null; address?: string | null } | null;
   workers: Array<{ id: string; teamMemberId: string | null; name: string; role: string }>;
+  executedAmount?: number | null;
+  approvedAt?: string | null;
+  createdAt?: string | null;
 };
 
 export const EMPREITEIRO_TEAM_ROLES = [
@@ -112,8 +117,11 @@ export async function createMeasurement(
     teamPhoto: GeoPhoto;
   }
 ): Promise<void> {
+  const semPreview = ({ previewUri: _previewUri, ...foto }: GeoPhoto) => foto;
   const res = await api.post(`/api/empreiteiros/${id}/daily-measurements`, {
     ...payload,
+    photos: payload.photos.map(semPreview),
+    teamPhoto: semPreview(payload.teamPhoto),
     quantity: null,
     unit: null,
   });
