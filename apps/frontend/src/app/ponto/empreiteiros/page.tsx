@@ -3572,7 +3572,7 @@ export default function EmpreiteirosPage() {
                                     <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Vencimento</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Status</th>
-                                    <th className={`${cadastroListClasses.th} text-center`}>Ação</th>
+                                    <th className={`${cadastroListClasses.th} text-right`}>Ação</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -3617,31 +3617,18 @@ export default function EmpreiteirosPage() {
                                                   </span>
                                                 )}
                                               </td>
-                                              <td className={`${cadastroListClasses.td} text-center`}>
+                                              <td className={`${cadastroListClasses.td} text-right`}>
                                                 {numeroFluig ? (
-                                                  <div className="flex items-center justify-center gap-2">
-                                                    <a
-                                                      href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:underline dark:text-red-400"
-                                                      title="Abrir no Fluig"
-                                                    >
-                                                      Solicitação {numeroFluig}
-                                                      <ExternalLink className="h-3.5 w-3.5" />
-                                                    </a>
-                                                    {canManageCadastro ? (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => abrirModalFluig(link.id, parcel)}
-                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700"
-                                                        aria-label="Alterar solicitação"
-                                                        title="Alterar solicitação"
-                                                      >
-                                                        <Pencil className="h-4 w-4" />
-                                                      </button>
-                                                    ) : null}
-                                                  </div>
+                                                  <a
+                                                    href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                    aria-label={`Abrir solicitação ${numeroFluig} no Fluig`}
+                                                    title={`Abrir solicitação ${numeroFluig} no Fluig`}
+                                                  >
+                                                    <ExternalLink className="h-4 w-4" />
+                                                  </a>
                                                 ) : canManageCadastro ? (
                                                   <button
                                                     type="button"
@@ -4228,41 +4215,7 @@ export default function EmpreiteirosPage() {
                               </Card>
                             ) : null}
 
-                            {abaServico === 'medicoes' ? (
-                              <>
-                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
-                                  <FilterStatCard
-                                    label="Contrato"
-                                    count={formatMoneyBr(contractValue) || '—'}
-                                    icon={FileText}
-                                    iconBg="bg-violet-100 dark:bg-violet-900/30"
-                                    iconColor="text-violet-600 dark:text-violet-400"
-                                  />
-                                  <FilterStatCard
-                                    label="Executado"
-                                    count={executedPct != null ? `${executedPct}%` : '—'}
-                                    icon={TrendingUp}
-                                    iconBg="bg-blue-100 dark:bg-blue-900/30"
-                                    iconColor="text-blue-600 dark:text-blue-400"
-                                  />
-                                  <FilterStatCard
-                                    label="Pago"
-                                    count={formatMoneyBr(paidTotal) || 'R$ 0,00'}
-                                    icon={CheckCircle2}
-                                    iconBg="bg-emerald-100 dark:bg-emerald-900/30"
-                                    iconColor="text-emerald-600 dark:text-emerald-400"
-                                  />
-                                  <FilterStatCard
-                                    label="Saldo"
-                                    count={formatMoneyBr(saldoValue) || '—'}
-                                    icon={Wallet}
-                                    iconBg="bg-amber-100 dark:bg-amber-900/30"
-                                    iconColor="text-amber-600 dark:text-amber-400"
-                                  />
-                                </div>
-                                {renderMedicoesCard(viewingItem, false, link.id)}
-                              </>
-                            ) : null}
+                            {abaServico === 'medicoes' ? renderMedicoesCard(viewingItem, false, link.id) : null}
 
                             {abaServico === 'dados' ? (
                               <Card className={cadastroListClasses.card}>
