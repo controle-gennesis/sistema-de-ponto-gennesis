@@ -743,7 +743,6 @@ function SolicitarLocacoesFerramentasPage() {
                     <th className={cadastroListClasses.thCenter}>Tipo</th>
                     <th className={cadastroListClasses.th}>Contrato</th>
                     <th className={cadastroListClasses.th}>Obra</th>
-                    <th className={cadastroListClasses.thCenter}>Polo</th>
                     <th className={cadastroListClasses.thCenter}>Prioridade</th>
                     <th className={cadastroListClasses.th}>Solicitante</th>
                     <th className={cadastroListClasses.thCenter}>Período</th>
@@ -766,9 +765,9 @@ function SolicitarLocacoesFerramentasPage() {
                           {formatCadastroListId(row.code, listRange.startItem + index)}
                         </ListRowNavigableLabel>
                       </td>
-                      <td className={`${cadastroListClasses.tdTruncate} max-w-[26rem] lg:max-w-[40rem]`}>
+                      <td className={`${cadastroListClasses.tdTruncate} min-w-[16rem] max-w-[28rem] lg:min-w-[22rem] lg:max-w-[40rem]`}>
                         <div className="min-w-0">
-                          <p className="line-clamp-2 break-words font-medium text-gray-900 dark:text-gray-100" title={row.titulo}>
+                          <p className="break-words font-medium text-gray-900 dark:text-gray-100">
                             {row.titulo}
                           </p>
                           <p
@@ -792,7 +791,6 @@ function SolicitarLocacoesFerramentasPage() {
                           {row.obra || '—'}
                         </p>
                       </td>
-                      <td className={cadastroListClasses.tdCenter}>{row.polo || '—'}</td>
                       <td className={cadastroListClasses.tdCenter}>
                         {formatToolRentalPriority(row.priority)}
                       </td>
