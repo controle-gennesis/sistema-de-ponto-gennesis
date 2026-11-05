@@ -2212,6 +2212,52 @@ export default function EmpreiteirosPage() {
     staleTime: 60_000,
   });
 
+  // Solicitações do Fluig da empreita (para escolher na lista ao vincular a parcela).
+  const { data: fluigSolicitacoesData, isLoading: carregandoSolicitacoesFluig } = useQuery({
+    queryKey: ['empreiteiro-fluig-solicitacoes-opcoes', viewingItem?.id],
+    queryFn: async () => {
+      const res = await api.get(`/empreiteiros/${viewingItem!.id}/fluig-solicitacoes`);
+      return (res.data?.data?.itens ?? []) as Array<{
+        numero: string;
+        titulo: string;
+        fase: string;
+        valor: number;
+        pagamento: string | null;
+      }>;
+    },
+    enabled: Boolean(viewingItem?.id) && Boolean(fluigModal),
+    staleTime: 60_000,
+  });
+
+  const opcoesSolicitacaoFluig = useMemo(() => {
+    const jaLigadas = new Set(
+      (viewingItem?.contracts || [])
+        .flatMap((c) => c.installments || [])
+        .filter((p) => p.id !== fluigModal?.parcelId)
+        .map((p) => p.fluigRequestNumber || '')
+        .filter(Boolean),
+    );
+    const itens = (Array.isArray(fluigSolicitacoesData) ? fluigSolicitacoesData : []).filter(
+      (s) => s.numero && !jaLigadas.has(s.numero),
+    );
+    const opcoes = itens.map((s) => ({
+      value: s.numero,
+      label: `${s.numero} · ${s.titulo || 'Solicitação'}`,
+      description: `${formatMoneyBr(s.valor) || '—'} · ${s.fase ? faseExibicao(s.fase).texto : 'Sem fase'}`,
+      searchText: `${s.numero} ${s.titulo} ${s.valor}`,
+    }));
+    // Número já vinculado antes (digitado à mão) continua selecionável mesmo fora da lista.
+    if (fluigNumeroInput && !opcoes.some((o) => o.value === fluigNumeroInput)) {
+      opcoes.unshift({
+        value: fluigNumeroInput,
+        label: `${fluigNumeroInput} · (informado manualmente)`,
+        description: '',
+        searchText: fluigNumeroInput,
+      });
+    }
+    return opcoes;
+  }, [fluigSolicitacoesData, viewingItem, fluigModal, fluigNumeroInput]);
+
   const abrirModalFluig = (linkId: string, parcel: ServiceInstallment) => {
     setFluigNumeroInput(parcel.fluigRequestNumber || '');
     setFluigModal({ linkId, parcelId: parcel.id, number: parcel.number });
@@ -3624,16 +3670,38 @@ export default function EmpreiteirosPage() {
                           >
                             <div className="space-y-4">
                               <div>
-                                <label className={labelClass}>Número da solicitação *</label>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={fluigNumeroInput}
-                                  onChange={(e) => setFluigNumeroInput(e.target.value.replace(/[^0-9]/g, ''))}
-                                  placeholder="Ex.: 123456"
-                                  className={inputClass}
-                                  autoFocus
-                                />
+                                <label className={labelClass}>Solicitação do Fluig *</label>
+                                {carregandoSolicitacoesFluig || opcoesSolicitacaoFluig.length > 0 ? (
+                                  <StringSingleSelectDropdown
+                                    value={fluigNumeroInput}
+                                    onChange={(v) => setFluigNumeroInput(v)}
+                                    options={opcoesSolicitacaoFluig}
+                                    allowEmpty={false}
+                                    placeholder={
+                                      carregandoSolicitacoesFluig ? 'Buscando no Fluig…' : 'Selecione a solicitação'
+                                    }
+                                    searchPlaceholder="Buscar por número, descrição ou valor"
+                                    emptySearchMessage="Nenhuma solicitação encontrada"
+                                    wrapLabel
+                                    matchTriggerWidth
+                                    className="w-full"
+                                  />
+                                ) : (
+                                  <>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={fluigNumeroInput}
+                                      onChange={(e) => setFluigNumeroInput(e.target.value.replace(/[^0-9]/g, ''))}
+                                      placeholder="Ex.: 123456"
+                                      className={inputClass}
+                                      autoFocus
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      Nenhuma solicitação deste CPF/CNPJ foi encontrada no Fluig. Informe o número manualmente.
+                                    </p>
+                                  </>
+                                )}
                               </div>
                               <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                                 <button
