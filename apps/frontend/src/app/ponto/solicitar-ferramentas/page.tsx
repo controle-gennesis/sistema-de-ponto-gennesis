@@ -766,12 +766,15 @@ function SolicitarLocacoesFerramentasPage() {
                           {formatCadastroListId(row.code, listRange.startItem + index)}
                         </ListRowNavigableLabel>
                       </td>
-                      <td className={cadastroListClasses.tdTruncate}>
+                      <td className={`${cadastroListClasses.tdTruncate} max-w-[26rem] lg:max-w-[40rem]`}>
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-gray-900 dark:text-gray-100">
+                          <p className="line-clamp-2 break-words font-medium text-gray-900 dark:text-gray-100" title={row.titulo}>
                             {row.titulo}
                           </p>
-                          <p className="truncate text-xs text-gray-500">
+                          <p
+                            className="line-clamp-2 break-words text-xs text-gray-500"
+                            title={formatEquipamentosLabel(resolveEquipamentos(row))}
+                          >
                             {formatEquipamentosLabel(resolveEquipamentos(row))}
                           </p>
                         </div>

@@ -804,8 +804,8 @@ function SolicitacoesFerramentasPage() {
                             {formatCadastroListId(row.code, listRange.startItem + index)}
                           </ListRowNavigableLabel>
                         </td>
-                        <td className={cadastroListClasses.tdTruncate}>
-                          <p className="truncate font-medium text-gray-900 dark:text-gray-100">
+                        <td className={`${cadastroListClasses.tdTruncate} max-w-[26rem] lg:max-w-[40rem]`}>
+                          <p className="line-clamp-2 break-words font-medium text-gray-900 dark:text-gray-100" title={row.titulo}>
                             {row.titulo}
                           </p>
                         </td>
