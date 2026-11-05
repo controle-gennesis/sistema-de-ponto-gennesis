@@ -5,7 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { parseBoletoDate, parseBoletoValue } from '../lib/boletoControlImport';
 
-type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true; cats: true } }>;
+type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true; cats: true; looseArts: true } }>;
 
 const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const dateFromYmd = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00.000Z`) : null);
@@ -128,6 +128,13 @@ function serialize(r: Row) {
       protocol: c.protocol,
       issuedAt: ymd(c.issuedAt),
     })),
+    looseArts: r.looseArts.map((a) => ({
+      id: a.id,
+      art: a.art,
+      professional: a.professional,
+      baixada: parseBaixada(a.baixada),
+      notes: a.notes,
+    })),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
@@ -136,7 +143,20 @@ function serialize(r: Row) {
 const withAddenda = {
   addenda: { orderBy: [{ effectiveDate: 'asc' as const }, { createdAt: 'asc' as const }] },
   cats: { orderBy: [{ issuedAt: 'asc' as const }, { createdAt: 'asc' as const }] },
+  looseArts: { orderBy: [{ createdAt: 'asc' as const }] },
 };
+
+/** Valida o corpo de uma ART avulsa (usado ao criar e ao editar). */
+function readLooseArtBody(body: Record<string, unknown>) {
+  const art = str(body.art, 60);
+  if (!art) throw createError('Informe a ART', 400);
+  return {
+    art,
+    professional: str(body.professional, 120),
+    baixada: parseBaixada(body.baixada) || null,
+    notes: str(body.notes, 500),
+  };
+}
 
 /** Valida o corpo de uma CAT (usado ao criar e ao editar). */
 function readCatBody(body: Record<string, unknown>) {
@@ -334,6 +354,50 @@ export class ContractRegistryController {
       if (!cat) throw createError('CAT não encontrada', 404);
       const fields = readCatBody((req.body ?? {}) as Record<string, unknown>);
       await prisma.contractRegistryCat.update({ where: { id: cat.id }, data: fields });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
+      res.json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async addLooseArt(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const entry = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!entry) throw createError('Registro não encontrado', 404);
+      const fields = readLooseArtBody((req.body ?? {}) as Record<string, unknown>);
+      await prisma.contractRegistryLooseArt.create({ data: { registryId: entry.id, ...fields, createdBy: req.user?.id } });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: entry.id }, include: withAddenda });
+      res.status(201).json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateLooseArt(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const row = await prisma.contractRegistryLooseArt.findFirst({
+        where: { id: req.params.looseArtId, registryId: req.params.id },
+        select: { id: true },
+      });
+      if (!row) throw createError('ART avulsa não encontrada', 404);
+      const fields = readLooseArtBody((req.body ?? {}) as Record<string, unknown>);
+      await prisma.contractRegistryLooseArt.update({ where: { id: row.id }, data: fields });
+      const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
+      res.json({ success: true, data: serialize(updated!) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async removeLooseArt(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const row = await prisma.contractRegistryLooseArt.findFirst({
+        where: { id: req.params.looseArtId, registryId: req.params.id },
+        select: { id: true },
+      });
+      if (!row) throw createError('ART avulsa não encontrada', 404);
+      await prisma.contractRegistryLooseArt.delete({ where: { id: row.id } });
       const updated = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
       res.json({ success: true, data: serialize(updated!) });
     } catch (error) {
