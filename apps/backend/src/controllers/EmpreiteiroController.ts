@@ -73,6 +73,63 @@ function normalizeAddendumStatus(raw: unknown): AddendumStatus {
   return 'APPROVED';
 }
 
+/** Marca de parcela quitada pelo Fluig (paidBy), para distinguir de pagamento com comprovante anexado. */
+const PAID_BY_FLUIG = 'FLUIG';
+
+/** Solicitação concluída no Fluig: tem data de pagamento ou está na etapa final (117). */
+function solicitacaoFluigPaga(s: { fase: string; pagamento: string | null } | undefined): boolean {
+  return Boolean(s && (s.pagamento || /(^|[^0-9])117([^0-9]|$)/.test(s.fase || '')));
+}
+
+/**
+ * Parcelas ligadas a uma solicitação já paga no Fluig passam a PAID com o valor realmente pago;
+ * em seguida as parcelas PENDING de cada contrato são recalculadas sobre o saldo restante.
+ * Idempotente. Devolve true se algo mudou.
+ */
+async function sincronizarParcelasPagasNoFluig(empreiteiroId: string): Promise<boolean> {
+  const parcelas = await prisma.empreiteiroContractInstallment.findMany({
+    where: { empreiteiroContract: { empreiteiroId }, fluigRequestNumber: { not: null } },
+    select: {
+      id: true,
+      empreiteiroContractId: true,
+      amount: true,
+      status: true,
+      paidAt: true,
+      fluigRequestNumber: true,
+    },
+  });
+  if (parcelas.length === 0) return false;
+  let statusFluig: Awaited<ReturnType<typeof buscarStatusFluigPorNumeros>> = {};
+  try {
+    statusFluig = await buscarStatusFluigPorNumeros(
+      parcelas.map((p) => p.fluigRequestNumber).filter((n): n is string => Boolean(n))
+    );
+  } catch {
+    return false;
+  }
+  const contratosAlterados = new Set<string>();
+  for (const p of parcelas) {
+    const s = statusFluig[String(p.fluigRequestNumber || '').replace(/\D/g, '')];
+    if (!solicitacaoFluigPaga(s) || !s || !(s.valor > 0)) continue;
+    const mesmoValor = Math.abs(Number(p.amount) - s.valor) < 0.005;
+    if (String(p.status).toUpperCase() === 'PAID' && mesmoValor) continue;
+    await prisma.empreiteiroContractInstallment.update({
+      where: { id: p.id },
+      data: {
+        amount: new Prisma.Decimal(s.valor.toFixed(2)),
+        status: 'PAID',
+        paidAt: s.pagamento ? new Date(`${s.pagamento}T12:00:00`) : p.paidAt ?? new Date(),
+        paidBy: PAID_BY_FLUIG,
+      } as Prisma.EmpreiteiroContractInstallmentUpdateInput,
+    });
+    contratosAlterados.add(p.empreiteiroContractId);
+  }
+  for (const contractId of contratosAlterados) {
+    await redistributePendingInstallmentAmounts(prisma, contractId);
+  }
+  return contratosAlterados.size > 0;
+}
+
 function isAddendumApproved(raw: unknown): boolean {
   return normalizeAddendumStatus(raw) === 'APPROVED';
 }
@@ -2024,6 +2081,8 @@ export class EmpreiteiroController {
     try {
       const { id } = req.params;
       await assertCanAccessEmpreiteiro(req, id);
+      // Mantém as parcelas em dia com o Fluig (quitadas + saldo das seguintes recalculado).
+      const changed = await sincronizarParcelasPagasNoFluig(id);
       const parcelas = await prisma.empreiteiroContractInstallment.findMany({
         where: { empreiteiroContract: { empreiteiroId: id }, fluigRequestNumber: { not: null } },
         select: { fluigRequestNumber: true },
@@ -2031,7 +2090,7 @@ export class EmpreiteiroController {
       const data = await buscarStatusFluigPorNumeros(
         parcelas.map((p) => p.fluigRequestNumber).filter((n): n is string => Boolean(n))
       );
-      res.json({ success: true, data });
+      res.json({ success: true, data, changed });
     } catch (error) {
       next(error);
     }
@@ -3423,10 +3482,21 @@ export class EmpreiteiroController {
           throw createError('Informe apenas o número da solicitação do Fluig', 400);
         }
         if (numero.length > 20) throw createError('Número da solicitação inválido', 400);
+        // Trocou/removeu o número de uma parcela que tinha sido quitada pelo Fluig: ela volta a pendente.
+        const eraQuitadaPeloFluig =
+          String(installment.status).toUpperCase() === 'PAID' &&
+          (installment as { paidBy?: string | null }).paidBy === PAID_BY_FLUIG &&
+          (installment as { fluigRequestNumber?: string | null }).fluigRequestNumber !== (numero || null);
         await prisma.empreiteiroContractInstallment.update({
           where: { id: installmentId },
-          data: { fluigRequestNumber: numero || null } as Prisma.EmpreiteiroContractInstallmentUpdateInput,
+          data: {
+            fluigRequestNumber: numero || null,
+            ...(eraQuitadaPeloFluig ? { status: 'PENDING', paidAt: null, paidBy: null } : {}),
+          } as Prisma.EmpreiteiroContractInstallmentUpdateInput,
         });
+        if (eraQuitadaPeloFluig) await redistributePendingInstallmentAmounts(prisma, linkId);
+        // Já quitada no Fluig: grava o valor real pago e recalcula as parcelas seguintes.
+        await sincronizarParcelasPagasNoFluig(id);
         const empreiteiroAtual = await prisma.empreiteiro.findUniqueOrThrow({
           where: { id },
           include: empreiteiroInclude,

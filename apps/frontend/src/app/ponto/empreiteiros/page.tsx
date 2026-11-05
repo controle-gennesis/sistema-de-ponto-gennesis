@@ -2206,6 +2206,10 @@ export default function EmpreiteirosPage() {
     queryKey: ['empreiteiro-fluig-parcelas', viewingItem?.id, numerosFluigDasParcelas],
     queryFn: async () => {
       const res = await api.get(`/empreiteiros/${viewingItem!.id}/fluig-parcelas`);
+      // O backend quita as parcelas pagas no Fluig e recalcula as seguintes: recarrega os dados da empreita.
+      if (res.data?.changed) {
+        void queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      }
       return (res.data?.data ?? {}) as Record<string, { fase: string; vencimento: string | null; pagamento: string | null }>;
     },
     enabled: Boolean(viewingItem?.id) && numerosFluigDasParcelas.length > 0,
