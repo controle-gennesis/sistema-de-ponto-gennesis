@@ -79,7 +79,7 @@ export type DailyMeasurementContractOption = {
 function isServiceContractClosed(contract?: DailyMeasurementContractOption | null) {
   if (!contract) return false;
   const status = String(contract.status || '').toUpperCase();
-  if (status === 'COMPLETED' || status === 'CANCELLED') return true;
+  if (status === 'COMPLETED' || status === 'CANCELLED' || status === 'PENDING_REVIEW') return true;
   return contract.isActive === false;
 }
 

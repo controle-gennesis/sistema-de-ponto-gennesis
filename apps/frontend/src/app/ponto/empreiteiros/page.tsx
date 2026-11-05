@@ -22,6 +22,7 @@ import {
   Plus,
   Info,
   Search,
+  Star,
   Trash2,
   TrendingUp,
   Users,
@@ -66,6 +67,14 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { Modal } from '@/components/ui/Modal';
 import { buildFluigWorkflowProcessViewUrl } from '@/lib/fluigWorkflowApproval';
 import { faseExibicao } from './EmpreiteiroFluigSolicitacoesModal';
+import {
+  EmpreiteiroReviewsPanel,
+  ReviewServiceModal,
+  StarsDisplay,
+  formatNota,
+  useEmpreiteiroReviews,
+  useReviewsSummaryByEmpreiteiro,
+} from './EmpreiteiroAvaliacao';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { FileDropZone } from '@/components/ui/FileDropZone';
@@ -87,7 +96,8 @@ type EmpreiteiroContractStatus =
   | 'IN_PROGRESS'
   | 'COMPLETED'
   | 'CANCELLED'
-  | 'OVERDUE';
+  | 'OVERDUE'
+  | 'PENDING_REVIEW';
 
 interface PaymentFile {
   url: string;
@@ -196,6 +206,7 @@ const CONTRACT_STATUS_OPTIONS: Array<{ value: EmpreiteiroContractStatus; label: 
   { value: 'COMPLETED', label: 'Concluído' },
   { value: 'CANCELLED', label: 'Cancelado' },
   { value: 'OVERDUE', label: 'Em atraso' },
+  { value: 'PENDING_REVIEW', label: 'Avaliar' },
 ];
 
 function contractStatusMeta(status?: string | null) {
@@ -212,6 +223,12 @@ function contractStatusMeta(status?: string | null) {
       label: 'Concluído',
       className:
         'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
+    };
+  }
+  if (key === 'PENDING_REVIEW') {
+    return {
+      label: 'Avaliar',
+      className: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
     };
   }
   if (key === 'CANCELLED') {
@@ -729,7 +746,8 @@ export default function EmpreiteirosPage() {
   useEffect(() => {
     setAbaServico('medicoes');
   }, [serviceDetailLinkId]);
-  const [abaDetalhe, setAbaDetalhe] = useState<'contratos' | 'medicoes' | 'fluig' | 'dados'>('contratos');
+  const [abaDetalhe, setAbaDetalhe] = useState<'contratos' | 'medicoes' | 'fluig' | 'avaliacoes' | 'dados'>('contratos');
+  const [reviewTarget, setReviewTarget] = useState<{ serviceId: string; serviceName: string } | null>(null);
   const [listPage, setListPage] = useState(1);
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
   const [empSkipAutoDetail, setEmpSkipAutoDetail] = useState(false);
@@ -905,8 +923,8 @@ export default function EmpreiteirosPage() {
     if (addingAddendumForId) resetAddendumForm();
   };
 
-  const openDetails = (item: EmpreiteiroRow) => {
-    setAbaDetalhe('contratos');
+  const openDetails = (item: EmpreiteiroRow, aba: 'contratos' | 'avaliacoes' = 'contratos') => {
+    setAbaDetalhe(aba);
     setEmpSkipAutoDetail(false);
     setPageSection('detalhe');
     setViewingItem(item);
@@ -2169,6 +2187,8 @@ export default function EmpreiteirosPage() {
     if (listPage > listaTotalPaginas) setListPage(listaTotalPaginas);
   }, [listPage, listaTotalPaginas]);
 
+  const { data: reviewsData } = useEmpreiteiroReviews(viewingItem?.id);
+  const { data: reviewsSummaryMap } = useReviewsSummaryByEmpreiteiro();
   const contractLinksForMenu = viewingItem?.contracts ?? [];
   const {
     rowActionMenu: contractRowActionMenu,
@@ -2733,6 +2753,7 @@ export default function EmpreiteirosPage() {
                             <th className={cadastroListClasses.thCenter}>Contratos</th>
                             <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
                             <th className={cadastroListClasses.thCenter}>Contato</th>
+                            {!isLinkedEmpreiteiro ? <th className={cadastroListClasses.thCenter}>Avaliação</th> : null}
                             <th className={cadastroListClasses.thCenter}>Status</th>
                             {showActions ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
                           </tr>
@@ -2802,6 +2823,32 @@ export default function EmpreiteirosPage() {
                                     ) : null}
                                   </div>
                                 </td>
+                                {!isLinkedEmpreiteiro ? (
+                                  <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm sm:px-6">
+                                    {(() => {
+                                      const r = reviewsSummaryMap?.[it.id];
+                                      if (!r || r.count === 0) {
+                                        return <span className="text-xs text-gray-400 dark:text-gray-500">Sem avaliação</span>;
+                                      }
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openDetails(it, 'avaliacoes');
+                                          }}
+                                          title="Ver avaliações"
+                                          className="mx-auto flex flex-col items-center gap-0.5 rounded-lg px-2 py-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        >
+                                          <StarsDisplay value={r.average} size="h-3.5 w-3.5" />
+                                          <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">
+                                            {formatNota(r.average)} · {r.count}
+                                          </span>
+                                        </button>
+                                      );
+                                    })()}
+                                  </td>
+                                ) : null}
                                 <td className="px-3 py-3 align-middle text-center sm:px-6">
                                   <span
                                     className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -4510,6 +4557,15 @@ export default function EmpreiteirosPage() {
                 { rotulo: 'Contratado', valor: formatMoneyBr(contratado) || 'R$ 0,00', Icon: Wallet },
                 { rotulo: 'Executado', valor: formatMoneyBr(executado) || 'R$ 0,00', Icon: TrendingUp },
                 { rotulo: 'Contratos', valor: String(links.length), Icon: FileText },
+                ...(reviewsData && reviewsData.summary.count > 0 && !isOwnEmpreiteiroAccount
+                  ? [
+                      {
+                        rotulo: `Avaliação (${reviewsData.summary.count})`,
+                        valor: `★ ${formatNota(reviewsData.summary.average)}`,
+                        Icon: Star,
+                      },
+                    ]
+                  : []),
               ];
               return (
                 <div className="space-y-4">
@@ -4578,6 +4634,7 @@ export default function EmpreiteirosPage() {
                       [
                         { id: 'contratos', label: 'Contratos de Serviço' },
                         ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'fluig', label: 'Solicitações Fluig' }]),
+                        ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'avaliacoes', label: 'Avaliações' }]),
                         { id: 'dados', label: 'Dados' },
                       ] as const
                     ).map((aba) => (
@@ -5027,6 +5084,28 @@ export default function EmpreiteirosPage() {
                           onDelete={() => {
                             void handleDeleteContractLink(contractRowForActionMenu);
                           }}
+                          extraItems={
+                            ['COMPLETED', 'PENDING_REVIEW'].includes(
+                              String(contractRowForActionMenu.status || '').toUpperCase()
+                            )
+                              ? [
+                                  {
+                                    label: reviewsData?.itens.some((r) => r.serviceId === contractRowForActionMenu.id)
+                                      ? 'Editar avaliação'
+                                      : 'Avaliar serviço',
+                                    icon: <Star className="h-4 w-4 shrink-0 text-amber-500" />,
+                                    onClick: () =>
+                                      setReviewTarget({
+                                        serviceId: contractRowForActionMenu.id,
+                                        serviceName:
+                                          contractRowForActionMenu.contratoNome ||
+                                          contractRowForActionMenu.name ||
+                                          'Contrato de serviço',
+                                      }),
+                                  },
+                                ]
+                              : []
+                          }
                         />
                       ) : null}
                     </>
@@ -5063,6 +5142,17 @@ export default function EmpreiteirosPage() {
                 </CardContent>
               </Card>
             ) : null}
+
+            {abaDetalhe === 'avaliacoes' && !isOwnEmpreiteiroAccount ? (
+              <EmpreiteiroReviewsPanel empreiteiroId={viewingItem.id} />
+            ) : null}
+
+            <ReviewServiceModal
+              empreiteiroId={viewingItem.id}
+              serviceId={reviewTarget?.serviceId ?? null}
+              serviceName={reviewTarget?.serviceName ?? ''}
+              onClose={() => setReviewTarget(null)}
+            />
 
             {abaDetalhe === 'dados' ? (
               <Card className={cadastroListClasses.card}>

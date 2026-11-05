@@ -73,6 +73,26 @@ function normalizeAddendumStatus(raw: unknown): AddendumStatus {
   return 'APPROVED';
 }
 
+/** Médias (1 casa decimal) das avaliações: por critério e geral. */
+function summarizeReviews(
+  rows: Array<{ priceRating: number; deadlineRating: number; paymentRating: number }>
+) {
+  const count = rows.length;
+  if (count === 0) return { count: 0, average: null, price: null, deadline: null, payment: null };
+  const media = (pick: (r: (typeof rows)[number]) => number) =>
+    Number((rows.reduce((soma, r) => soma + pick(r), 0) / count).toFixed(1));
+  const price = media((r) => r.priceRating);
+  const deadline = media((r) => r.deadlineRating);
+  const payment = media((r) => r.paymentRating);
+  return {
+    count,
+    average: Number(((price + deadline + payment) / 3).toFixed(1)),
+    price,
+    deadline,
+    payment,
+  };
+}
+
 /** Marca de parcela quitada pelo Fluig (paidBy), para distinguir de pagamento com comprovante anexado. */
 const PAID_BY_FLUIG = 'FLUIG';
 
@@ -138,7 +158,7 @@ async function sincronizarParcelasPagasNoFluig(empreiteiroId: string): Promise<b
  */
 async function concluirServicosQuitados(empreiteiroId: string): Promise<boolean> {
   const servicos = await prisma.empreiteiroContract.findMany({
-    where: { empreiteiroId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    where: { empreiteiroId, status: { notIn: ['COMPLETED', 'CANCELLED', 'PENDING_REVIEW'] } },
     select: {
       id: true,
       plannedValue: true,
@@ -162,7 +182,7 @@ async function concluirServicosQuitados(empreiteiroId: string): Promise<boolean>
     if (pago + 0.005 < valorContrato || executado + 0.005 < valorContrato) continue;
     await prisma.empreiteiroContract.update({
       where: { id: s.id },
-      data: { status: 'COMPLETED', isActive: false },
+      data: { status: 'PENDING_REVIEW', isActive: false },
     });
     concluiu = true;
   }
@@ -365,7 +385,7 @@ async function maybeCompleteServiceContractIfSettled(
   });
   if (!link) return false;
   const stored = String(link.status || '').toUpperCase();
-  if (stored === 'COMPLETED' || stored === 'CANCELLED') return false;
+  if (stored === 'COMPLETED' || stored === 'CANCELLED' || stored === 'PENDING_REVIEW') return false;
   if (link.isActive === false) return false;
 
   const installments = link.installments || [];
@@ -376,7 +396,7 @@ async function maybeCompleteServiceContractIfSettled(
   await db.empreiteiroContract.update({
     where: { id: linkId },
     data: {
-      status: 'COMPLETED',
+      status: 'PENDING_REVIEW',
       isActive: false,
       endDate: link.endDate || new Date(),
     },
@@ -394,7 +414,7 @@ async function completeSettledContractsForEmpreiteiro(
     where: {
       empreiteiroId,
       isActive: true,
-      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      status: { notIn: ['COMPLETED', 'CANCELLED', 'PENDING_REVIEW'] },
     },
     select: { id: true },
   });
@@ -891,6 +911,8 @@ const EMPREITEIRO_CONTRACT_STATUSES = [
   'COMPLETED',
   'CANCELLED',
   'OVERDUE',
+  /** Serviço quitado e executado: aguarda a avaliação para virar Concluído. */
+  'PENDING_REVIEW',
 ] as const;
 
 type EmpreiteiroContractStatus = (typeof EMPREITEIRO_CONTRACT_STATUSES)[number];
@@ -972,6 +994,7 @@ function normalizeContractLinkStatus(raw: unknown): EmpreiteiroContractStatus {
   if (value === 'COMPLETED' || value === 'CONCLUIDO' || value === 'CONCLUÍDO') {
     return 'COMPLETED';
   }
+  if (value === 'PENDING_REVIEW' || value === 'AVALIAR') return 'PENDING_REVIEW';
   if (value === 'CANCELLED' || value === 'CANCELADO') return 'CANCELLED';
   if (value === 'OVERDUE' || value === 'EM_ATRASO' || value === 'ATRASO') return 'OVERDUE';
   return 'IN_PROGRESS';
@@ -985,7 +1008,7 @@ function resolveContractLinkStatus(row: {
   endDate?: Date | null;
 }): EmpreiteiroContractStatus {
   const stored = normalizeContractLinkStatus(row.status);
-  if (stored === 'COMPLETED' || stored === 'CANCELLED') return stored;
+  if (stored === 'COMPLETED' || stored === 'CANCELLED' || stored === 'PENDING_REVIEW') return stored;
 
   const todayYmd = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   const startYmd = row.startDate ? formatWorkDate(new Date(row.startDate)) : '';
@@ -1024,6 +1047,8 @@ function parseContractLinkStatus(raw: unknown): EmpreiteiroContractStatus {
     overdue: 'OVERDUE',
     em_atraso: 'OVERDUE',
     atraso: 'OVERDUE',
+    pending_review: 'PENDING_REVIEW',
+    avaliar: 'PENDING_REVIEW',
   };
   const status = map[key] || normalizeContractLinkStatus(value);
   if (!EMPREITEIRO_CONTRACT_STATUSES.includes(status)) {
@@ -2135,6 +2160,111 @@ export class EmpreiteiroController {
     }
   }
 
+  /** Avaliação do serviço concluído (1 a 5 estrelas): cria ou atualiza a avaliação do serviço. */
+  async saveServiceReview(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const { id, linkId } = req.params;
+      const service = await prisma.empreiteiroContract.findFirst({
+        where: { id: linkId, empreiteiroId: id },
+        select: { id: true, status: true },
+      });
+      if (!service) throw createError('Serviço não encontrado', 404);
+      const statusServico = String(service.status).toUpperCase();
+      if (statusServico !== 'COMPLETED' && statusServico !== 'PENDING_REVIEW') {
+        throw createError('Só é possível avaliar serviços quitados (Avaliar) ou concluídos', 400);
+      }
+      const nota = (valor: unknown, rotulo: string) => {
+        const n = Number(valor);
+        if (!Number.isInteger(n) || n < 1 || n > 5) {
+          throw createError(`Informe a nota de ${rotulo} (de 1 a 5 estrelas)`, 400);
+        }
+        return n;
+      };
+      const priceRating = nota(req.body?.priceRating, 'preço');
+      const deadlineRating = nota(req.body?.deadlineRating, 'prazo');
+      const paymentRating = nota(req.body?.paymentRating, 'pagamento');
+      const comment = optionalStr(req.body?.comment)?.slice(0, 1000) ?? null;
+      const autor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+      const review = await prisma.empreiteiroServiceReview.upsert({
+        where: { empreiteiroContractId: linkId },
+        create: {
+          empreiteiroContractId: linkId,
+          empreiteiroId: id,
+          priceRating,
+          deadlineRating,
+          paymentRating,
+          comment,
+          reviewedById: req.user!.id,
+          reviewedByName: autor?.name ?? null,
+        },
+        update: {
+          priceRating,
+          deadlineRating,
+          paymentRating,
+          comment,
+          reviewedById: req.user!.id,
+          reviewedByName: autor?.name ?? null,
+        },
+      });
+      // Avaliado: o serviço que aguardava avaliação passa a Concluído.
+      if (statusServico === 'PENDING_REVIEW') {
+        await prisma.empreiteiroContract.update({ where: { id: linkId }, data: { status: 'COMPLETED' } });
+      }
+      res.json({ success: true, data: review, message: 'Avaliação salva' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Avaliações dos serviços da empreita + médias (preço, prazo, pagamento e geral). */
+  async listServiceReviews(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      await assertCanAccessEmpreiteiro(req, id);
+      const rows = await prisma.empreiteiroServiceReview.findMany({
+        where: { empreiteiroId: id },
+        orderBy: { updatedAt: 'desc' },
+        include: { empreiteiroContract: { select: { id: true, name: true } } },
+      });
+      const itens = rows.map((r) => ({
+        id: r.id,
+        serviceId: r.empreiteiroContractId,
+        serviceName: r.empreiteiroContract?.name || 'Serviço',
+        priceRating: r.priceRating,
+        deadlineRating: r.deadlineRating,
+        paymentRating: r.paymentRating,
+        average: Number(((r.priceRating + r.deadlineRating + r.paymentRating) / 3).toFixed(2)),
+        comment: r.comment,
+        reviewedByName: r.reviewedByName,
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+      res.json({ success: true, data: { itens, summary: summarizeReviews(rows) } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Média das avaliações de cada empreita (para a lista e o ranking). */
+  async reviewsSummaryByEmpreiteiro(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const rows = await prisma.empreiteiroServiceReview.findMany({
+        select: { empreiteiroId: true, priceRating: true, deadlineRating: true, paymentRating: true },
+      });
+      const porEmpreiteiro = new Map<string, typeof rows>();
+      for (const r of rows) {
+        const lista = porEmpreiteiro.get(r.empreiteiroId) ?? [];
+        lista.push(r);
+        porEmpreiteiro.set(r.empreiteiroId, lista);
+      }
+      const data: Record<string, ReturnType<typeof summarizeReviews>> = {};
+      for (const [empreiteiroId, lista] of porEmpreiteiro) data[empreiteiroId] = summarizeReviews(lista);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await assertCanManageEmpreiteiros(req);
@@ -3226,6 +3356,7 @@ export class EmpreiteiroController {
       const serviceStatus = String(serviceContract.status || '').toUpperCase();
       if (
         serviceStatus === 'COMPLETED' ||
+        serviceStatus === 'PENDING_REVIEW' ||
         serviceStatus === 'CANCELLED' ||
         serviceContract.isActive === false
       ) {
