@@ -76,6 +76,8 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
   const empreiteiroId = user?.empreiteiro?.id ?? '';
   const { linkId } = route.params;
   const [aba, setAba] = useState<Aba>('medicoes');
+  // O círculo de "puxar para atualizar" só liga quando a pessoa puxa (não em atualizações automáticas).
+  const [puxando, setPuxando] = useState(false);
   const [buscaMedicao, setBuscaMedicao] = useState('');
   const [buscaEquipe, setBuscaEquipe] = useState('');
   const [medicaoAberta, setMedicaoAberta] = useState(false);
@@ -209,10 +211,10 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
           contentContainerStyle={styles.content}
           refreshControl={
             <RefreshControl
-              refreshing={empreiteiroQuery.isRefetching || medicoesQuery.isRefetching}
+              refreshing={puxando}
               onRefresh={() => {
-                void empreiteiroQuery.refetch();
-                void medicoesQuery.refetch();
+                setPuxando(true);
+                void Promise.all([empreiteiroQuery.refetch(), medicoesQuery.refetch()]).finally(() => setPuxando(false));
               }}
             />
           }

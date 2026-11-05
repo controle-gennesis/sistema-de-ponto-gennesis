@@ -51,8 +51,10 @@ export default function EmpreitaHomeScreen({ navigation }: Props) {
   const { user } = useAuth();
   const empreiteiroId = user?.empreiteiro?.id ?? '';
   const [aba, setAba] = useState<Aba>('servicos');
+  // O círculo de "puxar para atualizar" só liga quando a pessoa puxa (não em atualizações automáticas).
+  const [puxando, setPuxando] = useState(false);
 
-  const { data, isLoading, isError, refetch, isRefetching } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['empreiteiro-mobile', empreiteiroId],
     queryFn: () => fetchEmpreiteiro(empreiteiroId),
     enabled: Boolean(empreiteiroId),
@@ -79,7 +81,15 @@ export default function EmpreitaHomeScreen({ navigation }: Props) {
       ) : (
         <ScrollView
           contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={puxando}
+              onRefresh={() => {
+                setPuxando(true);
+                void refetch().finally(() => setPuxando(false));
+              }}
+            />
+          }
         >
           <View style={styles.top}>
             <Avatar uri={data.photoUrl} size={76} />
