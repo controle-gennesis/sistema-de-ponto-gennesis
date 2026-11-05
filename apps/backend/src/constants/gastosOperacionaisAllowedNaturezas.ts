@@ -33,7 +33,8 @@ export function isGastosOperacionaisAllowedNatureza(natureza: string): boolean {
   if (!key || key === '—' || key === '-') return false;
 
   const store = loadGastosNaturezasConfigStore();
-  if (isUnlinkedConfiguredNatureza(natureza, store)) return false;
+  // Vínculo explícito do usuário vence a marca de «desvinculada».
+  if (isUnlinkedConfiguredNatureza(natureza, store) && !findNaturezaMapping(natureza, store)) return false;
 
   if (
     GASTOS_OPERACIONAIS_DFC_ALLOWED_KEYS.has(key) ||

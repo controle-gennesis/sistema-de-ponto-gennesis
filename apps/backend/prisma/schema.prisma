@@ -6094,3 +6094,24 @@ model ContractRegistryAddendum {
   @@index([registryId, effectiveDate])
   @@map("contract_registry_addenda")
 }
+
+/// Contratos Sócios: linha de detalhe de um contrato (ex.: um prédio do CONFEA) em um mês/ano, com valores digitados.
+model ContratoSocioSubitem {
+  id               String   @id @default(cuid())
+  /// Nome do contrato como aparece na tabela de Contratos Sócios.
+  contrato         String
+  ano              Int
+  mes              Int
+  nome             String
+  faturamento      Decimal? @db.Decimal(15, 2)
+  liquido          Decimal? @db.Decimal(15, 2)
+  recebido         Decimal? @db.Decimal(15, 2)
+  tetoOrcamentario Decimal? @db.Decimal(15, 2)
+  gastos           Decimal? @db.Decimal(15, 2)
+  createdBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([contrato, ano, mes])
+  @@map("contrato_socio_subitens")
+}

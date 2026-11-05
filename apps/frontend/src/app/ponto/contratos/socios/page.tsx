@@ -170,6 +170,7 @@ export default function ContratosSociosPage() {
             showTetoOrcamentarioColumn
             showPdfExport
             enableContractFluxoModal
+            enableContractBreakdown
           />
         </PageStack>
       </MainLayout>
