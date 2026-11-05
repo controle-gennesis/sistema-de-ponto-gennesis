@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
@@ -462,6 +463,21 @@ export function KanbanCardModal({
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const mainColumnRef = useRef<HTMLDivElement>(null);
   const descriptionSectionRef = useRef<HTMLDivElement>(null);
+
+  /** Envia a imagem colocada na descrição e devolve a URL que fica gravada no texto. */
+  const uploadDescriptionImage = useCallback(async (file: File): Promise<string> => {
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await api.post('/kanban/description-image', body);
+      const url = res.data?.data?.url as string | undefined;
+      if (!url) throw new Error('sem url');
+      return url;
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Não foi possível enviar a imagem');
+      return '';
+    }
+  }, []);
   const descriptionBeforeEditRef = useRef('');
   const attachmentsSectionRef = useRef<HTMLDivElement>(null);
   /** Evita que um fetch antigo do card sobrescreva membros após atribuir/remover. */
@@ -2103,6 +2119,7 @@ export function KanbanCardModal({
                     disabled={saving}
                     placeholder="Detalhes, links, observações..."
                     toolbar
+                    onUploadImage={uploadDescriptionImage}
                   />
                   {isDetail && isEditingDescription ? (
                     <div className="flex items-center justify-end gap-2 mt-2">

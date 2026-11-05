@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Bold, Italic, Link2, List, ListOrdered, Redo2, Underline, Undo2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { Bold, ImagePlus, Italic, Link2, List, ListOrdered, Redo2, Underline, Undo2 } from 'lucide-react';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 
 function applyInlineMarkdown(text: string): string {
   let s = text
@@ -17,6 +18,16 @@ function applyInlineMarkdown(text: string): string {
     return `\u0001${i}\u0001`;
   };
 
+  s = s.replace(/!\[([^\]\n]*)\]\((\/[^\s)"]+|https?:\/\/[^\s)"]+)\)/g, (_m, rawAlt, url) => {
+    const wm = /\|(\d{2,4})$/.exec(rawAlt);
+    const alt = wm ? rawAlt.slice(0, wm.index) : rawAlt;
+    const size = wm
+      ? `width:${wm[1]}px;height:auto;max-width:100%;`
+      : 'max-width:100%;max-height:20rem;';
+    return park(
+      `<img src="${resolveApiMediaUrl(url) ?? url}" alt="${alt}" data-md-src="${url}" draggable="true" style="${size}border-radius:0.5rem;margin:0.25rem 0" />`,
+    );
+  });
   s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"]+|mailto:[^\s)"]+)\)/g, (_m, label, url) =>
     park(`<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`),
   );
@@ -115,6 +126,14 @@ export function commentHtmlToMarkdown(root: HTMLElement): string {
     const tag = el.tagName.toLowerCase();
     if (tag === 'br') return '';
 
+    if (tag === 'img') {
+      const src = el.getAttribute('data-md-src') || el.getAttribute('src') || '';
+      const alt = (el.getAttribute('alt') || 'imagem').replace(/[\[\]|\n]/g, ' ');
+      const width = Math.round(parseFloat((el as HTMLImageElement).style.width || '0'));
+      const altComLargura = width >= 24 ? `${alt}|${width}` : alt;
+      return /^(\/|https?:\/\/)[^\s)"]+$/i.test(src) ? `![${altComLargura}](${src})` : '';
+    }
+
     if (tag === 'a') {
       const href = el.getAttribute('href') || '';
       const label = walkChildren(el, active);
@@ -195,6 +214,11 @@ export function commentHtmlToMarkdown(root: HTMLElement): string {
       return;
     }
 
+    if (tag === 'img') {
+      pushParagraph(walkInline(el, base));
+      return;
+    }
+
     if (
       isUnderlineElement(el) ||
       isBoldElement(el) ||
@@ -217,7 +241,7 @@ export function commentHtmlToMarkdown(root: HTMLElement): string {
 
 function isEditorVisuallyEmpty(el: HTMLElement): boolean {
   const text = (el.textContent ?? '').replace(/\u00a0/g, ' ').trim();
-  return !text;
+  return !text && !el.querySelector('img');
 }
 
 /** Preview do comentário (fora do campo / resumo) — mesmo HTML do editor, sem mostrar ** ou __. */
@@ -232,7 +256,7 @@ export function LicitacaoCommentFormatted({
   if (!html) return null;
   return (
     <div
-      className={`leading-relaxed [&_b]:font-bold [&_em]:italic [&_i]:italic [&_li]:my-0.5 [&_strong]:font-bold [&_u]:underline [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-red-600 [&_a]:underline dark:[&_a]:text-red-400 ${className}`}
+      className={`leading-relaxed [&_b]:font-bold [&_em]:italic [&_i]:italic [&_li]:my-0.5 [&_strong]:font-bold [&_u]:underline [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-red-600 [&_a]:underline dark:[&_a]:text-red-400 [&_img]:max-w-full [&_img]:rounded-lg ${className}`}
       style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
       dangerouslySetInnerHTML={{ __html: html }}
     />
@@ -247,6 +271,8 @@ type Props = {
   className?: string;
   /** Barra de formatação (negrito, itálico, sublinhado, lista) no estilo Google Docs. */
   toolbar?: boolean;
+  /** Quando informado, a barra ganha o botão de imagem (e colar imagem funciona): devolve a URL salva. */
+  onUploadImage?: (file: File) => Promise<string>;
 };
 
 /**
@@ -259,6 +285,7 @@ export function LicitacaoCommentEditor({
   placeholder = 'Comentário…',
   className = '',
   toolbar = false,
+  onUploadImage,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const lastEmittedRef = useRef(value);
@@ -274,6 +301,104 @@ export function LicitacaoCommentEditor({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const savedRangeRef = useRef<Range | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [selImg, setSelImg] = useState<HTMLImageElement | null>(null);
+  const [handlePos, setHandlePos] = useState<{ left: number; top: number } | null>(null);
+
+  const placeHandle = useCallback((img: HTMLImageElement | null) => {
+    const wrap = wrapperRef.current;
+    if (!img || !wrap || !img.isConnected) {
+      setHandlePos(null);
+      return;
+    }
+    const a = img.getBoundingClientRect();
+    const b = wrap.getBoundingClientRect();
+    setHandlePos({ left: a.right - b.left - 9, top: a.bottom - b.top - 9 });
+  }, []);
+
+  const selectImage = useCallback(
+    (img: HTMLImageElement | null) => {
+      ref.current?.querySelectorAll('img[data-selected]').forEach((el) => el.removeAttribute('data-selected'));
+      if (img) img.setAttribute('data-selected', 'true');
+      setSelImg(img);
+      placeHandle(img);
+    },
+    [placeHandle],
+  );
+
+  useEffect(() => {
+    if (!selImg) return;
+    const update = () => placeHandle(selImg);
+    const el = ref.current;
+    el?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    return () => {
+      el?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [selImg, placeHandle]);
+
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const img = selImg;
+    if (!img) return;
+    const startX = e.clientX;
+    const startW = img.getBoundingClientRect().width;
+    const maxW = (ref.current?.clientWidth ?? 800) - 24;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.max(48, Math.min(maxW, Math.round(startW + ev.clientX - startX)));
+      img.style.width = `${w}px`;
+      img.style.height = 'auto';
+      img.style.maxHeight = 'none';
+      img.style.maxWidth = '100%';
+      placeHandle(img);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      emitFromDom();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    savedRangeRef.current =
+      sel && sel.rangeCount && ref.current?.contains(sel.anchorNode)
+        ? sel.getRangeAt(0).cloneRange()
+        : null;
+  };
+
+  const insertImageFile = async (file: File | null | undefined) => {
+    if (!file || !onUploadImage || disabled) return;
+    if (!file.type.startsWith('image/')) return;
+    setUploadingImage(true);
+    try {
+      const url = await onUploadImage(file);
+      if (!url) return;
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (sel && savedRangeRef.current) {
+        sel.removeAllRanges();
+        sel.addRange(savedRangeRef.current);
+      }
+      const src = resolveApiMediaUrl(url) ?? url;
+      document.execCommand(
+        'insertHTML',
+        false,
+        `<img src="${src}" alt="imagem" data-md-src="${url}" draggable="true" style="max-width:100%;max-height:20rem;border-radius:0.5rem;margin:0.25rem 0" /><br>`,
+      );
+      emitFromDom();
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   useEffect(() => {
     if (!toolbar) return;
@@ -536,11 +661,38 @@ export function LicitacaoCommentEditor({
       { key: 'ul', label: 'Lista com marcadores', Icon: List, on: active.list, run: () => runCommand('insertUnorderedList') },
       { key: 'ol', label: 'Lista numerada', Icon: ListOrdered, on: active.olist, run: () => runCommand('insertOrderedList') },
     ],
-    [{ key: 'link', label: 'Inserir link', Icon: Link2, on: linkOpen, run: openLinkInput }],
+    [
+      { key: 'link', label: 'Inserir link', Icon: Link2, on: linkOpen, run: openLinkInput },
+      ...(onUploadImage
+        ? [
+            {
+              key: 'image',
+              label: uploadingImage ? 'Enviando imagem…' : 'Inserir imagem',
+              Icon: ImagePlus,
+              on: uploadingImage,
+              run: () => {
+                if (uploadingImage) return;
+                saveSelection();
+                imageInputRef.current?.click();
+              },
+            } as ToolbarItem,
+          ]
+        : []),
+    ],
   ];
 
   const editor = (
-    <div className="relative">
+    <div className="relative" ref={wrapperRef}>
+      {selImg && handlePos && !disabled ? (
+        <span
+          role="separator"
+          aria-label="Arraste para redimensionar a imagem"
+          title="Arraste para redimensionar"
+          onMouseDown={startResize}
+          style={{ left: handlePos.left, top: handlePos.top }}
+          className="absolute z-10 h-[18px] w-[18px] cursor-nwse-resize rounded-md border-2 border-white bg-red-600 shadow ring-1 ring-red-700/40"
+        />
+      ) : null}
       {showPlaceholder ? (
         <span
           aria-hidden
@@ -560,8 +712,14 @@ export function LicitacaoCommentEditor({
         onFocus={() => {
           focusedRef.current = true;
         }}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          selectImage(target.tagName === 'IMG' ? (target as HTMLImageElement) : null);
+        }}
         onBlur={() => {
           focusedRef.current = false;
+          setSelImg(null);
+          setHandlePos(null);
           const el = ref.current;
           if (el) {
             const md = commentHtmlToMarkdown(el);
@@ -572,12 +730,20 @@ export function LicitacaoCommentEditor({
           }
         }}
         onInput={emitFromDom}
+        onPaste={(e) => {
+          if (!onUploadImage || disabled) return;
+          const img = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'));
+          if (!img) return;
+          e.preventDefault();
+          saveSelection();
+          void insertImageFile(img);
+        }}
         onKeyDown={onKeyDown}
         className={`w-full overflow-auto text-gray-900 outline-none dark:text-gray-100 ${
           toolbar
             ? 'min-h-[7.5rem] bg-transparent px-3 py-2.5 text-sm leading-relaxed'
             : 'min-h-[4.5rem] rounded border border-gray-200 bg-white px-2 py-1.5 text-xs leading-relaxed focus:border-red-400 focus:ring-1 focus:ring-red-400 dark:border-gray-600 dark:bg-gray-900'
-        } [&_b]:font-bold [&_em]:italic [&_i]:italic [&_li]:my-0.5 [&_strong]:font-bold [&_u]:underline [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-red-600 [&_a]:underline ${
+        } [&_b]:font-bold [&_em]:italic [&_i]:italic [&_li]:my-0.5 [&_strong]:font-bold [&_u]:underline [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-red-600 [&_a]:underline [&_img]:max-w-full [&_img]:rounded-lg [&_img]:cursor-grab [&_img[data-selected=true]]:outline [&_img[data-selected=true]]:outline-2 [&_img[data-selected=true]]:outline-red-500 ${
           disabled ? 'cursor-not-allowed opacity-60' : ''
         } ${className}`}
         style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
@@ -615,6 +781,19 @@ export function LicitacaoCommentEditor({
           </span>
         ))}
       </div>
+      {onUploadImage ? (
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            void insertImageFile(file);
+          }}
+        />
+      ) : null}
       {linkOpen ? (
         <div className="flex items-center gap-2 border-b border-gray-200 bg-white px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900">
           <Link2 className="h-4 w-4 shrink-0 text-gray-400" />

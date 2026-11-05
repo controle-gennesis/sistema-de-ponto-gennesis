@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { savePersistentUpload } from '../lib/persistentUpload';
+import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { KanbanController } from '../controllers/KanbanController';
 import { authenticate, requireAdministrator } from '../middleware/auth';
 
@@ -74,6 +77,52 @@ router.post('/cards/:cardId/comments', (req, res, next) =>
   controller.createComment(req, res, next),
 );
 router.delete('/comments/:id', (req, res, next) => controller.deleteComment(req, res, next));
+
+// Imagem colada/enviada na descrição do card (a URL é gravada no próprio texto).
+const uploadDescriptionImage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Apenas arquivos de imagem são permitidos'));
+  },
+});
+
+router.post(
+  '/description-image',
+  (req, res, next) => {
+    uploadDescriptionImage.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        res.status(400).json({
+          success: false,
+          message: err instanceof Error ? err.message : 'Erro no upload da imagem',
+        });
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file?.buffer) {
+        res.status(400).json({ success: false, message: 'Selecione uma imagem para enviar' });
+        return;
+      }
+      const saved = await savePersistentUpload({
+        folder: 'kanban-description',
+        buffer: req.file.buffer,
+        originalName: fixMulterOriginalName(req.file.originalname),
+        mimeType: req.file.mimetype,
+      });
+      res.json({ success: true, data: { url: saved.url } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 router.post(
   '/cards/:cardId/attachments',

@@ -16,7 +16,6 @@ import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
-import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import {
   originFromElement,
   useCelebratePulse,
@@ -109,8 +108,6 @@ import {
   Paperclip,
   BarChart2,
   ListChecks,
-  Columns,
-  List,
   Tag,
   Trash2,
   Edit3,
@@ -1019,19 +1016,6 @@ function kanbanCardBoardSnapshot(card: KanbanCard): string {
 }
 
 type KanbanCardViewMode = 'classic' | 'checklist';
-
-const KANBAN_CARD_VIEW_MODE_KEY = 'kanban:cardViewMode';
-
-function readKanbanCardViewMode(): KanbanCardViewMode {
-  if (typeof window === 'undefined') return 'classic';
-  try {
-    return localStorage.getItem(KANBAN_CARD_VIEW_MODE_KEY) === 'checklist'
-      ? 'checklist'
-      : 'classic';
-  } catch {
-    return 'classic';
-  }
-}
 
 interface KanbanCardItemProps {
   card: KanbanCard;
@@ -2526,6 +2510,13 @@ function KanbanBoardPicker({
       >
         <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
         <span className="min-w-0 truncate">{currentBoardName}</span>
+        <ChevronDown
+          className={clsx(
+            'h-4 w-4 shrink-0 text-gray-400 transition-transform dark:text-gray-500',
+            open && 'rotate-180',
+          )}
+          aria-hidden
+        />
       </button>
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 min-w-[16rem] w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
@@ -2911,7 +2902,8 @@ function KanbanPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchExpanded = searchOpen || search.trim().length > 0;
-  const [cardViewMode, setCardViewMode] = useState<KanbanCardViewMode>(() => readKanbanCardViewMode());
+  // Só existe a versão nova (checklist); a versão clássica foi removida.
+  const cardViewMode: KanbanCardViewMode = 'checklist';
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [filterLabelColors, setFilterLabelColors] = useState<string[]>([]);
   const [filterMemberIds, setFilterMemberIds] = useState<string[]>([]);
@@ -3255,15 +3247,6 @@ function KanbanPage() {
     },
     [queryClient, kanbanBoardQueryKey],
   );
-
-  const setCardViewModePersist = useCallback((mode: KanbanCardViewMode) => {
-    setCardViewMode(mode);
-    try {
-      localStorage.setItem(KANBAN_CARD_VIEW_MODE_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const handleToggleCardComplete = useCallback(
     async (card: KanbanCard) => {
@@ -4172,25 +4155,6 @@ function KanbanPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Esquerda: visão + quadros */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <SegmentedControl
-                value={cardViewMode}
-                onChange={setCardViewModePersist}
-                aria-label="Versão de visualização dos cards"
-                options={[
-                  {
-                    value: 'classic',
-                    title: 'Versão clássica',
-                    ariaLabel: 'Versão clássica',
-                    label: <Columns className="h-4 w-4" />,
-                  },
-                  {
-                    value: 'checklist',
-                    title: 'Versão nova',
-                    ariaLabel: 'Versão nova',
-                    label: <List className="h-4 w-4" />,
-                  },
-                ]}
-              />
               <KanbanBoardPicker
                 boards={boardsList ?? []}
                 currentDepartmentKey={board?.departmentKey}
