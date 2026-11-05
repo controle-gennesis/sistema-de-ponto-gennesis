@@ -2,7 +2,7 @@
 
 import React, { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import {
   AlertCircle,
@@ -15,6 +15,7 @@ import {
   EyeOff,
   Filter,
   Loader2,
+  Plus,
   PiggyBank,
   RefreshCw,
   RotateCcw,
@@ -31,13 +32,19 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { ResizableTh } from './ColumnResizeHandle';
 import {
   useControleGeralColumnWidths,
   type ControleGeralColumnWidth
 } from './useControleGeralColumnWidths';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  formatCurrencyInputBrFromNumber,
+  maskCurrencyInputBrOrEmpty,
+  parseCurrencyInputBr
+} from '@/lib/maskCurrencyBr';
 import {
   aggregateGastosDetailRows,
   aggregateGastosNaturezaRows,
@@ -282,6 +289,8 @@ type ControleGeralGastosOperacionaisPanelProps = {
   primaryExportButton?: boolean;
   /** Habilita modal de detalhes/gráficos ao clicar no contrato (Controle Geral). */
   enableContractFluxoModal?: boolean;
+  /** Cada contrato pode ser aberto para mostrar linhas de detalhe (ex.: prédios) com valores digitados, por mês e ano. */
+  enableContractBreakdown?: boolean;
   /** Exibe o quadrante Previsão de Gastos Mensal (mesmos CC / filtros / ocultos). */
   showPrevisaoGastosMensal?: boolean;
   /**
@@ -619,7 +628,8 @@ function FinancialTotalsTableRow({
   variant = 'locality',
   nfsValuesPending = false,
   tetoValuesPending = false,
-  gastosValuesPending = false
+  gastosValuesPending = false,
+  trailingCells = 0
 }: {
   title: string;
   contractCount: number;
@@ -631,6 +641,8 @@ function FinancialTotalsTableRow({
   nfsValuesPending?: boolean;
   tetoValuesPending?: boolean;
   gastosValuesPending?: boolean;
+  /** Colunas extras vazias no fim da linha (ex.: coluna Ação). */
+  trailingCells?: number;
 }) {
   const isGrand = variant === 'grand';
   const rowClassName = isGrand
@@ -749,6 +761,9 @@ function FinancialTotalsTableRow({
           )}
         </td>
       ) : null}
+      {Array.from({ length: trailingCells }).map((_, i) => (
+        <td key={`trailing-${i}`} className={currencyCellClassName} />
+      ))}
     </tr>
   );
 }
@@ -813,6 +828,43 @@ function RowSelectCheckbox({
 const EMPTY_NATUREZA_DETAIL_ROWS: QueryGastosNaturezaDetailRow[] = [];
 const EMPTY_TOTVS_NATUREZA_CATALOG: GastosTotvsNaturezaCatalogRow[] = [];
 
+type ContratoSubitem = {
+  id: string;
+  contrato: string;
+  ano: number;
+  mes: number;
+  nome: string;
+  faturamento: number | null;
+  liquido: number | null;
+  recebido: number | null;
+  tetoOrcamentario: number | null;
+  gastos: number | null;
+};
+
+type SubitemDraft = {
+  id?: string;
+  contrato: string;
+  nome: string;
+  mes: string;
+  ano: string;
+  faturamento: string;
+  liquido: string;
+  recebido: string;
+  gastos: string;
+};
+
+const EMPTY_SUBITENS: ContratoSubitem[] = [];
+const MESES_SUBITEM = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+const CAMPOS_VALOR_SUBITEM = [
+  { key: 'faturamento', label: 'Faturamento' },
+  { key: 'liquido', label: 'Líquido' },
+  { key: 'recebido', label: 'Recebido' },
+  { key: 'gastos', label: 'Gastos' }
+] as const;
+
 export function ControleGeralGastosOperacionaisPanel({
   detailRows,
   naturezaDetailRows = EMPTY_NATUREZA_DETAIL_ROWS,
@@ -844,6 +896,7 @@ export function ControleGeralGastosOperacionaisPanel({
   inlineFilters = false,
   primaryExportButton = false,
   enableContractFluxoModal = false,
+  enableContractBreakdown = false,
   showPrevisaoGastosMensal = false,
   allowedContracts,
   extraContracts,
@@ -861,14 +914,16 @@ export function ControleGeralGastosOperacionaisPanel({
     gastoRatioColumnCount +
     tetoOrcamentarioColumnCount +
     (hideLocalityColumn ? 0 : 1) +
-    (enableRowExclusion ? 1 : 0);
+    (enableRowExclusion ? 1 : 0) +
+    (enableContractBreakdown ? 1 : 0);
   const tableAmountColumnCount =
     1 +
     nfsMetricColumnCount +
     lucroLiquidoColumnCount +
     gastoRatioColumnCount +
     tetoOrcamentarioColumnCount;
-  const tableLabelColSpan = tableColumnCount - tableAmountColumnCount;
+  const tableLabelColSpan =
+    tableColumnCount - tableAmountColumnCount - (enableContractBreakdown ? 1 : 0);
   const resizableColumns = useMemo((): ControleGeralColumnWidth[] => {
     const columns: ControleGeralColumnWidth[] = [];
     if (enableRowExclusion) columns.push({ key: 'select', defaultWidth: 56, minWidth: 48 });
@@ -932,6 +987,126 @@ export function ControleGeralGastosOperacionaisPanel({
   );
   const [localitiesModalOpen, setLocalitiesModalOpen] = useState(false);
   const [naturezasModalOpen, setNaturezasModalOpen] = useState(false);
+  // --- Detalhamento por contrato (ex.: os prédios do CONFEA), por mês e ano ---
+  const queryClient = useQueryClient();
+  const { data: subitensData } = useQuery({
+    queryKey: ['contrato-socio-subitens'],
+    queryFn: async () => {
+      const res = await api.get('/contracts/socios-subitens');
+      return (res.data?.data ?? []) as ContratoSubitem[];
+    },
+    enabled: enableContractBreakdown,
+    staleTime: 30_000
+  });
+  const subitens = subitensData ?? EMPTY_SUBITENS;
+  const [subitensAbertos, setSubitensAbertos] = useState<Set<string>>(() => new Set());
+  const [subitemModal, setSubitemModal] = useState<SubitemDraft | null>(null);
+  const [salvandoSubitem, setSalvandoSubitem] = useState(false);
+  const [subitemTetoModal, setSubitemTetoModal] = useState<{ item: ContratoSubitem; valor: string } | null>(null);
+  const [salvandoSubitemTeto, setSalvandoSubitemTeto] = useState(false);
+  const {
+    rowActionMenu: subitemMenu,
+    rowForActionMenu: subitemParaMenu,
+    toggleRowActionMenu: toggleSubitemMenu,
+    closeRowActionMenu: closeSubitemMenu,
+    isRowMenuOpen: isSubitemMenuOpen
+  } = useRowActionMenu(subitens);
+
+  const alternarSubitens = (rowKey: string) =>
+    setSubitensAbertos((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+
+  const subitensDoContrato = (contract: string): ContratoSubitem[] => {
+    const alvo = normalizeGastosOperacionaisContractName(contract);
+    const de = filters.periodFrom.slice(0, 7);
+    const ate = filters.periodTo.slice(0, 7);
+    return subitens.filter((item) => {
+      if (normalizeGastosOperacionaisContractName(item.contrato) !== alvo) return false;
+      const ym = `${item.ano}-${String(item.mes).padStart(2, '0')}`;
+      return ym >= de && ym <= ate;
+    });
+  };
+
+  const abrirSubitem = (contrato: string, existente?: ContratoSubitem) => {
+    const [anoPeriodo, mesPeriodo] = filters.periodTo.slice(0, 7).split('-');
+    const money = (v: number | null) => (v == null ? '' : formatCurrencyInputBrFromNumber(v));
+    setSubitemModal({
+      id: existente?.id,
+      contrato,
+      nome: existente?.nome ?? '',
+      mes: String(existente?.mes ?? Number(mesPeriodo) ?? 1),
+      ano: String(existente?.ano ?? anoPeriodo ?? new Date().getFullYear()),
+      faturamento: money(existente?.faturamento ?? null),
+      liquido: money(existente?.liquido ?? null),
+      recebido: money(existente?.recebido ?? null),
+      gastos: money(existente?.gastos ?? null)
+    });
+  };
+
+  const salvarSubitem = async () => {
+    if (!subitemModal) return;
+    const nome = subitemModal.nome.trim();
+    if (!nome) {
+      toast.error('Informe o nome (ex.: o prédio).');
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      contrato: subitemModal.contrato,
+      nome,
+      mes: Number(subitemModal.mes),
+      ano: Number(subitemModal.ano)
+    };
+    for (const { key } of CAMPOS_VALOR_SUBITEM) {
+      const texto = subitemModal[key].trim();
+      payload[key] = texto ? parseCurrencyInputBr(texto) : null;
+    }
+    setSalvandoSubitem(true);
+    try {
+      if (subitemModal.id) await api.patch(`/contracts/socios-subitens/${subitemModal.id}`, payload);
+      else await api.post('/contracts/socios-subitens', payload);
+      await queryClient.invalidateQueries({ queryKey: ['contrato-socio-subitens'] });
+      setSubitemModal(null);
+      toast.success('Linha salva.');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Não foi possível salvar a linha.');
+    } finally {
+      setSalvandoSubitem(false);
+    }
+  };
+
+  const salvarTetoSubitem = async () => {
+    if (!subitemTetoModal) return;
+    const texto = subitemTetoModal.valor.trim();
+    setSalvandoSubitemTeto(true);
+    try {
+      await api.patch(`/contracts/socios-subitens/${subitemTetoModal.item.id}`, {
+        tetoOrcamentario: texto ? parseCurrencyInputBr(texto) : null
+      });
+      await queryClient.invalidateQueries({ queryKey: ['contrato-socio-subitens'] });
+      setSubitemTetoModal(null);
+      toast.success('Teto salvo.');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Não foi possível salvar o teto.');
+    } finally {
+      setSalvandoSubitemTeto(false);
+    }
+  };
+
+  const removerSubitem = async (item: ContratoSubitem) => {
+    if (!window.confirm(`Remover "${item.nome}"?`)) return;
+    try {
+      await api.delete(`/contracts/socios-subitens/${item.id}`);
+      await queryClient.invalidateQueries({ queryKey: ['contrato-socio-subitens'] });
+      toast.success('Linha removida.');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Não foi possível remover a linha.');
+    }
+  };
+
   const [naturezasConfigVersion, setNaturezasConfigVersion] = useState(0);
 
   const refreshNaturezasConfig = useCallback(() => {
@@ -2744,6 +2919,9 @@ export function ControleGeralGastosOperacionaisPanel({
                             SALDO TOTAL - CV
                           </ResizableTh>
                         ) : null}
+                        {enableContractBreakdown ? (
+                          <th className={`${cadastroListClasses.thRight} w-16`}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -2761,8 +2939,8 @@ export function ControleGeralGastosOperacionaisPanel({
                             </td>
                           </tr>
                           {group.rows.map((row) => (
+                            <React.Fragment key={row.rowKey}>
                             <tr
-                              key={row.rowKey}
                               className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
                                 enableRowExclusion && selectedRowKeys.has(row.rowKey)
                                   ? 'bg-blue-50/70 dark:bg-blue-950/20'
@@ -2785,6 +2963,25 @@ export function ControleGeralGastosOperacionaisPanel({
                               ) : null}
                               <td className={contractCellClassName}>
                                 <div className="flex items-center gap-2">
+                                  {enableContractBreakdown ? (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        alternarSubitens(row.rowKey);
+                                      }}
+                                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                                      aria-expanded={subitensAbertos.has(row.rowKey)}
+                                      aria-label={subitensAbertos.has(row.rowKey) ? 'Recolher detalhes' : 'Mostrar detalhes'}
+                                      title={subitensAbertos.has(row.rowKey) ? 'Recolher detalhes' : 'Mostrar detalhes'}
+                                    >
+                                      {subitensAbertos.has(row.rowKey) ? (
+                                        <ChevronDown className="h-4 w-4" aria-hidden />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" aria-hidden />
+                                      )}
+                                    </button>
+                                  ) : null}
                                   {enableContractFluxoModal ? (
                                     <button
                                       type="button"
@@ -3081,7 +3278,124 @@ export function ControleGeralGastosOperacionaisPanel({
                                   )}
                                 </td>
                               ) : null}
+                              {enableContractBreakdown ? <td className="px-2 py-2" /> : null}
                             </tr>
+                            {enableContractBreakdown && subitensAbertos.has(row.rowKey)
+                              ? (() => {
+                                  const linhasDetalhe = subitensDoContrato(row.contract);
+                                  const moeda = (v: number | null) => (v == null ? '—' : formatCurrency(v));
+                                  const celulaPadrao = 'bg-gray-50/70 dark:bg-gray-900/40';
+                                  return (
+                                    <>
+                                      {linhasDetalhe.map((item) => {
+                                        const saldo =
+                                          item.tetoOrcamentario != null && item.gastos != null
+                                            ? item.tetoOrcamentario - item.gastos
+                                            : null;
+                                        const lucro =
+                                          item.recebido != null && item.gastos != null
+                                            ? item.recebido - item.gastos
+                                            : null;
+                                        return (
+                                          <tr
+                                            key={item.id}
+                                            className={`${celulaPadrao} transition-colors hover:bg-gray-100/80 dark:hover:bg-gray-700/40`}
+                                          >
+                                            {enableRowExclusion ? <td className="px-2 py-2" /> : null}
+                                            <td className={contractCellClassName}>
+                                              <div className="flex items-center gap-1.5 pl-8">
+                                                <span className="truncate text-gray-700 dark:text-gray-200">{item.nome}</span>
+                                              </div>
+                                            </td>
+                                            <td className={dataCenterCellClassName}>{MESES_SUBITEM[item.mes - 1] ?? item.mes}</td>
+                                            <td className={dataCenterCellClassName}>{item.ano}</td>
+                                            {!hideLocalityColumn ? <td className={dataCenterCellClassName} /> : null}
+                                            {showFaturamentoColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
+                                                {moeda(item.faturamento)}
+                                              </td>
+                                            ) : null}
+                                            {showFaturamentoColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-blue-600 dark:text-blue-400`}>
+                                                {moeda(item.liquido)}
+                                              </td>
+                                            ) : null}
+                                            {showFaturamentoColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-sky-600 dark:text-sky-400`}>
+                                                {moeda(item.recebido)}
+                                              </td>
+                                            ) : null}
+                                            {showTetoOrcamentarioColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-gray-700 dark:text-gray-200`}>
+                                                <button
+                                                  type="button"
+                                                  title="Cadastrar / editar teto orçamentário"
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setSubitemTetoModal({
+                                                      item,
+                                                      valor:
+                                                        item.tetoOrcamentario == null
+                                                          ? ''
+                                                          : formatCurrencyInputBrFromNumber(item.tetoOrcamentario)
+                                                    });
+                                                  }}
+                                                  className="mx-auto block rounded-md px-1.5 py-0.5 tabular-nums transition-colors hover:bg-gray-100 hover:underline dark:hover:bg-gray-700"
+                                                >
+                                                  {moeda(item.tetoOrcamentario)}
+                                                </button>
+                                              </td>
+                                            ) : null}
+                                            <td className={`${amountCurrencyCellClassName} text-red-600 dark:text-red-400`}>
+                                              {moeda(item.gastos)}
+                                            </td>
+                                            {showTetoOrcamentarioColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-gray-700 dark:text-gray-200`}>
+                                                {moeda(saldo)}
+                                              </td>
+                                            ) : null}
+                                            {showFaturamentoColumn ? (
+                                              <td className={`${amountCurrencyCellClassName} text-gray-700 dark:text-gray-200`}>
+                                                {moeda(lucro)}
+                                              </td>
+                                            ) : null}
+                                            {showTetoOrcamentarioColumn ? <td className={amountPercentCellClassName}>—</td> : null}
+                                            {showFaturamentoColumn ? <td className={amountPercentCellClassName}>—</td> : null}
+                                            {showFaturamentoColumn ? <td className={amountPercentCellClassName}>—</td> : null}
+                                            {showFaturamentoColumn ? <td className={amountCurrencyCellClassName}>—</td> : null}
+                                            <RowActionMenuCell
+                                              isOpen={isSubitemMenuOpen(item.id)}
+                                              onToggle={(e) =>
+                                                toggleSubitemMenu(item.id, e.currentTarget as HTMLButtonElement)
+                                              }
+                                            />
+                                          </tr>
+                                        );
+                                      })}
+                                      <tr className={celulaPadrao}>
+                                        <td colSpan={tableColumnCount} className="px-3 py-2">
+                                          <div className="flex items-center gap-3 pl-8">
+                                            <button
+                                              type="button"
+                                              onClick={() => abrirSubitem(row.contract)}
+                                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                                            >
+                                              <Plus className="h-3.5 w-3.5" aria-hidden />
+                                              Adicionar
+                                            </button>
+                                            {linhasDetalhe.length === 0 ? (
+                                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                Nenhuma linha neste período (ex.: um valor para cada prédio).
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    </>
+                                  );
+                                })()
+                              : null}
+                            </React.Fragment>
                           ))}
                           <FinancialTotalsTableRow
                             title="Total"
@@ -3093,6 +3407,7 @@ export function ControleGeralGastosOperacionaisPanel({
                             nfsValuesPending={nfsValuesPending}
                             tetoValuesPending={tetoValuesPending}
                             gastosValuesPending={gastosValuesPending}
+                            trailingCells={enableContractBreakdown ? 1 : 0}
                           />
                         </React.Fragment>
                         );
@@ -3112,6 +3427,7 @@ export function ControleGeralGastosOperacionaisPanel({
                           nfsValuesPending={nfsValuesPending}
                           tetoValuesPending={tetoValuesPending}
                           gastosValuesPending={gastosValuesPending}
+                          trailingCells={enableContractBreakdown ? 1 : 0}
                           variant="grand"
                         />
                       ) : null}
@@ -3467,6 +3783,162 @@ export function ControleGeralGastosOperacionaisPanel({
           entries={tetoOrcamentarioEntries}
           prefill={tetoModalPrefill}
         />
+      ) : null}
+
+      {enableContractBreakdown && subitemMenu && subitemParaMenu ? (
+        <RowActionMenuPortal
+          menu={subitemMenu}
+          onClose={closeSubitemMenu}
+          onEdit={() => abrirSubitem(subitemParaMenu.contrato, subitemParaMenu)}
+          onDelete={() => {
+            void removerSubitem(subitemParaMenu);
+          }}
+        />
+      ) : null}
+
+      {enableContractBreakdown ? (
+        <Modal
+          isOpen={Boolean(subitemTetoModal)}
+          onClose={() => setSubitemTetoModal(null)}
+          title="Teto Orçamentário"
+          size="md"
+        >
+          {subitemTetoModal ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {subitemTetoModal.item.contrato} · {subitemTetoModal.item.nome}
+              </p>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Teto orçamentário
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={subitemTetoModal.valor}
+                  onChange={(e) =>
+                    setSubitemTetoModal((prev) =>
+                      prev ? { ...prev, valor: maskCurrencyInputBrOrEmpty(e.target.value) } : prev
+                    )
+                  }
+                  placeholder="R$ 0,00"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setSubitemTetoModal(null)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={salvandoSubitemTeto}
+                  onClick={() => void salvarTetoSubitem()}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {salvandoSubitemTeto ? 'Salvando…' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
+      ) : null}
+
+      {enableContractBreakdown ? (
+        <Modal
+          isOpen={Boolean(subitemModal)}
+          onClose={() => setSubitemModal(null)}
+          title={subitemModal?.id ? 'Editar Linha' : 'Nova Linha'}
+          size="lg"
+        >
+          {subitemModal ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">{subitemModal.contrato}</p>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Nome *</label>
+                <input
+                  type="text"
+                  value={subitemModal.nome}
+                  onChange={(e) => setSubitemModal((prev) => (prev ? { ...prev, nome: e.target.value } : prev))}
+                  placeholder="Ex.: Prédio A"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  autoFocus
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Mês</label>
+                  <StringSingleSelectDropdown
+                    value={subitemModal.mes}
+                    onChange={(value) => setSubitemModal((prev) => (prev ? { ...prev, mes: value || prev.mes } : prev))}
+                    options={labeledToSelectOptions(
+                      MESES_SUBITEM.map((label, index) => ({ value: String(index + 1), label }))
+                    )}
+                    placeholder="Selecione o mês"
+                    allowEmpty={false}
+                    disableSearch
+                    matchTriggerWidth
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Ano</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={subitemModal.ano}
+                    onChange={(e) =>
+                      setSubitemModal((prev) => (prev ? { ...prev, ano: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) } : prev))
+                    }
+                    placeholder="2026"
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {CAMPOS_VALOR_SUBITEM.map((campo) => (
+                  <div key={campo.key}>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {campo.label}
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={subitemModal[campo.key]}
+                      onChange={(e) =>
+                        setSubitemModal((prev) =>
+                          prev ? { ...prev, [campo.key]: maskCurrencyInputBrOrEmpty(e.target.value) } : prev
+                        )
+                      }
+                      placeholder="R$ 0,00"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setSubitemModal(null)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={salvandoSubitem || !subitemModal.nome.trim()}
+                  onClick={() => void salvarSubitem()}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {salvandoSubitem ? 'Salvando…' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
       ) : null}
 
       {!readOnlyPoloColumn ? (

@@ -8065,7 +8065,6 @@ export function OrcamentoPageView({
   const [importOrcamentoModalOpen, setImportOrcamentoModalOpen] = useState(false);
   const [importOrcamentoModalFile, setImportOrcamentoModalFile] = useState<File | null>(null);
   const [importOrcamentoModalDragging, setImportOrcamentoModalDragging] = useState(false);
-  const [importOrigemModalOpen, setImportOrigemModalOpen] = useState(false);
   const [importPlanilhaOsDraft, setImportPlanilhaOsDraft] = useState<OrcamentoOsDraft>(() => ({
     ...ORCAMENTO_OS_DRAFT_VAZIO,
   }));
@@ -8846,7 +8845,7 @@ export function OrcamentoPageView({
       toast.error('Selecione um contrato antes de importar.');
       return;
     }
-    setImportOrigemModalOpen(true);
+    abrirModalImportarOrcafascioOrcamentos();
   };
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
@@ -10809,6 +10808,27 @@ export function OrcamentoPageView({
     deferContractOnImport,
     importContratoSelecionadoId,
     orcafascioFilterClientId,
+  ]);
+
+  // A lista do Orçafascio fica em cache por alguns minutos. Se o cliente do contrato não aparece nela
+  // (ex.: o orçamento acabou de ser criado lá), busca de novo sem cache, uma vez por cliente.
+  const orcafascioRecargaForcadaRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!orcafascioModalOpen) {
+      orcafascioRecargaForcadaRef.current = new Set();
+      return;
+    }
+    if (!orcafascioFilterClientId || orcafascioOrcamentos === null || orcafascioOrcamentosLoading) return;
+    const temDoCliente = orcafascioOrcamentos.some((o) => budgetClientId(o) === orcafascioFilterClientId);
+    if (temDoCliente || orcafascioRecargaForcadaRef.current.has(orcafascioFilterClientId)) return;
+    orcafascioRecargaForcadaRef.current.add(orcafascioFilterClientId);
+    void carregarOrcamentosOrcafascioParaSelect('', { force: true });
+  }, [
+    orcafascioModalOpen,
+    orcafascioFilterClientId,
+    orcafascioOrcamentos,
+    orcafascioOrcamentosLoading,
+    carregarOrcamentosOrcafascioParaSelect,
   ]);
 
   // Troca de contrato: limpa orçamento selecionado (filtro por client_id muda).
@@ -23464,384 +23484,6 @@ export function OrcamentoPageView({
           </div>
         ) : null}
       </Modal>
-
-      <Modal
-        isOpen={importOrigemModalOpen}
-        onClose={() => {
-          setImportOrigemModalOpen(false);
-          dismissImportShellIfNeeded();
-        }}
-        title="Importar orçamento"
-        size="md"
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => {
-              setImportOrigemModalOpen(false);
-              abrirModalImportarOrcamentoExcel();
-            }}
-            className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-green-300 hover:bg-green-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-green-800 dark:hover:bg-green-950/30"
-          >
-            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
-              <FileSpreadsheet className="h-5 w-5" aria-hidden />
-            </span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Planilha</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setImportOrigemModalOpen(false);
-              abrirModalImportarOrcafascioOrcamentos();
-            }}
-            className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
-          >
-            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-              <Upload className="h-5 w-5" aria-hidden />
-            </span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Orçafascio</span>
-          </button>
-        </div>
-      </Modal>
-
-      {importOrcamentoModalOpen && (
-        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
-          <div
-            className="absolute inset-0"
-            onClick={() => {
-              if (!isImportandoOrcamento) {
-                setImportOrcamentoModalOpen(false);
-                setImportOrcamentoModalFile(null);
-                resetImportPlanilhaOsDraft();
-                dismissImportShellIfNeeded();
-              }
-            }}
-            aria-hidden
-          />
-          <div className="relative mx-4 max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-gray-800">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Importar planilha</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isImportandoOrcamento) {
-                    setImportOrcamentoModalOpen(false);
-                    setImportOrcamentoModalFile(null);
-                    resetImportPlanilhaOsDraft();
-                    dismissImportShellIfNeeded();
-                  }
-                }}
-                disabled={isImportandoOrcamento}
-                className="rounded p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-700"
-                aria-label="Fechar"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-6 p-6">
-              <div className="flex items-center justify-between gap-4 border-b border-gray-200 pb-4 dark:border-gray-700">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Envie um Excel no padrão Gênnesis (sintético com ITEM, CÓDIGO, BANCO e DESCRIÇÃO). Se houver aba de memória, ela entra no orçamento; se não houver analítico, essa aba não aparece. Isso cria um orçamento novo no contrato escolhido.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => baixarModeloOrcamentoPerfeitoXlsx()}
-                  className="flex shrink-0 items-center space-x-2 rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700"
-                >
-                  <Download className="h-4 w-4" />
-                  <span>Baixar Modelo</span>
-                </button>
-              </div>
-
-              <div>
-                <input
-                  id="import-orcamento-modal-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  className="hidden"
-                  onChange={e => {
-                    const f = e.target.files?.[0];
-                    e.target.value = '';
-                    if (!f) return;
-                    if (!/\.(xlsx|xls|csv)$/i.test(f.name)) {
-                      toast.error('Apenas arquivos .xlsx, .xls ou .csv');
-                      return;
-                    }
-                    setImportOrcamentoModalFile(f);
-                    setImportPlanilhaOsDraft((p) => ({
-                      ...p,
-                      descricaoServicoOs:
-                        p.descricaoServicoOs.trim() ||
-                        f.name.replace(/\.[^/.]+$/, '').trim(),
-                    }));
-                  }}
-                />
-
-                <div
-                  onDragOver={e => {
-                    e.preventDefault();
-                    setImportOrcamentoModalDragging(true);
-                  }}
-                  onDragLeave={e => {
-                    e.preventDefault();
-                    setImportOrcamentoModalDragging(false);
-                  }}
-                  onDrop={e => {
-                    e.preventDefault();
-                    setImportOrcamentoModalDragging(false);
-                    const f = e.dataTransfer.files[0];
-                    if (f && /\.(xlsx|xls|csv)$/i.test(f.name)) {
-                      setImportOrcamentoModalFile(f);
-                      setImportPlanilhaOsDraft((p) => ({
-                        ...p,
-                        descricaoServicoOs:
-                          p.descricaoServicoOs.trim() ||
-                          f.name.replace(/\.[^/.]+$/, '').trim(),
-                      }));
-                    } else toast.error('Apenas arquivos .xlsx, .xls ou .csv');
-                  }}
-                  className={`
-                relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200
-                ${
-                  importOrcamentoModalDragging
-                    ? 'border-red-500 bg-red-50 dark:border-red-500 dark:bg-red-950/30'
-                    : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-400 dark:hover:border-gray-500'
-                }
-                ${importOrcamentoModalFile ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : ''}
-              `}
-                >
-                  {importOrcamentoModalFile ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-center">
-                        <div className="rounded-full bg-green-100 p-3 dark:bg-green-900/30">
-                          <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {importOrcamentoModalFile.name}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          {(importOrcamentoModalFile.size / 1024).toFixed(2)} KB
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setImportOrcamentoModalFile(null)}
-                        className="text-xs text-red-600 underline hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                      >
-                        Remover arquivo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-center">
-                        <div
-                          className={`rounded-full p-4 transition-colors ${
-                            importOrcamentoModalDragging
-                              ? 'bg-red-100 dark:bg-red-900/40'
-                              : 'bg-gray-100 dark:bg-gray-700'
-                          }`}
-                        >
-                          <Upload
-                            className={`h-10 w-10 ${
-                              importOrcamentoModalDragging
-                                ? 'text-red-600 dark:text-red-400'
-                                : 'text-gray-400 dark:text-gray-500'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {importOrcamentoModalDragging
-                            ? 'Solte o arquivo aqui'
-                            : 'Arraste e solte o arquivo Excel aqui'}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">ou</p>
-                      </div>
-                      <label
-                        htmlFor="import-orcamento-modal-file"
-                        className="inline-flex cursor-pointer items-center rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-red-700 hover:shadow-md dark:bg-red-700 dark:hover:bg-red-800"
-                      >
-                        <FileSpreadsheet className="mr-2 h-4 w-4" />
-                        Escolher arquivo
-                      </label>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        Formatos aceitos: .xlsx, .xls ou .csv
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Orçamento aditivo? *
-                </p>
-                <OrcamentoAditivoEscolha
-                  value={importPlanilhaOsDraft.isAditivo}
-                  onChange={(next) =>
-                    setImportPlanilhaOsDraft((p) => ({
-                      ...p,
-                      isAditivo: next,
-                      confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
-                    }))
-                  }
-                />
-              </div>
-
-              {deferContractOnImport ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Contrato
-                  </label>
-                  <StringSingleSelectDropdown
-                    value={importContratoSelecionadoId}
-                    onChange={setImportContratoSelecionadoId}
-                    options={importContractSelectOptions}
-                    allowEmpty
-                    emptyOptionLabel="Selecione o contrato"
-                    placeholder="Selecione o contrato"
-                    searchPlaceholder="Pesquisar contrato..."
-                    emptyOptionsMessage="Nenhum contrato disponível."
-                    className="w-full"
-                  />
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    OS *
-                  </label>
-                  <input
-                    value={importPlanilhaOsCodigo}
-                    onChange={(e) => setImportPlanilhaOsCodigo(e.target.value)}
-                    className={FORM_FIELD_INPUT_CLS}
-                    placeholder="Ex: XX/2025"
-                    disabled={isImportandoOrcamento}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Número da pasta *
-                  </label>
-                  <input
-                    value={importPlanilhaNumeroPasta}
-                    onChange={(e) => setImportPlanilhaNumeroPasta(e.target.value)}
-                    className={FORM_FIELD_INPUT_CLS}
-                    placeholder="Ex: 241"
-                    disabled={isImportandoOrcamento}
-                  />
-                </div>
-              </div>
-              <ObraSelectField
-                contratoId={importObraContratoId}
-                value={importPlanilhaObra}
-                onChange={setImportPlanilhaObra}
-                disabled={isImportandoOrcamento}
-              />
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Descrição do serviço
-                </label>
-                <input
-                  value={importPlanilhaOsDraft.descricaoServicoOs}
-                  onChange={(e) =>
-                    setImportPlanilhaOsDraft((p) => ({ ...p, descricaoServicoOs: e.target.value }))
-                  }
-                  className={FORM_FIELD_INPUT_CLS}
-                  placeholder="Descrição na OS do contrato"
-                  disabled={isImportandoOrcamento}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Valor na OS *
-                </label>
-                <input
-                  value={importPlanilhaOsDraft.valorOs}
-                  onChange={(e) =>
-                    setImportPlanilhaOsDraft((p) => ({
-                      ...p,
-                      valorOs: formatOrcamentoValorBr(parseOrcamentoValorBr(e.target.value)),
-                    }))
-                  }
-                  className={FORM_FIELD_INPUT_CLS}
-                  placeholder="0,00"
-                  inputMode="decimal"
-                  disabled={isImportandoOrcamento}
-                />
-              </div>
-              {importPlanilhaOsDraft.isAditivo === true ? (
-                <div className="space-y-1">
-                  <Checkbox
-                    checked={importPlanilhaOsDraft.confirmSomarAditivo}
-                    onChange={(confirmSomarAditivo) =>
-                      setImportPlanilhaOsDraft((p) => ({ ...p, confirmSomarAditivo }))
-                    }
-                    disabled={isImportandoOrcamento}
-                    label="Confirmo somar este valor aditivo ao total da OS"
-                  />
-                  <p className="pl-7 text-xs text-gray-500 dark:text-gray-400">
-                    Este valor será somado à OS existente no mesmo contrato (mesma OS + Nº da pasta).
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="flex space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isImportandoOrcamento) {
-                      setImportOrcamentoModalOpen(false);
-                      setImportOrcamentoModalFile(null);
-                      resetImportPlanilhaOsDraft();
-                      dismissImportShellIfNeeded();
-                    }
-                  }}
-                  disabled={isImportandoOrcamento}
-                  className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void confirmarImportOrcamentoModal()}
-                  disabled={
-                    isImportandoOrcamento ||
-                    !importOrcamentoModalFile ||
-                    (deferContractOnImport && !importContratoSelecionadoId.trim()) ||
-                    !orcamentoOsDraftValido(
-                      importPlanilhaOsDraft,
-                      importPlanilhaOsCodigo,
-                      importPlanilhaNumeroPasta,
-                      { exigirValor: false }
-                    )
-                  }
-                  className="flex flex-1 items-center justify-center space-x-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-800"
-                >
-                  {isImportandoOrcamento ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Importando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-4 w-4" />
-                      <span>Importar planilha</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </AppModalOverlay>
-      )}
 
       <Modal
         isOpen={novoBlocoModalOpen}
