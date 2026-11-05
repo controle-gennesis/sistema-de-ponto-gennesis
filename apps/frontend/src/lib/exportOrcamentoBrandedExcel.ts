@@ -274,7 +274,8 @@ function applyCellFormat(
   } else if (typeof value === 'number' && Number.isFinite(value)) {
     cell.value = value;
   } else {
-    cell.value = value;
+    // Todo texto exportado sai em maiúsculas.
+    cell.value = typeof value === 'string' ? value.toUpperCase() : value;
   }
   const numFmt = excelNumFmt(format);
   if (numFmt && (typeof cell.value === 'number' || formula)) {
@@ -305,7 +306,7 @@ async function fillWorkbook(
     const itemFg = hexToArgb(aparencia?.itemTexto, tituloFg);
     const composicaoBg = hexToArgb(aparencia?.composicaoFundo, 'FFF1F5F9');
     const composicaoFg = hexToArgb(aparencia?.composicaoTexto, TITLE_TEXT);
-    const tamItem = spec.tamanhos?.item ?? 10;
+    const tamItem = spec.tamanhos?.item ?? 11;
     const tamHeader = spec.tamanhos?.header ?? 8;
     const colCount = spec.columns.length;
     const showHeader = spec.showHeader !== false;
@@ -502,10 +503,10 @@ async function fillWorkbook(
           const fundo = kind === 'itemBarra' ? itemBg : tituloBg;
           const letra = kind === 'itemBarra' ? itemFg : tituloFg;
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fundo } };
-          cell.font = { name: fontName, size: 10, bold: true, color: { argb: letra } };
+          cell.font = { name: fontName, size: 11, bold: true, color: { argb: letra } };
           cell.alignment = {
             vertical: 'middle',
-            horizontal: colunaEhDescricao(col?.header) ? 'left' : 'center',
+            horizontal: 'center',
             wrapText: true,
           };
         } else if (kind === 'composicao') {
@@ -513,7 +514,8 @@ async function fillWorkbook(
           cell.font = { name: fontName, size: tamItem, bold: true, color: { argb: composicaoFg } };
         } else if (kind === 'subtitulo') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subtituloBg } };
-          cell.font = { name: fontName, size: 10, bold: true, color: { argb: subtituloFg } };
+          cell.font = { name: fontName, size: 11, bold: true, color: { argb: subtituloFg } };
+          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         } else if (kind === 'cabecalho') {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
           cell.font = { name: fontName, size: 9, bold: true, color: { argb: headerFg } };

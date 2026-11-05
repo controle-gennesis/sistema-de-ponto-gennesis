@@ -7754,8 +7754,10 @@ function montarNomeArquivoOrcamento(opts: {
 }): string {
   const codigo = sanitizarTrechoArquivo(String(opts.codigo || '').replace(/\//g, '-'));
   const descricao = sanitizarTrechoArquivo(opts.descricao || '');
-  const partes = opts.semTipo ? [] : [opts.tipo];
+  // O nº da pasta vem primeiro; depois o tipo do arquivo e a descrição.
+  const partes: string[] = [];
   if (codigo) partes.push(codigo);
+  if (!opts.semTipo) partes.push(opts.tipo);
   if (descricao && descricao.toLowerCase() !== opts.tipo.toLowerCase()) partes.push(descricao);
   const base = partes.join(' - ').slice(0, 120).trim() || opts.tipo;
   return `${base}.${opts.ext}`;
