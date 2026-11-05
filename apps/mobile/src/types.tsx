@@ -30,4 +30,6 @@ export interface User {
   profilePhotoUrl?: string | null;
   profilePhotoKey?: string | null;
   employee?: Employee;
+  /** Preenchido quando o login é de uma empreita (empreiteiro). */
+  empreiteiro?: { id: string } | null;
 }
