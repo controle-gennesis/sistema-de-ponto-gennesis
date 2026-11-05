@@ -306,11 +306,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canApproveEmpreiteiroDaily && counts.medicao > 0) {
       list.push({
         id: 'medicao',
-        title: 'Medições de entrega/Aditivos',
+        title: 'Medições de entrega',
         description: 'Aguardando aprovação',
         count: counts.medicao,
         href: '/ponto/aprovacoes?tab=medicao',
         Icon: HardHat,
+      });
+    }
+    if (canApproveEmpreiteiroDaily && counts.aditivo > 0) {
+      list.push({
+        id: 'aditivo',
+        title: 'Aditivos',
+        description: 'Aguardando aprovação',
+        count: counts.aditivo,
+        href: '/ponto/aprovacoes?tab=aditivo',
+        Icon: FileCheck,
       });
     }
     if (canSeeFdAprovadas && fdNotificationCounts.pendingPurchase > 0) {

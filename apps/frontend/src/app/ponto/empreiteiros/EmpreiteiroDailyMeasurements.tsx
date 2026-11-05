@@ -14,7 +14,9 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -30,7 +32,14 @@ import {
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
 import { Modal } from '@/components/ui/Modal';
-import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { RowActionMenuCell, cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
@@ -345,6 +354,8 @@ export function EmpreiteiroDailyMeasurements({
   const [actionMenu, setActionMenu] = useState<{ id: string; top: number; left: number } | null>(
     null,
   );
+  const [busca, setBusca] = useState('');
+  const [pagina, setPagina] = useState(1);
 
   const { data, isLoading, dataUpdatedAt, isSuccess } = useQuery({
     queryKey: ['empreiteiro-daily-measurements', empreiteiroId],
@@ -456,6 +467,33 @@ export function EmpreiteiroDailyMeasurements({
     [items],
   );
   const menuItem = sortedItems.find((row) => row.id === actionMenu?.id) ?? null;
+  const POR_PAGINA = 20;
+  const filtrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return sortedItems;
+    return sortedItems.filter((item) =>
+      [
+        item.description,
+        item.contratoNome,
+        formatDateBr(item.workDate),
+        statusLabel(normalizeStatus(item.status)),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(termo),
+    );
+  }, [sortedItems, busca]);
+  const { startItem: listaInicio, endItem: listaFim, totalPages: listaTotalPaginas } = getCadastroListRange(
+    Math.min(pagina, Math.max(1, Math.ceil(filtrados.length / POR_PAGINA))),
+    POR_PAGINA,
+    filtrados.length,
+  );
+  const paginaAtual = Math.min(pagina, listaTotalPaginas);
+  const itensPagina = filtrados.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA);
+  useEffect(() => {
+    setPagina(1);
+  }, [busca, filterContractId]);
   const showContractColumn = !filterContractId;
 
   useEffect(() => {
@@ -683,7 +721,29 @@ export function EmpreiteiroDailyMeasurements({
   const menuCanDelete = Boolean(menuItem && canEdit && (menuStatus !== 'APPROVED' || canApprove));
 
   const acoesMedicao = (
-    <div className="flex flex-shrink-0 items-center gap-2">
+    <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+      {items.length > 0 ? (
+        <div className="relative min-w-[240px] flex-1 sm:w-[300px] sm:flex-none">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+          <input
+            type="text"
+            placeholder="Buscar descrição, data ou status..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          />
+          {busca ? (
+            <button
+              type="button"
+              onClick={() => setBusca('')}
+              aria-label="Limpar busca"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <span className="group/info relative inline-flex">
         <button
           type="button"
@@ -1001,14 +1061,7 @@ export function EmpreiteiroDailyMeasurements({
       </Modal>
 
       {isLoading ? (
-        <div className="space-y-3">
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className="h-36 animate-pulse rounded-2xl border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800/60"
-            />
-          ))}
-        </div>
+        <CadastroListLoading message="Carregando medições..." />
       ) : items.length === 0 ? (
         <CadastroListEmpty
           icon={CalendarDays}
@@ -1021,41 +1074,33 @@ export function EmpreiteiroDailyMeasurements({
                 : 'Nenhuma entrega registrada ainda'
           }
         />
+      ) : filtrados.length === 0 ? (
+        <CadastroListEmpty icon={CalendarDays} title="Nenhuma medição encontrada" hint="Tente ajustar a busca" />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/55">
-          <div className="mb-2 flex flex-col gap-1 px-3 pt-3 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-6">
-            <span>
-              Mostrando 1 a {sortedItems.length} de {sortedItems.length} medições
-            </span>
-            <span>Página 1 de 1</span>
-          </div>
+        <div className="space-y-4">
+          <CadastroListSummary
+            startItem={listaInicio}
+            endItem={listaFim}
+            total={filtrados.length}
+            itemLabel="medição"
+            itemLabelPlural="medições"
+            currentPage={paginaAtual}
+            totalPages={listaTotalPaginas}
+          />
           <div className="table-scroll">
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr>
-                  {[
-                    'Serviço',
-                    ...(showContractColumn ? ['Contrato'] : []),
-                    'Data',
-                    'Valor',
-                    APPROVAL_STATUS_COLUMN_TITLE,
-                    'Ação',
-                  ].map((label) => (
-                    <th
-                      key={label}
-                      className={`px-3 py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6 ${
-                        label === APPROVAL_STATUS_COLUMN_TITLE || label === 'Ação'
-                          ? 'text-center'
-                          : 'text-left'
-                      }`}
-                    >
-                      {label}
-                    </th>
-                  ))}
+                  <th className={cadastroListClasses.th}>Serviço</th>
+                  {showContractColumn ? <th className={cadastroListClasses.th}>Contrato</th> : null}
+                  <th className={cadastroListClasses.thCenter}>Data</th>
+                  <th className={cadastroListClasses.thCenter}>Valor</th>
+                  <th className={cadastroListClasses.thCenter}>{APPROVAL_STATUS_COLUMN_TITLE}</th>
+                  <th className={cadastroListClasses.thRight}>Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                {sortedItems.map((item) => {
+                {itensPagina.map((item) => {
                   const status = normalizeStatus(item.status);
                   return (
                     <tr
@@ -1063,63 +1108,50 @@ export function EmpreiteiroDailyMeasurements({
                       className={getListTableRowClassName(true)}
                       onClick={() => openDetail(item)}
                     >
-                      <td className="px-3 py-3 align-middle text-sm sm:px-6">
+                      <td className="px-3 py-3 align-middle text-left text-sm sm:px-6">
                         <ListRowNavigableLabel className="font-medium">
                           {item.description || '—'}
                         </ListRowNavigableLabel>
                       </td>
                       {showContractColumn ? (
                         <td
-                          className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                          className="max-w-[200px] truncate px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6"
                           title={item.contratoNome || undefined}
                         >
                           {item.contratoNome || '—'}
                         </td>
                       ) : null}
-                      <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                         {formatDateBr(item.workDate)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                         {formatMoneyCompact(item.executedAmount)}
                       </td>
                       <td className="px-3 py-3 text-center align-middle sm:px-6">
                         <ApprovalStatusBadge kind={statusKind(status)} label={statusLabel(status)} />
                       </td>
-                      <td
-                        className="px-3 py-3 text-center align-middle sm:px-6"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <div className="flex justify-center">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              setActionMenu((prev) => {
-                                if (prev?.id === item.id) return null;
-                                let left = rect.right - ACTION_MENU_WIDTH_PX;
-                                left = Math.max(
-                                  8,
-                                  Math.min(left, window.innerWidth - ACTION_MENU_WIDTH_PX - 8),
-                                );
-                                return { id: item.id, top: rect.bottom + 4, left };
-                              });
-                            }}
-                            className={rowActionMenuButtonClass(actionMenu?.id === item.id)}
-                            aria-label="Menu de ações"
-                            aria-expanded={actionMenu?.id === item.id}
-                            aria-haspopup="menu"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
+                      <RowActionMenuCell
+                        isOpen={actionMenu?.id === item.id}
+                        onToggle={(event) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setActionMenu((prev) => {
+                            if (prev?.id === item.id) return null;
+                            let left = rect.right - ACTION_MENU_WIDTH_PX;
+                            left = Math.max(
+                              8,
+                              Math.min(left, window.innerWidth - ACTION_MENU_WIDTH_PX - 8),
+                            );
+                            return { id: item.id, top: rect.bottom + 4, left };
+                          });
+                        }}
+                      />
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          <ListPagination currentPage={paginaAtual} totalPages={listaTotalPaginas} onPageChange={setPagina} />
         </div>
       )}
       <ActionMenuOverlay
