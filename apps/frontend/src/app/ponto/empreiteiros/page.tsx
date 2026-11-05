@@ -725,10 +725,10 @@ export default function EmpreiteirosPage() {
   const [savingFluigNumero, setSavingFluigNumero] = useState(false);
   const [teamModal, setTeamModal] = useState<{ linkId: string; index: number | null } | null>(null);
   const [teamModalForm, setTeamModalForm] = useState<TeamMemberForm>(() => emptyTeamMember());
-  const [abaServico, setAbaServico] = useState<'parcelas' | 'aditivos' | 'anexos' | 'equipe' | 'medicoes' | 'dados'>('parcelas');
+  const [abaServico, setAbaServico] = useState<'parcelas' | 'aditivos' | 'anexos' | 'equipe' | 'medicoes' | 'dados'>('medicoes');
   useEffect(() => {
-    setAbaServico(isLinkedEmpreiteiro ? 'equipe' : 'parcelas');
-  }, [serviceDetailLinkId, isLinkedEmpreiteiro]);
+    setAbaServico('medicoes');
+  }, [serviceDetailLinkId]);
   const [abaDetalhe, setAbaDetalhe] = useState<'contratos' | 'medicoes' | 'fluig' | 'dados'>('contratos');
   const [listPage, setListPage] = useState(1);
   /** Evita reabrir o detalhe automaticamente após o empreiteiro clicar em Voltar. */
@@ -3233,15 +3233,15 @@ export default function EmpreiteirosPage() {
                               <AppUnderlineTabList aria-label="Seções do contrato de serviço" centered={false} className="mt-1">
                                 {(
                                   [
+                                    { id: 'medicoes', label: 'Medições' },
                                     ...(isOwnEmpreiteiroAccount
                                       ? []
                                       : [
-                                          { id: 'parcelas', label: 'Parcelas' },
                                           { id: 'aditivos', label: 'Aditivos' },
-                                          { id: 'anexos', label: 'Anexos' },
+                                          { id: 'parcelas', label: 'Parcelas' },
                                         ]),
                                     { id: 'equipe', label: 'Equipe' },
-                                    { id: 'medicoes', label: 'Medições' },
+                                    ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'anexos', label: 'Anexos' }]),
                                     { id: 'dados', label: 'Dados' },
                                   ] as const
                                 ).map((aba) => (
