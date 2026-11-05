@@ -35,6 +35,7 @@ import {
   Trash2,
   Filter,
 } from 'lucide-react-native';
+import PickerSheetFrame from '../components/PickerSheetFrame';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import OfflineBanner from '../components/OfflineBanner';
@@ -835,57 +836,8 @@ export default function FuelRequestsScreen() {
   const renderPickerOverlay = () => {
     if (!picker) return null;
     return (
-      <View
-        collapsable={false}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.45)',
-          justifyContent: 'flex-end',
-          padding: 16,
-          paddingBottom: Math.max(insets.bottom, 20),
-          zIndex: 99999,
-          elevation: 99999,
-        }}
-      >
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={dismissPicker}
-        />
-        <View
-          style={[
-            styles.pickerSheet,
-            {
-              backgroundColor: colors.card,
-              height: Math.round(windowHeight * 0.58),
-            },
-          ]}
-        >
-          <View style={styles.pickerHandle} />
-          <View style={styles.pickerHeader}>
-            <Text style={[styles.pickerTitle, { color: colors.text }]}>{picker.title}</Text>
-            <TouchableOpacity
-              onPress={() => setPicker(null)}
-              style={[styles.formCloseBtn, { width: 36, height: 36 }]}
-            >
-              <X size={18} color={colors.text} strokeWidth={2.2} />
-            </TouchableOpacity>
-          </View>
-          <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
-            <Search size={16} color={colors.textSecondary} />
-            <TextInput
-              style={styles.pickerSearchInput}
-              placeholder="Buscar..."
-              placeholderTextColor={colors.textSecondary}
-              value={pickerSearch}
-              onChangeText={setPickerSearch}
-            />
-          </View>
-          <FlatList
+      <PickerSheetFrame title={picker.title} onClose={dismissPicker} search={pickerSearch} onSearchChange={setPickerSearch}>
+<FlatList
             style={{ flex: 1 }}
             data={pickerFiltered}
             keyExtractor={(item) => item.value}
@@ -955,8 +907,7 @@ export default function FuelRequestsScreen() {
             }
             contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24), gap: 8 }}
           />
-        </View>
-      </View>
+        </PickerSheetFrame>
     );
   };
 

@@ -42,7 +42,8 @@ import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
 import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
 import { RmApprovalsSection } from './_components/RmApprovalsSection';
-import { MedicaoAditivoApprovalsSection } from './_components/MedicaoAditivoApprovalsSection';
+import { MedicaoApprovalsSection } from './_components/MedicaoApprovalsSection';
+import { AditivoApprovalsSection } from './_components/AditivoApprovalsSection';
 import {
   AprovacoesTabsNav,
   type AprovacaoTabId,
@@ -324,7 +325,8 @@ function AprovacoesPage() {
     tabFromUrl === 'fuel' ||
     tabFromUrl === 'rm' ||
     tabFromUrl === 'oc' ||
-    tabFromUrl === 'medicao'
+    tabFromUrl === 'medicao' ||
+    tabFromUrl === 'aditivo'
       ? tabFromUrl
       : 'dp';
   const [activeTab, setActiveTab] = useState<AprovacaoTabId>(initialTab);
@@ -338,7 +340,8 @@ function AprovacoesPage() {
       tabFromUrl === 'fuel' ||
       tabFromUrl === 'rm' ||
       tabFromUrl === 'oc' ||
-      tabFromUrl === 'medicao'
+      tabFromUrl === 'medicao' ||
+      tabFromUrl === 'aditivo'
     ) {
       setActiveTab(tabFromUrl);
     }
@@ -663,8 +666,13 @@ function AprovacoesPage() {
     if (canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro) {
       tabs.push({
         id: 'medicao',
-        label: 'Medições de Entrega/Aditivos',
+        label: 'Medições de Entrega',
         count: approvalCounts.medicao,
+      });
+      tabs.push({
+        id: 'aditivo',
+        label: 'Aditivos',
+        count: approvalCounts.aditivo,
       });
     }
     return tabs;
@@ -1405,7 +1413,11 @@ function AprovacoesPage() {
           {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
 
           {canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro && activeTab === 'medicao' && (
-            <MedicaoAditivoApprovalsSection />
+            <MedicaoApprovalsSection />
+          )}
+
+          {canApproveEmpreiteiroDaily && !isLinkedEmpreiteiro && activeTab === 'aditivo' && (
+            <AditivoApprovalsSection />
           )}
 
           <Modal

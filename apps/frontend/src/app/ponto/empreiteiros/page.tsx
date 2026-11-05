@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Building2,
+  CalendarDays,
   Camera,
   CheckCircle2,
   ClipboardList,
@@ -60,6 +61,12 @@ import {
 } from '@/lib/maskCurrencyBr';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { formatDateBr as formatDateBrLib, parseDateSafe } from '@/lib/dateTimeBr';
+import {
+  DEFAULT_SERVICE_COLOR,
+  DEFAULT_SERVICE_ICON,
+  ServiceIcon,
+  ServiceIconPicker,
+} from './ServiceIcon';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
@@ -148,6 +155,8 @@ interface EmpreiteiroContractLink {
   addendaPendingCount?: number;
   currentValue?: number | null;
   location?: string | null;
+  iconName?: string | null;
+  iconColor?: string | null;
   contractId?: string | null;
   costCenterId?: string | null;
   costCenter?: { id: string; name: string; code?: string | null } | null;
@@ -593,6 +602,7 @@ export default function EmpreiteirosPage() {
   const [newServiceDescription, setNewServiceDescription] = useState('');
   const [newServicePlannedValue, setNewServicePlannedValue] = useState('');
   const [newServiceLocation, setNewServiceLocation] = useState('');
+  const [newServiceIcon, setNewServiceIcon] = useState({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
   /** avista = 1 parcela · parcelado = N parcelas · null = não informar agora */
   const [newServicePayMode, setNewServicePayMode] = useState<'avista' | 'parcelado' | null>(null);
   const [newServicePayDate, setNewServicePayDate] = useState('');
@@ -623,6 +633,7 @@ export default function EmpreiteirosPage() {
   const [editServiceDescription, setEditServiceDescription] = useState('');
   const [editServicePlannedValue, setEditServicePlannedValue] = useState('');
   const [editServiceLocation, setEditServiceLocation] = useState('');
+  const [editServiceIcon, setEditServiceIcon] = useState({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
   const [editServiceContractId, setEditServiceContractId] = useState('');
   const [editServiceStart, setEditServiceStart] = useState('');
   const [editServiceEnd, setEditServiceEnd] = useState('');
@@ -735,6 +746,7 @@ export default function EmpreiteirosPage() {
   const [openTeamLinkIds, setOpenTeamLinkIds] = useState<Record<string, boolean>>({});
   const [openParcelLinkIds, setOpenParcelLinkIds] = useState<Record<string, boolean>>({});
   const [serviceDetailLinkId, setServiceDetailLinkId] = useState<string | null>(null);
+  const servicoPendenteRef = useRef<string | null>(null);
   const [anexoModalLinkId, setAnexoModalLinkId] = useState<string | null>(null);
   const [medActionsEl, setMedActionsEl] = useState<HTMLDivElement | null>(null);
   const [fluigModal, setFluigModal] = useState<{ linkId: string; parcelId: string; number: number } | null>(null);
@@ -937,6 +949,7 @@ export default function EmpreiteirosPage() {
     setNewServiceDescription('');
     setNewServicePlannedValue('');
     setNewServiceLocation('');
+    setNewServiceIcon({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
     setNewServicePayMode(null);
     setNewServicePayDate('');
     setNewServiceParcelCount('6');
@@ -952,6 +965,13 @@ export default function EmpreiteirosPage() {
         if (data?.id) {
           setViewingItem(data);
           setContractTeamDraftById(teamDraftsFromContracts(data.contracts));
+          // Ao atualizar a página (F5) a lista pode vir sem os serviços: reabre o serviço da URL
+          // assim que o detalhe completo da empreita chega.
+          const pendente = servicoPendenteRef.current;
+          servicoPendenteRef.current = null;
+          if (pendente && (data.contracts || []).some((c) => c.id === pendente)) {
+            setServiceDetailLinkId(pendente);
+          }
         }
       })
       .catch(() => undefined);
@@ -1033,6 +1053,8 @@ export default function EmpreiteirosPage() {
         description: newServiceDescription.trim() || null,
         plannedValue,
         location: newServiceLocation.trim() || null,
+        iconName: newServiceIcon.iconName,
+        iconColor: newServiceIcon.iconColor,
         parcelCount,
         ...(installments ? { installments } : {}),
         contractId: newServiceContractId || null,
@@ -1055,6 +1077,7 @@ export default function EmpreiteirosPage() {
       setNewServiceDescription('');
       setNewServicePlannedValue('');
       setNewServiceLocation('');
+      setNewServiceIcon({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
       setNewServiceContractId('');
       setNewServicePayMode(null);
       setNewServicePayDate('');
@@ -1356,9 +1379,299 @@ export default function EmpreiteirosPage() {
     return 'Sem parcelas';
   };
 
+  /** Modal de edição do serviço — usado na lista de contratos e na página do serviço. */
+  const renderEditServiceModal = (link: EmpreiteiroContractLink) => (
+    <Modal
+                            isOpen={editingServiceId === link.id}
+                            onClose={() => setEditingServiceId(null)}
+                            title="Editar Serviço"
+                            size="lg"
+                          >
+                            <div className="space-y-4">
+                              <div>
+                                <label className={labelClass}>Nome do serviço *</label>
+                                <input
+                                  type="text"
+                                  value={editServiceName}
+                                  onChange={(e) => setEditServiceName(e.target.value)}
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Descrição</label>
+                                <textarea
+                                  value={editServiceDescription}
+                                  onChange={(e) => setEditServiceDescription(e.target.value)}
+                                  rows={2}
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Valor planejado (R$)</label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={editServicePlannedValue}
+                                  onChange={(e) =>
+                                    setEditServicePlannedValue(
+                                      maskCurrencyInputBrOrEmpty(e.target.value)
+                                    )
+                                  }
+                                  placeholder="R$ 0,00"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Contrato *</label>
+                                <StringSingleSelectDropdown
+                                  value={editServiceContractId}
+                                  onChange={setEditServiceContractId}
+                                  options={contractSelectOptions}
+                                  placeholder="Selecione o contrato"
+                                  emptyOptionLabel="Selecione o contrato"
+                                  searchPlaceholder="Pesquisar contrato..."
+                                  matchTriggerWidth
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Local de execução</label>
+                                <input
+                                  type="text"
+                                  value={editServiceLocation}
+                                  onChange={(e) => setEditServiceLocation(e.target.value)}
+                                  className={inputClass}
+                                />
+                              </div>
+                              <ServiceIconPicker
+                                iconName={editServiceIcon.iconName}
+                                iconColor={editServiceIcon.iconColor}
+                                onChange={setEditServiceIcon}
+                                labelClass={labelClass}
+                              />
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <div>
+                                  <label className={labelClass}>Início</label>
+                                  <input
+                                    type="date"
+                                    value={editServiceStart}
+                                    onChange={(e) => setEditServiceStart(e.target.value)}
+                                    className={inputClass}
+                                  />
+                                </div>
+                                <div>
+                                  <label className={labelClass}>Fim</label>
+                                  <input
+                                    type="date"
+                                    value={editServiceEnd}
+                                    onChange={(e) => setEditServiceEnd(e.target.value)}
+                                    className={inputClass}
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className={labelClass}>Status</label>
+                                <select
+                                  value={editServiceStatus}
+                                  onChange={(e) =>
+                                    setEditServiceStatus(
+                                      e.target.value as EmpreiteiroContractStatus
+                                    )
+                                  }
+                                  className={inputClass}
+                                >
+                                  {CONTRACT_STATUS_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className={labelClass}>Forma de pagamento</label>
+                                {editServicePayLocked ? (
+                                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                                    Há parcelas liberadas ou pagas — não é possível alterar a forma
+                                    de pagamento. Atual: {paymentLabelForLink(link)}.
+                                  </p>
+                                ) : (
+                                  <>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {(
+                                        [
+                                          { value: 'avista' as 'avista' | 'parcelado', label: 'À vista' },
+                                          { value: 'parcelado' as 'avista' | 'parcelado', label: 'Parcelado' },
+                                        ]
+                                      ).map((opt) => {
+                                        const active = editServicePayMode === opt.value;
+                                        return (
+                                          <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => {
+                                              setEditServicePayMode((prev) => {
+                                                const next = prev === opt.value ? null : opt.value;
+                                                if (next === 'parcelado') {
+                                                  const n =
+                                                    Math.floor(Number(editServiceParcelCount)) || 6;
+                                                  setEditServiceParcelCount(String(n));
+                                                  setEditServiceParcelAmounts(
+                                                    buildEqualParcelAmountInputs(
+                                                      parseCurrencyInputBr(editServicePlannedValue),
+                                                      n
+                                                    )
+                                                  );
+                                                } else {
+                                                  setEditServiceParcelAmounts([]);
+                                                }
+                                                return next;
+                                              });
+                                            }}
+                                            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                                              active
+                                                ? 'border-sky-500 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
+                                                : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+                                            }`}
+                                          >
+                                            {opt.label}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    {editServicePayMode === 'avista' ? (
+                                      <div className="mt-2 max-w-xs">
+                                        <label className={labelClass}>Data do pagamento</label>
+                                        <input
+                                          type="date"
+                                          value={editServicePayDate}
+                                          onChange={(e) => setEditServicePayDate(e.target.value)}
+                                          className={inputClass}
+                                        />
+                                      </div>
+                                    ) : null}
+                                    {editServicePayMode === 'parcelado' ? (
+                                      <div className="mt-2 space-y-2">
+                                        <label className={labelClass}>Número de parcelas</label>
+                                        <input
+                                          type="number"
+                                          min={2}
+                                          max={60}
+                                          value={editServiceParcelCount}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            setEditServiceParcelCount(value);
+                                            const n = Math.floor(Number(value));
+                                            if (Number.isFinite(n) && n >= 2 && n <= 60) {
+                                              setEditServiceParcelAmounts(
+                                                buildEqualParcelAmountInputs(
+                                                  parseCurrencyInputBr(editServicePlannedValue),
+                                                  n
+                                                )
+                                              );
+                                            } else {
+                                              setEditServiceParcelAmounts([]);
+                                            }
+                                          }}
+                                          className={inputClass}
+                                        />
+                                        {(() => {
+                                          const n = Math.floor(
+                                            Number(editServiceParcelCount.trim())
+                                          );
+                                          if (!Number.isFinite(n) || n < 2 || n > 60) return null;
+                                          const amounts =
+                                            editServiceParcelAmounts.length === n
+                                              ? editServiceParcelAmounts
+                                              : buildEqualParcelAmountInputs(
+                                                  parseCurrencyInputBr(editServicePlannedValue),
+                                                  n
+                                                );
+                                          const sum = amounts.reduce(
+                                            (acc, raw) => acc + (parseCurrencyInputBr(raw) || 0),
+                                            0
+                                          );
+                                          const planned =
+                                            parseCurrencyInputBr(editServicePlannedValue);
+                                          return (
+                                            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                                  Valor de cada parcela
+                                                </p>
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setEditServiceParcelAmounts(
+                                                      buildEqualParcelAmountInputs(planned, n)
+                                                    )
+                                                  }
+                                                  className="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                                                >
+                                                  Dividir igualmente
+                                                </button>
+                                              </div>
+                                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                {amounts.map((amount, index) => (
+                                                  <div key={`edit-parcel-${index}`}>
+                                                    <label className="mb-1 block text-[11px] text-gray-500 dark:text-gray-400">
+                                                      Parcela {index + 1}
+                                                    </label>
+                                                    <input
+                                                      type="text"
+                                                      inputMode="numeric"
+                                                      value={amount}
+                                                      onChange={(e) => {
+                                                        setEditServiceParcelAmounts(
+                                                          redistributeParcelAmounts(
+                                                            amounts,
+                                                            index,
+                                                            e.target.value,
+                                                            planned
+                                                          )
+                                                        );
+                                                      }}
+                                                      placeholder="R$ 0,00"
+                                                      className={inputClass}
+                                                    />
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    ) : null}
+                                    {!editServicePayMode ? (
+                                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                        Sem seleção = remove o cronograma de parcelas.
+                                      </p>
+                                    ) : null}
+                                  </>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={savingContractLink || !editServiceName.trim()}
+                                  onClick={() => void handleUpdateContractLink()}
+                                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                                >
+                                  {savingContractLink ? 'Salvando…' : 'Salvar alterações'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingContractLink}
+                                  onClick={() => setEditingServiceId(null)}
+                                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          </Modal>
+  );
+
   const openEditService = (link: EmpreiteiroContractLink) => {
     setAddingContract(false);
-    setServiceDetailLinkId(link.id);
     setEditingServiceId(link.id);
     setEditServiceName(link.contratoNome || link.name || '');
     setEditServiceDescription(link.description || '');
@@ -1368,6 +1681,10 @@ export default function EmpreiteirosPage() {
         : ''
     );
     setEditServiceLocation(link.location || '');
+    setEditServiceIcon({
+      iconName: link.iconName || DEFAULT_SERVICE_ICON,
+      iconColor: link.iconColor || DEFAULT_SERVICE_COLOR,
+    });
     setEditServiceContractId(link.contractId || '');
     setEditServiceStart(toDateInputValue(link.startDate));
     setEditServiceEnd(toDateInputValue(link.endDate));
@@ -1487,6 +1804,8 @@ export default function EmpreiteirosPage() {
           description: editServiceDescription.trim() || null,
           plannedValue,
           location: editServiceLocation.trim() || null,
+          iconName: editServiceIcon.iconName,
+          iconColor: editServiceIcon.iconColor,
           contractId: editServiceContractId || null,
           startDate: editServiceStart || null,
           endDate: editServiceEnd || null,
@@ -1883,20 +2202,24 @@ export default function EmpreiteirosPage() {
     showMedicaoPage && medicaoContractFilterId
       ? (medicaoTargetItem?.contracts || []).find((l) => l.id === medicaoContractFilterId) || null
       : null;
+  // Empreiteiro não enxerga a lista de empreitas: o crumb "Empreitas" só volta para a própria empreita.
+  const voltarParaEmpreitas = () => {
+    if (isOwnEmpreiteiroAccount) {
+      if (ownEmpreitaItem) openDetails(ownEmpreitaItem);
+      return;
+    }
+    closeDetails();
+  };
   useBreadcrumbEntity(
     showMedicaoPage && breadcrumbEmpreitaName
       ? [
-          ...(isOwnEmpreiteiroAccount
-            ? []
-            : [
-                {
-                  label: 'Empreitas',
-                  onClick: () => {
-                    setMedicaoContractFilterId(null);
-                    closeDetails();
-                  },
-                },
-              ]),
+          {
+            label: 'Empreitas',
+            onClick: () => {
+              setMedicaoContractFilterId(null);
+              voltarParaEmpreitas();
+            },
+          },
           {
             label: breadcrumbEmpreitaName,
             // Volta para a empreita (a tela troca de seção por estado, não por URL).
@@ -1923,12 +2246,12 @@ export default function EmpreiteirosPage() {
         ]
       : servicePageLink && breadcrumbEmpreitaName
         ? [
-            { label: 'Empreitas', onClick: closeDetails },
+            { label: 'Empreitas', onClick: voltarParaEmpreitas },
             { label: breadcrumbEmpreitaName, onClick: closeServiceDetailModal },
             { label: servicePageLink.contratoNome || servicePageLink.name || 'Contrato de serviço' },
           ]
         : showDetailPage && breadcrumbEmpreitaName
-        ? [{ label: 'Empreitas', onClick: closeDetails }, { label: breadcrumbEmpreitaName }]
+        ? [{ label: 'Empreitas', onClick: voltarParaEmpreitas }, { label: breadcrumbEmpreitaName }]
         : breadcrumbEmpreitaName
           ? { label: breadcrumbEmpreitaName }
           : null,
@@ -1958,7 +2281,7 @@ export default function EmpreiteirosPage() {
     navFromPopRef.current = true;
     if (target <= 0) {
       setMedicaoContractFilterId(null);
-      closeDetails();
+      voltarParaEmpreitas();
       return;
     }
     if (showMedicaoPage && medicaoTargetItem) {
@@ -2013,17 +2336,22 @@ export default function EmpreiteirosPage() {
       window.location.pathname
     );
     if (!alvo) return;
-    openDetails(alvo);
     const servicoId = params.get('servico');
+    servicoPendenteRef.current = servicoId;
+    openDetails(alvo);
     if (servicoId && (alvo.contracts || []).some((c) => c.id === servicoId)) {
+      servicoPendenteRef.current = null;
       setServiceDetailLinkId(servicoId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, isLinkedEmpreiteiro, items]);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onPop = (event: PopStateEvent) => {
-      const target = Number((event.state as { empLevel?: number } | null)?.empLevel ?? 0);
+    const onPop = () => {
+      // O nível vem da URL (?empreita=…&servico=… / &medicoes=1): o state do histórico pode ser
+      // reescrito pelo Next e perder o nível, o que fazia o "voltar" fechar tudo de vez.
+      const params = new URLSearchParams(window.location.search);
+      const target = params.get('servico') || params.get('medicoes') ? 2 : params.get('empreita') ? 1 : 0;
       if (navFromPopRef.current && target >= navLevelRef.current) {
         navFromPopRef.current = false;
         return;
@@ -3222,6 +3550,7 @@ export default function EmpreiteirosPage() {
                             <div className="space-y-4">
                               <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
                                 <div className="flex min-w-0 items-center gap-4">
+                                  <ServiceIcon name={link.iconName} color={link.iconColor} size="lg" />
                                   <div className="min-w-0">
                                     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                                       <h1 className="truncate text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
@@ -3236,21 +3565,21 @@ export default function EmpreiteirosPage() {
                                     {link.location ? (
                                       <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{link.location}</p>
                                     ) : null}
-                                    {link.centroCustoNome || link.costCenter?.name ? (
-                                      <p
-                                        className={`${link.location ? '' : 'mt-1 '}text-sm text-gray-600 dark:text-gray-400`}
-                                      >
-                                        {link.centroCustoNome || link.costCenter?.name}
-                                      </p>
-                                    ) : null}
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                                      {`${formatDateBr(link.startDate)} à ${formatDateBr(link.endDate)}`}
-                                    </p>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                                   {[
-                                    { rotulo: 'Contrato', valor: formatMoneyBr(contractValue) || '—', Icon: FileText },
+                                    {
+                                      rotulo: 'Contrato',
+                                      valor: link.centroCustoNome || link.costCenter?.name || '—',
+                                      Icon: Building2,
+                                    },
+                                    {
+                                      rotulo: 'Período',
+                                      valor: `${formatDateBr(link.startDate)} à ${formatDateBr(link.endDate)}`,
+                                      Icon: CalendarDays,
+                                    },
+                                    { rotulo: 'Valor', valor: formatMoneyBr(contractValue) || '—', Icon: FileText },
                                     { rotulo: 'Executado', valor: executedPct != null ? `${executedPct}%` : '—', Icon: TrendingUp },
                                     { rotulo: 'Pago', valor: formatMoneyBr(paidTotal) || 'R$ 0,00', Icon: CheckCircle2 },
                                     { rotulo: 'Saldo', valor: formatMoneyBr(saldoValue) || '—', Icon: Wallet },
@@ -3261,7 +3590,7 @@ export default function EmpreiteirosPage() {
                                       </span>
                                       <div>
                                         <p className="text-xs text-gray-500 dark:text-gray-400">{k.rotulo}</p>
-                                        <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{k.valor}</p>
+                                        <p className="whitespace-nowrap text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{k.valor}</p>
                                       </div>
                                     </div>
                                   ))}
@@ -3295,287 +3624,7 @@ export default function EmpreiteirosPage() {
                             </div>
 
 
-                            <Modal
-                            isOpen={editingServiceId === link.id}
-                            onClose={() => setEditingServiceId(null)}
-                            title="Editar Serviço"
-                            size="lg"
-                          >
-                            <div className="space-y-4">
-                              <div>
-                                <label className={labelClass}>Nome do serviço *</label>
-                                <input
-                                  type="text"
-                                  value={editServiceName}
-                                  onChange={(e) => setEditServiceName(e.target.value)}
-                                  className={inputClass}
-                                />
-                              </div>
-                              <div>
-                                <label className={labelClass}>Descrição</label>
-                                <textarea
-                                  value={editServiceDescription}
-                                  onChange={(e) => setEditServiceDescription(e.target.value)}
-                                  rows={2}
-                                  className={inputClass}
-                                />
-                              </div>
-                              <div>
-                                <label className={labelClass}>Valor planejado (R$)</label>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={editServicePlannedValue}
-                                  onChange={(e) =>
-                                    setEditServicePlannedValue(
-                                      maskCurrencyInputBrOrEmpty(e.target.value)
-                                    )
-                                  }
-                                  placeholder="R$ 0,00"
-                                  className={inputClass}
-                                />
-                              </div>
-                              <div>
-                                <label className={labelClass}>Contrato *</label>
-                                <StringSingleSelectDropdown
-                                  value={editServiceContractId}
-                                  onChange={setEditServiceContractId}
-                                  options={contractSelectOptions}
-                                  placeholder="Selecione o contrato"
-                                  emptyOptionLabel="Selecione o contrato"
-                                  searchPlaceholder="Pesquisar contrato..."
-                                  matchTriggerWidth
-                                />
-                              </div>
-                              <div>
-                                <label className={labelClass}>Local de execução</label>
-                                <input
-                                  type="text"
-                                  value={editServiceLocation}
-                                  onChange={(e) => setEditServiceLocation(e.target.value)}
-                                  className={inputClass}
-                                />
-                              </div>
-                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <div>
-                                  <label className={labelClass}>Início</label>
-                                  <input
-                                    type="date"
-                                    value={editServiceStart}
-                                    onChange={(e) => setEditServiceStart(e.target.value)}
-                                    className={inputClass}
-                                  />
-                                </div>
-                                <div>
-                                  <label className={labelClass}>Fim</label>
-                                  <input
-                                    type="date"
-                                    value={editServiceEnd}
-                                    onChange={(e) => setEditServiceEnd(e.target.value)}
-                                    className={inputClass}
-                                  />
-                                </div>
-                              </div>
-                              <div>
-                                <label className={labelClass}>Status</label>
-                                <select
-                                  value={editServiceStatus}
-                                  onChange={(e) =>
-                                    setEditServiceStatus(
-                                      e.target.value as EmpreiteiroContractStatus
-                                    )
-                                  }
-                                  className={inputClass}
-                                >
-                                  {CONTRACT_STATUS_OPTIONS.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className={labelClass}>Forma de pagamento</label>
-                                {editServicePayLocked ? (
-                                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                                    Há parcelas liberadas ou pagas — não é possível alterar a forma
-                                    de pagamento. Atual: {paymentLabelForLink(link)}.
-                                  </p>
-                                ) : (
-                                  <>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {(
-                                        [
-                                          { value: 'avista' as 'avista' | 'parcelado', label: 'À vista' },
-                                          { value: 'parcelado' as 'avista' | 'parcelado', label: 'Parcelado' },
-                                        ]
-                                      ).map((opt) => {
-                                        const active = editServicePayMode === opt.value;
-                                        return (
-                                          <button
-                                            key={opt.value}
-                                            type="button"
-                                            onClick={() => {
-                                              setEditServicePayMode((prev) => {
-                                                const next = prev === opt.value ? null : opt.value;
-                                                if (next === 'parcelado') {
-                                                  const n =
-                                                    Math.floor(Number(editServiceParcelCount)) || 6;
-                                                  setEditServiceParcelCount(String(n));
-                                                  setEditServiceParcelAmounts(
-                                                    buildEqualParcelAmountInputs(
-                                                      parseCurrencyInputBr(editServicePlannedValue),
-                                                      n
-                                                    )
-                                                  );
-                                                } else {
-                                                  setEditServiceParcelAmounts([]);
-                                                }
-                                                return next;
-                                              });
-                                            }}
-                                            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
-                                              active
-                                                ? 'border-sky-500 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
-                                                : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
-                                            }`}
-                                          >
-                                            {opt.label}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                    {editServicePayMode === 'avista' ? (
-                                      <div className="mt-2 max-w-xs">
-                                        <label className={labelClass}>Data do pagamento</label>
-                                        <input
-                                          type="date"
-                                          value={editServicePayDate}
-                                          onChange={(e) => setEditServicePayDate(e.target.value)}
-                                          className={inputClass}
-                                        />
-                                      </div>
-                                    ) : null}
-                                    {editServicePayMode === 'parcelado' ? (
-                                      <div className="mt-2 space-y-2">
-                                        <label className={labelClass}>Número de parcelas</label>
-                                        <input
-                                          type="number"
-                                          min={2}
-                                          max={60}
-                                          value={editServiceParcelCount}
-                                          onChange={(e) => {
-                                            const value = e.target.value;
-                                            setEditServiceParcelCount(value);
-                                            const n = Math.floor(Number(value));
-                                            if (Number.isFinite(n) && n >= 2 && n <= 60) {
-                                              setEditServiceParcelAmounts(
-                                                buildEqualParcelAmountInputs(
-                                                  parseCurrencyInputBr(editServicePlannedValue),
-                                                  n
-                                                )
-                                              );
-                                            } else {
-                                              setEditServiceParcelAmounts([]);
-                                            }
-                                          }}
-                                          className={inputClass}
-                                        />
-                                        {(() => {
-                                          const n = Math.floor(
-                                            Number(editServiceParcelCount.trim())
-                                          );
-                                          if (!Number.isFinite(n) || n < 2 || n > 60) return null;
-                                          const amounts =
-                                            editServiceParcelAmounts.length === n
-                                              ? editServiceParcelAmounts
-                                              : buildEqualParcelAmountInputs(
-                                                  parseCurrencyInputBr(editServicePlannedValue),
-                                                  n
-                                                );
-                                          const sum = amounts.reduce(
-                                            (acc, raw) => acc + (parseCurrencyInputBr(raw) || 0),
-                                            0
-                                          );
-                                          const planned =
-                                            parseCurrencyInputBr(editServicePlannedValue);
-                                          return (
-                                            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                                              <div className="flex items-center justify-between gap-2">
-                                                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                                  Valor de cada parcela
-                                                </p>
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    setEditServiceParcelAmounts(
-                                                      buildEqualParcelAmountInputs(planned, n)
-                                                    )
-                                                  }
-                                                  className="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                                                >
-                                                  Dividir igualmente
-                                                </button>
-                                              </div>
-                                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                                {amounts.map((amount, index) => (
-                                                  <div key={`edit-parcel-${index}`}>
-                                                    <label className="mb-1 block text-[11px] text-gray-500 dark:text-gray-400">
-                                                      Parcela {index + 1}
-                                                    </label>
-                                                    <input
-                                                      type="text"
-                                                      inputMode="numeric"
-                                                      value={amount}
-                                                      onChange={(e) => {
-                                                        setEditServiceParcelAmounts(
-                                                          redistributeParcelAmounts(
-                                                            amounts,
-                                                            index,
-                                                            e.target.value,
-                                                            planned
-                                                          )
-                                                        );
-                                                      }}
-                                                      placeholder="R$ 0,00"
-                                                      className={inputClass}
-                                                    />
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          );
-                                        })()}
-                                      </div>
-                                    ) : null}
-                                    {!editServicePayMode ? (
-                                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                                        Sem seleção = remove o cronograma de parcelas.
-                                      </p>
-                                    ) : null}
-                                  </>
-                                )}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={savingContractLink || !editServiceName.trim()}
-                                  onClick={() => void handleUpdateContractLink()}
-                                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-                                >
-                                  {savingContractLink ? 'Salvando…' : 'Salvar alterações'}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={savingContractLink}
-                                  onClick={() => setEditingServiceId(null)}
-                                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                                >
-                                  Cancelar
-                                </button>
-                              </div>
-                            </div>
-                          </Modal>
+                            {renderEditServiceModal(link)}
 
                             {!isOwnEmpreiteiroAccount && abaServico === 'parcelas' ? (
                               <Card className={cadastroListClasses.card}>
@@ -4546,7 +4595,6 @@ export default function EmpreiteirosPage() {
               const kpis = [
                 { rotulo: 'Contratado', valor: formatMoneyBr(contratado) || 'R$ 0,00', Icon: Wallet },
                 { rotulo: 'Executado', valor: formatMoneyBr(executado) || 'R$ 0,00', Icon: TrendingUp },
-                { rotulo: 'Contratos', valor: String(links.length), Icon: FileText },
                 ...(reviewsData && reviewsData.summary.count > 0 && !isOwnEmpreiteiroAccount
                   ? [
                       {
@@ -4677,6 +4725,12 @@ export default function EmpreiteirosPage() {
                   </div>
                 </CardHeader>
                 <CardContent className={`${cadastroListClasses.cardContent} space-y-6`}>
+                {!servicePageLink
+                  ? (() => {
+                      const editando = (viewingItem?.contracts || []).find((c) => c.id === editingServiceId);
+                      return editando ? renderEditServiceModal(editando) : null;
+                    })()
+                  : null}
                 <div>
                   <Modal
                     isOpen={addingContract}
@@ -4728,6 +4782,12 @@ export default function EmpreiteirosPage() {
                           className={inputClass}
                         />
                       </div>
+                      <ServiceIconPicker
+                        iconName={newServiceIcon.iconName}
+                        iconColor={newServiceIcon.iconColor}
+                        onChange={setNewServiceIcon}
+                        labelClass={labelClass}
+                      />
                       </div>
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -5015,9 +5075,12 @@ export default function EmpreiteirosPage() {
                                   onClick={() => setServiceDetailLinkId(link.id)}
                                 >
                                   <td className={cadastroListClasses.td}>
-                                    <ListRowNavigableLabel>
-                                      {link.contratoNome || link.name || 'Contrato de serviço'}
-                                    </ListRowNavigableLabel>
+                                    <div className="flex items-center gap-3">
+                                      <ServiceIcon name={link.iconName} color={link.iconColor} size="sm" />
+                                      <ListRowNavigableLabel>
+                                        {link.contratoNome || link.name || 'Contrato de serviço'}
+                                      </ListRowNavigableLabel>
+                                    </div>
                                   </td>
                                   <td className={`${cadastroListClasses.td} text-center`}>
                                     <span className="text-sm text-gray-700 dark:text-gray-300">

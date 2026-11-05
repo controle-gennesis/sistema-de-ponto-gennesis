@@ -25,6 +25,8 @@ import GestaoOsDetailScreen from './src/screens/GestaoOsDetailScreen';
 import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
 import GestaoOsUnplannedScreen from './src/screens/GestaoOsUnplannedScreen';
 import FieldAssistantScreen from './src/screens/FieldAssistantScreen';
+import EmpreitaHomeScreen from './src/screens/empreiteiro/EmpreitaHomeScreen';
+import EmpreitaServicoScreen from './src/screens/empreiteiro/EmpreitaServicoScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
 import AppUpdateGate from './src/components/AppUpdateGate';
 import ThemeBackground from './src/components/ThemeBackground';
@@ -55,6 +57,8 @@ export type RootStackParamList = {
   GestaoOsQr: { token: string };
   GestaoOsUnplanned: undefined;
   FieldAssistant: undefined;
+  EmpreitaHome: undefined;
+  EmpreitaServico: { linkId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -63,7 +67,8 @@ const queryClient = new QueryClient();
 const MIN_SPLASH_MS = 900;
 
 function AppNavigator() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
+  const isEmpreiteiro = Boolean(user?.empreiteiro?.id);
   const { isDark } = useTheme();
   const [minSplashDone, setMinSplashDone] = React.useState(false);
   const [bootFade] = React.useState(() => new Animated.Value(1));
@@ -122,7 +127,11 @@ function AppNavigator() {
         <View style={{ flex: 1 }}>
           <NavigationContainer ref={navigationRef} theme={navigationTheme}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="Main" component={BottomTabNavigator} />
+              {isEmpreiteiro ? (
+                <Stack.Screen name="EmpreitaHome" component={EmpreitaHomeScreen} />
+              ) : (
+                <Stack.Screen name="Main" component={BottomTabNavigator} />
+              )}
             </Stack.Navigator>
           </NavigationContainer>
           <Animated.View
@@ -147,7 +156,21 @@ function AppNavigator() {
   const shell = (
     <View style={{ flex: 1, backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG }}>
       <NavigationContainer ref={navigationRef} theme={navigationTheme}>
-        {isAuthenticated ? (
+        {isAuthenticated && isEmpreiteiro ? (
+          // Login de empreiteiro: só a área de Empreitas (empreita, contratos de serviço, medições e equipe).
+          <Stack.Navigator
+            screenOptions={{
+              headerShown: false,
+              contentStyle: {
+                backgroundColor: 'transparent',
+              },
+              animation: 'slide_from_right',
+            }}
+          >
+            <Stack.Screen name="EmpreitaHome" component={EmpreitaHomeScreen} />
+            <Stack.Screen name="EmpreitaServico" component={EmpreitaServicoScreen} />
+          </Stack.Navigator>
+        ) : isAuthenticated ? (
           <>
             <Stack.Navigator
               screenOptions={{

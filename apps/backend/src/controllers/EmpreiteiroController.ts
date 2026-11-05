@@ -797,6 +797,12 @@ function digits(value: unknown): string {
   return str(value).replace(/\D/g, '');
 }
 
+/** Aceita só #RRGGBB; qualquer outra coisa vira null. */
+function sanitizeHexColor(value: unknown): string | null {
+  const v = typeof value === 'string' ? value.trim() : '';
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+}
+
 function optionalStr(value: unknown): string | null {
   const v = str(value);
   return v ? v : null;
@@ -975,6 +981,8 @@ type ContractLinkRow = {
   description?: string | null;
   plannedValue?: Prisma.Decimal | null;
   location?: string | null;
+  iconName?: string | null;
+  iconColor?: string | null;
   contractId?: string | null;
   costCenterId?: string | null;
   startDate: Date | null;
@@ -1153,6 +1161,8 @@ function serializeContractLink(
     /** Valor vigente = planejado + aditivos. */
     currentValue: row.plannedValue != null || approvedAddenda.length > 0 ? currentValue : null,
     location: row.location ?? null,
+    iconName: row.iconName ?? null,
+    iconColor: row.iconColor ?? null,
     contractId: row.contractId ?? null,
     costCenterId: row.costCenterId ?? row.costCenter?.id ?? null,
     /** YYYY-MM-DD civil — evita deslocar dia no fuso do browser. */
@@ -2765,6 +2775,8 @@ export class EmpreiteiroController {
       const description = optionalStr(req.body?.description);
       const plannedValue = parsePlannedValue(req.body?.plannedValue);
       const location = optionalStr(req.body?.location);
+      const iconName = optionalStr(req.body?.iconName);
+      const iconColor = sanitizeHexColor(req.body?.iconColor);
       const systemContractId = str(req.body?.contractId) || null;
       let costCenterId = str(req.body?.costCenterId) || null;
 
@@ -2806,6 +2818,8 @@ export class EmpreiteiroController {
             description,
             plannedValue: plannedValue ?? undefined,
             location,
+            iconName,
+            iconColor,
             contractId: systemContractId,
             costCenterId,
             startDate,
@@ -2894,6 +2908,10 @@ export class EmpreiteiroController {
           : link.plannedValue;
       const location =
         req.body?.location !== undefined ? optionalStr(req.body.location) : link.location;
+      const iconName =
+        req.body?.iconName !== undefined ? optionalStr(req.body.iconName) : link.iconName;
+      const iconColor =
+        req.body?.iconColor !== undefined ? sanitizeHexColor(req.body.iconColor) : link.iconColor;
 
       let systemContractId =
         req.body?.contractId !== undefined
@@ -2975,6 +2993,8 @@ export class EmpreiteiroController {
             description,
             plannedValue: plannedValue ?? null,
             location,
+            iconName,
+            iconColor,
             contractId: systemContractId,
             costCenterId,
             startDate,

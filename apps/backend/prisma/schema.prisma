@@ -2543,6 +2543,9 @@ model EmpreiteiroContract {
   plannedValue  Decimal?  @db.Decimal(15, 2)
   /// Local de execução (endereço / obra física).
   location      String?
+  /// Ícone (nome do ícone lucide) e cor (#RRGGBB) escolhidos para identificar o serviço.
+  iconName      String?
+  iconColor     String?
   /// Opcional: obra/contrato do sistema só como referência.
   contractId    String?
   /// Opcional: centro de custo da obra.

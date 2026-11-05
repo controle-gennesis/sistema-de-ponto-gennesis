@@ -15,6 +15,7 @@ export type ApprovalNotificationCounts = {
   oc: number;
   rm: number;
   medicao: number;
+  aditivo: number;
   total: number;
 };
 
@@ -26,6 +27,7 @@ const emptyCounts: ApprovalNotificationCounts = {
   oc: 0,
   rm: 0,
   medicao: 0,
+  aditivo: 0,
   total: 0,
 };
 
@@ -109,17 +111,17 @@ export function useApprovalNotificationCounts() {
     queryKey: ['empreiteiro-daily-measurements-pending', 'count'],
     enabled: enabled && canApproveEmpreiteiroDaily,
     queryFn: async () => {
-      // A aba "Medições de Entrega/Aditivos" soma as duas filas pendentes.
+      // Medições de entrega e aditivos são abas separadas, cada uma com a sua fila pendente.
       const [measurements, addenda] = await Promise.all([
         api.get('/empreiteiros/daily-measurements/pending'),
         api.get('/empreiteiros/addenda/pending'),
       ]);
       const measurementRows = measurements.data?.data;
       const addendaRows = addenda.data?.data;
-      return (
-        (Array.isArray(measurementRows) ? measurementRows.length : 0) +
-        (Array.isArray(addendaRows) ? addendaRows.length : 0)
-      );
+      return {
+        medicao: Array.isArray(measurementRows) ? measurementRows.length : 0,
+        aditivo: Array.isArray(addendaRows) ? addendaRows.length : 0,
+      };
     },
     refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
@@ -134,9 +136,10 @@ export function useApprovalNotificationCounts() {
     const fuel = canApproveFuel ? (base?.fuel ?? 0) : 0;
     const oc = canApproveOc ? (base?.oc ?? 0) : 0;
     const rm = canApproveMaterialRequests ? (base?.rm ?? 0) : 0;
-    const medicao = canApproveEmpreiteiroDaily ? (medicaoQuery.data ?? 0) : 0;
-    const total = dp + espelho + fd + fuel + oc + rm + medicao;
-    return { dp, espelho, fd, fuel, oc, rm, medicao, total };
+    const medicao = canApproveEmpreiteiroDaily ? (medicaoQuery.data?.medicao ?? 0) : 0;
+    const aditivo = canApproveEmpreiteiroDaily ? (medicaoQuery.data?.aditivo ?? 0) : 0;
+    const total = dp + espelho + fd + fuel + oc + rm + medicao + aditivo;
+    return { dp, espelho, fd, fuel, oc, rm, medicao, aditivo, total };
   }, [
     mainQuery.data,
     espelhoQuery.data,
