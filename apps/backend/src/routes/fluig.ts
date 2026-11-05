@@ -106,7 +106,14 @@ router.get('/request-logs', requireAdministrator, async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: limite,
     });
-    return res.json({ success: true, data: itens });
+    // Nome de quem fez a chamada (rotinas automáticas não têm usuário).
+    const ids = [...new Set(itens.map((i) => i.userId).filter((v): v is string => Boolean(v)))];
+    const usuarios = ids.length
+      ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
+      : [];
+    const nomePorId = new Map(usuarios.map((u) => [u.id, u.name]));
+    const data = itens.map((i) => ({ ...i, userName: i.userId ? nomePorId.get(i.userId) ?? null : null }));
+    return res.json({ success: true, data });
   } catch (error) {
     return next(error);
   }
