@@ -131,7 +131,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     can(pathToModuleKey('/ponto/meus-chamados')) ||
     can(pathToModuleKey('/ponto/sistema-gestao-os/planos'));
 
-  const { data: gestaoOsInbox } = useQuery({
+  const { data: gestaoOsInboxRaw } = useQuery({
     queryKey: ['gestao-os-inbox'],
     queryFn: async () => {
       const res = await api.get('/gestao-os/inbox');
@@ -146,11 +146,14 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         sacOpenCount?: number;
       } | null;
     },
-    enabled: !permissionsLoading,
+    // Só busca a caixa de OS quem tem acesso ao módulo (antes buscava para todo mundo).
+    enabled: canSeeGestaoOs && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
+  // A chave do cache não é por usuário: sem acesso, ignora qualquer dado que sobrou de outro login.
+  const gestaoOsInbox = canSeeGestaoOs ? gestaoOsInboxRaw : null;
 
   const { data: atendimentoContabilPendingCount = 0 } = useQuery({
     queryKey: ['dp-contabilidade-pending-count'],
