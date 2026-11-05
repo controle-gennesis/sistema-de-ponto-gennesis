@@ -93,6 +93,46 @@ function summarizeReviews(
   };
 }
 
+/**
+ * Última parcela pendente do serviço: o valor da baixa precisa ser exatamente o saldo que falta
+ * (contrato − parcelas já liberadas/pagas), senão a soma das parcelas não fecha o valor do contrato.
+ */
+async function assertLastInstallmentClosesContract(
+  empreiteiroContractId: string | null,
+  executedAmount: number
+): Promise<void> {
+  if (!empreiteiroContractId) return;
+  const servico = await prisma.empreiteiroContract.findUnique({
+    where: { id: empreiteiroContractId },
+    select: {
+      plannedValue: true,
+      addenda: { select: { amount: true, status: true } },
+      installments: { select: { amount: true, status: true } },
+    },
+  });
+  if (!servico) return;
+  const pendentes = servico.installments.filter((p) => String(p.status || '').toUpperCase() === 'PENDING');
+  if (pendentes.length !== 1) return;
+  const base = servico.plannedValue != null ? Number(servico.plannedValue) : 0;
+  const aditivos = servico.addenda
+    .filter((a) => isAddendumApproved(a.status))
+    .reduce((soma, a) => soma + (a.amount != null ? Number(a.amount) : 0), 0);
+  const valorContrato = Number((base + aditivos).toFixed(2));
+  if (!(valorContrato > 0)) return;
+  const comprometido = servico.installments
+    .filter((p) => String(p.status || '').toUpperCase() !== 'PENDING')
+    .reduce((soma, p) => soma + (Number(p.amount) || 0), 0);
+  const saldo = Number((valorContrato - comprometido).toFixed(2));
+  if (Math.abs(executedAmount - saldo) > 0.005) {
+    throw createError(
+      `Esta é a última parcela do serviço: o valor executado deve ser R$ ${saldo
+        .toFixed(2)
+        .replace('.', ',')} para fechar o valor do contrato.`,
+      400
+    );
+  }
+}
+
 /** Marca de parcela quitada pelo Fluig (paidBy), para distinguir de pagamento com comprovante anexado. */
 const PAID_BY_FLUIG = 'FLUIG';
 
@@ -227,7 +267,9 @@ function parseAddendumApplyPlan(raw: unknown): AddendumApplyPlan {
  */
 async function redistributePendingInstallmentAmounts(
   db: InstallmentDb,
-  empreiteiroContractId: string
+  empreiteiroContractId: string,
+  /** true: só recalcula se a soma das parcelas não fechar o valor do contrato (preserva divisões personalizadas). */
+  onlyIfMismatch = false
 ): Promise<void> {
   const link = await db.empreiteiroContract.findUnique({
     where: { id: empreiteiroContractId },
@@ -255,6 +297,10 @@ async function redistributePendingInstallmentAmounts(
     (p) => String(p.status || '').toUpperCase() === 'PENDING'
   );
   if (pending.length === 0) return;
+  if (onlyIfMismatch) {
+    const somaParcelas = installments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    if (Math.abs(somaParcelas - contractValue) < 0.005) return;
+  }
 
   let committed = 0;
   for (const p of installments) {
@@ -290,7 +336,12 @@ async function syncInstallmentReleasesForContract(
     orderBy: [{ approvedAt: 'asc' }, { workDate: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, approvedAt: true, executedAmount: true },
   });
-  if (approved.length === 0) return 0;
+  if (approved.length === 0) {
+    // Sem baixas ainda: as parcelas pendentes só são recalculadas se a soma não fechar o valor do contrato
+    // (ex.: valor do serviço foi alterado depois de gerar as parcelas).
+    await redistributePendingInstallmentAmounts(db, empreiteiroContractId, true);
+    return 0;
+  }
 
   const alreadyLinked = await db.empreiteiroContractInstallment.findMany({
     where: {
@@ -3540,6 +3591,7 @@ export class EmpreiteiroController {
       }
 
       const contractId = item.empreiteiroContractId;
+      await assertLastInstallmentClosesContract(contractId, executedAmountNum);
       const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.empreiteiroDailyMeasurement.update({
           where: { id: measurementId },

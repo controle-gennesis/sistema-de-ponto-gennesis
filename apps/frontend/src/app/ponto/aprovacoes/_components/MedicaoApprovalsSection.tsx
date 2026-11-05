@@ -11,6 +11,7 @@ import {
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import {
+  formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
   parseCurrencyInputBr,
 } from '@/lib/maskCurrencyBr';
@@ -100,6 +101,14 @@ function formatMoney(value?: number | null) {
 function isImageFile(file: { url?: string; name?: string }) {
   const source = `${file.name || ''} ${file.url || ''}`.toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(source) || source.includes('data:image/');
+}
+
+/** Saldo que a última parcela pendente precisa ter para fechar o contrato (null se não for a última). */
+function lastInstallmentBalance(item: ReviewItem): number | null {
+  const f = item.serviceFinance;
+  if (!f || f.installmentsCount <= 0 || f.installmentsPending !== 1 || !(f.contractValue > 0)) return null;
+  const saldo = Number((f.contractValue - f.paidTotal - f.releasedTotal).toFixed(2));
+  return saldo > 0 ? saldo : null;
 }
 
 function contractLabel(item: ReviewItem) {
@@ -225,7 +234,8 @@ export function MedicaoApprovalsSection() {
 
   const openDetail = (item: ReviewItem) => {
     setActionMenu(null);
-    setApproveAmount('');
+    const saldoFinal = itemPhase(item.status) === 'PENDING' ? lastInstallmentBalance(item) : null;
+    setApproveAmount(saldoFinal != null ? formatCurrencyInputBrFromNumber(saldoFinal) : '');
     setReturnNote('');
     setDetail(item);
   };
@@ -233,6 +243,7 @@ export function MedicaoApprovalsSection() {
   const activeCard = MEDICAO_PHASE_CARDS.find((card) => card.filter === phase) ?? MEDICAO_PHASE_CARDS[0];
   const PhaseIcon = activeCard.Icon;
   const detailPending = detail ? itemPhase(detail.status) === 'PENDING' : false;
+  const detailLastBalance = detail && detailPending ? lastInstallmentBalance(detail) : null;
   const detailPhotos = detail
     ? [
         ...(detail.teamPhoto?.url
@@ -589,9 +600,15 @@ export function MedicaoApprovalsSection() {
                     inputMode="numeric"
                     value={approveAmount}
                     onChange={(event) => setApproveAmount(maskCurrencyInputBrOrEmpty(event.target.value))}
+                    readOnly={detailLastBalance != null}
                     placeholder="R$ 0,00"
-                    className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:read-only:bg-gray-700/60"
                   />
+                  {detailLastBalance != null ? (
+                    <span className="mt-1 block text-[11px] font-normal text-amber-700 dark:text-amber-300">
+                      Última parcela do serviço: o valor é fixo e fecha o valor do contrato.
+                    </span>
+                  ) : null}
                 </label>
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                   Motivo da devolução
