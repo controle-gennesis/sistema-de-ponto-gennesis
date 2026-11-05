@@ -127,7 +127,46 @@ async function sincronizarParcelasPagasNoFluig(empreiteiroId: string): Promise<b
   for (const contractId of contratosAlterados) {
     await redistributePendingInstallmentAmounts(prisma, contractId);
   }
-  return contratosAlterados.size > 0;
+  const concluidos = await concluirServicosQuitados(empreiteiroId);
+  return contratosAlterados.size > 0 || concluidos;
+}
+
+/**
+ * Serviço 100% executado (baixas aprovadas) e 100% pago (parcelas PAID) passa para "Concluído".
+ * Só avança: serviço já concluído/cancelado não é alterado e nada volta sozinho para "Em andamento".
+ * Devolve true se algum serviço foi concluído.
+ */
+async function concluirServicosQuitados(empreiteiroId: string): Promise<boolean> {
+  const servicos = await prisma.empreiteiroContract.findMany({
+    where: { empreiteiroId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    select: {
+      id: true,
+      plannedValue: true,
+      addenda: { select: { amount: true, status: true } },
+      installments: { select: { amount: true, status: true } },
+      dailyMeasurements: { where: { status: 'APPROVED' }, select: { executedAmount: true } },
+    },
+  });
+  let concluiu = false;
+  for (const s of servicos) {
+    const base = s.plannedValue != null ? Number(s.plannedValue) : 0;
+    const aditivos = s.addenda
+      .filter((a) => isAddendumApproved(a.status))
+      .reduce((soma, a) => soma + (a.amount != null ? Number(a.amount) : 0), 0);
+    const valorContrato = Number((base + aditivos).toFixed(2));
+    if (!(valorContrato > 0)) continue;
+    const pago = s.installments
+      .filter((p) => String(p.status || '').toUpperCase() === 'PAID')
+      .reduce((soma, p) => soma + (Number(p.amount) || 0), 0);
+    const executado = s.dailyMeasurements.reduce((soma, m) => soma + (Number(m.executedAmount) || 0), 0);
+    if (pago + 0.005 < valorContrato || executado + 0.005 < valorContrato) continue;
+    await prisma.empreiteiroContract.update({
+      where: { id: s.id },
+      data: { status: 'COMPLETED', isActive: false },
+    });
+    concluiu = true;
+  }
+  return concluiu;
 }
 
 function isAddendumApproved(raw: unknown): boolean {
@@ -3389,6 +3428,7 @@ export class EmpreiteiroController {
         }
         return row;
       });
+      await concluirServicosQuitados(id);
 
       res.json({
         success: true,
@@ -3448,6 +3488,7 @@ export class EmpreiteiroController {
         }
         return row;
       });
+      await concluirServicosQuitados(id);
 
       res.json({
         success: true,
@@ -3561,6 +3602,8 @@ export class EmpreiteiroController {
       } else {
         throw createError('Status de parcela inválido', 400);
       }
+      // Última parcela paga com serviço 100% executado: conclui o serviço.
+      await concluirServicosQuitados(id);
 
       let autoCompleted = false;
       if (nextStatus === 'PAID') {
