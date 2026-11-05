@@ -80,6 +80,15 @@ router.get('/linkable-users', (req, res, next) =>
 router.get('/daily-measurements/pending', (req, res, next) =>
   controller.listPendingDailyMeasurements(req as any, res as any, next)
 );
+router.get('/reviews/summary', (req, res, next) =>
+  controller.reviewsSummaryByEmpreiteiro(req as any, res as any, next)
+);
+router.get('/:id/reviews', (req, res, next) =>
+  controller.listServiceReviews(req as any, res as any, next)
+);
+router.put('/:id/contracts/:linkId/review', (req, res, next) =>
+  controller.saveServiceReview(req as any, res as any, next)
+);
 router.get('/addenda/pending', (req, res, next) =>
   controller.listPendingAddenda(req as any, res as any, next)
 );

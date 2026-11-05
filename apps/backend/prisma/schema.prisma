@@ -2565,6 +2565,7 @@ model EmpreiteiroContract {
   installments      EmpreiteiroContractInstallment[]
   addenda           EmpreiteiroContractAddendum[]
   teamMembers       EmpreiteiroTeamMember[]
+  review            EmpreiteiroServiceReview?
 
   @@index([empreiteiroId])
   @@index([contractId])
@@ -2644,6 +2645,27 @@ model EmpreiteiroContractInstallment {
   @@index([status])
   @@index([measurementId])
   @@map("empreiteiro_contract_installments")
+}
+
+/// Avaliação (1 a 5 estrelas) do contrato de serviço concluído: preço, prazo e pagamento. Uma por serviço.
+model EmpreiteiroServiceReview {
+  id                    String   @id @default(cuid())
+  empreiteiroContractId String   @unique
+  /// Denormalizado para somar a reputação da empreita sem juntar tabelas.
+  empreiteiroId         String
+  priceRating           Int
+  deadlineRating        Int
+  paymentRating         Int
+  comment               String?
+  reviewedById          String?
+  reviewedByName        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  empreiteiroContract EmpreiteiroContract @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+
+  @@index([empreiteiroId])
+  @@map("empreiteiro_service_reviews")
 }
 
 /// Pessoa da equipe de um contrato de serviço (turma daquele serviço).

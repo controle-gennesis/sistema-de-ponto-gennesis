@@ -25,12 +25,22 @@ type ApprovalTemplateName =
   | 'solicitacao_rejeitada'
   | 'solicitacao_cancelada';
 
+/**
+ * Avisos de aprovação por WhatsApp (nova_solicitacao_pendente, solicitacao_aprovada,
+ * solicitacao_rejeitada, solicitacao_cancelada) estão DESLIGADOS.
+ * Para religar, defina WHATSAPP_APPROVAL_NOTIFICATIONS=on no ambiente do backend.
+ */
+function approvalWhatsAppEnabled(): boolean {
+  return (process.env.WHATSAPP_APPROVAL_NOTIFICATIONS || '').trim().toLowerCase() === 'on';
+}
+
 /** Envia sem lançar — falha de WhatsApp nunca deve derrubar a criação/decisão da solicitação. */
 async function sendApprovalTemplate(
   phone: string,
   template: ApprovalTemplateName,
   bodyParams: string[]
 ): Promise<void> {
+  if (!approvalWhatsAppEnabled()) return;
   try {
     await metaWhatsApp.sendTemplate(phone, template, TEMPLATE_LANGUAGE, bodyParams);
   } catch (err) {
@@ -40,6 +50,7 @@ async function sendApprovalTemplate(
 
 /** Telefones (Employee.phone) únicos e não vazios de uma lista de userIds. */
 async function resolvePhonesForUserIds(userIds: string[]): Promise<string[]> {
+  if (!approvalWhatsAppEnabled()) return [];
   const uniqueIds = [...new Set(userIds.filter(Boolean))];
   if (uniqueIds.length === 0) return [];
   const employees = await prisma.employee.findMany({
