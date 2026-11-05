@@ -1,5 +1,5 @@
 /**
- * Mapa de Cotação das composições próprias do orçamento (código "COTAÇÃO - n").
+ * Mapa de Cotação das composições próprias do orçamento (código com "COMP. COTAÇÃO").
  * Cada composição tem propostas de fornecedores/plataformas; o valor adotado sai da menor proposta,
  * de uma proposta escolhida ou de um valor informado na mão.
  */
@@ -24,13 +24,14 @@ export type MapaCotacao = {
   propostas: MapaCotacaoProposta[];
 };
 
-/** Chave = código da composição normalizado (ex.: "COTAÇÃO - 12"). */
+/** Chave = código da composição normalizado (ex.: "COMP. COTAÇÃO - 12"). */
 export type MapasCotacao = Record<string, MapaCotacao>;
 
 export const MAPA_COTACAO_MIN_PROPOSTAS = 3;
 export const MAPA_COTACAO_MAX_PROPOSTAS = 6;
 
-const CODIGO_COTACAO_RE = /^COTA[ÇC][ÃA]O\s*[-–—]\s*\S+/i;
+// Vai para o Mapa de Cotação a composição cujo código contém "COMP. COTAÇÃO".
+const CODIGO_COTACAO_RE = /COMP\.?\s*COTA[ÇC][ÃA]O/i;
 
 export function isCodigoCotacao(codigo: string | null | undefined): boolean {
   return CODIGO_COTACAO_RE.test(String(codigo ?? '').trim());

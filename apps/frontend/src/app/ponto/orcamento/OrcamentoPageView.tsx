@@ -4420,7 +4420,7 @@ interface SessaoOrcamentoPersist {
   >;
   /** Observações da Ficha de demanda (chave da linha). */
   fichaDemandaObservacoes?: Record<string, string>;
-  /** Mapa de Cotação das composições próprias "COTAÇÃO - n" (chave = código da composição). */
+  /** Mapa de Cotação das composições próprias com "COMP. COTAÇÃO" (chave = código da composição). */
   mapasCotacao?: MapasCotacao;
   /** Insumos manuais adicionados na Ficha de demanda, por chave da composição pai. */
   insumosAnaliticoManuais?: Record<string, InsumoAnaliticoManual[]>;
@@ -7752,7 +7752,10 @@ function montarNomeArquivoOrcamento(opts: {
   /** Omite o prefixo do tipo («Orcamento - ») do nome do arquivo. */
   semTipo?: boolean;
 }): string {
-  const codigo = sanitizarTrechoArquivo(String(opts.codigo || '').replace(/\//g, '-'));
+  const codigoBruto = sanitizarTrechoArquivo(String(opts.codigo || '').replace(/\//g, '-'));
+  // "XX-2026 - Nº74" vira "Nº74 - XX-2026": o nº da pasta abre o nome do arquivo.
+  const pastaPrimeiro = codigoBruto.match(/^(.+?)\s*-\s*(N[ºo°.]?\s*\d+)$/i);
+  const codigo = pastaPrimeiro ? `${pastaPrimeiro[2].replace(/\s+/g, '')} - ${pastaPrimeiro[1].trim()}` : codigoBruto;
   const descricao = sanitizarTrechoArquivo(opts.descricao || '');
   // O nº da pasta vem primeiro; depois o tipo do arquivo e a descrição.
   const partes: string[] = [];
@@ -7763,8 +7766,8 @@ function montarNomeArquivoOrcamento(opts: {
   return `${base}.${opts.ext}`;
 }
 
-/** Primeira linha de dados da aba «Memória de cálculo» no Excel (cabeçalho de 3 linhas + respiro). */
-const MEMORIA_PRIMEIRA_LINHA_DADOS = 5;
+/** Primeira linha de dados da aba «Memória de cálculo» no Excel (cabeçalho de 3 linhas, sem linha de respiro). */
+const MEMORIA_PRIMEIRA_LINHA_DADOS = 4;
 
 /** Campos de «Editar dados» que também são preenchidos na importação do Orçafascio. */
 const ORCAFASCIO_META_EXTRA_VAZIO = {
@@ -9041,6 +9044,14 @@ export function OrcamentoPageView({
       setLoadingEmployeeOptions(false);
     }
   }, [employeeOptions.length, loadingEmployeeOptions]);
+
+  // Os modais de importação também têm "Responsável": a lista precisa existir quando eles abrem,
+  // não só depois de alguém ter aberto "Novo orçamento" ou "Editar dados" nesta sessão.
+  useEffect(() => {
+    if (orcafascioModalOpen || importOrcamentoModalOpen || orcafascioImportDetalheModalOpen) {
+      void loadEmployeeOptionsForMeta();
+    }
+  }, [orcafascioModalOpen, importOrcamentoModalOpen, orcafascioImportDetalheModalOpen, loadEmployeeOptionsForMeta]);
 
   const employeeSelectOptions = useMemo(
     () =>
@@ -16210,6 +16221,7 @@ export function OrcamentoPageView({
           [{ texto: 'ORÇAMENTO', de: 0, ate: 15, estilo: 'barra' }],
         ],
         alturas: [14, 26, 26, 26, 26, 26, 26, 8, 24, 24, 30, 24, 30, 30, 24, 8, 22],
+        semRespiro: true,
         molduras: [
           { linhaDe: 2, linhaAte: 7, colDe: 0, colAte: 3 },
           { linhaDe: 2, linhaAte: 7, colDe: 6, colAte: 13 },
@@ -16325,7 +16337,7 @@ export function OrcamentoPageView({
   const memorialDisponivel = meta.usarMemoriaCalculo === true || meta?.importadoPlanilha !== true;
   const analiticoDisponivel = meta.temAnalitico !== false;
 
-  /** Composições próprias com código "COTAÇÃO - n": cada uma precisa do seu Mapa de Cotação. */
+  /** Composições próprias com código "COMP. COTAÇÃO": cada uma precisa do seu Mapa de Cotação. */
   const composicoesCotacao = useMemo<ComposicaoCotacao[]>(() => {
     const porChave = new Map<string, ComposicaoCotacao>();
     for (const row of itensCalculados) {
@@ -16868,16 +16880,21 @@ export function OrcamentoPageView({
 
     let servicoAnterior: string | null = null;
     itensCalculados.forEach((row, rowIdx) => {
-      if (rows.length) rows.push({ kind: 'blank', values: empty() });
-
       // Barra com o nome do serviço sempre que ele muda (os itens vêm agrupados por serviço).
       const servicoAtual = normalizarNomeServicoOrcamento(row.servicoNome);
+      // A linha em branco acima da barra do serviço é fina (10); entre itens do mesmo serviço mantém a altura normal.
+      if (rows.length) {
+        rows.push({
+          kind: 'blank',
+          values: empty(),
+          ...(servicoAtual !== servicoAnterior ? { altura: 10 } : {}),
+        });
+      }
       if (servicoAtual !== servicoAnterior) {
         servicoAnterior = servicoAtual;
         const barra = empty();
         barra[0] = String(row.servicoNome || '').trim().toUpperCase();
         rows.push({ kind: 'servico', values: barra, merge: [0, 10] });
-        rows.push({ kind: 'blank', values: empty() });
       }
 
       const linhasExport = linhasMedicaoEfetivas(row.dimensoes);
@@ -17054,7 +17071,8 @@ export function OrcamentoPageView({
             },
           ],
         ],
-        alturas: [54, 20, 30],
+        alturas: [135, 20, 36],
+        semRespiro: true,
       },
       subtitle: 'Quantitativos por dimensão (C, L, H) com fórmulas de área, volume e subtotal',
       autoFilter: false,
@@ -17064,10 +17082,11 @@ export function OrcamentoPageView({
       columns: [
         { header: 'ITEM', width: 12, align: 'center' },
         { header: 'DESCRIÇÃO', width: 56 },
-        { header: 'C', width: 10, align: 'center', format: 'qty' },
-        { header: 'L', width: 10, align: 'center', format: 'qty' },
-        { header: 'H', width: 10, align: 'center', format: 'qty' },
-        { header: '%', width: 14, align: 'center', format: 'qty' },
+        { header: 'C', width: 11, align: 'center', format: 'qty' },
+        { header: 'L', width: 11, align: 'center', format: 'qty' },
+        // H e % também recebem valores em R$ na linha do item (preço unitário e total): precisam de folga.
+        { header: 'H', width: 16, align: 'center', format: 'qty' },
+        { header: '%', width: 20, align: 'center', format: 'qty' },
         { header: 'N', width: 8, align: 'center', format: 'qty' },
         { header: 'A', width: 12, align: 'center', format: 'qty' },
         { header: 'V', width: 12, align: 'center', format: 'qty' },
@@ -17078,7 +17097,7 @@ export function OrcamentoPageView({
     };
   };
 
-  /** Mapa de Cotação das composições próprias "COTAÇÃO - n": 1 bloco por composição, com as 3 propostas e os prints. */
+  /** Mapa de Cotação das composições próprias com "COMP. COTAÇÃO": 1 bloco por composição, com as 3 propostas e os prints. */
   const montarSheetMapaCotacao = (): OrcamentoExcelSheetSpec | null => {
     if (composicoesCotacao.length === 0) return null;
     const NCOL = 9;
@@ -20875,7 +20894,7 @@ export function OrcamentoPageView({
                                     return (
                                     <React.Fragment key={row.key}>
                                     <tr
-                                      className={`border-b border-gray-100/90 bg-white hover:bg-gray-50/90 dark:border-gray-700/90 dark:bg-gray-800 dark:hover:bg-gray-800/95 ${gradeTableRowTrCls}`}
+                                      className={`border-b border-gray-100/90 bg-white hover:bg-gray-50/90 dark:border-gray-700/90 dark:bg-gray-800 dark:hover:bg-gray-800/95 [&>td]:border-b [&>td]:border-gray-200 dark:[&>td]:border-gray-700 ${gradeTableRowTrCls}`}
                                       style={
                                         coresLinhaPorKey[row.key]
                                           ? {
@@ -23164,58 +23183,49 @@ export function OrcamentoPageView({
                     </p>
                   </div>
                 ) : null}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      BDI (%)
-                    </label>
-                    <input
-                      value={
-                        padraoBdiDescontoDoContrato(
-                          (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
-                        )?.bdiPercentual || orcafascioImportBdi
-                      }
-                      onChange={(e) => setOrcafascioImportBdi(e.target.value)}
-                      className={FORM_FIELD_INPUT_CLS}
-                      placeholder="Ex: 28,35"
-                      inputMode="decimal"
-                      disabled={
-                        isImportandoOrcamento ||
-                        Boolean(
-                          padraoBdiDescontoDoContrato(
-                            (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
-                          )?.bdiPercentual
-                        )
-                      }
-                      title="Definido no cadastro do contrato, quando existir"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Desconto (%)
-                    </label>
-                    <input
-                      value={
-                        padraoBdiDescontoDoContrato(
-                          (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
-                        )?.descontoPercentual || orcafascioImportDesconto
-                      }
-                      onChange={(e) => setOrcafascioImportDesconto(e.target.value)}
-                      className={FORM_FIELD_INPUT_CLS}
-                      placeholder="Ex: 25,01"
-                      inputMode="decimal"
-                      disabled={
-                        isImportandoOrcamento ||
-                        Boolean(
-                          padraoBdiDescontoDoContrato(
-                            (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
-                          )?.descontoPercentual
-                        )
-                      }
-                      title="Definido no cadastro do contrato, quando existir"
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  // BDI e desconto vêm do cadastro do contrato. Só aparecem aqui os que o contrato deixou vazios.
+                  const padraoUi = padraoBdiDescontoDoContrato(
+                    (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
+                  );
+                  const pedeBdi = !padraoUi?.bdiPercentual;
+                  const pedeDesconto = !padraoUi?.descontoPercentual;
+                  if (!pedeBdi && !pedeDesconto) return null;
+                  return (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {pedeBdi ? (
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            BDI (%)
+                          </label>
+                          <input
+                            value={orcafascioImportBdi}
+                            onChange={(e) => setOrcafascioImportBdi(e.target.value)}
+                            className={FORM_FIELD_INPUT_CLS}
+                            placeholder="Ex: 28,35"
+                            inputMode="decimal"
+                            disabled={isImportandoOrcamento}
+                          />
+                        </div>
+                      ) : null}
+                      {pedeDesconto ? (
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Desconto (%)
+                          </label>
+                          <input
+                            value={orcafascioImportDesconto}
+                            onChange={(e) => setOrcafascioImportDesconto(e.target.value)}
+                            className={FORM_FIELD_INPUT_CLS}
+                            placeholder="Ex: 25,01"
+                            inputMode="decimal"
+                            disabled={isImportandoOrcamento}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
             ) : null}
           </>
