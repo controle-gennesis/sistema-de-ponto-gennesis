@@ -4106,6 +4106,14 @@ export class EmpreiteiroController {
               },
             });
           }
+          // Aditivo com parcela nova num serviço já quitado (Avaliar/Concluído): reabre para novas medições.
+          const statusServico = String(link.status || '').toUpperCase();
+          if (statusServico === 'COMPLETED' || statusServico === 'PENDING_REVIEW') {
+            await tx.empreiteiroContract.update({
+              where: { id: linkId },
+              data: { status: 'IN_PROGRESS', isActive: true },
+            });
+          }
         }
 
         const files = parsePaymentFiles(addendum.files);

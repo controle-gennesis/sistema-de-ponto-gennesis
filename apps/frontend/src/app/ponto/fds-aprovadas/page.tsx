@@ -47,8 +47,7 @@ import {
 } from '@/lib/fichaDemandaApproval';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
-import { AppTabButton } from '@/components/ui/AppTabButton';
-import { TabCountBadge } from '@/components/ui/TabCountBadge';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
@@ -278,43 +277,31 @@ export default function FdsAprovadasPage() {
             </div>
           </div>
 
-          <div id="secao-etapas-fichas" className="scroll-mt-4 bg-transparent px-2">
-            <nav
-              aria-label="Etapas das fichas de demanda"
-              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
-            >
-              {([
+          <div id="secao-etapas-fichas" className="grid scroll-mt-4 grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-4 sm:gap-6">
+            {(
+              [
                 { filter: 'ALL', label: 'Todas' },
                 { filter: 'PENDING', label: 'Em Fila' },
                 { filter: 'QUOTATION', label: 'Em Cotação' },
                 { filter: 'FINISHED', label: 'Finalizadas' },
                 { filter: 'CANCELLED', label: 'Canceladas' },
-              ] as const).map((tab) => {
-                const active = statCardFilter === tab.filter;
-                return (
-                  <React.Fragment key={tab.filter}>
-                    <AppTabButton
-                      active={active}
-                      onClick={() => setStatCardFilter(tab.filter)}
-                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
-                    >
-                      {tab.label}
-                      <span className="app-tab__badge">
-                        <TabCountBadge count={statCounts[tab.filter] ?? 0} active={active} tone="red" />
-                      </span>
-                    </AppTabButton>
-                    {tab.filter === 'ALL' ? (
-                      <span
-                        aria-hidden
-                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
-                      >
-                        |
-                      </span>
-                    ) : null}
-                  </React.Fragment>
-                );
-              })}
-            </nav>
+              ] as const
+            ).map((card) => {
+              const style = LIST_HEADER_BY_FILTER[card.filter];
+              return (
+                <FilterStatCard
+                  key={card.filter}
+                  label={card.label}
+                  count={statCounts[card.filter]}
+                  icon={style.Icon}
+                  iconBg={style.iconBg}
+                  iconColor={style.iconColor}
+                  loading={loadingList}
+                  isActive={statCardFilter === card.filter}
+                  onClick={() => setStatCardFilter(card.filter)}
+                />
+              );
+            })}
           </div>
 
           <Card className="w-full">
