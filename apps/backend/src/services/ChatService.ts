@@ -1581,8 +1581,9 @@ export class ChatService {
     callId: string;
     participantUserIds: string[];
   }): Promise<string> {
+    // O chat pai pode ser um GROUP ou uma conversa DIRECT (chamada 1:1 que virou chamada em grupo).
     const parent = await prisma.chat.findFirst({
-      where: { id: params.parentGroupChatId, chatType: ChatType.GROUP },
+      where: { id: params.parentGroupChatId, chatType: { in: [ChatType.GROUP, ChatType.DIRECT] } },
       select: { id: true, groupName: true },
     });
     if (!parent) throw new Error('Grupo não encontrado');
