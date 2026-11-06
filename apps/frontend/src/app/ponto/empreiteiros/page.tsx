@@ -4060,7 +4060,18 @@ export default function EmpreiteirosPage() {
                                     <ButtonSeg
                                       active={addendumPayMode === 'redistribute'}
                                       label="Redistribuir nas parcelas"
-                                      onClick={() => setAddendumPayMode('redistribute')}
+                                      onClick={() => {
+                                        const pendentes = (link.installments || []).filter(
+                                          (p) => String(p.status || 'PENDING').toUpperCase() === 'PENDING'
+                                        ).length;
+                                        if (pendentes === 0) {
+                                          toast.error(
+                                            'Todas as parcelas já foram liberadas ou pagas: use "Nova condição de pagamento".'
+                                          );
+                                          return;
+                                        }
+                                        setAddendumPayMode('redistribute');
+                                      }}
                                     />
                                   </div>
                                   {addendumPayMode === 'new' ? (

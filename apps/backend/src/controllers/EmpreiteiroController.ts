@@ -652,11 +652,15 @@ function parseAddendumInput(
   const newInstallmentAmounts =
     paymentMode === 'new' && amountNum > 0 ? parseAddendumInstallmentAmounts(body, amountNum) : [];
   if (paymentMode === 'redistribute') {
+    // Só parcelas PENDENTES recebem a redistribuição: liberada (já aprovada pelo gestor) ou paga não muda mais.
     const openInstallments = installments.filter(
-      (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
+      (row) => String(row.status || 'PENDING').toUpperCase() === 'PENDING'
     );
     if (openInstallments.length === 0) {
-      throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
+      throw createError(
+        'Não há parcelas pendentes para redistribuir o valor (as demais já foram liberadas ou pagas). Use "Nova condição de pagamento".',
+        400
+      );
     }
     // Só valida (valor reduzido que zeraria parcela). A redistribuição de fato acontece na aprovação.
     splitAddendumAcrossInstallments(openInstallments, amountNum);
@@ -4062,10 +4066,13 @@ export class EmpreiteiroController {
 
         if (plan.paymentMode === 'redistribute') {
           const open = link.installments.filter(
-            (row) => String(row.status || 'PENDING').toUpperCase() !== 'PAID'
+            (row) => String(row.status || 'PENDING').toUpperCase() === 'PENDING'
           );
           if (open.length === 0) {
-            throw createError('Não há parcelas em aberto para redistribuir o valor', 400);
+            throw createError(
+              'Não há parcelas pendentes para redistribuir o valor (as demais já foram liberadas ou pagas). Edite o aditivo para "Nova condição de pagamento".',
+              400
+            );
           }
           const split = splitAddendumAcrossInstallments(open, amountNum);
           appliedPlan = {
