@@ -2103,6 +2103,10 @@ interface CardColumnActionModalProps {
   cardTitle: string;
   currentColumnId: string;
   columns: KanbanColumn[];
+  /** Quadros que o usuário enxerga (para mover o card entre quadros). */
+  boards?: KanbanBoardSummary[];
+  /** departmentKey do quadro que está aberto. */
+  currentBoardKey?: string | null;
   labelsCount?: number;
   attachmentsCount?: number;
   onClose: () => void;
@@ -2118,26 +2122,54 @@ function CardColumnActionModal({
   cardTitle,
   currentColumnId,
   columns,
+  boards = [],
+  currentBoardKey = null,
   labelsCount = 0,
   attachmentsCount = 0,
   onClose,
   onConfirm,
 }: CardColumnActionModalProps) {
   const [columnId, setColumnId] = useState(currentColumnId);
+  const [boardKey, setBoardKey] = useState<string | null>(currentBoardKey);
+  const otherBoardSelected = !!boardKey && boardKey !== currentBoardKey;
+  const { data: otherBoard, isLoading: loadingOtherBoard } = useQuery({
+    queryKey: ['kanban-board', boardKey],
+    queryFn: () => fetchKanbanBoard(boardKey ?? undefined),
+    enabled: otherBoardSelected,
+    staleTime: 60_000,
+  });
+  const otherBoardReadOnly = otherBoardSelected && otherBoard?.canWrite === false;
+  const boardOptions = useMemo(
+    () =>
+      boards.map((b) => ({
+        value: b.departmentKey,
+        label: b.name,
+        searchText: `${b.name} ${b.department}`,
+      })),
+    [boards],
+  );
   const [title, setTitle] = useState(cardTitle);
   const [copyLabels, setCopyLabels] = useState(true);
   const [copyAttachments, setCopyAttachments] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const targetColumns = otherBoardSelected ? otherBoard?.columns ?? [] : columns;
   const columnOptions = useMemo(
     () =>
-      columns.map((column) => ({
+      targetColumns.map((column) => ({
         value: column.id,
         label: column.title,
         searchText: column.title,
       })),
-    [columns],
+    [targetColumns],
   );
+
+  // Ao trocar de quadro, a lista volta para a primeira coluna do quadro escolhido.
+  useEffect(() => {
+    if (!otherBoardSelected) return;
+    const first = otherBoard?.columns?.[0]?.id ?? '';
+    setColumnId(first);
+  }, [otherBoardSelected, otherBoard?.id]);
 
   return (
     <Modal
@@ -2160,6 +2192,21 @@ function CardColumnActionModal({
             />
           </div>
         ) : null}
+        {boards.length > 1 ? (
+          <div>
+            <label className={kanbanLabel}>Quadro</label>
+            <StringSingleSelectDropdown
+              value={boardKey ?? ''}
+              onChange={(value) => {
+                setBoardKey(value);
+                if (value === currentBoardKey) setColumnId(currentColumnId);
+              }}
+              options={boardOptions}
+              allowEmpty={false}
+              placeholder="Selecione o quadro..."
+            />
+          </div>
+        ) : null}
         <div>
           <label className={kanbanLabel}>Lista</label>
           <StringSingleSelectDropdown
@@ -2167,8 +2214,13 @@ function CardColumnActionModal({
             onChange={setColumnId}
             options={columnOptions}
             allowEmpty={false}
-            placeholder="Selecione a coluna..."
+            placeholder={loadingOtherBoard ? 'Carregando listas...' : 'Selecione a coluna...'}
           />
+          {otherBoardReadOnly ? (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              Você só tem acesso de leitura a este quadro. Escolha outro quadro.
+            </p>
+          ) : null}
         </div>
         {mode === 'copy' && (labelsCount > 0 || attachmentsCount > 0) ? (
           <div>
@@ -2217,6 +2269,7 @@ function CardColumnActionModal({
             type="button"
             variant="primary"
             loading={submitting}
+            disabled={otherBoardReadOnly || (otherBoardSelected && loadingOtherBoard)}
             className="!bg-red-600 hover:!bg-red-700 !text-white border-transparent focus-visible:ring-red-500"
             onClick={() => {
               if (submitting) return;
@@ -3822,6 +3875,30 @@ function KanbanPage() {
     const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
     const mutationGen = beginBoardMutation();
 
+    if (action.mode === 'move' && !columns.some((col) => col.id === targetColumnId)) {
+      // Coluna de outro quadro: o card sai deste quadro e passa a existir no quadro escolhido.
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        const next = removeCardFromBoardCache(old, action.cardId);
+        if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+        return next;
+      });
+      void (async () => {
+        try {
+          await moveKanbanCard(action.cardId, { columnId: targetColumnId, position: 0 });
+          toast.success('Card movido para o outro quadro!', { duration: 2500 });
+          // O outro quadro precisa recarregar para mostrar o card.
+          void queryClient.invalidateQueries({
+            queryKey: ['kanban-board'],
+            predicate: (q) => q.queryKey[1] !== (boardScopeKey ?? 'own'),
+          });
+        } catch {
+          rollbackBoardMutation(mutationGen, previousBoard);
+          toast.error('Não foi possível mover o card para o outro quadro. Verifique se você pode editá-lo.');
+        }
+      })();
+      return;
+    }
+
     if (action.mode === 'move') {
       const moveSeq = (cardMoveSeqRef.current[action.cardId] ?? 0) + 1;
       cardMoveSeqRef.current[action.cardId] = moveSeq;
@@ -3853,19 +3930,20 @@ function KanbanPage() {
       copyAttachments: keep?.copyAttachments !== false,
     };
     const copyTitle = title?.trim() || action.title;
+    const crossBoardCopy = !columns.some((col) => col.id === targetColumnId);
     const tempId = `optimistic-copy-${action.cardId}-${Date.now()}`;
     const sourceCard = previousBoard?.columns
       .find((col) => col.id === action.columnId)
       ?.cards.find((card) => card.id === action.cardId);
 
-    if (sourceCard) {
+    if (sourceCard && !crossBoardCopy) {
       const optimistic = buildOptimisticCardCopy(sourceCard, copyTitle, tempId, copyKeep);
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
         insertCardIntoBoardCache(old, targetColumnId, optimistic, true),
       );
     }
 
-    toast.success('Card copiado!', { duration: 2000 });
+    toast.success(crossBoardCopy ? 'Copiando para o outro quadro...' : 'Card copiado!', { duration: 2000 });
 
     void (async () => {
       try {
@@ -3875,6 +3953,15 @@ function KanbanPage() {
           copyLabels: copyKeep.copyLabels,
           copyAttachments: copyKeep.copyAttachments,
         });
+        if (crossBoardCopy) {
+          // O outro quadro precisa recarregar para mostrar a cópia.
+          void queryClient.invalidateQueries({
+            queryKey: ['kanban-board'],
+            predicate: (q) => q.queryKey[1] !== (boardScopeKey ?? 'own'),
+          });
+          toast.success('Card copiado para o outro quadro!', { duration: 2500 });
+          return;
+        }
         queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
           const withoutTemp = removeCardFromBoardCache(old, tempId);
           return insertCardIntoBoardCache(withoutTemp, targetColumnId, created, true) ?? withoutTemp;
@@ -4954,6 +5041,8 @@ function KanbanPage() {
           cardTitle={cardColumnAction.title}
           currentColumnId={cardColumnAction.columnId}
           columns={columns}
+          boards={boardsList ?? []}
+          currentBoardKey={board?.departmentKey ?? boardScopeKey}
           labelsCount={cardColumnAction.mode === 'copy' ? cardColumnAction.labelsCount : 0}
           attachmentsCount={
             cardColumnAction.mode === 'copy' ? cardColumnAction.attachmentsCount : 0

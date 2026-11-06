@@ -2360,12 +2360,13 @@ export class KanbanService {
     const copyAttachments = options?.copyAttachments !== false;
 
     if (targetColumnId !== source.columnId) {
+      // Pode ser coluna de outro quadro, desde que o usuário tenha acesso de escrita nele.
       await this.assertColumnAccess(userId, targetColumnId);
       const targetColumn = await prisma.kanbanColumn.findUnique({
         where: { id: targetColumnId },
-        select: { boardId: true },
+        select: { id: true },
       });
-      if (!targetColumn || targetColumn.boardId !== source.column.boardId) {
+      if (!targetColumn) {
         throw new Error('Coluna inválida');
       }
     }

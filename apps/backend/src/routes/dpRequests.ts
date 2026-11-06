@@ -24,6 +24,11 @@ router.get(
 // Minhas solicitações (EMPLOYEE / DP usuário)
 router.get('/minhas', requireModuleAccess(myModule), controller.getMyRequests.bind(controller));
 router.get(
+  '/minhas/pendencias-count',
+  requireModuleAccess(myModule),
+  controller.getMyReturnPendingCount.bind(controller)
+);
+router.get(
   '/contabilidade',
   requireModuleAccess(accountingModule),
   controller.getAccountingRequests.bind(controller)

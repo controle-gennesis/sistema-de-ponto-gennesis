@@ -51,6 +51,8 @@ export function admTstOnlyWhere(): Prisma.DpRequestWhereInput {
 /** Próximas etapas permitidas no feedback de solicitações ADM/TST. */
 export const ADM_TST_FEEDBACK_NEXT_STATUSES = [
   'IN_REVIEW_DP',
+  /** Correção: devolve ao solicitante (mesmo mecanismo da pendência: ele responde e volta para Em Análise). */
+  'WAITING_RETURN',
   'WAITING_SUPPLIES',
   'WAITING_PAYMENT',
   'CONCLUDED',
@@ -58,4 +60,4 @@ export const ADM_TST_FEEDBACK_NEXT_STATUSES = [
 ] as const;
 
 /** Status em que a equipe ADM/TST pode registrar feedback. */
-export const ADM_TST_MAY_ACT_STATUSES = ['IN_REVIEW_DP', 'WAITING_SUPPLIES', 'WAITING_PAYMENT'] as const;
+export const ADM_TST_MAY_ACT_STATUSES = ['IN_REVIEW_DP', 'WAITING_RETURN', 'WAITING_SUPPLIES', 'WAITING_PAYMENT'] as const;

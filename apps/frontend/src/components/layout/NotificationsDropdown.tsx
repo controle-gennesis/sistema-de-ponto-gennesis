@@ -168,6 +168,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     staleTime: 20_000,
   });
 
+  // Solicitações do próprio usuário devolvidas para correção (status "Sua pendência"/"Correção").
+  const canSeeMyDpRequests = isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-dp'));
+  const { data: dpReturnPendingCount = 0 } = useQuery({
+    queryKey: ['dp-requester-return-count'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/minhas/pendencias-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeMyDpRequests && !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
     queryFn: async () => {
@@ -403,6 +418,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: Calculator,
       });
     }
+    if (canSeeMyDpRequests && dpReturnPendingCount > 0) {
+      list.push({
+        id: 'dp-correcao',
+        title: 'Minhas solicitações',
+        description: 'Precisam de correção — responda',
+        count: dpReturnPendingCount,
+        href: '/ponto/solicitacoes-dp',
+        Icon: ClipboardCheck,
+      });
+    }
     if (chatUnreadCount > 0) {
       list.push({
         id: 'chat',
@@ -521,6 +546,8 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     entregaLogisticaPendingCount,
     canSeeAtendimentoContabil,
     atendimentoContabilPendingCount,
+    canSeeMyDpRequests,
+    dpReturnPendingCount,
     chatUnreadCount,
     gestaoOsInbox,
   ]);

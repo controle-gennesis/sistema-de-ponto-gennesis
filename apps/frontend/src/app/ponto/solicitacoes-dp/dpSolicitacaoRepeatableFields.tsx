@@ -12,6 +12,7 @@ import { QuantityStepperInput } from '@/components/ui/QuantityStepperInput';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { DEPARTMENTS_LIST } from '@/constants/payrollFilters';
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
+import { formatCpfInput } from '@/lib/cpf';
 import { formatDateBr } from '@/lib/dateTimeBr';
 import { DP_SOLICITACOES_NO_FOCUS_CLS } from '@/lib/dpSolicitacoesUi';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
@@ -1614,6 +1615,7 @@ export function OutrasSolicitacoesRepeatableFields({
 
 type AdmViagemRow = {
   employeeId: string;
+  cpf: string;
   dataIda: string;
   dataVolta: string;
   cidade: string;
@@ -1626,6 +1628,7 @@ type AdmViagemRow = {
 function emptyAdmViagemRow(): AdmViagemRow {
   return {
     employeeId: '',
+    cpf: '',
     dataIda: '',
     dataVolta: '',
     cidade: '',
@@ -1649,6 +1652,7 @@ export function AdmViagensRepeatableFields({
       const pedagio = pedagioRaw === 'SIM' || pedagioRaw === 'NAO' ? pedagioRaw : '';
       return {
         employeeId: String(row.employeeId ?? ''),
+        cpf: String(row.cpf ?? ''),
         dataIda: String(row.dataIda ?? ''),
         dataVolta: String(row.dataVolta ?? ''),
         cidade: String(row.cidade ?? ''),
@@ -1672,6 +1676,7 @@ export function AdmViagensRepeatableFields({
       const observacoes = String(legacyDetails.observacoes ?? '');
       return employeeIds.map((employeeId) => ({
         employeeId,
+        cpf: '',
         dataIda,
         dataVolta,
         cidade,
@@ -1705,10 +1710,29 @@ export function AdmViagensRepeatableFields({
           <SearchSelectField
             label="Colaborador *"
             value={row.employeeId}
-            onChange={(employeeId) => updateItem(index, { employeeId })}
+            onChange={(employeeId) => {
+              const picked = employees.find((em) => em.id === employeeId);
+              updateItem(index, { employeeId, cpf: picked?.cpf ? formatCpfInput(String(picked.cpf)) : '' });
+            }}
             options={rowEmployeeOptions(employeeOptions, viagens, index)}
             placeholder="Selecionar colaborador..."
           />
+          {row.employeeId ? (
+            <div className="max-w-[260px]">
+              <label className={labelCls}>CPF</label>
+              <Input
+                value={
+                  row.cpf ||
+                  (() => {
+                    const cpfEmp = employees.find((em) => em.id === row.employeeId)?.cpf;
+                    return cpfEmp ? formatCpfInput(String(cpfEmp)) : '';
+                  })()
+                }
+                readOnly
+                placeholder="CPF não cadastrado"
+              />
+            </div>
+          ) : null}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <DateField
               label="Data de ida *"
