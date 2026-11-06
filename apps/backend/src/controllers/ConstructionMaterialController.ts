@@ -506,7 +506,9 @@ export class ConstructionMaterialController {
     try {
       const { search, isActive, page = 1, limit = 20, sortBy, sortDir, source } = req.query;
 
-      const limitNum = Math.min(Number(limit), 100);
+      // Exportação em planilha (export=1) busca páginas maiores; a listagem normal continua em 100.
+      const maxPageSize = String(req.query.export || '') === '1' ? 1000 : 100;
+      const limitNum = Math.min(Number(limit), maxPageSize);
       const skip = (Number(page) - 1) * limitNum;
       const searchTerm = search ? String(search) : undefined;
       const activeFilter = isActive !== undefined ? String(isActive) : undefined;

@@ -525,6 +525,7 @@ export default function MateriaisConstrucaoPage() {
   const [showImportJson, setShowImportJson] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingTotvs, setIsDownloadingTotvs] = useState(false);
+  const [isExportingSistema, setIsExportingSistema] = useState(false);
   const [isSyncingTotvs, setIsSyncingTotvs] = useState(false);
   const atualizarBase = useAtualizarBaseTotvs('materiais');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -1128,6 +1129,86 @@ export default function MateriaisConstrucaoPage() {
     }
   };
 
+  /** Baixa em Excel os materiais e serviços cadastrados no sistema (respeita a busca e o filtro de status da tela). */
+  const handleExportSistemaMateriais = async () => {
+    const toastId = toast.loading('Preparando planilha...');
+    try {
+      setIsExportingSistema(true);
+      const PAGE_SIZE = 1000;
+      const all: ConstructionMaterial[] = [];
+      let page = 1;
+      let totalPages = 1;
+      let total = 0;
+      do {
+        const res = await api.get('/construction-materials', {
+          params: {
+            search: searchTerm || undefined,
+            isActive: materialActiveFilter !== 'all' ? materialActiveFilter : undefined,
+            page,
+            limit: PAGE_SIZE,
+            export: 1,
+          },
+          timeout: 180_000,
+        });
+        all.push(...((res.data?.data ?? []) as ConstructionMaterial[]));
+        totalPages = Number(res.data?.pagination?.totalPages ?? 1);
+        total = Number(res.data?.pagination?.total ?? all.length);
+        toast.loading(`Preparando planilha... ${all.length} de ${total}`, { id: toastId });
+        page += 1;
+      } while (page <= totalPages);
+
+      if (all.length === 0) {
+        toast.error('Nenhum material para exportar.', { id: toastId });
+        return;
+      }
+
+      const headers = [
+        'ID',
+        'Nome',
+        'Tipo',
+        'Unidade',
+        'Natureza orçamentária',
+        'Código SINAPI',
+        'Categoria',
+        'Descrição',
+        'ID TOTVS',
+        'Média paga (R$)',
+        'Status',
+      ];
+      const rows = all.map((m) => [
+        m.code ?? '',
+        m.name ?? '',
+        m.productType ?? '',
+        m.unit ?? '',
+        m.budgetNature ? [m.budgetNature.code, m.budgetNature.name].filter(Boolean).join(' - ') : '',
+        m.sinapiCode ?? '',
+        m.category ?? '',
+        m.description ?? '',
+        m.totvsIdPrd ?? '',
+        m.avgPaidUnitPrice != null ? Number(m.avgPaidUnitPrice) : '',
+        m.isActive ? 'Ativo' : 'Inativo',
+      ]);
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, 'MATERIAIS');
+      XLSX.writeFile(
+        wb,
+        `materiais-servicos-sistema-${new Date().toISOString().split('T')[0]}.xlsx`
+      );
+      toast.success(`${all.length} cadastro(s) baixado(s) em Excel`, { id: toastId });
+    } catch (error: unknown) {
+      console.error('Erro ao exportar materiais do sistema:', error);
+      const err = error as { response?: { data?: { error?: string; message?: string } }; message?: string };
+      toast.error(
+        err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Erro ao exportar a planilha',
+        { id: toastId }
+      );
+    } finally {
+      setIsExportingSistema(false);
+    }
+  };
+
   const handleDownloadTotvsProdutos = async () => {
     try {
       setIsDownloadingTotvs(true);
@@ -1351,7 +1432,19 @@ export default function MateriaisConstrucaoPage() {
         <div className="space-y-6">
           {/* Header */}
           <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
-            <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
+            <div className="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => void handleExportSistemaMateriais()}
+                disabled={isExportingSistema}
+                aria-label="Baixar planilha dos materiais e serviços do sistema"
+                title="Baixar planilha dos materiais e serviços do sistema"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                <FileSpreadsheet
+                  className={`h-5 w-5 shrink-0 ${isExportingSistema ? 'animate-pulse' : ''}`}
+                />
+              </button>
               <button
                 type="button"
                 onClick={() => void handleDownloadTotvsProdutos()}
