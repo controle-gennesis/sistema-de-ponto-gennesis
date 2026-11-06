@@ -106,7 +106,7 @@ export function CreateTaskFromChatModal({
 
   const { data: boards } = useQuery({
     queryKey: ['kanban-boards-picker'],
-    queryFn: fetchKanbanBoards,
+    queryFn: () => fetchKanbanBoards(),
     enabled: isOpen && canPickBoard,
   });
 

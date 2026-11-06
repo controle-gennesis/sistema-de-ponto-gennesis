@@ -116,8 +116,18 @@ export interface KanbanBoardShare {
   };
 }
 
-export async function fetchKanbanBoards(): Promise<KanbanBoardSummary[]> {
-  const res = await api.get('/kanban/boards');
+export async function fetchKanbanBoards(archived = false): Promise<KanbanBoardSummary[]> {
+  const res = await api.get('/kanban/boards', { params: archived ? { archived: 1 } : undefined });
+  return res.data.data;
+}
+
+export async function archiveKanbanBoard(boardId: string): Promise<{ departmentKey: string }> {
+  const res = await api.post(`/kanban/boards/${boardId}/archive`);
+  return res.data.data;
+}
+
+export async function unarchiveKanbanBoard(boardId: string): Promise<{ departmentKey: string }> {
+  const res = await api.post(`/kanban/boards/${boardId}/unarchive`);
   return res.data.data;
 }
 

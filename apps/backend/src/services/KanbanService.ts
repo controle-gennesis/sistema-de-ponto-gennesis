@@ -1042,9 +1042,11 @@ export class KanbanService {
     }
   }
 
-  async listBoardsForUser(userId: string) {
+  async listBoardsForUser(userId: string, archived = false) {
     const { key: ownKey, label: ownLabel } = await this.getUserDepartment(userId);
     const isAdmin = await userIsAdministrator(userId);
+    /** true = só os quadros arquivados; false = só os ativos. */
+    const archivedWhere = archived ? { archivedAt: { not: null } } : { archivedAt: null };
 
     const boardSelect = {
       id: true,
@@ -1054,6 +1056,7 @@ export class KanbanService {
       departmentLabel: true,
       isCustom: true,
       createdById: true,
+      archivedAt: true,
       updatedAt: true,
       _count: { select: { columns: true } },
     } as const;
@@ -1108,6 +1111,7 @@ export class KanbanService {
         where: {
           isCustom: false,
           departmentKey: { not: KANBAN_LEGACY_DEPARTMENT_KEY },
+          ...archivedWhere,
         },
         orderBy: { departmentLabel: 'asc' },
         select: boardSelect,
@@ -1116,7 +1120,7 @@ export class KanbanService {
 
       // Sem quadros de setor no banco o admin ficava com lista vazia e o frontend
       // nunca pedia /kanban/board (skeleton infinito). Garante o quadro do próprio setor.
-      if (results.length === 0 && ownKey !== KANBAN_LEGACY_DEPARTMENT_KEY) {
+      if (!archived && results.length === 0 && ownKey !== KANBAN_LEGACY_DEPARTMENT_KEY) {
         await this.getOrCreateBoardForDepartment(userId);
         const ownBoard = await prisma.kanbanBoard.findUnique({
           where: { departmentKey: ownKey },
@@ -1126,7 +1130,7 @@ export class KanbanService {
       }
 
       const customBoards = await prisma.kanbanBoard.findMany({
-        where: { isCustom: true },
+        where: { isCustom: true, ...archivedWhere },
         orderBy: { departmentLabel: 'asc' },
         select: boardSelect,
       });
@@ -1137,8 +1141,8 @@ export class KanbanService {
         select: boardSelect,
       });
       if (ownBoard) {
-        pushBoard(ownBoard);
-      } else {
+        if (!!ownBoard.archivedAt === archived) pushBoard(ownBoard);
+      } else if (!archived) {
         results.push({
           id: '',
           name: ownKey === KANBAN_UNB_DEPARTMENT_KEY ? 'Tasks UNB' : 'Tasks',
@@ -1159,6 +1163,7 @@ export class KanbanService {
         where: {
           isCustom: true,
           OR: [{ createdById: userId }, { shares: { some: { userId } } }],
+          ...archivedWhere,
         },
         orderBy: { departmentLabel: 'asc' },
         select: boardSelect,
@@ -1270,6 +1275,27 @@ export class KanbanService {
       canManageShares: true,
       sharedWithMe: false,
     };
+  }
+
+  /**
+   * Arquiva (ou restaura) o quadro inteiro. Administrador arquiva qualquer quadro;
+   * o dono pode arquivar o próprio quadro personalizado.
+   */
+  async setBoardArchived(boardId: string, userId: string, archive: boolean) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { id: true, isCustom: true, createdById: true, departmentKey: true },
+    });
+    if (!board) throw new Error('Quadro não encontrado');
+    const isOwnerOfCustom = board.isCustom && board.createdById === userId;
+    if (!isOwnerOfCustom && !(await userIsAdministrator(userId))) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
+    await prisma.kanbanBoard.update({
+      where: { id: boardId },
+      data: { archivedAt: archive ? new Date() : null },
+    });
+    return { departmentKey: board.departmentKey, archived: archive };
   }
 
   async deleteCustomBoard(boardId: string, userId: string) {
