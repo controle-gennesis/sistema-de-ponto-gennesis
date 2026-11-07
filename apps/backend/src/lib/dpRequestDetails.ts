@@ -116,6 +116,8 @@ const outrasItemSchema = z.object({
 
 const admViagemItemSchema = z.object({
   employeeId: str,
+  /** CPF do colaborador (preenchido automaticamente ao escolher o colaborador). */
+  cpf: strOpt,
   dataIda: str,
   dataVolta: str,
   cidade: str,

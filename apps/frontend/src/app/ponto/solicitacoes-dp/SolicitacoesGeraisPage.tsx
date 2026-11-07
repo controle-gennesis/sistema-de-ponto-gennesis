@@ -966,12 +966,12 @@ export function SolicitacoesGeraisPage() {
   const requesterReturnMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
       const comment = (returnComment[id] || '').trim();
-      if (!comment) throw new Error('Escreva o retorno para o DP');
+      if (!comment) throw new Error('Escreva o seu retorno');
       const res = await api.put(`/solicitacoes-dp/${id}/requester-return`, { comment });
       return res.data?.data as DpRequest;
     },
     onSuccess: async (_data, vars) => {
-      toast.success('Retorno enviado para o DP');
+      toast.success('Retorno enviado');
       setReturnComment((p) => {
         const next = { ...p };
         delete next[vars.id];
@@ -1723,13 +1723,19 @@ export function SolicitacoesGeraisPage() {
                   ) : null}
 
                   {historyRequest.status === 'WAITING_RETURN' ? (
-                    <DpRequestHistorySectionCard title="Responder ao DP">
+                    <DpRequestHistorySectionCard
+                      title={historyRequest.requestType.startsWith('ADM_') ? 'Responder à Administração' : 'Responder ao DP'}
+                    >
                       <textarea
                         value={returnComment[historyRequest.id] || ''}
                         onChange={(e) =>
                           setReturnComment((p) => ({ ...p, [historyRequest.id]: e.target.value }))
                         }
-                        placeholder="Digite seu retorno para o DP..."
+                        placeholder={
+                          historyRequest.requestType.startsWith('ADM_')
+                            ? 'Digite seu retorno para a Administração...'
+                            : 'Digite seu retorno para o DP...'
+                        }
                         className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[100px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                       />
                     </DpRequestHistorySectionCard>
@@ -1745,7 +1751,11 @@ export function SolicitacoesGeraisPage() {
                         onClick={() => requesterReturnMutation.mutate({ id: historyRequest.id })}
                         disabled={requesterReturnMutation.isPending}
                       >
-                        {requesterReturnMutation.isPending ? 'Enviando...' : 'Responder ao DP'}
+                        {requesterReturnMutation.isPending
+                          ? 'Enviando...'
+                          : historyRequest.requestType.startsWith('ADM_')
+                            ? 'Responder à Administração'
+                            : 'Responder ao DP'}
                       </Button>
                     ) : null}
                   </DpRequestHistoryModalFooter>

@@ -686,6 +686,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
             const pedagio =
               row.pedagio === 'SIM' ? 'Pedágio: Sim' : row.pedagio === 'NAO' ? 'Pedágio: Não' : '';
             const parts = [
+              toTrimmedString(row.cpf) ? `CPF ${toTrimmedString(row.cpf)}` : '',
               `${formatYmdToBr(row.dataIda)} à ${formatYmdToBr(row.dataVolta)}`,
               toTrimmedString(row.cidade),
               toTrimmedString(row.motivoViagem),

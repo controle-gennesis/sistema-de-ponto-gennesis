@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Eye, FileText, Filter, MoreVertical, RotateCcw, Search, X } from 'lucide-react';
+import { CalendarDays, Check, Eye, FileText, Filter, MoreVertical, RotateCcw, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   type PendingMeasurementItem,
@@ -11,6 +11,7 @@ import {
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import {
+  formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
   parseCurrencyInputBr,
 } from '@/lib/maskCurrencyBr';
@@ -100,6 +101,14 @@ function formatMoney(value?: number | null) {
 function isImageFile(file: { url?: string; name?: string }) {
   const source = `${file.name || ''} ${file.url || ''}`.toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(source) || source.includes('data:image/');
+}
+
+/** Saldo que a última parcela pendente precisa ter para fechar o contrato (null se não for a última). */
+function lastInstallmentBalance(item: ReviewItem): number | null {
+  const f = item.serviceFinance;
+  if (!f || f.installmentsCount <= 0 || f.installmentsPending !== 1 || !(f.contractValue > 0)) return null;
+  const saldo = Number((f.contractValue - f.paidTotal - f.releasedTotal).toFixed(2));
+  return saldo > 0 ? saldo : null;
 }
 
 function contractLabel(item: ReviewItem) {
@@ -225,7 +234,8 @@ export function MedicaoApprovalsSection() {
 
   const openDetail = (item: ReviewItem) => {
     setActionMenu(null);
-    setApproveAmount('');
+    const saldoFinal = itemPhase(item.status) === 'PENDING' ? lastInstallmentBalance(item) : null;
+    setApproveAmount(saldoFinal != null ? formatCurrencyInputBrFromNumber(saldoFinal) : '');
     setReturnNote('');
     setDetail(item);
   };
@@ -233,6 +243,7 @@ export function MedicaoApprovalsSection() {
   const activeCard = MEDICAO_PHASE_CARDS.find((card) => card.filter === phase) ?? MEDICAO_PHASE_CARDS[0];
   const PhaseIcon = activeCard.Icon;
   const detailPending = detail ? itemPhase(detail.status) === 'PENDING' : false;
+  const detailLastBalance = detail && detailPending ? lastInstallmentBalance(detail) : null;
   const detailPhotos = detail
     ? [
         ...(detail.teamPhoto?.url
@@ -439,11 +450,74 @@ export function MedicaoApprovalsSection() {
       >
         {detail ? (
           <div className="space-y-4 text-sm">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <DetailField label="Serviço" value={detail.description} />
-              <DetailField label="Contrato" value={contractLabel(detail)} />
-              <DetailField label="Data" value={formatDateBr(detail.workDate)} />
-              <DetailField label="Status" value={statusLabel(detail.status)} />
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+              <div className="min-w-0">
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100">{detail.description || '—'}</p>
+                <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-300">{contractLabel(detail)}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Entrega em {formatDateBr(detail.workDate)}
+                </p>
+              </div>
+              <ApprovalStatusBadge kind={statusKind(detail.status)} label={statusLabel(detail.status)} />
+            </div>
+            {detail.serviceFinance ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    ['Valor do contrato', formatMoney(detail.serviceFinance.contractValue), 'Contrato + aditivos', 'text-blue-600 dark:text-blue-400'],
+                    ['Já executado', formatMoney(detail.serviceFinance.executedTotal), 'Medições aprovadas', 'text-amber-600 dark:text-amber-400'],
+                    [
+                      'Já pago',
+                      formatMoney(detail.serviceFinance.paidTotal),
+                      detail.serviceFinance.releasedTotal > 0
+                        ? `+ ${formatMoney(detail.serviceFinance.releasedTotal)} liberado`
+                        : 'Parcelas pagas',
+                      'text-emerald-600 dark:text-emerald-400',
+                    ],
+                    [
+                      'Saldo a executar',
+                      formatMoney(Math.max(0, detail.serviceFinance.contractValue - detail.serviceFinance.executedTotal)),
+                      'Contrato − executado',
+                      'text-gray-900 dark:text-gray-100',
+                    ],
+                  ].map(([label, value, hint, tone]) => (
+                    <div key={label} className="rounded-xl border border-gray-200 p-3 text-center dark:border-gray-700">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+                      <p className={`mt-1 text-base font-bold tabular-nums ${tone}`}>{value}</p>
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-gray-200 px-4 py-3 dark:border-gray-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">Parcelas</span>
+                    {detail.serviceFinance.installmentsCount > 0 ? (
+                      <span className="text-xs text-gray-600 dark:text-gray-300">
+                        {detail.serviceFinance.installmentsPaid} paga(s) · {detail.serviceFinance.installmentsReleased} liberada(s) ·{' '}
+                        {detail.serviceFinance.installmentsPending} pendente(s) · {detail.serviceFinance.installmentsCount} no total
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Sem parcelas cadastradas</span>
+                    )}
+                  </div>
+                  {detail.serviceFinance.installmentsCount > 0 ? (
+                    <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                      <div
+                        className="bg-emerald-500"
+                        style={{ width: `${(detail.serviceFinance.installmentsPaid / detail.serviceFinance.installmentsCount) * 100}%` }}
+                      />
+                      <div
+                        className="bg-amber-400"
+                        style={{ width: `${(detail.serviceFinance.installmentsReleased / detail.serviceFinance.installmentsCount) * 100}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+
+            <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-2">
               <DetailField label="Confirmado por" value={detail.confirmedBy || '—'} />
               <DetailField
                 label="Equipe"
@@ -526,9 +600,15 @@ export function MedicaoApprovalsSection() {
                     inputMode="numeric"
                     value={approveAmount}
                     onChange={(event) => setApproveAmount(maskCurrencyInputBrOrEmpty(event.target.value))}
+                    readOnly={detailLastBalance != null}
                     placeholder="R$ 0,00"
-                    className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:read-only:bg-gray-700/60"
                   />
+                  {detailLastBalance != null ? (
+                    <span className="mt-1 block text-[11px] font-normal text-amber-700 dark:text-amber-300">
+                      Última parcela do serviço: o valor é fixo e fecha o valor do contrato.
+                    </span>
+                  ) : null}
                 </label>
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                   Motivo da devolução

@@ -453,7 +453,8 @@ export function buildTotvsNaturezaItems(
       const key = normalizeGastosOperacionaisNaturezaKey(row.label);
       const mapping = mappingByKey.get(key);
       const unlinked = isUnlinkedConfiguredNatureza(row.label, store);
-      const isConfigured = !unlinked && (row.isConfigured || Boolean(mapping));
+      // Um vínculo feito pelo usuário vence a marca de «desvinculada» (senão a natureza continuava em «Fora do catálogo»).
+      const isConfigured = Boolean(mapping) || (!unlinked && row.isConfigured);
       const isDismissed = dismissed.has(key);
       const isAcknowledged = acknowledged.has(key);
       const isNew = !isConfigured && !isDismissed;
@@ -526,11 +527,16 @@ export function mapTotvsNaturezaToBlock(input: {
     mappings: [...nextMappings, mapping],
     dismissedTotvsKeys: store.dismissedTotvsKeys.filter((k) => k !== key),
     acknowledgedTotvsKeys: [...new Set([...store.acknowledgedTotvsKeys, key])],
-    unlinkedConfiguredKeys: store.unlinkedConfiguredKeys.filter(
-      (k) =>
+    // Limpa também a canônica embutida a que esta natureza do TOTVS corresponde, quando estava desvinculada.
+    unlinkedConfiguredKeys: store.unlinkedConfiguredKeys.filter((k) => {
+      const entry = resolveGastosOperacionaisDfcEntry(totvsLabel);
+      const entryKey = entry ? normalizeGastosOperacionaisNaturezaKey(entry.canonicalLabel) : '';
+      return (
         k !== key &&
-        k !== normalizeGastosOperacionaisNaturezaKey(targetCanonicalLabel)
-    )
+        k !== normalizeGastosOperacionaisNaturezaKey(targetCanonicalLabel) &&
+        (!entryKey || k !== entryKey)
+      );
+    })
   });
 
   return mapping;

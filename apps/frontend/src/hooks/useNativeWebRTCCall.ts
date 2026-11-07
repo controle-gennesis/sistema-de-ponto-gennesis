@@ -432,6 +432,26 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
           return;
         }
 
+        if (type === 'call:upgraded-to-group') {
+          // Chamada 1:1 virou grupo: descarta a conexão 1:1; o servidor manda refazer em malha.
+          const callId = msg.callId as string;
+          const ctx = callCtxRef.current;
+          if (!ctx || ctx.callId !== callId || ctx.isGroupCall) return;
+          try {
+            pcRef.current?.close();
+          } catch {
+            /* ignore */
+          }
+          pcRef.current = null;
+          setRemoteStream(null);
+          callCtxRef.current = { ...ctx, isGroupCall: true };
+          const side = msg.callSideChatId as string | undefined;
+          if (side) setCallSideChatId(side);
+          setGroupPeers({ [ctx.peerUserId]: { name: ctx.peerName || 'Participante', stream: null } });
+          setIsGroupCall(true);
+          return;
+        }
+
         if (type === 'call:group-sync') {
           const callId = msg.callId as string;
           if (callCtxRef.current?.callId !== callId) return;
@@ -1194,6 +1214,16 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     ws.send(JSON.stringify({ type: 'call:group-add-invite', callId: ctx.callId, targetUserIds: ids }));
   }, []);
 
+  /** Chamada 1:1 em andamento: adiciona gente e a ligação passa a ser em grupo. */
+  const addPeopleToCall = useCallback((targetUserIds: string[]) => {
+    const ctx = callCtxRef.current;
+    const ws = wsRef.current;
+    if (!ctx || ctx.isGroupCall || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const ids = Array.from(new Set(targetUserIds.filter(Boolean)));
+    if (ids.length === 0) return;
+    ws.send(JSON.stringify({ type: 'call:upgrade-to-group', callId: ctx.callId, targetUserIds: ids }));
+  }, []);
+
   const emitGroupMediaState = useCallback(
     (nextMicMuted: boolean, nextCamOff: boolean) => {
       const ctx = callCtxRef.current;
@@ -1415,6 +1445,8 @@ export function useNativeWebRTCCall(opts: { userId: string | undefined }) {
     kickGroupPeer,
     approveGroupJoin,
     inviteMoreToGroupCall,
+    addPeopleToCall,
+    getCallPeerUserId: () => callCtxRef.current?.peerUserId ?? null,
   };
 }
 

@@ -446,6 +446,28 @@ export class DpRequestController {
     }
   }
 
+  /** Quantas solicitações do próprio usuário estão devolvidas para ele (correção/pendência). */
+  async getMyReturnPendingCount(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const employee = await prisma.employee.findUnique({
+        where: { userId: req.user.id },
+        select: { id: true },
+      });
+      if (!employee) return res.json({ success: true, data: { count: 0 } });
+      const count = await prisma.dpRequest.count({
+        where: { employeeId: employee.id, status: 'WAITING_RETURN' },
+      });
+      return res.json({ success: true, data: { count } });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode && typeof err.statusCode === 'number') {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao contar pendências do solicitante' });
+    }
+  }
+
   async getMyRequests(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);

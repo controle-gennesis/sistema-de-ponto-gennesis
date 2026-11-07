@@ -2543,6 +2543,9 @@ model EmpreiteiroContract {
   plannedValue  Decimal?  @db.Decimal(15, 2)
   /// Local de execução (endereço / obra física).
   location      String?
+  /// Ícone (nome do ícone lucide) e cor (#RRGGBB) escolhidos para identificar o serviço.
+  iconName      String?
+  iconColor     String?
   /// Opcional: obra/contrato do sistema só como referência.
   contractId    String?
   /// Opcional: centro de custo da obra.
@@ -2565,6 +2568,7 @@ model EmpreiteiroContract {
   installments      EmpreiteiroContractInstallment[]
   addenda           EmpreiteiroContractAddendum[]
   teamMembers       EmpreiteiroTeamMember[]
+  review            EmpreiteiroServiceReview?
 
   @@index([empreiteiroId])
   @@index([contractId])
@@ -2644,6 +2648,27 @@ model EmpreiteiroContractInstallment {
   @@index([status])
   @@index([measurementId])
   @@map("empreiteiro_contract_installments")
+}
+
+/// Avaliação (1 a 5 estrelas) do contrato de serviço concluído: preço, prazo e pagamento. Uma por serviço.
+model EmpreiteiroServiceReview {
+  id                    String   @id @default(cuid())
+  empreiteiroContractId String   @unique
+  /// Denormalizado para somar a reputação da empreita sem juntar tabelas.
+  empreiteiroId         String
+  priceRating           Int
+  deadlineRating        Int
+  paymentRating         Int
+  comment               String?
+  reviewedById          String?
+  reviewedByName        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  empreiteiroContract EmpreiteiroContract @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+
+  @@index([empreiteiroId])
+  @@map("empreiteiro_service_reviews")
 }
 
 /// Pessoa da equipe de um contrato de serviço (turma daquele serviço).
@@ -3517,6 +3542,8 @@ model KanbanBoard {
   /// Paleta de etiquetas do setor: [{ color, name }]
   labelPresets    Json     @default("[]") @map("label_presets")
   createdById     String?
+  /// Quadro arquivado: some da lista de quadros e pode ser restaurado.
+  archivedAt      DateTime? @map("archived_at")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -6044,8 +6071,9 @@ model ContractRegistryEntry {
   createdBy      String?
   updatedBy      String?
 
-  addenda ContractRegistryAddendum[]
-  cats    ContractRegistryCat[]
+  addenda   ContractRegistryAddendum[]
+  cats      ContractRegistryCat[]
+  looseArts ContractRegistryLooseArt[]
 
   @@index([contractorName])
   @@index([contractNumber])
@@ -6068,6 +6096,24 @@ model ContractRegistryCat {
 
   @@index([registryId, issuedAt])
   @@map("contract_registry_cats")
+}
+
+/// ART avulsa de um contrato do Controle de Contratos (fora da lista de ARTs do contrato/aditivos).
+model ContractRegistryLooseArt {
+  id           String   @id @default(cuid())
+  registryId   String
+  art          String
+  professional String?
+  /// SIM | NÃO | vazio (não informado).
+  baixada      String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  createdBy    String?
+
+  registry ContractRegistryEntry @relation(fields: [registryId], references: [id], onDelete: Cascade)
+
+  @@index([registryId, createdAt])
+  @@map("contract_registry_loose_arts")
 }
 
 /// Aditivos de um contrato do Controle de Contratos (valor pode ser zero em aditivo de prazo).
@@ -6093,4 +6139,25 @@ model ContractRegistryAddendum {
 
   @@index([registryId, effectiveDate])
   @@map("contract_registry_addenda")
+}
+
+/// Contratos Sócios: linha de detalhe de um contrato (ex.: um prédio do CONFEA) em um mês/ano, com valores digitados.
+model ContratoSocioSubitem {
+  id               String   @id @default(cuid())
+  /// Nome do contrato como aparece na tabela de Contratos Sócios.
+  contrato         String
+  ano              Int
+  mes              Int
+  nome             String
+  faturamento      Decimal? @db.Decimal(15, 2)
+  liquido          Decimal? @db.Decimal(15, 2)
+  recebido         Decimal? @db.Decimal(15, 2)
+  tetoOrcamentario Decimal? @db.Decimal(15, 2)
+  gastos           Decimal? @db.Decimal(15, 2)
+  createdBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([contrato, ano, mes])
+  @@map("contrato_socio_subitens")
 }

@@ -131,7 +131,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     can(pathToModuleKey('/ponto/meus-chamados')) ||
     can(pathToModuleKey('/ponto/sistema-gestao-os/planos'));
 
-  const { data: gestaoOsInbox } = useQuery({
+  const { data: gestaoOsInboxRaw } = useQuery({
     queryKey: ['gestao-os-inbox'],
     queryFn: async () => {
       const res = await api.get('/gestao-os/inbox');
@@ -146,11 +146,14 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         sacOpenCount?: number;
       } | null;
     },
-    enabled: !permissionsLoading,
+    // Só busca a caixa de OS quem tem acesso ao módulo (antes buscava para todo mundo).
+    enabled: canSeeGestaoOs && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
+  // A chave do cache não é por usuário: sem acesso, ignora qualquer dado que sobrou de outro login.
+  const gestaoOsInbox = canSeeGestaoOs ? gestaoOsInboxRaw : null;
 
   const { data: atendimentoContabilPendingCount = 0 } = useQuery({
     queryKey: ['dp-contabilidade-pending-count'],
@@ -160,6 +163,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeAtendimentoContabil && !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
+  // Solicitações do próprio usuário devolvidas para correção (status "Sua pendência"/"Correção").
+  const canSeeMyDpRequests = isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-dp'));
+  const { data: dpReturnPendingCount = 0 } = useQuery({
+    queryKey: ['dp-requester-return-count'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/minhas/pendencias-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeMyDpRequests && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
@@ -303,11 +321,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canApproveEmpreiteiroDaily && counts.medicao > 0) {
       list.push({
         id: 'medicao',
-        title: 'Medições de entrega/Aditivos',
+        title: 'Medições de entrega',
         description: 'Aguardando aprovação',
         count: counts.medicao,
         href: '/ponto/aprovacoes?tab=medicao',
         Icon: HardHat,
+      });
+    }
+    if (canApproveEmpreiteiroDaily && counts.aditivo > 0) {
+      list.push({
+        id: 'aditivo',
+        title: 'Aditivos',
+        description: 'Aguardando aprovação',
+        count: counts.aditivo,
+        href: '/ponto/aprovacoes?tab=aditivo',
+        Icon: FileCheck,
       });
     }
     if (canSeeFdAprovadas && fdNotificationCounts.pendingPurchase > 0) {
@@ -388,6 +416,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         count: atendimentoContabilPendingCount,
         href: '/ponto/dp-contabilidade',
         Icon: Calculator,
+      });
+    }
+    if (canSeeMyDpRequests && dpReturnPendingCount > 0) {
+      list.push({
+        id: 'dp-correcao',
+        title: 'Minhas solicitações',
+        description: 'Precisam de correção — responda',
+        count: dpReturnPendingCount,
+        href: '/ponto/solicitacoes-dp',
+        Icon: ClipboardCheck,
       });
     }
     if (chatUnreadCount > 0) {
@@ -508,6 +546,8 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     entregaLogisticaPendingCount,
     canSeeAtendimentoContabil,
     atendimentoContabilPendingCount,
+    canSeeMyDpRequests,
+    dpReturnPendingCount,
     chatUnreadCount,
     gestaoOsInbox,
   ]);

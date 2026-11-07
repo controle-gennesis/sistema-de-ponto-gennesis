@@ -51,6 +51,8 @@ type Registro = {
   createdAt: string;
   origem: string;
   detalhe?: string | null;
+  userId?: string | null;
+  userName?: string | null;
   tipo: string;
   metodo: string;
   path: string;
@@ -296,6 +298,7 @@ export default function FluigChamadasPage() {
                         <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
                           <th className="py-2 pr-4">Data e hora</th>
                           <th className="py-2 pr-4">Origem</th>
+                          <th className="py-2 pr-4">Usuário</th>
                           <th className="py-2 pr-4">Tipo</th>
                           <th className="py-2 pr-4">Dataset / caminho</th>
                           <th className="py-2 pr-4 text-right">Status</th>
@@ -313,6 +316,15 @@ export default function FluigChamadasPage() {
                               {r.detalhe ? (
                                 <span className="block text-xs text-gray-500 dark:text-gray-400">{r.detalhe}</span>
                               ) : null}
+                            </td>
+                            <td className="whitespace-nowrap py-2 pr-4 text-gray-800 dark:text-gray-200">
+                              {r.userName ? (
+                                r.userName
+                              ) : r.userId ? (
+                                <span className="text-gray-500 dark:text-gray-400">Usuário removido</span>
+                              ) : (
+                                <span className="text-gray-500 dark:text-gray-400">Sistema (automático)</span>
+                              )}
                             </td>
                             <td className="py-2 pr-4 text-gray-800 dark:text-gray-200">
                               {ROTULO_TIPO[r.tipo] ?? r.tipo}

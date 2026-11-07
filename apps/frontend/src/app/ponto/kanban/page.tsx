@@ -16,7 +16,6 @@ import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
-import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import {
   originFromElement,
   useCelebratePulse,
@@ -41,6 +40,8 @@ import {
   type KanbanBoard,
   type KanbanBoardSummary,
   fetchKanbanBoard,
+  archiveKanbanBoard,
+  unarchiveKanbanBoard,
   fetchKanbanBoards,
   createKanbanBoard,
   updateKanbanBoard,
@@ -109,8 +110,6 @@ import {
   Paperclip,
   BarChart2,
   ListChecks,
-  Columns,
-  List,
   Tag,
   Trash2,
   Edit3,
@@ -1020,19 +1019,6 @@ function kanbanCardBoardSnapshot(card: KanbanCard): string {
 
 type KanbanCardViewMode = 'classic' | 'checklist';
 
-const KANBAN_CARD_VIEW_MODE_KEY = 'kanban:cardViewMode';
-
-function readKanbanCardViewMode(): KanbanCardViewMode {
-  if (typeof window === 'undefined') return 'classic';
-  try {
-    return localStorage.getItem(KANBAN_CARD_VIEW_MODE_KEY) === 'checklist'
-      ? 'checklist'
-      : 'classic';
-  } catch {
-    return 'classic';
-  }
-}
-
 interface KanbanCardItemProps {
   card: KanbanCard;
   columnId: string;
@@ -1408,6 +1394,8 @@ interface KanbanColumnProps {
   onDrop: (e: React.DragEvent, columnId: string, index?: number) => void;
   onEditColumn: (column: KanbanColumn) => void;
   onDeleteColumn: (columnId: string) => void;
+  /** Arquivar o quadro inteiro (só aparece para quem pode). */
+  onArchiveBoard?: () => void;
   onSortColumn: (columnId: string, mode: KanbanColumnSortMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -1438,6 +1426,7 @@ function KanbanColumnComponent({
   onDrop,
   onEditColumn,
   onDeleteColumn,
+  onArchiveBoard,
   onSortColumn,
   collapsed = false,
   onToggleCollapse,
@@ -1813,6 +1802,19 @@ function KanbanColumnComponent({
                       >
                         <ArrowUpDown className="h-4 w-4" /> Ordenar lista
                       </button>
+                      {onArchiveBoard ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onArchiveBoard();
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          <Archive className="h-4 w-4" /> Arquivar quadro
+                        </button>
+                      ) : null}
                       <hr className="my-1 border-gray-200 dark:border-gray-700" />
                       <button
                         type="button"
@@ -2119,6 +2121,10 @@ interface CardColumnActionModalProps {
   cardTitle: string;
   currentColumnId: string;
   columns: KanbanColumn[];
+  /** Quadros que o usuário enxerga (para mover o card entre quadros). */
+  boards?: KanbanBoardSummary[];
+  /** departmentKey do quadro que está aberto. */
+  currentBoardKey?: string | null;
   labelsCount?: number;
   attachmentsCount?: number;
   onClose: () => void;
@@ -2134,26 +2140,54 @@ function CardColumnActionModal({
   cardTitle,
   currentColumnId,
   columns,
+  boards = [],
+  currentBoardKey = null,
   labelsCount = 0,
   attachmentsCount = 0,
   onClose,
   onConfirm,
 }: CardColumnActionModalProps) {
   const [columnId, setColumnId] = useState(currentColumnId);
+  const [boardKey, setBoardKey] = useState<string | null>(currentBoardKey);
+  const otherBoardSelected = !!boardKey && boardKey !== currentBoardKey;
+  const { data: otherBoard, isLoading: loadingOtherBoard } = useQuery({
+    queryKey: ['kanban-board', boardKey],
+    queryFn: () => fetchKanbanBoard(boardKey ?? undefined),
+    enabled: otherBoardSelected,
+    staleTime: 60_000,
+  });
+  const otherBoardReadOnly = otherBoardSelected && otherBoard?.canWrite === false;
+  const boardOptions = useMemo(
+    () =>
+      boards.map((b) => ({
+        value: b.departmentKey,
+        label: b.name,
+        searchText: `${b.name} ${b.department}`,
+      })),
+    [boards],
+  );
   const [title, setTitle] = useState(cardTitle);
   const [copyLabels, setCopyLabels] = useState(true);
   const [copyAttachments, setCopyAttachments] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const targetColumns = otherBoardSelected ? otherBoard?.columns ?? [] : columns;
   const columnOptions = useMemo(
     () =>
-      columns.map((column) => ({
+      targetColumns.map((column) => ({
         value: column.id,
         label: column.title,
         searchText: column.title,
       })),
-    [columns],
+    [targetColumns],
   );
+
+  // Ao trocar de quadro, a lista volta para a primeira coluna do quadro escolhido.
+  useEffect(() => {
+    if (!otherBoardSelected) return;
+    const first = otherBoard?.columns?.[0]?.id ?? '';
+    setColumnId(first);
+  }, [otherBoardSelected, otherBoard?.id]);
 
   return (
     <Modal
@@ -2176,6 +2210,21 @@ function CardColumnActionModal({
             />
           </div>
         ) : null}
+        {boards.length > 1 ? (
+          <div>
+            <label className={kanbanLabel}>Quadro</label>
+            <StringSingleSelectDropdown
+              value={boardKey ?? ''}
+              onChange={(value) => {
+                setBoardKey(value);
+                if (value === currentBoardKey) setColumnId(currentColumnId);
+              }}
+              options={boardOptions}
+              allowEmpty={false}
+              placeholder="Selecione o quadro..."
+            />
+          </div>
+        ) : null}
         <div>
           <label className={kanbanLabel}>Lista</label>
           <StringSingleSelectDropdown
@@ -2183,8 +2232,13 @@ function CardColumnActionModal({
             onChange={setColumnId}
             options={columnOptions}
             allowEmpty={false}
-            placeholder="Selecione a coluna..."
+            placeholder={loadingOtherBoard ? 'Carregando listas...' : 'Selecione a coluna...'}
           />
+          {otherBoardReadOnly ? (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              Você só tem acesso de leitura a este quadro. Escolha outro quadro.
+            </p>
+          ) : null}
         </div>
         {mode === 'copy' && (labelsCount > 0 || attachmentsCount > 0) ? (
           <div>
@@ -2233,6 +2287,7 @@ function CardColumnActionModal({
             type="button"
             variant="primary"
             loading={submitting}
+            disabled={otherBoardReadOnly || (otherBoardSelected && loadingOtherBoard)}
             className="!bg-red-600 hover:!bg-red-700 !text-white border-transparent focus-visible:ring-red-500"
             onClick={() => {
               if (submitting) return;
@@ -2478,7 +2533,11 @@ function KanbanBoardPicker({
   onShare,
   onEditName,
   onDeleteBoard,
+  archivedBoards = [],
+  onRestoreBoard,
 }: {
+  archivedBoards?: KanbanBoardSummary[];
+  onRestoreBoard?: (board: KanbanBoardSummary) => void;
   boards: KanbanBoardSummary[];
   currentDepartmentKey?: string;
   defaultDepartmentKey?: string | null;
@@ -2526,6 +2585,13 @@ function KanbanBoardPicker({
       >
         <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
         <span className="min-w-0 truncate">{currentBoardName}</span>
+        <ChevronDown
+          className={clsx(
+            'h-4 w-4 shrink-0 text-gray-400 transition-transform dark:text-gray-500',
+            open && 'rotate-180',
+          )}
+          aria-hidden
+        />
       </button>
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 min-w-[16rem] w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
@@ -2599,6 +2665,26 @@ function KanbanBoardPicker({
               </div>
             )}
           </div>
+          {archivedBoards.length > 0 && onRestoreBoard ? (
+            <div className="border-t border-gray-100 p-2 dark:border-gray-700">
+              <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Arquivados</p>
+              {archivedBoards.map((b) => (
+                <div key={b.id} className="flex min-h-9 items-center justify-between gap-2 rounded-lg px-2 text-sm text-gray-600 dark:text-gray-300">
+                  <span className="truncate">{b.department}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onRestoreBoard(b);
+                    }}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                  >
+                    Restaurar
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {canCreateBoard !== false ? (
           <div className="border-t border-gray-100 p-2 dark:border-gray-700">
             <button
@@ -2640,7 +2726,15 @@ function KanbanPage() {
 
   const { data: boardsList, isLoading: loadingBoardsList } = useQuery({
     queryKey: ['kanban-boards'],
-    queryFn: fetchKanbanBoards,
+    queryFn: () => fetchKanbanBoards(),
+    enabled: !!meUser,
+    staleTime: 3 * 60 * 1000,
+  });
+
+  // Quadros arquivados (aparecem na seção "Arquivados" do seletor, com o botão Restaurar).
+  const { data: archivedBoardsList } = useQuery({
+    queryKey: ['kanban-boards', 'archived'],
+    queryFn: () => fetchKanbanBoards(true),
     enabled: !!meUser,
     staleTime: 3 * 60 * 1000,
   });
@@ -2739,6 +2833,8 @@ function KanbanPage() {
   } | null>(null);
   const [renamingBoard, setRenamingBoard] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState<KanbanBoardSummary | null>(null);
+  const [boardArchiveTarget, setBoardArchiveTarget] = useState<KanbanBoardSummary | null>(null);
+  const [archivingBoard, setArchivingBoard] = useState(false);
   const [deletingBoard, setDeletingBoard] = useState(false);
   const [shareTarget, setShareTarget] = useState<{
     boardId: string;
@@ -2787,6 +2883,10 @@ function KanbanPage() {
   ]);
 
   const boardReadOnly = board?.canWrite === false;
+  const currentBoardSummary = useMemo(
+    () => (boardsList ?? []).find((b) => b.departmentKey === (board?.departmentKey ?? boardScopeKey)) ?? null,
+    [boardsList, board?.departmentKey, boardScopeKey],
+  );
 
   useDocumentTitle(
     board?.department ? `Tasks - ${board.department}` : 'Tasks'
@@ -2840,6 +2940,50 @@ function KanbanPage() {
       }
     },
     [queryClient, kanbanBoardQueryKey, renameBoardTarget],
+  );
+
+  const handleArchiveBoard = useCallback(async () => {
+    if (!boardArchiveTarget?.id || !meUser) return;
+    setArchivingBoard(true);
+    try {
+      await archiveKanbanBoard(boardArchiveTarget.id);
+      if (getKanbanDefaultBoard(meUser.id) === boardArchiveTarget.departmentKey) {
+        clearKanbanDefaultBoard(meUser.id);
+      }
+      const remaining = (boardsList ?? []).filter(
+        (b) => b.departmentKey !== boardArchiveTarget.departmentKey,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+      const archivedKey = boardArchiveTarget.departmentKey;
+      setBoardArchiveTarget(null);
+      toast.success('Quadro arquivado');
+      const nextKey = resolveKanbanDefaultBoard(meUser.id, remaining);
+      if (nextKey && nextKey !== archivedKey) openBoard(nextKey);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Erro ao arquivar quadro';
+      toast.error(msg);
+    } finally {
+      setArchivingBoard(false);
+    }
+  }, [boardArchiveTarget, meUser, boardsList, queryClient, openBoard]);
+
+  const handleRestoreBoard = useCallback(
+    async (target: KanbanBoardSummary) => {
+      try {
+        await unarchiveKanbanBoard(target.id);
+        await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+        toast.success('Quadro restaurado');
+        openBoard(target.departmentKey);
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+          'Erro ao restaurar quadro';
+        toast.error(msg);
+      }
+    },
+    [queryClient, openBoard],
   );
 
   const handleDeleteBoard = useCallback(async () => {
@@ -2911,7 +3055,8 @@ function KanbanPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchExpanded = searchOpen || search.trim().length > 0;
-  const [cardViewMode, setCardViewMode] = useState<KanbanCardViewMode>(() => readKanbanCardViewMode());
+  // Só existe a versão nova (checklist); a versão clássica foi removida.
+  const cardViewMode: KanbanCardViewMode = 'checklist';
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [filterLabelColors, setFilterLabelColors] = useState<string[]>([]);
   const [filterMemberIds, setFilterMemberIds] = useState<string[]>([]);
@@ -3255,15 +3400,6 @@ function KanbanPage() {
     },
     [queryClient, kanbanBoardQueryKey],
   );
-
-  const setCardViewModePersist = useCallback((mode: KanbanCardViewMode) => {
-    setCardViewMode(mode);
-    try {
-      localStorage.setItem(KANBAN_CARD_VIEW_MODE_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const handleToggleCardComplete = useCallback(
     async (card: KanbanCard) => {
@@ -3839,6 +3975,30 @@ function KanbanPage() {
     const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
     const mutationGen = beginBoardMutation();
 
+    if (action.mode === 'move' && !columns.some((col) => col.id === targetColumnId)) {
+      // Coluna de outro quadro: o card sai deste quadro e passa a existir no quadro escolhido.
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        const next = removeCardFromBoardCache(old, action.cardId);
+        if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+        return next;
+      });
+      void (async () => {
+        try {
+          await moveKanbanCard(action.cardId, { columnId: targetColumnId, position: 0 });
+          toast.success('Card movido para o outro quadro!', { duration: 2500 });
+          // O outro quadro precisa recarregar para mostrar o card.
+          void queryClient.invalidateQueries({
+            queryKey: ['kanban-board'],
+            predicate: (q) => q.queryKey[1] !== (boardScopeKey ?? 'own'),
+          });
+        } catch {
+          rollbackBoardMutation(mutationGen, previousBoard);
+          toast.error('Não foi possível mover o card para o outro quadro. Verifique se você pode editá-lo.');
+        }
+      })();
+      return;
+    }
+
     if (action.mode === 'move') {
       const moveSeq = (cardMoveSeqRef.current[action.cardId] ?? 0) + 1;
       cardMoveSeqRef.current[action.cardId] = moveSeq;
@@ -3870,19 +4030,20 @@ function KanbanPage() {
       copyAttachments: keep?.copyAttachments !== false,
     };
     const copyTitle = title?.trim() || action.title;
+    const crossBoardCopy = !columns.some((col) => col.id === targetColumnId);
     const tempId = `optimistic-copy-${action.cardId}-${Date.now()}`;
     const sourceCard = previousBoard?.columns
       .find((col) => col.id === action.columnId)
       ?.cards.find((card) => card.id === action.cardId);
 
-    if (sourceCard) {
+    if (sourceCard && !crossBoardCopy) {
       const optimistic = buildOptimisticCardCopy(sourceCard, copyTitle, tempId, copyKeep);
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
         insertCardIntoBoardCache(old, targetColumnId, optimistic, true),
       );
     }
 
-    toast.success('Card copiado!', { duration: 2000 });
+    toast.success(crossBoardCopy ? 'Copiando para o outro quadro...' : 'Card copiado!', { duration: 2000 });
 
     void (async () => {
       try {
@@ -3892,6 +4053,15 @@ function KanbanPage() {
           copyLabels: copyKeep.copyLabels,
           copyAttachments: copyKeep.copyAttachments,
         });
+        if (crossBoardCopy) {
+          // O outro quadro precisa recarregar para mostrar a cópia.
+          void queryClient.invalidateQueries({
+            queryKey: ['kanban-board'],
+            predicate: (q) => q.queryKey[1] !== (boardScopeKey ?? 'own'),
+          });
+          toast.success('Card copiado para o outro quadro!', { duration: 2500 });
+          return;
+        }
         queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
           const withoutTemp = removeCardFromBoardCache(old, tempId);
           return insertCardIntoBoardCache(withoutTemp, targetColumnId, created, true) ?? withoutTemp;
@@ -4172,25 +4342,6 @@ function KanbanPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Esquerda: visão + quadros */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <SegmentedControl
-                value={cardViewMode}
-                onChange={setCardViewModePersist}
-                aria-label="Versão de visualização dos cards"
-                options={[
-                  {
-                    value: 'classic',
-                    title: 'Versão clássica',
-                    ariaLabel: 'Versão clássica',
-                    label: <Columns className="h-4 w-4" />,
-                  },
-                  {
-                    value: 'checklist',
-                    title: 'Versão nova',
-                    ariaLabel: 'Versão nova',
-                    label: <List className="h-4 w-4" />,
-                  },
-                ]}
-              />
               <KanbanBoardPicker
                 boards={boardsList ?? []}
                 currentDepartmentKey={board?.departmentKey}
@@ -4208,6 +4359,8 @@ function KanbanPage() {
                   setRenameBoardTarget({ boardId: b.id, name: b.department })
                 }
                 onDeleteBoard={setBoardDeleteTarget}
+                archivedBoards={archivedBoardsList ?? []}
+                onRestoreBoard={handleRestoreBoard}
               />
               {boardReadOnly ? (
                 <span
@@ -4527,6 +4680,11 @@ function KanbanPage() {
                     onDrop={handleDrop}
                     onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
                     onDeleteColumn={handleDeleteColumn}
+                    onArchiveBoard={
+                      !boardReadOnly && currentBoardSummary && (isAdministrator || currentBoardSummary.isOwner)
+                        ? () => setBoardArchiveTarget(currentBoardSummary)
+                        : undefined
+                    }
                     onSortColumn={handleSortColumn}
                     collapsed={collapsedColumnIds.has(column.id)}
                     onToggleCollapse={() => toggleColumnCollapsed(column.id)}
@@ -4990,6 +5148,8 @@ function KanbanPage() {
           cardTitle={cardColumnAction.title}
           currentColumnId={cardColumnAction.columnId}
           columns={columns}
+          boards={boardsList ?? []}
+          currentBoardKey={board?.departmentKey ?? boardScopeKey}
           labelsCount={cardColumnAction.mode === 'copy' ? cardColumnAction.labelsCount : 0}
           attachmentsCount={
             cardColumnAction.mode === 'copy' ? cardColumnAction.attachmentsCount : 0
@@ -5044,6 +5204,34 @@ function KanbanPage() {
         initialName={renameBoardTarget?.name ?? ''}
         hint=""
       />
+
+      {boardArchiveTarget && (
+        <Modal
+          isOpen
+          onClose={() => !archivingBoard && setBoardArchiveTarget(null)}
+          size="sm"
+          confirmBeforeClose={false}
+          title="Arquivar quadro"
+        >
+          <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
+            Arquivar o quadro <strong>{boardArchiveTarget.department}</strong> inteiro? Ele some da lista de quadros,
+            mas as colunas e os cards são mantidos. Você pode restaurá-lo depois, na seção «Arquivados» do seletor de quadros.
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBoardArchiveTarget(null)}
+              disabled={archivingBoard}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" onClick={handleArchiveBoard} disabled={archivingBoard}>
+              {archivingBoard ? 'Arquivando…' : 'Arquivar quadro'}
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       {boardDeleteTarget && (
         <Modal

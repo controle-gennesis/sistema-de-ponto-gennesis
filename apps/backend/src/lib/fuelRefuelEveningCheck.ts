@@ -219,6 +219,8 @@ export async function resolveFuelEveningCheckRequestId(params: {
  * Botões: Sim (`fuel_chk_yes`) / Não (`fuel_chk_no`).
  */
 export async function sendFuelRefuelEveningChecks(now = new Date()): Promise<{ sent: number }> {
+  // Lembrete das 19h DESLIGADO. Para religar, defina FUEL_EVENING_CHECK=on no ambiente do backend.
+  if ((process.env.FUEL_EVENING_CHECK || '').trim().toLowerCase() !== 'on') return { sent: 0 };
   const todayKey = brazilCalendarDateKey(now);
   const templateName = fuelEveningCheckTemplateName();
 

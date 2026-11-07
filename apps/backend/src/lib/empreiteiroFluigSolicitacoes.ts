@@ -138,6 +138,8 @@ export type FluigStatusParcela = {
   /** AAAA-MM-DD */
   vencimento: string | null;
   pagamento: string | null;
+  /** Valor da solicitação (soma dos valores distintos do processo; 0 se não informado). */
+  valor: number;
 };
 
 /** Fase atual e vencimento no Fluig de cada solicitação informada (pelo número do processo). */
@@ -152,18 +154,31 @@ export async function buscarStatusFluigPorNumeros(numeros: string[]): Promise<Re
       AND regexp_replace(COALESCE(payload->>'NUM_PROCES', ''), '[^0-9]', '', 'g') = ANY(${lista}::text[])
     LIMIT 2000
   `;
+  // Valores distintos por processo (o mesmo processo aparece nos dois datasets com o mesmo valor).
+  const valoresPorProcesso = new Map<string, Set<number>>();
   for (const linha of linhas) {
     const p = linha.payload ?? {};
     const numero = somenteDigitos(p.NUM_PROCES);
     if (!numero) continue;
+    const valorLinha = parseValorBr(p.Valor);
+    if (valorLinha > 0) {
+      const set = valoresPorProcesso.get(numero) ?? new Set<number>();
+      set.add(valorLinha);
+      valoresPorProcesso.set(numero, set);
+    }
     const atual = resultado[numero];
     const item: FluigStatusParcela = {
       fase: texto(p.fase_Atual),
       vencimento: dataIso(p.data_vencimento),
       pagamento: dataIso(p.data_pagamento),
+      valor: 0,
     };
     // Se o processo aparece em várias linhas, fica a que tem mais informação.
     if (!atual || (!atual.vencimento && item.vencimento) || (!atual.fase && item.fase)) resultado[numero] = item;
+  }
+  for (const [numero, valores] of valoresPorProcesso) {
+    const alvo = resultado[numero];
+    if (alvo) alvo.valor = Number([...valores].reduce((soma, v) => soma + v, 0).toFixed(2));
   }
   return resultado;
 }

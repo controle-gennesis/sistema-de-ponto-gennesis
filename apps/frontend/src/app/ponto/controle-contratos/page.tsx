@@ -22,6 +22,7 @@ import {
   Trash2,
   Wallet,
 } from 'lucide-react';
+import { DriveLinksMenu } from './DriveLinksMenu';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -75,6 +76,13 @@ type RegistryRow = {
     professional: string | null;
     protocol: string | null;
     issuedAt: string | null;
+  }>;
+  looseArts: Array<{
+    id: string;
+    art: string;
+    professional: string | null;
+    baixada: string;
+    notes: string | null;
   }>;
 };
 
@@ -361,12 +369,17 @@ function ControleContratosPage() {
   const [editing, setEditing] = useState<RegistryRow | 'new' | null>(null);
   const [form, setForm] = useState<RegistryForm>(EMPTY_FORM);
   const [viewingId, setViewingId] = useState<string | null>(null);
-  const [viewTab, setViewTab] = useState<'info' | 'aditivos' | 'cat'>('info');
+  const [viewTab, setViewTab] = useState<'info' | 'aditivos' | 'cat' | 'artavulsas'>('info');
   const [catNumber, setCatNumber] = useState('');
   const [catProfessional, setCatProfessional] = useState('');
   const [catProtocol, setCatProtocol] = useState('');
   const [catIssuedAt, setCatIssuedAt] = useState('');
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [looseArt, setLooseArt] = useState('');
+  const [looseProfessional, setLooseProfessional] = useState('');
+  const [looseBaixada, setLooseBaixada] = useState('');
+  const [looseNotes, setLooseNotes] = useState('');
+  const [editingLooseArtId, setEditingLooseArtId] = useState<string | null>(null);
   const [addSignedAt, setAddSignedAt] = useState('');
   const [addStart, setAddStart] = useState('');
   const [addEnd, setAddEnd] = useState('');
@@ -385,6 +398,7 @@ function ControleContratosPage() {
         ...r,
         arts: (r.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })),
         cats: r.cats ?? [],
+        looseArts: (r.looseArts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })),
         addenda: (r.addenda ?? []).map((x) => ({ ...x, arts: (x.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })) })),
         addendaTotal: r.addendaTotal ?? 0,
       })),
@@ -516,6 +530,40 @@ function ControleContratosPage() {
     onError: (e) => toast.error(errMessage(e, 'Não foi possível remover a CAT.')),
   });
 
+  const resetLooseArtForm = () => {
+    setEditingLooseArtId(null);
+    setLooseArt('');
+    setLooseProfessional('');
+    setLooseBaixada('');
+    setLooseNotes('');
+  };
+
+  const saveLooseArtMutation = useMutation({
+    mutationFn: async () => {
+      if (!viewingId) return;
+      const payload = { art: looseArt, professional: looseProfessional, baixada: looseBaixada, notes: looseNotes };
+      if (editingLooseArtId) await api.patch(`/contract-registry/${viewingId}/loose-arts/${editingLooseArtId}`, payload);
+      else await api.post(`/contract-registry/${viewingId}/loose-arts`, payload);
+    },
+    onSuccess: () => {
+      toast.success(editingLooseArtId ? 'ART atualizada.' : 'ART adicionada.');
+      resetLooseArtForm();
+      void queryClient.invalidateQueries({ queryKey: ['contract-registry'] });
+    },
+    onError: (e) => toast.error(errMessage(e, 'Não foi possível salvar a ART.')),
+  });
+
+  const deleteLooseArtMutation = useMutation({
+    mutationFn: async (looseArtId: string) => {
+      await api.delete(`/contract-registry/${viewingId}/loose-arts/${looseArtId}`);
+    },
+    onSuccess: () => {
+      toast.success('ART removida.');
+      void queryClient.invalidateQueries({ queryKey: ['contract-registry'] });
+    },
+    onError: (e) => toast.error(errMessage(e, 'Não foi possível remover a ART.')),
+  });
+
   const deleteAddendumMutation = useMutation({
     mutationFn: async (addendumId: string) => {
       await api.delete(`/contract-registry/${viewingId}/addenda/${addendumId}`);
@@ -562,6 +610,7 @@ function ControleContratosPage() {
     setAddGuarantee('');
     setEditingAddendumId(null);
     resetCatForm();
+    resetLooseArtForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingId]);
 
@@ -677,6 +726,7 @@ function ControleContratosPage() {
                 </div>
               </div>
               <div className={cadastroListClasses.cardToolbar}>
+                <DriveLinksMenu />
                 <div className="relative min-w-0 w-full flex-1 basis-full sm:basis-auto sm:min-w-[260px] sm:w-[340px] sm:flex-none">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
@@ -870,6 +920,7 @@ function ControleContratosPage() {
                 ['info', 'Informações gerais', Info, null],
                 ['aditivos', 'Aditivos', FilePlus2, viewing.addenda.length],
                 ['cat', 'CAT', BadgeCheck, viewing.cats.length],
+                ['artavulsas', 'ART avulsas', FileSignature, viewing.looseArts.length],
               ] as const).map(([key, label, Icon, count]) => (
                 <button
                   key={key}
@@ -1101,7 +1152,7 @@ function ControleContratosPage() {
                   </p>
                 ) : null}
               </div>
-            ) : (
+            ) : viewTab === 'cat' ? (
               <div className="space-y-4">
                 <form
                   onSubmit={(e) => {
@@ -1211,6 +1262,148 @@ function ControleContratosPage() {
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                                 title="Excluir CAT"
                                 aria-label="Excluir CAT"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    saveLooseArtMutation.mutate();
+                  }}
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                >
+                  <div>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">ART *</span>
+                    {(() => {
+                      const options = artOptions.map((a) => ({ value: a.art, label: a.art }));
+                      if (looseArt && !options.some((o) => o.value === looseArt)) options.unshift({ value: looseArt, label: looseArt });
+                      return (
+                        <StringSingleSelectDropdown
+                          value={looseArt}
+                          onChange={(v) => {
+                            const picked = artOptions.find((a) => a.art === v);
+                            setLooseArt(v);
+                            setLooseProfessional(v ? picked?.profissional ?? looseProfessional : '');
+                          }}
+                          options={options}
+                          allowEmpty
+                          emptyOptionLabel="Sem ART"
+                          placeholder="Selecione a ART"
+                          searchPlaceholder="Pesquisar ART..."
+                          matchTriggerWidth
+                          className="w-full"
+                        />
+                      );
+                    })()}
+                  </div>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Profissional</span>
+                    <input
+                      value={looseProfessional}
+                      onChange={(e) => setLooseProfessional(e.target.value)}
+                      placeholder="Preenchido ao escolher a ART"
+                      className={FORM_FIELD_INPUT_CLS}
+                    />
+                  </label>
+                  <div>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Baixada</span>
+                    <StringSingleSelectDropdown
+                      value={looseBaixada}
+                      onChange={setLooseBaixada}
+                      options={BAIXADA_OPTIONS}
+                      allowEmpty
+                      emptyOptionLabel="Sem informação"
+                      placeholder="Baixada"
+                      disableSearch
+                      matchTriggerWidth
+                      className="w-full"
+                    />
+                  </div>
+                  <label className="block sm:col-span-3">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Observação</span>
+                    <input value={looseNotes} onChange={(e) => setLooseNotes(e.target.value)} className={FORM_FIELD_INPUT_CLS} />
+                  </label>
+                  <div className="flex items-center justify-end gap-2 sm:col-span-3">
+                    {editingLooseArtId ? (
+                      <button
+                        type="button"
+                        onClick={resetLooseArtForm}
+                        disabled={saveLooseArtMutation.isPending}
+                        className="h-10 rounded-lg bg-gray-100 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                      >
+                        Cancelar edição
+                      </button>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={saveLooseArtMutation.isPending || !looseArt.trim()}
+                      className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {saveLooseArtMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editingLooseArtId ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      {editingLooseArtId ? 'Salvar alterações' : 'Adicionar ART'}
+                    </button>
+                  </div>
+                </form>
+
+                {viewing.looseArts.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-10 text-center dark:border-gray-600">
+                    <FileSignature className="h-10 w-10 text-gray-400" />
+                    <p className="text-base font-semibold text-gray-600 dark:text-gray-300">Nenhuma ART avulsa cadastrada</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">As ARTs avulsas aparecerão aqui quando forem adicionadas ao contrato.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                    <table className="w-full min-w-[640px] text-sm">
+                      <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-500 dark:bg-gray-900/40 dark:text-gray-400">
+                        <tr>
+                          <th className="px-3 py-2 text-center font-medium">ART</th>
+                          <th className="px-3 py-2 text-left font-medium">Profissional</th>
+                          <th className="px-3 py-2 text-center font-medium">Baixada</th>
+                          <th className="px-3 py-2 text-left font-medium">Observação</th>
+                          <th className="px-3 py-2 text-right font-medium">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
+                        {viewing.looseArts.map((a) => (
+                          <tr key={a.id} className="text-gray-900 dark:text-gray-100">
+                            <td className="whitespace-nowrap px-3 py-2 text-center font-medium">{a.art}</td>
+                            <td className="px-3 py-2">{a.professional || '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center">{a.baixada || '—'}</td>
+                            <td className="px-3 py-2">{a.notes || '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingLooseArtId(a.id);
+                                  setLooseArt(a.art);
+                                  setLooseProfessional(a.professional ?? '');
+                                  setLooseBaixada(a.baixada ?? '');
+                                  setLooseNotes(a.notes ?? '');
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                                title="Editar ART"
+                                aria-label="Editar ART"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm('Excluir esta ART avulsa?')) deleteLooseArtMutation.mutate(a.id);
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                title="Excluir ART"
+                                aria-label="Excluir ART"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>

@@ -65,7 +65,8 @@ export class KanbanController {
     try {
       const userId = requireUserId(req, next);
       if (!userId) return;
-      const boards = await kanbanService.listBoardsForUser(userId);
+      const archived = String(req.query.archived ?? '') === '1';
+      const boards = await kanbanService.listBoardsForUser(userId, archived);
       res.json({ success: true, data: boards });
     } catch (error) {
       handleKanbanError(error, next);
@@ -104,6 +105,34 @@ export class KanbanController {
       if (msg && msg !== KANBAN_FORBIDDEN) {
         return next(createError(msg, 400));
       }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async archiveBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { boardId } = req.params;
+      const result = await kanbanService.setBoardArchived(boardId, userId, true);
+      res.json({ success: true, data: result });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async unarchiveBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { boardId } = req.params;
+      const result = await kanbanService.setBoardArchived(boardId, userId, false);
+      res.json({ success: true, data: result });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
       handleKanbanError(error, next);
     }
   }

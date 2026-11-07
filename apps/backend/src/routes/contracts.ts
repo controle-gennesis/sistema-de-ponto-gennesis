@@ -4,6 +4,7 @@ import { ContractBillingController } from '../controllers/ContractBillingControl
 import { ContractAnnualValueController } from '../controllers/ContractAnnualValueController';
 import { ContractAddendumController } from '../controllers/ContractAddendumController';
 import { ContractPleitoController } from '../controllers/ContractPleitoController';
+import { ContratoSocioSubitemController } from '../controllers/ContratoSocioSubitemController';
 import { ContractWeeklyProductionController } from '../controllers/ContractWeeklyProductionController';
 import { authenticate } from '../middleware/auth';
 
@@ -14,6 +15,7 @@ const weeklyProductionController = new ContractWeeklyProductionController();
 const annualValueController = new ContractAnnualValueController();
 const addendumController = new ContractAddendumController();
 const pleitoController = new ContractPleitoController();
+const socioSubitemController = new ContratoSocioSubitemController();
 
 router.use(authenticate);
 
@@ -24,6 +26,11 @@ router.get('/', (req, res, next) =>
 router.get('/overview', (req, res, next) =>
   contractController.getOverview(req, res, next)
 );
+
+router.get('/socios-subitens', (req, res, next) => socioSubitemController.list(req, res, next));
+router.post('/socios-subitens', (req, res, next) => socioSubitemController.create(req, res, next));
+router.patch('/socios-subitens/:id', (req, res, next) => socioSubitemController.update(req, res, next));
+router.delete('/socios-subitens/:id', (req, res, next) => socioSubitemController.remove(req, res, next));
 
 router.get('/gastos-operacionais', (req, res, next) =>
   contractController.getGastosOperacionais(req, res, next)

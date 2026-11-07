@@ -4,6 +4,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 /** Etapas do fluxo ADM/TST (filtro, feedback e badges). */
 export type AdmTstFlowStatus =
   | 'IN_REVIEW_DP'
+  | 'WAITING_RETURN'
   | 'WAITING_SUPPLIES'
   | 'WAITING_PAYMENT'
   | 'CONCLUDED'
@@ -11,6 +12,7 @@ export type AdmTstFlowStatus =
 
 export const ADM_TST_FLOW_STATUSES: AdmTstFlowStatus[] = [
   'IN_REVIEW_DP',
+  'WAITING_RETURN',
   'WAITING_SUPPLIES',
   'WAITING_PAYMENT',
   'CONCLUDED',
@@ -19,6 +21,7 @@ export const ADM_TST_FLOW_STATUSES: AdmTstFlowStatus[] = [
 
 export const ADM_TST_STATUS_LABELS: Record<AdmTstFlowStatus, string> = {
   IN_REVIEW_DP: 'Em Análise',
+  WAITING_RETURN: 'Correção',
   WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
   WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
@@ -27,6 +30,7 @@ export const ADM_TST_STATUS_LABELS: Record<AdmTstFlowStatus, string> = {
 
 export const ADM_TST_STATUS_LABEL_CLASS: Record<AdmTstFlowStatus, string> = {
   IN_REVIEW_DP: 'font-semibold text-yellow-800 dark:text-yellow-300',
+  WAITING_RETURN: 'font-semibold text-amber-800 dark:text-amber-300',
   WAITING_SUPPLIES: 'font-semibold text-orange-800 dark:text-orange-300',
   WAITING_PAYMENT: 'font-semibold text-orange-800 dark:text-orange-300',
   CONCLUDED: 'font-semibold text-green-700 dark:text-green-300',
@@ -35,6 +39,7 @@ export const ADM_TST_STATUS_LABEL_CLASS: Record<AdmTstFlowStatus, string> = {
 
 export const ADM_TST_STATUS_ROW_BADGE: Record<AdmTstFlowStatus, string> = {
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  WAITING_RETURN: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   WAITING_SUPPLIES: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_PAYMENT: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
@@ -44,6 +49,7 @@ export const ADM_TST_STATUS_ROW_BADGE: Record<AdmTstFlowStatus, string> = {
 /** Status em que a equipe ADM/TST pode registrar feedback. */
 export const ADM_TST_MAY_SEND_FEEDBACK_STATUSES: AdmTstFlowStatus[] = [
   'IN_REVIEW_DP',
+  'WAITING_RETURN',
   'WAITING_SUPPLIES',
   'WAITING_PAYMENT',
 ];

@@ -196,6 +196,8 @@ export function NativeCallOverlay({
     kickGroupPeer,
     approveGroupJoin,
     inviteMoreToGroupCall,
+    addPeopleToCall,
+    getCallPeerUserId,
   } = call;
 
   const localPipRef = useRef<HTMLVideoElement>(null);
@@ -212,6 +214,7 @@ export function NativeCallOverlay({
   const [addParticipantOpen, setAddParticipantOpen] = useState(false);
   const [addParticipantPick, setAddParticipantPick] = useState<string[]>([]);
   const [callMessage, setCallMessage] = useState('');
+  const [addPeopleSearch, setAddPeopleSearch] = useState('');
   const prevMinimizedRef = useRef(false);
   const minimizedCardRef = useRef<HTMLDivElement>(null);
   const minDragStateRef = useRef<{ active: boolean; dx: number; dy: number }>({ active: false, dx: 0, dy: 0 });
@@ -363,15 +366,33 @@ export function NativeCallOverlay({
     enabled: Boolean(isGroupCall && activeChatId && phase === 'connected'),
   });
 
+  // Chamada 1:1 (ou 1:1 que virou grupo): qualquer usuário pode ser adicionado.
+  const needsOpenInviteList =
+    phase === 'connected' && (!isGroupCall || (!!groupChatForInvite && groupChatForInvite.chatType !== 'GROUP'));
+  const { data: openInviteUsers } = useQuery({
+    queryKey: ['native-call-open-invite-users'],
+    queryFn: async () => {
+      const res = await api.get('/chats/direct/users');
+      return (res.data?.data ?? []) as Array<{ id: string; name: string }>;
+    },
+    enabled: needsOpenInviteList && (addParticipantOpen || isGroupCall),
+    staleTime: 60_000,
+  });
+
   const eligibleAddParticipants = useMemo(() => {
-    if (!groupChatForInvite || groupChatForInvite.chatType !== 'GROUP') return [];
+    if (!groupChatForInvite || groupChatForInvite.chatType !== 'GROUP') {
+      if (!needsOpenInviteList) return [];
+      return (openInviteUsers ?? [])
+        .filter((u) => u.id && u.id !== user?.id && u.id !== getCallPeerUserId() && !groupPeers[u.id])
+        .map((u) => ({ userId: u.id, user: { name: u.name } }));
+    }
     const parts = groupChatForInvite.participants ?? [];
     return parts.filter((p) => {
       if (!p.userId || p.userId === user?.id) return false;
       if (groupPeers[p.userId]) return false;
       return true;
     });
-  }, [groupChatForInvite, groupPeers, user?.id]);
+  }, [groupChatForInvite, groupPeers, user?.id, needsOpenInviteList, openInviteUsers, getCallPeerUserId]);
 
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
@@ -603,6 +624,21 @@ export function NativeCallOverlay({
         <>
           <div className={`relative flex min-h-0 flex-1 flex-col bg-gradient-to-b ${callGradientClass}`}>
             <div className="absolute right-4 top-4 z-30 flex items-center gap-2">
+              {phase === 'connected' && !isGroupCall && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddParticipantOpen((v) => !v);
+                    setAddParticipantPick([]);
+                    setAddPeopleSearch('');
+                  }}
+                  className={`rounded-md p-2 ${addParticipantOpen ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-black/50 hover:bg-black/65'}`}
+                  aria-label="Adicionar pessoas à chamada"
+                  title="Adicionar pessoas"
+                >
+                  <UserPlus className="h-4 w-4" />
+                </button>
+              )}
               {phase === 'connected' && !isGroupCall && (
                 <>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${qualityColor}`}>
@@ -845,6 +881,67 @@ export function NativeCallOverlay({
                     <Send className="h-4 w-4" />
                   </button>
                 </form>
+              </div>
+            )}
+            {!isGroupCall && addParticipantOpen && phase === 'connected' && (
+              <div className={`absolute right-4 top-16 z-30 flex max-h-[60vh] w-[min(92vw,320px)] flex-col overflow-hidden rounded-2xl backdrop-blur-md ${isDark ? 'border border-white/20 bg-black/75' : 'border border-gray-300 bg-white/90'}`}>
+                <div className={`border-b px-3 py-2 text-sm font-semibold ${isDark ? 'border-white/15' : 'border-gray-300'}`}>
+                  Adicionar à chamada
+                </div>
+                <div className="px-3 pt-2">
+                  <input
+                    value={addPeopleSearch}
+                    onChange={(e) => setAddPeopleSearch(e.target.value)}
+                    placeholder="Buscar pessoa..."
+                    className={`h-8 w-full rounded-lg px-2 text-xs outline-none ${isDark ? 'border border-white/15 bg-white/10 text-white placeholder:text-white/50' : 'border border-gray-300 bg-white text-gray-900'}`}
+                  />
+                </div>
+                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
+                  {eligibleAddParticipants
+                    .filter((p) => (p.user?.name ?? '').toLowerCase().includes(addPeopleSearch.trim().toLowerCase()))
+                    .map((p) => {
+                      const checked = addParticipantPick.includes(p.userId);
+                      return (
+                        <label
+                          key={p.userId}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${isDark ? 'hover:bg-white/10' : 'hover:bg-white'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setAddParticipantPick((prev) =>
+                                checked ? prev.filter((id) => id !== p.userId) : [...prev, p.userId]
+                              )
+                            }
+                            className="rounded border-gray-400"
+                          />
+                          <span className="truncate">{p.user?.name?.trim() || 'Usuário'}</span>
+                        </label>
+                      );
+                    })}
+                  {eligibleAddParticipants.length === 0 && (
+                    <p className="text-xs opacity-80">Carregando pessoas…</p>
+                  )}
+                </div>
+                <div className="px-3 pb-3">
+                  <button
+                    type="button"
+                    disabled={addParticipantPick.length === 0}
+                    onClick={() => {
+                      if (addParticipantPick.length === 0) return;
+                      addPeopleToCall(addParticipantPick);
+                      toast.success(
+                        addParticipantPick.length === 1 ? 'Convite enviado' : `${addParticipantPick.length} convites enviados`
+                      );
+                      setAddParticipantPick([]);
+                      setAddParticipantOpen(false);
+                    }}
+                    className="w-full rounded-lg bg-emerald-600 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Convidar selecionados
+                  </button>
+                </div>
               </div>
             )}
             {isGroupCall && isGroupPanelOpen && (

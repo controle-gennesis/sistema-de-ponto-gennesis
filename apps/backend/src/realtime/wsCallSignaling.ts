@@ -34,6 +34,8 @@ type GroupSession = {
   waitingApproval: Set<string>;
   /** Estado de mídia por participante. */
   mediaState: Map<string, { micMuted: boolean; camOff: boolean }>;
+  /** Chamada 1:1 que virou grupo: quem está na chamada pode convidar qualquer usuário (não há grupo pai). */
+  openInvite?: boolean;
 };
 
 const MAX_GROUP_MESH = 12;
@@ -649,6 +651,97 @@ export function attachCallSignaling(server: Server): void {
             break;
           }
 
+          case 'call:upgrade-to-group': {
+            // Chamada 1:1 em andamento vira chamada em grupo para adicionar mais gente.
+            const callId = msg.callId as string;
+            const targetUserIds = (msg.targetUserIds as string[] | undefined)?.filter(Boolean) ?? [];
+            if (!callId || targetUserIds.length === 0) return;
+            const recU = activeCalls.get(callId);
+            if (!recU || !recU.answeredAt) return;
+            if (recU.callerId !== uid && recU.calleeId !== uid) return;
+
+            const otherU = otherInCall(recU, uid)!;
+            const ringU = Array.from(new Set(targetUserIds)).filter((id) => id !== uid && id !== otherU);
+            if (ringU.length === 0) return;
+            if (2 + ringU.length > MAX_GROUP_MESH) {
+              sendToUser(uid, { type: 'call:error', callId, code: 'group-too-big', max: MAX_GROUP_MESH });
+              return;
+            }
+            const existingU = await prisma.user.findMany({
+              where: { id: { in: ringU }, isActive: true },
+              select: { id: true },
+            });
+            const validU = ringU.filter((id) => existingU.some((u) => u.id === id));
+            if (validU.length === 0) return;
+            const busyU = validU.filter((id) => userInAnyCallSocket(id));
+            if (busyU.length > 0) {
+              sendToUser(uid, { type: 'call:group-busy', callId, busyUserIds: busyU });
+              return;
+            }
+
+            let sideU: string;
+            try {
+              sideU = await chatService.createGroupCallSideChat({
+                parentGroupChatId: recU.chatId,
+                initiatorId: uid,
+                callId,
+                participantUserIds: [uid, otherU, ...validU],
+              });
+            } catch (e) {
+              console.error('[ws/calls] upgrade side chat', e);
+              sendToUser(uid, { type: 'call:error', callId, code: 'side-chat-failed' });
+              return;
+            }
+
+            activeCalls.delete(callId);
+            const grpU: GroupSession = {
+              chatId: recU.chatId,
+              sideChatId: sideU,
+              video: recU.video,
+              initiatorId: recU.callerId,
+              startedAt: recU.startedAt,
+              locked: false,
+              joined: new Set([recU.callerId, recU.calleeId]),
+              ringing: new Set(validU),
+              waitingApproval: new Set(),
+              mediaState: new Map([
+                [recU.callerId, { micMuted: false, camOff: !recU.video }],
+                [recU.calleeId, { micMuted: false, camOff: !recU.video }],
+              ]),
+              openInvite: true,
+            };
+            groupSessions.set(callId, grpU);
+
+            const namesU = await namesByUserIds([recU.callerId, recU.calleeId]);
+            for (const p of [recU.callerId, recU.calleeId]) {
+              sendToUser(p, { type: 'call:upgraded-to-group', callId, chatId: recU.chatId, callSideChatId: sideU });
+            }
+            for (const tid of validU) {
+              sendToUser(tid, {
+                type: 'call:incoming',
+                callId,
+                chatId: recU.chatId,
+                callSideChatId: sideU,
+                video: recU.video,
+                isGroupCall: true,
+                groupExpectedCount: grpU.joined.size + grpU.ringing.size,
+                from: { id: uid, name: namesU[uid] || 'Usuário' },
+              });
+            }
+            // As duas pontas refazem a conexão entre si como malha de grupo (quem tem o menor id oferece).
+            meshNotifyNewJoiner(callId, grpU, recU.calleeId);
+            await notifyGroupEveryone(callId, grpU);
+            await persistCallStartedMessage({
+              chatId: sideU,
+              senderId: uid,
+              mode: 'group',
+              callId,
+              video: recU.video,
+              initiatorName: namesU[uid] || 'Usuário',
+            });
+            break;
+          }
+
           case 'call:group-add-invite': {
             const callId = msg.callId as string;
             const targetUserIds = (msg.targetUserIds as string[] | undefined)?.filter(Boolean) ?? [];
@@ -656,14 +749,14 @@ export function attachCallSignaling(server: Server): void {
             const grpAdd = groupSessions.get(callId);
             if (!grpAdd || !grpAdd.joined.has(uid)) return;
 
-            const membersAdd = await getGroupParticipantIds(grpAdd.chatId);
-            if (!membersAdd) return;
+            const membersAdd = grpAdd.openInvite ? null : await getGroupParticipantIds(grpAdd.chatId);
+            if (!grpAdd.openInvite && !membersAdd) return;
 
             const uniq = Array.from(new Set(targetUserIds));
             const allowed = uniq.filter(
               (id) =>
                 id !== uid &&
-                membersAdd.includes(id) &&
+                (grpAdd.openInvite || membersAdd!.includes(id)) &&
                 !grpAdd.joined.has(id) &&
                 !grpAdd.ringing.has(id) &&
                 !grpAdd.waitingApproval.has(id)
