@@ -1103,17 +1103,22 @@ export function ContratoAcompanhamentoListPage({
           ) : null}
 
           {isSplit && splitWith ? (
-            <div className="space-y-6">
-              {renderPanel(config, {
-                compact: false,
-                formVariant: 'modal',
-                consumeOpenQuery: openKind === config.kind,
-              })}
-              {renderPanel(splitWith, {
-                compact: false,
-                formVariant: 'modal',
-                consumeOpenQuery: openKind === splitWith.kind,
-              })}
+            // Tela dividida: reunião quinzenal à esquerda e relatório mensal à direita (empilha em telas estreitas).
+            <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+              <div className="min-w-0">
+                {renderPanel(config, {
+                  compact: false,
+                  formVariant: 'modal',
+                  consumeOpenQuery: openKind === config.kind,
+                })}
+              </div>
+              <div className="min-w-0">
+                {renderPanel(splitWith, {
+                  compact: false,
+                  formVariant: 'modal',
+                  consumeOpenQuery: openKind === splitWith.kind,
+                })}
+              </div>
             </div>
           ) : (
             renderPanel(config, { compact: false, formVariant: 'modal', consumeOpenQuery: true })

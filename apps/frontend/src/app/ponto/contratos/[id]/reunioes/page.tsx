@@ -1,14 +1,12 @@
 'use client';
 
 import { FileText, Video } from 'lucide-react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo } from 'react';
+import { useParams } from 'next/navigation';
 import {
   ContratoAcompanhamentoListPage,
   type ContratoAcompanhamentoListConfig,
 } from '@/components/contract/ContratoAcompanhamentoListPage';
 import { Loading } from '@/components/ui/Loading';
-import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
 import { usePermissions } from '@/hooks/usePermissions';
 
 const REUNIOES_CONFIG: ContratoAcompanhamentoListConfig = {
@@ -35,9 +33,9 @@ const REUNIOES_CONFIG: ContratoAcompanhamentoListConfig = {
   openSuccessToast: 'Reunião da quinzena aberta para registro.',
   createSuccessToast: 'Nova reunião criada.',
   allowConfigureForm: false,
-  allowToolbarCreate: false,
+  // Botão pequeno (+) para criar/abrir a reunião manualmente e preencher durante a reunião.
+  allowToolbarCreate: true,
   allowRowEditDelete: false,
-  allowFill: false,
 };
 
 const RELATORIO_MENSAL_CONFIG: ContratoAcompanhamentoListConfig = {
@@ -64,71 +62,33 @@ const RELATORIO_MENSAL_CONFIG: ContratoAcompanhamentoListConfig = {
   openSuccessToast: 'Mês atual aberto para preenchimento.',
   createSuccessToast: 'Novo relatório criado.',
   allowConfigureForm: false,
-  allowToolbarCreate: false,
+  // Botão pequeno (+) para criar/abrir o relatório do mês manualmente.
+  allowToolbarCreate: true,
   allowRowEditDelete: false,
 };
 
-type AbaId = 'quinzenais' | 'relatorio-mensal';
-
 export default function ContratoReunioesDeContratoPage() {
   const params = useParams();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const { canAccessContractReunioesTab, isLoading: permissionsLoading } = usePermissions();
   const rawId = params?.id;
   const contractId = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
   const canReunioesAba = canAccessContractReunioesTab(contractId);
-  const { pendingByContractId } = useMensalReportPendingCount(Boolean(contractId));
-  const mensalPendingForContract = pendingByContractId.has(contractId) ? 1 : 0;
-
-  const activeAba: AbaId =
-    searchParams?.get('aba') === 'relatorio-mensal' ? 'relatorio-mensal' : 'quinzenais';
-
-  const handleAbaChange = useCallback(
-    (id: string) => {
-      const next = new URLSearchParams(searchParams?.toString() ?? '');
-      if (id === 'relatorio-mensal') {
-        next.set('aba', 'relatorio-mensal');
-      } else {
-        next.delete('aba');
-      }
-      const qs = next.toString();
-      router.replace(
-        qs ? `/ponto/contratos/${contractId}/reunioes?${qs}` : `/ponto/contratos/${contractId}/reunioes`,
-        { scroll: false }
-      );
-    },
-    [contractId, router, searchParams]
-  );
-
-  const tabs = useMemo(
-    () => ({
-      items: [
-        { id: 'quinzenais' as const, label: 'Reuniões Quinzenais' },
-        {
-          id: 'relatorio-mensal' as const,
-          label: 'Relatório Mensal',
-          badgeCount: mensalPendingForContract,
-        },
-      ],
-      activeId: activeAba,
-      onChange: handleAbaChange,
-    }),
-    [activeAba, handleAbaChange, mensalPendingForContract]
-  );
 
   if (permissionsLoading) {
     return <Loading message="Carregando…" fullScreen size="lg" />;
   }
 
+  // Controle Geral repetido no topo (o mesmo da página do contrato) e, abaixo, reunião quinzenal e
+  // relatório mensal lado a lado — para acompanhar tudo ao mesmo tempo durante a reunião.
   if (!canReunioesAba) {
-    return <ContratoAcompanhamentoListPage config={RELATORIO_MENSAL_CONFIG} />;
+    return <ContratoAcompanhamentoListPage config={RELATORIO_MENSAL_CONFIG} showMonthlyControleGeral />;
   }
 
   return (
     <ContratoAcompanhamentoListPage
-      config={activeAba === 'relatorio-mensal' ? RELATORIO_MENSAL_CONFIG : REUNIOES_CONFIG}
-      tabs={tabs}
+      config={REUNIOES_CONFIG}
+      splitWith={RELATORIO_MENSAL_CONFIG}
+      showMonthlyControleGeral
     />
   );
 }
