@@ -134,6 +134,14 @@ function labelBadgeCompras(status: Parameters<typeof purchaseStatusLabel>[0]): s
   return label === 'Fila' || label === 'Cotação' ? `Em ${label}` : label;
 }
 
+/** Minúsculas e sem acento, para a busca achar "ses" em "SES - LOTE 14". */
+function normalizarBusca(v: unknown): string {
+  return String(v ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
 export default function FdsAprovadasPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
@@ -164,17 +172,42 @@ export default function FdsAprovadasPage() {
   });
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['demand-sheet-approvals', 'aprovadas-compras', searchTerm],
+    queryKey: ['demand-sheet-approvals', 'aprovadas-compras'],
     queryFn: async () => {
-      const res = await api.get('/demand-sheet-approvals/aprovadas-compras', {
-        params: { search: searchTerm || undefined },
-      });
+      // A busca é feita na tela, em todas as colunas da lista.
+      const res = await api.get('/demand-sheet-approvals/aprovadas-compras');
       return (res.data?.data || []) as FichaDemandaApprovalRecord[];
     },
     enabled: !loadingUser,
   });
 
-  const allRecords = useMemo(() => listData || [], [listData]);
+  /** Busca em todas as colunas (ID, código, IdMov/Nº mov., contrato, obra, solicitante, faturamento, status). */
+  const allRecords = useMemo(() => {
+    const lista = listData || [];
+    const termos = normalizarBusca(searchTerm).split(/\s+/).filter(Boolean);
+    if (termos.length === 0) return lista;
+    return lista.filter((r) => {
+      const texto = normalizarBusca(
+        [
+          r.displayNumber != null ? String(r.displayNumber) : '',
+          r.codFichaDemanda,
+          r.idMovRm,
+          idMovRmExibicao(r.idMovRm),
+          r.numMovRm,
+          r.contratoNome,
+          r.obra,
+          r.solicitanteNome,
+          formatCurrencyDisplay(r.faturamentoEstimado),
+          r.faturamentoEstimado != null ? String(r.faturamentoEstimado) : '',
+          pedidosStatusLabel(r.pedidosStatus),
+          labelBadgeCompras(r.purchaseStatus),
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+      return termos.every((t) => texto.includes(t));
+    });
+  }, [listData, searchTerm]);
   const statCounts = useMemo(
     () => ({
       ALL: allRecords.length,

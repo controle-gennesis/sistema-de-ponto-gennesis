@@ -34,12 +34,16 @@ export interface OrcamentoIndexEntry {
   bdiPercentual?: number;
   /** Total com BDI (R$), espelhado da meta. */
   totalComBdi?: number;
+  /** Desconto em pontos percentuais (ex.: 10), espelhado da meta.descontoPercentual. */
+  descontoPercentual?: number;
   /** OS do orçamento, espelhada da meta. */
   osCodigo?: string;
   /** Número da pasta, espelhado da meta. */
   numeroPasta?: string;
   /** Obra informada ao iniciar/importar o orçamento, espelhada da meta. */
   obra?: string;
+  /** Encargos do orçamento (Dados → Encargos): espelha meta.orcafascioDados.exempt. '' = não informado. */
+  encargos?: 'onerado' | 'desonerado' | '';
   /** Progresso físico do cronograma (%), espelhado de meta.cronogramaResumo. */
   cronogramaProgressoFisico?: number;
   /** Etapas concluídas no cronograma. */
@@ -115,6 +119,15 @@ function parseBdiPercentualPoints(raw: unknown): number | undefined {
     ? Number(limpo.replace(/\./g, '').replace(',', '.'))
     : Number(limpo);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/** Encargos do orçamento (campo "Encargos" em Dados): desonerado quando o OrçaFascio marca `exempt`. */
+function extractEncargosFromMeta(meta: Record<string, unknown> | undefined): 'onerado' | 'desonerado' | '' {
+  const dados = meta?.orcafascioDados;
+  if (!dados || typeof dados !== 'object') return '';
+  const exempt = (dados as { exempt?: unknown }).exempt;
+  if (typeof exempt !== 'boolean') return '';
+  return exempt ? 'desonerado' : 'onerado';
 }
 
 function extractListaFinanceiroFromMeta(meta: Record<string, unknown> | undefined): {
@@ -451,7 +464,8 @@ export class OrcamentoService {
     centroCustoId: string,
     index: OrcamentoIndex
   ): Promise<OrcamentoIndex> {
-    const LISTA_FIN_VERSION = 4;
+    // v5: encargos (onerado/desonerado); v6: desconto %, nos orçamentos já existentes.
+    const LISTA_FIN_VERSION = 6;
     const needsBdiFill = index.orcamentos.some(o => o.bdiPercentual == null);
     const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < 2;
     const needsOsFill = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
@@ -501,6 +515,8 @@ export class OrcamentoService {
           numeroPasta: osPasta.numeroPasta,
           ...(statusArquivo ? { statusAprovacao: statusArquivo } : {}),
           obra: osPasta.obra,
+          encargos: extractEncargosFromMeta(metaRaw),
+          descontoPercentual: parseBdiPercentualPoints(metaRaw?.descontoPercentual) ?? 0,
         };
         if (
           next.bdiPercentual !== o.bdiPercentual ||
@@ -541,6 +557,8 @@ export class OrcamentoService {
           osCodigo: atual.osCodigo || enriched.osCodigo,
           numeroPasta: atual.numeroPasta || enriched.numeroPasta,
           statusAprovacao: atual.statusAprovacao || enriched.statusAprovacao,
+          encargos: atual.encargos ?? enriched.encargos,
+          descontoPercentual: atual.descontoPercentual ?? enriched.descontoPercentual,
         };
       }
       return enriched;
@@ -1027,6 +1045,13 @@ export class OrcamentoService {
               osCodigo: osPastaFromMeta.osCodigo,
               numeroPasta: osPastaFromMeta.numeroPasta,
               obra: osPastaFromMeta.obra,
+              encargos: extractEncargosFromMeta(
+                meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
+              ),
+              descontoPercentual:
+                parseBdiPercentualPoints(
+                  meta && typeof meta === 'object' ? (meta as Record<string, unknown>).descontoPercentual : undefined
+                ) ?? 0,
               ...(cronoFromMeta.cronogramaProgressoFisico !== undefined
                 ? {
                     cronogramaProgressoFisico: cronoFromMeta.cronogramaProgressoFisico,

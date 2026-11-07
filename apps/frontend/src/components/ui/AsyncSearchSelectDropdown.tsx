@@ -55,6 +55,18 @@ export type AsyncSearchSelectDropdownProps<T> = {
   defaultOptionsLabel?: string;
   /** IDs já escolhidos — mostra check e permite marcar/desmarcar na lista. */
   selectedIds?: string[];
+  /** Altura máxima da lista (px). Padrão: a mesma dos demais seletores. */
+  listMaxPx?: number;
+  /** Sugestões carregadas ao abrir com a busca vazia (ex.: pela descrição do item). */
+  defaultOptionsFn?: () => Promise<T[]>;
+  /** Chave de cache das sugestões (mude quando o contexto mudar). */
+  defaultOptionsKey?: string;
+  /** Mostra "N resultado(s)" acima da lista. */
+  showResultCount?: boolean;
+  /** Recebe o texto buscado — para destacar o que bateu na opção. */
+  renderOptionWithQuery?: (option: T, query: string) => React.ReactNode;
+  /** Abre sempre para baixo (rola a tela para dar espaço, se preciso). */
+  openDownOnly?: boolean;
 };
 
 function getPortalRoot(): HTMLElement | null {
@@ -62,17 +74,17 @@ function getPortalRoot(): HTMLElement | null {
   return document.getElementById('dropdown-portal-root') ?? document.body;
 }
 
-function computeFloatingPos(trigger: HTMLElement): FloatingPos {
+function computeFloatingPos(trigger: HTMLElement, listMax = LIST_MAX, soParaBaixo = false): FloatingPos {
   const rect = trigger.getBoundingClientRect();
   const gap = 6;
   const margin = 12;
   const width = Math.max(rect.width, 200);
   const chrome = 72;
-  const preferred = LIST_MAX + chrome;
+  const preferred = listMax + chrome;
 
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
-  const openUp = spaceBelow < preferred && spaceAbove > spaceBelow;
+  const openUp = !soParaBaixo && spaceBelow < preferred && spaceAbove > spaceBelow;
 
   if (openUp) {
     const maxHeight = Math.max(160, Math.min(preferred, spaceAbove));
@@ -115,7 +127,14 @@ export function AsyncSearchSelectDropdown<T>({
   showCheckbox = false,
   defaultOptions,
   defaultOptionsLabel,
+  listMaxPx,
+  defaultOptionsFn,
+  defaultOptionsKey,
+  showResultCount = false,
+  renderOptionWithQuery,
+  openDownOnly = false,
 }: AsyncSearchSelectDropdownProps<T>) {
+  const listMax = listMaxPx ?? LIST_MAX;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -148,10 +167,17 @@ export function AsyncSearchSelectDropdown<T>({
     staleTime: 30_000,
   });
 
+  const { data: sugestoes = [], isFetching: buscandoSugestoes } = useQuery({
+    queryKey: [queryKeyPrefix, 'sugestoes', defaultOptionsKey ?? ''],
+    queryFn: () => (defaultOptionsFn ? defaultOptionsFn() : Promise.resolve([] as T[])),
+    enabled: open && !!defaultOptionsFn && search.trim().length < Math.max(1, minSearchLength),
+    staleTime: 5 * 60_000,
+  });
+
   const syncFloatingPos = useCallback(() => {
     if (!triggerRef.current) return;
-    setFloatingPos(computeFloatingPos(triggerRef.current));
-  }, []);
+    setFloatingPos(computeFloatingPos(triggerRef.current, listMax, openDownOnly));
+  }, [listMax, openDownOnly]);
 
   // Rolagem volta ao topo só ao abrir a lista, não a cada atualização das opções.
   useLayoutEffect(() => {
@@ -165,6 +191,21 @@ export function AsyncSearchSelectDropdown<T>({
 
     const onScroll = (e: Event) => {
       if (panelRef.current?.contains(e.target as Node)) return;
+      // Campo saiu da área visível ao rolar (ex.: lista dentro de um modal): fecha em vez de deixar o
+      // menu flutuando solto no meio da tela.
+      const trigger = triggerRef.current;
+      if (trigger) {
+        const r = trigger.getBoundingClientRect();
+        const alvo = e.target instanceof Element ? e.target : null;
+        const area = alvo && alvo !== document.documentElement && alvo !== document.body
+          ? alvo.getBoundingClientRect()
+          : { top: 0, bottom: window.innerHeight };
+        if (r.bottom < area.top + 4 || r.top > area.bottom - 4) {
+          setOpen(false);
+          setSearch('');
+          return;
+        }
+      }
       syncFloatingPos();
     };
 
@@ -222,7 +263,7 @@ export function AsyncSearchSelectDropdown<T>({
     return placeholder;
   }, [selectedLabel, value, placeholder]);
 
-  const listMaxHeight = floatingPos ? Math.max(80, floatingPos.maxHeight - 72) : LIST_MAX;
+  const listMaxHeight = floatingPos ? Math.max(80, floatingPos.maxHeight - 72) : listMax;
 
   const optionClassName = singleSelectOptionClassName;
 
@@ -239,13 +280,17 @@ export function AsyncSearchSelectDropdown<T>({
               aria-selected={active}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pickOption(option)}
-              className={`group ${optionClassName(active)}${renderOption && !showCheckbox ? ' !items-start' : ''}`}
+              className={`group ${optionClassName(active)}${(renderOption || renderOptionWithQuery) && !showCheckbox ? ' !items-start' : ''}`}
             >
               {showCheckbox ? (
                 <CheckboxIndicator checked={active} />
               ) : null}
-              <span className={`min-w-0 flex-1 ${renderOption ? '' : 'truncate'}`}>
-                {renderOption ? renderOption(option) : getOptionLabel(option)}
+              <span className={`min-w-0 flex-1 ${renderOption || renderOptionWithQuery ? '' : 'truncate'}`}>
+                {renderOptionWithQuery
+                  ? renderOptionWithQuery(option, search.trim())
+                  : renderOption
+                    ? renderOption(option)
+                    : getOptionLabel(option)}
               </span>
               {active && !showCheckbox ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
             </button>
@@ -257,6 +302,28 @@ export function AsyncSearchSelectDropdown<T>({
   const listContent = (() => {
     const q = search.trim();
     if (q.length < minSearchLength) {
+      if (defaultOptionsFn) {
+        if (buscandoSugestoes) {
+          return <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">Buscando sugestões…</p>;
+        }
+        if (sugestoes.length === 0) {
+          return (
+            <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+              Nenhuma sugestão para este item. Digite ao menos {minSearchLength} caracteres para buscar.
+            </p>
+          );
+        }
+        if (sugestoes.length > 0) {
+          return (
+            <div>
+              <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {defaultOptionsLabel ?? 'Sugestões'} · {sugestoes.length}
+              </p>
+              {renderOptionList(sugestoes)}
+            </div>
+          );
+        }
+      }
       if (defaultOptions && defaultOptions.length > 0) {
         return (
           <div>
@@ -290,6 +357,16 @@ export function AsyncSearchSelectDropdown<T>({
         <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           Nenhum resultado para esta pesquisa.
         </p>
+      );
+    }
+    if (showResultCount) {
+      return (
+        <div>
+          <p className="px-3 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {results.length} resultado(s){results.length >= 100 ? ' · refine a busca para ver outros' : ''}
+          </p>
+          {renderOptionList(results)}
+        </div>
       );
     }
     return renderOptionList(results);
@@ -372,6 +449,29 @@ export function AsyncSearchSelectDropdown<T>({
         onClick={(e) => {
           e.stopPropagation();
           if (disabled) return;
+          if (!open && openDownOnly && triggerRef.current) {
+            // Sem espaço embaixo: rola só o necessário para a lista caber abaixo, sem esconder o que fica
+            // logo acima do campo (ex.: o nome do item da FD) — deixa ~90px visíveis acima dele.
+            const trig = triggerRef.current;
+            const r = trig.getBoundingClientRect();
+            const espacoAbaixo = window.innerHeight - r.bottom - 18;
+            const falta = listMax + 72 - espacoAbaixo;
+            if (falta > 0) {
+              let rolavel: HTMLElement | null = trig.parentElement;
+              while (rolavel) {
+                const st = window.getComputedStyle(rolavel);
+                if (/(auto|scroll)/.test(st.overflowY) && rolavel.scrollHeight > rolavel.clientHeight) break;
+                rolavel = rolavel.parentElement;
+              }
+              const topoArea = rolavel ? rolavel.getBoundingClientRect().top : 0;
+              const maxRolagem = Math.max(0, r.top - topoArea - 90);
+              const delta = Math.min(falta, maxRolagem);
+              if (delta > 0) {
+                if (rolavel) rolavel.scrollTop += delta;
+                else window.scrollBy(0, delta);
+              }
+            }
+          }
           if (!open) syncFloatingPos();
           setOpen((v) => {
             if (v) setSearch('');

@@ -4554,6 +4554,7 @@ export function OcPurchaseOrdersPanel({
       historico: editOcForm.historico.trim() || null,
       items: editOcForm.items.map((it) => ({
         materialId: it.materialId,
+        materialRequestItemId: it.materialRequestItemId ?? null,
         quantity: Number(it.quantity),
         unit: it.unit,
         unitPrice: Number(it.unitPrice)

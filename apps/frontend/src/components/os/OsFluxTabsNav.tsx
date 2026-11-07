@@ -37,7 +37,7 @@ export function OsFluxTabsNav({
                 key={tab.id}
                 active={active}
                 onClick={() => onActiveTab(tab.id)}
-                className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                className="flex items-center gap-2 whitespace-nowrap px-2.5 py-2 text-sm font-medium sm:px-3.5 sm:text-base"
               >
                 {tab.label}
                 <span className="app-tab__badge">

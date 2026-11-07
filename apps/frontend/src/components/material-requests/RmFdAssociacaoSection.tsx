@@ -24,18 +24,32 @@ const ALERTA_LABEL: Record<string, string> = {
   unidade: 'unidade diferente da FD',
 };
 
-export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId: string }) {
-  const [alertasExpandidos, setAlertasExpandidos] = useState(false);
-
-  const { data } = useQuery({
-    queryKey: ['rm-fd-association', materialRequestId],
+/** Mesma consulta da seção: usada para buscar junto com o detalhe da RM (prefetch) e na própria seção. */
+export function rmFdAssociacaoQuery(materialRequestId: string) {
+  return {
+    queryKey: ['rm-fd-association', materialRequestId] as const,
     queryFn: async () => {
       const res = await api.get(`/demand-sheet-approvals/by-material-request/${materialRequestId}`);
       return (res.data?.data ?? null) as FdAssociacao | null;
     },
-    enabled: !!materialRequestId,
     staleTime: 60_000,
-    retry: false,
+    retry: false as const,
+  };
+}
+
+function Detalhamento({ texto }: { texto?: string }) {
+  if (!texto) return null;
+  return (
+    <p className="mt-0.5 text-sm italic text-gray-500 dark:text-gray-400">Detalhamento: {texto}</p>
+  );
+}
+
+export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId: string }) {
+  const [alertasExpandidos, setAlertasExpandidos] = useState(false);
+
+  const { data } = useQuery({
+    ...rmFdAssociacaoQuery(materialRequestId),
+    enabled: !!materialRequestId,
   });
 
   if (!data || data.itens.length === 0) return null;
@@ -99,8 +113,13 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
                       <ul className="mt-2 space-y-1 text-xs">
                         {(it.materiais ?? []).map((m, idx) => (
                           <li key={`${m.materialId}-${idx}`} className="flex items-baseline justify-between gap-3">
-                            <span className="min-w-0 truncate text-gray-700 dark:text-gray-300">
+                            <span className="min-w-0 text-gray-700 dark:text-gray-300">
                               → {m.materialLabel || 'Material'}
+                              {m.detalhamento ? (
+                                <span className="block pl-3 italic text-gray-500 dark:text-gray-400">
+                                  Detalhamento: {m.detalhamento}
+                                </span>
+                              ) : null}
                             </span>
                             <span
                               className={`shrink-0 tabular-nums ${
@@ -154,6 +173,7 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
                   </td>
                   <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                     {materiais[0] ? materiais[0].materialLabel : '—'}
+                    <Detalhamento texto={materiais[0]?.detalhamento} />
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-gray-700 dark:text-gray-300">
                     {materiais[0] ? `${fmtQtd(materiais[0].quantity)} ${materiais[0].unit}` : '—'}
@@ -176,6 +196,7 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
                     )}
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                       {m.materialLabel}
+                      <Detalhamento texto={m.detalhamento} />
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-gray-700 dark:text-gray-300">
                       {fmtQtd(m.quantity)} {m.unit}

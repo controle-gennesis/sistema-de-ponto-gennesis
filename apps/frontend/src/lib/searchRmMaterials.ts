@@ -36,8 +36,11 @@ export function isRmServiceMaterial(
   );
 }
 
-/** Busca materiais para RM (IDs de engenharia); mínimo 2 caracteres. */
-export async function searchRmMaterials(search: string, limit = 50): Promise<RmMaterialListItem[]> {
+/**
+ * Busca materiais para RM (IDs de engenharia); mínimo 2 caracteres.
+ * O servidor procura cada palavra em qualquer ordem, sem acento, e devolve por relevância.
+ */
+export async function searchRmMaterials(search: string, limit = 100): Promise<RmMaterialListItem[]> {
   const term = search.trim();
   if (term.length < 2) return [];
 
@@ -46,4 +49,24 @@ export async function searchRmMaterials(search: string, limit = 50): Promise<RmM
   });
 
   return res.data?.data ?? [];
+}
+
+/** Sugestões do cadastro pela descrição de um item (ex.: insumo da FD): basta bater parte das palavras. */
+export async function sugerirRmMaterials(descricao: string, limit = 30): Promise<RmMaterialListItem[]> {
+  const term = descricao.trim();
+  if (term.length < 3) return [];
+  const res = await api.get('/material-requests/materials', {
+    params: { search: term, limit, sugestao: 1 },
+  });
+  return res.data?.data ?? [];
+}
+
+/** Palavras digitadas (sem acento) — usadas para destacar o que bateu na lista. */
+export function palavrasDaBusca(texto: string): string[] {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9.,/-]+/)
+    .filter((t) => t.length >= 2);
 }

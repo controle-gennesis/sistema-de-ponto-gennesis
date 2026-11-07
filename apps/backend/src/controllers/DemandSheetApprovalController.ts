@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { idMovsValidadosComprasG4 } from '../lib/fluigG4Validacao';
+import { fasesFluigDasOcs, type FluigOcFase } from '../lib/fluigOcFase';
 import { createError } from '../middleware/errorHandler';
 import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_CONFLICT_MESSAGE } from '../lib/prismaConflict';
 import { AuthRequest } from '../middleware/auth';
@@ -135,8 +136,8 @@ type FdItemPedido = {
   unidadeFd: string;
   /** Soma só dos materiais pedidos na unidade da FD (base do saldo). */
   quantidadeNaUnidadeFd: number;
-  /** Materiais associados ao item neste pedido (1 item → N materiais). */
-  materiais: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+  /** Materiais associados ao item neste pedido (1 item → N materiais), com o detalhamento do solicitante. */
+  materiais: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
   /** Motivos de atenção para o gestor: '1:N' (vários materiais) e/ou 'unidade' (unidade diferente da FD). */
   alertas: string[];
 };
@@ -168,6 +169,9 @@ function parseItensPedidos(raw: unknown): FdItemPedido[] {
             materialLabel: String(m?.materialLabel || ''),
             quantity: Number(m?.quantity) || 0,
             unit: String(m?.unit || ''),
+            ...(typeof m?.detalhamento === 'string' && m.detalhamento.trim()
+              ? { detalhamento: m.detalhamento.trim() }
+              : {}),
           }))
         : [],
       alertas: Array.isArray(r.alertas) ? (r.alertas as unknown[]).map(String) : [],
@@ -262,6 +266,7 @@ async function itensOcPorRmMaterial(rmIds: string[]): Promise<Map<string, ItemOc
     totvsNumMovimento: true,
     materialRequestId: true,
     amountToPay: true,
+    freightAmount: true,
   } as const;
   const [porItemRm, porCabecalho] = await Promise.all([
     prisma.purchaseOrderItem.findMany({
@@ -292,6 +297,7 @@ async function itensOcPorRmMaterial(rmIds: string[]): Promise<Map<string, ItemOc
       totvsIdMov: number | null;
       totvsNumMovimento: string | null;
       amountToPay: unknown;
+      freightAmount?: unknown;
     };
   }) => {
     if (!rmId) return;
@@ -316,6 +322,32 @@ async function itensOcPorRmMaterial(rmIds: string[]): Promise<Map<string, ItemOc
   };
   for (const poi of porItemRm) adicionar(poi.materialRequestItem?.materialRequestId, poi);
   for (const poi of porCabecalho) adicionar(poi.purchaseOrder.materialRequestId, poi);
+
+  // Frete da OC entra no custo dos itens: rateado pelo valor de cada item no total de itens da OC.
+  const fretePorOc = new Map<string, number>();
+  for (const poi of [...porItemRm, ...porCabecalho]) {
+    const frete = Number(poi.purchaseOrder.freightAmount) || 0;
+    if (frete > 0) fretePorOc.set(poi.purchaseOrder.id, frete);
+  }
+  if (fretePorOc.size > 0) {
+    const somas = await prisma.purchaseOrderItem.groupBy({
+      by: ['purchaseOrderId'],
+      where: { purchaseOrderId: { in: [...fretePorOc.keys()] } },
+      _sum: { totalPrice: true },
+    });
+    const fatorPorOc = new Map<string, number>();
+    for (const sItens of somas) {
+      const itensTotal = Number(sItens._sum.totalPrice) || 0;
+      const frete = fretePorOc.get(sItens.purchaseOrderId) || 0;
+      if (itensTotal > 0 && frete > 0) fatorPorOc.set(sItens.purchaseOrderId, 1 + frete / itensTotal);
+    }
+    for (const lista of mapa.values()) {
+      for (const x of lista) {
+        const f = fatorPorOc.get(x.oc.id);
+        if (f) x.total = x.total * f;
+      }
+    }
+  }
   return mapa;
 }
 
@@ -1808,6 +1840,9 @@ export class DemandSheetApprovalController {
 
       const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
       if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (row.status === 'CANCELLED' || row.purchaseStatus === 'CANCELLED') {
+        throw createError('Ficha de demanda cancelada: não é possível reabrir pedidos.', 400);
+      }
       if (!row.pedidosEncerrados) {
         throw createError('Os pedidos desta FD não estão encerrados', 400);
       }
@@ -2127,6 +2162,10 @@ export class DemandSheetApprovalController {
 
       if (!fd) throw createError('Ficha de demanda não encontrada', 404);
       if (fd.status !== 'APPROVED') throw createError('Ficha de demanda não está aprovada', 400);
+      // FD cancelada (status de compras) não aceita pedido de material.
+      if (fd.purchaseStatus === 'CANCELLED') {
+        throw createError('Ficha de demanda cancelada: não é possível solicitar material por ela.', 400);
+      }
       // FD do orçamento: pedido de material só com orçamento e FD trancados.
       if ((await orcamentoDaFdTrancado(fd.anexos)) === false) {
         throw createError('Tranque o orçamento e a FD antes de pedir material.', 400);
@@ -2152,7 +2191,8 @@ export class DemandSheetApprovalController {
           quantity: z.number().positive(),
           /** Unidade do pedido (padrão = unidade da FD; editável no modal). */
           unit: z.string().optional(),
-          description: z.string().optional(),
+          /** Detalhamento do material escrito pelo solicitante (vai para a observação do item da RM). */
+          description: z.string().max(500, 'Detalhamento com no máximo 500 caracteres').optional(),
         })).min(1, 'Informe pelo menos um item'),
       });
 
@@ -2183,7 +2223,7 @@ export class DemandSheetApprovalController {
         descricao: string;
         fdQuantidade?: number;
         fdUnidade: string;
-        materiais: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+        materiais: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
       };
       const porItemFd = new Map<string, ItemFd>();
       for (const item of body.items) {
@@ -2199,6 +2239,7 @@ export class DemandSheetApprovalController {
           materialLabel: item.materialLabel,
           quantity: item.quantity,
           unit: (item.unit || '').trim() || item.fdUnidade.trim(),
+          ...(item.description?.trim() ? { detalhamento: item.description.trim() } : {}),
         });
         porItemFd.set(item.fdItemKey, atual);
       }
@@ -2252,7 +2293,7 @@ export class DemandSheetApprovalController {
         const unit = (item.unit || '').trim();
         const atual = linhasRm.get(item.materialId);
         if (!atual) {
-          linhasRm.set(item.materialId, { quantity: item.quantity, unit, notes: item.description ? [item.description] : [] });
+          linhasRm.set(item.materialId, { quantity: item.quantity, unit, notes: item.description?.trim() ? [item.description.trim()] : [] });
           continue;
         }
         if (atual.unit !== unit) {
@@ -2262,7 +2303,7 @@ export class DemandSheetApprovalController {
           );
         }
         atual.quantity += item.quantity;
-        if (item.description) atual.notes.push(item.description);
+        if (item.description?.trim()) atual.notes.push(item.description.trim());
       }
 
       const materialRequestService = new MaterialRequestService();
@@ -2355,10 +2396,33 @@ export class DemandSheetApprovalController {
       const rmId = String(req.params.materialRequestId || '').trim();
       if (!rmId) throw createError('ID inválido', 400);
 
-      const fd = await prisma.demandSheetApproval.findFirst({
-        where: { itensPedidos: { array_contains: [{ materialRequestId: rmId }] } },
-        select: { id: true, codFichaDemanda: true, obra: true, itensPedidos: true, anexos: true, contratoId: true, contrato: { select: { costCenterId: true, name: true } } },
-      });
+      const selectFd = {
+        id: true,
+        codFichaDemanda: true,
+        obra: true,
+        itensPedidos: true,
+        anexos: true,
+        contratoId: true,
+        contrato: { select: { costCenterId: true, name: true } },
+      } as const;
+      // Caminho rápido: a RM da FD guarda o código da FD (índice em codFichaDemanda); evita varrer o JSON de todas as FDs.
+      const rm = await prisma.materialRequest.findUnique({ where: { id: rmId }, select: { demandSheet: true } });
+      const codFd = String(rm?.demandSheet || '').trim();
+      let fd = codFd
+        ? (
+            await prisma.demandSheetApproval.findMany({
+              where: { codFichaDemanda: codFd },
+              select: selectFd,
+              take: 5,
+            })
+          ).find((f) => parseItensPedidos(f.itensPedidos).some((i) => i.materialRequestId === rmId)) ?? null
+        : null;
+      if (!fd && codFd) {
+        fd = await prisma.demandSheetApproval.findFirst({
+          where: { itensPedidos: { array_contains: [{ materialRequestId: rmId }] } },
+          select: selectFd,
+        });
+      }
       if (!fd) return res.json({ success: true, data: null });
 
       const itens = parseItensPedidos(fd.itensPedidos).filter((i) => i.materialRequestId === rmId);
@@ -2421,6 +2485,12 @@ export class DemandSheetApprovalController {
       const itensOc = await itensOcPorRmMaterial(rmIds);
       // Pago = OC validada pelo compras no G4 (Anexar Nota Fiscal ou Finalizada), pelo IdMov.
       const validadasG4 = await idMovsValidadosComprasG4();
+      // Fase G3/G4 do Fluig de cada OC enviada ao TOTVS (espelho; só leitura).
+      const idMovs = new Set<number>();
+      for (const lista of itensOc.values()) {
+        for (const { oc } of lista) if (oc.totvsIdMov != null) idMovs.add(oc.totvsIdMov);
+      }
+      const fasesFluig = await fasesFluigDasOcs([...idMovs]).catch(() => new Map<number, FluigOcFase>());
 
       // Quanto cada item da FD pediu de cada material na mesma RM (base do rateio do valor pago).
       const pedidoPorRmMaterial = new Map<string, number>();
@@ -2448,11 +2518,17 @@ export class DemandSheetApprovalController {
                 po.status !== 'CANCELLED' &&
                 po.status !== 'REJECTED' &&
                 validadasG4.has(po.totvsIdMov);
-              const valorMaterial = linhas
-                .filter((x) => x.oc.id === po.id)
-                .reduce((s, x) => s + x.total, 0);
+              const linhasDaOc = linhas.filter((x) => x.oc.id === po.id);
+              const valorMaterial = linhasDaOc.reduce((s, x) => s + x.total, 0);
+              const qtdMaterial = linhasDaOc.reduce((s, x) => s + x.quantidade, 0);
+              const fase = po.totvsIdMov != null ? fasesFluig.get(po.totvsIdMov) : undefined;
               return {
+                ocId: po.id,
                 orderNumber: po.orderNumber,
+                // Custo deste material na OC rateado para o item da FD (previsto, pago ou não).
+                valorOc: Math.round(valorMaterial * fator * 100) / 100,
+                quantidadeOc: Math.round(qtdMaterial * fator * 10000) / 10000,
+                fluigFase: fase ?? null,
                 status: po.status,
                 totvsIdMov: po.totvsIdMov,
                 totvsNumMovimento: po.totvsNumMovimento,

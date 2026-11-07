@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, RotateCcw, Truck, Wrench, X } from 'lucide-react';
+import { Download, FileSpreadsheet, RotateCcw, Truck, Wrench, X } from 'lucide-react';
+import { exportarMapaCotacao } from '@/lib/exportMapaCotacao';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -64,6 +65,20 @@ import {
   resolveOcDestinationFromCostCenter,
   type OcDestination,
 } from '@/lib/ocTotvsDestination';
+
+/**
+ * Detalhamento do solicitante (observação do item da RM). Pedidos antigos da FD gravavam
+ * "FD 1.1.1 — descrição" automaticamente: esse texto não é detalhamento e fica de fora.
+ */
+function detalhamentoSolicitante(item: { notes?: string | null; observation?: string | null }): string {
+  const bruto = String(item.notes ?? item.observation ?? '').trim();
+  if (!bruto) return '';
+  return bruto
+    .split(' | ')
+    .map((p) => p.trim())
+    .filter((p) => p && !/^FD\s+\S+\s+—\s/.test(p))
+    .join(' | ');
+}
 
 type MaterialRequestItem = {
   id: string;
@@ -1088,6 +1103,71 @@ export default function MapaCotacaoPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // --- Exportar o mapa (PDF/Excel, retrato/paisagem): exatamente o que está na tela ---
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFormato, setExportFormato] = useState<'pdf' | 'excel'>('pdf');
+  const [exportOrientacao, setExportOrientacao] = useState<'landscape' | 'portrait'>('landscape');
+  const [exportando, setExportando] = useState(false);
+
+  const exportarMapa = async () => {
+    if (!selectedRequestId || ocItems.length === 0) return;
+    setExportando(true);
+    try {
+      const fornecedorIds = Array.from(selectedSupplierIds);
+      const nomeFornecedor = (id: string) => {
+        const sup = suppliers.find((x) => x.id === id);
+        return sup ? (sup.code ? `${sup.code} - ${sup.name}` : sup.name) : id;
+      };
+      const itens = ocItems.map((item) => {
+        const qtdOc = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
+        const winner = winnersByItem.find((w) => w.itemId === item.id) || null;
+        const winnerUnit =
+          winner?.winnerSupplierId != null
+            ? parseMapUnitPrice(unitPriceBySupplierItem[`${winner.winnerSupplierId}:${item.id}`] ?? '')
+            : null;
+        return {
+          codigo: materialProductCode(item.material) || '',
+          material: materialItemLabel(item),
+          detalhamento: detalhamentoSolicitante(item) || undefined,
+          unidade: item.unit || '',
+          qtdRm: Number(item.quantity),
+          qtdOc,
+          valorReferencia: itemReferenceUnitPrice(item),
+          precos: fornecedorIds.map((sid) => parseMapUnitPrice(unitPriceBySupplierItem[`${sid}:${item.id}`] ?? '')),
+          vencedor: winner?.winnerSupplierId ? nomeFornecedor(winner.winnerSupplierId) : '',
+          vencedorUnitario: winnerUnit,
+          vencedorTotal: winnerUnit == null ? null : Math.round(winnerUnit * qtdOc * 100) / 100,
+          empateTecnico: !!winner?.technicalTie,
+        };
+      });
+      const fornecedores = fornecedorIds.map((sid) => {
+        const won = (wonItemsBySupplier[sid] ?? []).length;
+        const totals = computedSupplierTotals[sid];
+        return {
+          nome: nomeFornecedor(sid),
+          frete: parseMapUnitPrice(freightBySupplier[sid] ?? ''),
+          desconto: parseMapUnitPrice(discountBySupplier[sid] ?? ''),
+          valorTotal: won > 0 && totals ? totals.amountToPay : null,
+          ordemCompra: generatedOcSupplierIds.has(sid) ? 'OC gerada' : won > 0 ? 'Pendente' : '—',
+        };
+      });
+      await exportarMapaCotacao({
+        formato: exportFormato,
+        orientacao: exportOrientacao,
+        titulo: `Mapa de cotação · ${selectedRequestLabel}`,
+        subtitulo: [selectedRequestLabel, selectedCostCenterName].filter(Boolean).join(' · '),
+        arquivoBase: `Mapa_de_cotacao_${selectedRequestLabel}`,
+        itens,
+        fornecedores,
+      });
+      setExportModalOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível exportar o mapa.');
+    } finally {
+      setExportando(false);
+    }
+  };
+
   const clearMapSelection = () => {
     setSelectedRequestId('');
     setQuoteMapId('');
@@ -1324,7 +1404,8 @@ export default function MapaCotacaoPage() {
         const won = wonItemsBySupplier[supplierId] ?? [];
         for (const item of won) {
           const key = `${supplierId}:${item.id}`;
-          const detail = (supplierItemDetailByKey[key] ?? '').trim();
+          // Sem edição no mapa, vale o detalhamento do solicitante.
+          const detail = (supplierItemDetailByKey[key] ?? detalhamentoSolicitante(item)).trim();
           if (detail) itemNotesBySupplierItem[key] = detail;
         }
 
@@ -1540,6 +1621,16 @@ export default function MapaCotacaoPage() {
                         </p>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setExportModalOpen(true)}
+                      disabled={!selectedRequestId || !selectedRequest || ocItems.length === 0}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      title={selectedRequestId ? 'Exportar o mapa em PDF ou Excel' : 'Escolha uma RM para exportar'}
+                    >
+                      <Download className="h-4 w-4" aria-hidden />
+                      Exportar
+                    </button>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -1624,6 +1715,11 @@ export default function MapaCotacaoPage() {
                                       <p className="font-medium text-gray-900 dark:text-gray-100">
                                         {materialItemLabel(item)}
                                       </p>
+                                      {detalhamentoSolicitante(item) ? (
+                                        <p className="mt-0.5 text-xs italic text-gray-500 dark:text-gray-400">
+                                          Detalhamento do solicitante: {detalhamentoSolicitante(item)}
+                                        </p>
+                                      ) : null}
                                     </td>
                                     <td className={cadastroListClasses.tdCenter}>{unitLabel}</td>
                                     <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium`}>
@@ -2031,11 +2127,16 @@ export default function MapaCotacaoPage() {
                                 <p className="font-medium text-gray-900 dark:text-gray-100">
                                   {materialItemLabel(item)}
                                 </p>
+                                {detalhamentoSolicitante(item) ? (
+                                  <p className="mt-0.5 text-xs italic text-gray-500 dark:text-gray-400">
+                                    Detalhamento do solicitante: {detalhamentoSolicitante(item)}
+                                  </p>
+                                ) : null}
                               </td>
                               <td className={cadastroListClasses.td}>
                                 <input
                                   type="text"
-                                  value={supplierItemDetailByKey[detailKey] ?? ''}
+                                  value={supplierItemDetailByKey[detailKey] ?? detalhamentoSolicitante(item)}
                                   onChange={(e) => {
                                     const next = e.target.value;
                                     setSupplierItemDetailByKey((prev) => ({
@@ -2504,6 +2605,94 @@ export default function MapaCotacaoPage() {
             </Modal>
           );
         })()}
+
+          <Modal
+            isOpen={exportModalOpen}
+            onClose={() => {
+              if (!exportando) setExportModalOpen(false);
+            }}
+            title="Exportar mapa de cotação"
+            size="md"
+            confirmBeforeClose={false}
+          >
+            <div className="space-y-5">
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Formato</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 'pdf', label: 'PDF' },
+                      { id: 'excel', label: 'Excel' },
+                    ] as const
+                  ).map((op) => (
+                    <button
+                      key={op.id}
+                      type="button"
+                      onClick={() => setExportFormato(op.id)}
+                      className={`rounded-lg border-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                        exportFormato === op.id
+                          ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/30 dark:text-red-300'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      {op.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Orientação</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 'landscape', label: 'Paisagem' },
+                      { id: 'portrait', label: 'Retrato' },
+                    ] as const
+                  ).map((op) => (
+                    <button
+                      key={op.id}
+                      type="button"
+                      onClick={() => setExportOrientacao(op.id)}
+                      className={`rounded-lg border-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                        exportOrientacao === op.id
+                          ? 'border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/30 dark:text-red-300'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      {op.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {exportFormato === 'pdf'
+                    ? 'Em retrato, as colunas ficam mais estreitas para caber na folha.'
+                    : 'No Excel, vale para a impressão da planilha.'}
+                </p>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Sai o mapa como está na tela, com os fornecedores selecionados.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setExportModalOpen(false)}
+                  disabled={exportando}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportarMapa()}
+                  disabled={exportando}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  <Download className="h-4 w-4" aria-hidden />
+                  {exportando ? 'Exportando…' : 'Exportar'}
+                </button>
+              </div>
+            </div>
+          </Modal>
 
           <Modal
             isOpen={showCorrectionConfirm}

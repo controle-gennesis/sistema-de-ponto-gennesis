@@ -1,4 +1,5 @@
 'use client';
+import { RmCancelOcsAviso } from '@/components/material-requests/RmCancelOcsAviso';
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -2466,7 +2467,7 @@ function SolicitarMateriaisPage() {
                                       <span
                                         key={row.key}
                                         className={row.statusBadgeClassName}
-                                        title={row.status}
+                                        title={row.statusTitle ?? row.status}
                                       >
                                         {row.status}
                                       </span>
@@ -2504,6 +2505,25 @@ function SolicitarMateriaisPage() {
                           },
                           icon: <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                         },
+                        // Administrador cancela a RM em qualquer fase (fora da correção, só ele).
+                        ...(isAdministrator &&
+                        rowForActionMenu.status !== 'IN_REVIEW' &&
+                        rowForActionMenu.status !== 'CANCELLED'
+                          ? [
+                              {
+                                label: 'Cancelar RM',
+                                onClick: () => {
+                                  closeRowActionMenu();
+                                  setCancelTargetId(rowForActionMenu.id);
+                                },
+                                disabled: cancelRmMutation.isPending,
+                                disabledTitle: 'Cancelando...',
+                                icon: (
+                                  <XCircle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                                )
+                              }
+                            ]
+                          : []),
                         ...(rowForActionMenu.status === 'IN_REVIEW'
                           ? [
                               ...(canUserCancelMaterialRequest(
@@ -3596,6 +3616,13 @@ function SolicitarMateriaisPage() {
             title="Cancelar Requisição"
             size="md"
           >
+            <RmCancelOcsAviso
+              purchaseOrders={
+                (filteredRequests.find((r) => r.id === cancelTargetId) as
+                  | { purchaseOrders?: { status?: string | null; orderNumber?: string | null }[] }
+                  | undefined)?.purchaseOrders
+              }
+            />
             <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
               A RM ficará como <strong>Cancelada</strong> e sairá do fluxo de análise. Confirma?
             </p>

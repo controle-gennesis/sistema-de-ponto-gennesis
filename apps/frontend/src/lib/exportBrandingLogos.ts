@@ -97,18 +97,14 @@ async function loadGennesisLogo(maxHPx: number): Promise<LoadedLogo | null> {
   return null;
 }
 
-async function loadEngPacLogo(maxHPx: number): Promise<LoadedLogo | null> {
-  const img = await loadImageElement('/logo-engpac.png');
-  if (!img) return null;
-  return scaleImageToLogo(img, maxHPx, true);
-}
-
+/**
+ * Logos dos relatórios exportados. A logo da ENG PAC não aparece em nenhuma exportação:
+ * a faixa leva só a logo Gennesis (as funções "Dual" foram mantidas pelo nome, para não mexer nos usos).
+ */
 async function loadDualLogos(maxHPx = LOGO_MAX_H_PX): Promise<LoadedLogo[]> {
   const logos: LoadedLogo[] = [];
   const gennesis = await loadGennesisLogo(maxHPx);
   if (gennesis) logos.push(gennesis);
-  const engPac = await loadEngPacLogo(maxHPx);
-  if (engPac) logos.push(engPac);
   return logos;
 }
 
@@ -135,7 +131,7 @@ function composeHorizontal(logos: LoadedLogo[]): {
   return { canvas, widthPx, heightPx };
 }
 
-/** Faixa Gennesis + ENG PAC lado a lado para Excel (uma única imagem). */
+/** Faixa de logo para Excel (só Gennesis). */
 export async function loadExcelDualLogoStrip(
   maxHPx = LOGO_MAX_H_PX
 ): Promise<ExcelLogoStrip | null> {
@@ -154,7 +150,7 @@ export async function loadExcelDualLogoStrip(
   };
 }
 
-/** Faixa Gennesis + ENG PAC lado a lado para PDF (mm). */
+/** Faixa de logo para PDF (só Gennesis, em mm). */
 export async function loadPdfDualLogoStrip(maxHMm = 16): Promise<PdfLogoStrip | null> {
   const maxHPx = Math.round((maxHMm * 96) / 25.4);
   const logos = await loadDualLogos(maxHPx);

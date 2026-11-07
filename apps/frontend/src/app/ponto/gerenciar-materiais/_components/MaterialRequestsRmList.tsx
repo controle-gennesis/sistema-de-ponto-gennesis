@@ -1,4 +1,5 @@
 'use client';
+import { RmCancelOcsAviso } from '@/components/material-requests/RmCancelOcsAviso';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -575,7 +576,7 @@ export function MaterialRequestsRmList({
                                 <span
                                   key={row.key}
                                   className={row.statusBadgeClassName}
-                                  title={row.status}
+                                  title={row.statusTitle ?? row.status}
                                 >
                                   {row.status}
                                 </span>
@@ -694,7 +695,9 @@ export function MaterialRequestsRmList({
                     <span>Editar RM</span>
                   </Link>
                 )}
-              {requestForMenu.status === 'IN_REVIEW' &&
+              {(requestForMenu.status === 'IN_REVIEW' ||
+                // Administrador cancela a RM em qualquer fase.
+                (isAdministrator && requestForMenu.status !== 'CANCELLED')) &&
                 canUserCancelMaterialRequest(
                   requestForMenu,
                   currentUserId,
@@ -726,6 +729,12 @@ export function MaterialRequestsRmList({
           title="Cancelar Requisição"
           size="md"
         >
+          <RmCancelOcsAviso
+            purchaseOrders={
+              (cancelTarget as { purchaseOrders?: { status?: string | null; orderNumber?: string | null }[] })
+                .purchaseOrders
+            }
+          />
           <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
             A RM ficará como <strong>Cancelada</strong> e sairá do fluxo de análise. Confirma?
           </p>

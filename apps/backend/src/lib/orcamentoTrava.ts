@@ -66,6 +66,7 @@ const SESSAO_PROTEGIDA = [
   'insumosAnaliticoManuais',
   'itensOcultosNoOrcamento',
   'insumosAnaliticoOcultos',
+  'insumosSemDesconto',
   'servicosDocumento',
 ] as const;
 
@@ -83,6 +84,8 @@ const META_PROTEGIDA = [
   'importadoPlanilha',
   'usarMemoriaCalculo',
   'temAnalitico',
+  'requerConfigDesconto',
+  'descontoConfigFinalizada',
   'modoArredondamento',
   'statusAprovacao',
   'fichaDemandaApprovalId',

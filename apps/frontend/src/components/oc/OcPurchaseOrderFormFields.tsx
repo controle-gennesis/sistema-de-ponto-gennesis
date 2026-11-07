@@ -282,6 +282,8 @@ export function getOcSupplierLabel(supplier?: OcSupplierOption | null): string {
 
 export type OcFormLineItem = {
   materialId: string;
+  /** Item da RM atendido por esta linha — reenviado na edição para a RM não voltar a ficar pendente. */
+  materialRequestItemId?: string | null;
   quantity: number;
   unit: string;
   unitPrice: number;
@@ -816,6 +818,7 @@ export type OcFormOrderSource = {
       sinapiCode?: string | null;
       code?: string | null;
     };
+    materialRequestItemId?: string | null;
     materialRequestItem?: { quantity?: number | string | null } | null;
     quantity: number | string;
     unit?: string | null;
@@ -843,6 +846,7 @@ export function buildOcFormValuesFromOrder(
     const code = materialProductCode(it.material);
     return {
       materialId: it.material?.id || it.materialId || '',
+      materialRequestItemId: it.materialRequestItemId ?? null,
       quantity: Number(it.quantity),
       unit: it.unit || 'UN',
       unitPrice: Number(it.unitPrice),
