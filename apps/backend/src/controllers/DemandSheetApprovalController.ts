@@ -1,3 +1,4 @@
+import { cotacaoEmpreitaPreenchida as cotacaoEmpreitaPreenchida_ } from '../lib/cotacaoEmpreita';
 import { Response } from 'express';
 import { z } from 'zod';
 import {
@@ -731,7 +732,7 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
  */
 async function osNumeroPastaPorFd(
   rows: Array<{ id: string; anexos: unknown }>
-): Promise<{ os: Map<string, string>; orcamentoExiste: Map<string, boolean> }> {
+): Promise<{ os: Map<string, string>; orcamentoExiste: Map<string, boolean>; gastoEmpreita: Map<string, number> }> {
   const refPorFd = new Map<string, { centroCustoId: string; orcamentoId: string }>();
   for (const r of rows) {
     const ref = extractOrcamentoRefFromAnexos(r.anexos);
@@ -740,6 +741,7 @@ async function osNumeroPastaPorFd(
   const ccs = [...new Set([...refPorFd.values()].map((r) => r.centroCustoId))];
   const osPorOrcamento = new Map<string, string>();
   const orcamentosExistentes = new Set<string>();
+  const gastoPorOrcamento = new Map<string, number>();
   const ccsLidos = new Set<string>();
   await Promise.all(
     ccs.map(async (cc) => {
@@ -748,6 +750,7 @@ async function osNumeroPastaPorFd(
         ccsLidos.add(cc);
         for (const o of index.orcamentos) {
           orcamentosExistentes.add(`${cc}|${o.id}`);
+          if (typeof o.gastoEmpreita === 'number') gastoPorOrcamento.set(`${cc}|${o.id}`, o.gastoEmpreita);
           const os = String(o.osCodigo || '').trim();
           const pasta = String(o.numeroPasta || '').trim();
           const label = os && pasta ? `${os} - Nº${pasta}` : os || pasta;
@@ -761,13 +764,16 @@ async function osNumeroPastaPorFd(
   const out = new Map<string, string>();
   // Orçamento de origem excluído: a FD não entra nos resultados (índice lido e orçamento ausente).
   const orcamentoExiste = new Map<string, boolean>();
+  const gastoEmpreita = new Map<string, number>();
   for (const [fdId, ref] of refPorFd) {
     const chave = `${ref.centroCustoId}|${ref.orcamentoId}`;
+    const gasto = gastoPorOrcamento.get(chave);
+    if (gasto != null) gastoEmpreita.set(fdId, gasto);
     const label = osPorOrcamento.get(chave);
     if (label) out.set(fdId, label);
     if (ccsLidos.has(ref.centroCustoId)) orcamentoExiste.set(fdId, orcamentosExistentes.has(chave));
   }
-  return { os: out, orcamentoExiste };
+  return { os: out, orcamentoExiste, gastoEmpreita };
 }
 
 /**
@@ -883,6 +889,8 @@ export class DemandSheetApprovalController {
           /** false = o orçamento de origem foi excluído (FD sem dado real para o resultado). */
           orcamentoExiste: osInfo.orcamentoExiste.get(r.id) ?? null,
           totalPagoOcs: pagoPorFd.get(r.id) ?? 0,
+          /** Empreitas cotadas: soma dos fornecedores escolhidos na aba Cotação Empreita do orçamento. */
+          gastoEmpreita: osInfo.gastoEmpreita.get(r.id) ?? 0,
         })),
       });
     } catch (e: unknown) {
@@ -2427,6 +2435,16 @@ export class DemandSheetApprovalController {
 
       const itens = parseItensPedidos(fd.itensPedidos).filter((i) => i.materialRequestId === rmId);
       const orcRef = extractOrcamentoRefFromAnexos(fd.anexos);
+      // Alerta ao aprovador: cotação de empreita do orçamento da FD não finalizada (não bloqueia a RM).
+      let cotacaoEmpreitaPreenchida: boolean | null = null;
+      if (orcRef?.centroCustoId && orcRef?.orcamentoId) {
+        try {
+          const arquivo = await orcamentoService.readOrcamentoFile(orcRef.centroCustoId, orcRef.orcamentoId);
+          cotacaoEmpreitaPreenchida = arquivo ? cotacaoEmpreitaPreenchida_(arquivo.sessaoOrcamento) : null;
+        } catch {
+          cotacaoEmpreitaPreenchida = null;
+        }
+      }
       return res.json({
         success: true,
         data: {
@@ -2438,6 +2456,7 @@ export class DemandSheetApprovalController {
           contratoId: fd.contratoId || null,
           contratoNome: fd.contrato?.name || null,
           centroCustoId: orcRef?.centroCustoId || fd.contrato?.costCenterId || null,
+          cotacaoEmpreitaPreenchida,
         },
       });
     } catch (e: unknown) {

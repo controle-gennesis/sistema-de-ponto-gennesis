@@ -14,6 +14,8 @@ type FdAssociacao = {
   orcamentoId?: string | null;
   contratoId?: string | null;
   centroCustoId?: string | null;
+  /** Cotação Empreita do orçamento da FD finalizada? null = FD sem orçamento ligado. */
+  cotacaoEmpreitaPreenchida?: boolean | null;
 };
 
 const fmtQtd = (n: number | null | undefined) =>
@@ -79,6 +81,22 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
           </a>
         )}
       </div>
+
+      {data.cotacaoEmpreitaPreenchida === false && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 dark:border-red-600 dark:bg-red-950/40 dark:text-red-300"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            COTAÇÃO EMPREITA NÃO PREENCHIDA
+            <span className="block text-xs font-normal text-red-600 dark:text-red-400">
+              O orçamento desta FD não tem a cotação de empreita finalizada (mínimo de 3 empreiteiros por empreita).
+              Isso não impede a aprovação.
+            </span>
+          </span>
+        </div>
+      )}
 
       {emAlerta > 0 && (
         <div className="rounded-lg border border-red-300 dark:border-red-700">

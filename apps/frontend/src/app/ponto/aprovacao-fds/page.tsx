@@ -152,7 +152,7 @@ const CARD_ORDER: CardFilter[] = [
 ];
 
 /** Resultado somado de um nível (FD, OS, obra ou centro de custo). */
-type ResultadoFd = { faturamento: number; custoEstimado: number; custoReal: number; pagoOcs: number };
+type ResultadoFd = { faturamento: number; custoEstimado: number; custoReal: number; pagoOcs: number; empreitas: number };
 
 /** FD cancelada não entra nas somas (aparece só para consulta). */
 function fdCancelada(r: FichaDemandaApprovalRecord): boolean {
@@ -169,8 +169,9 @@ function somarResultado(rows: FichaDemandaApprovalRecord[]): ResultadoFd {
             custoEstimado: acc.custoEstimado + (Number(r.custoEstimado) || 0),
             custoReal: acc.custoReal + (Number(r.custoReal) || 0),
             pagoOcs: acc.pagoOcs + (Number(r.totalPagoOcs) || 0),
+            empreitas: acc.empreitas + (Number(r.gastoEmpreita) || 0),
           },
-    { faturamento: 0, custoEstimado: 0, custoReal: 0, pagoOcs: 0 }
+    { faturamento: 0, custoEstimado: 0, custoReal: 0, pagoOcs: 0, empreitas: 0 }
   );
 }
 
@@ -243,6 +244,7 @@ function ResultadoNivel({ resultado }: { resultado: ResultadoFd }) {
         acimaEstimado ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
       )}
       {item('Pago em OCs', resultado.pagoOcs, 'text-emerald-700 dark:text-emerald-400')}
+      {item('Empreitas', resultado.empreitas, 'text-indigo-600 dark:text-indigo-400')}
       {/* Mesma largura da coluna Ação da tabela das FDs. */}
       {MOSTRAR_COLUNA_ACAO ? <div className={COL_ACAO} aria-hidden /> : null}
     </div>
@@ -420,6 +422,9 @@ export default function AprovacaoFdsPage() {
                                         <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="OCs pagas (validadas pelo compras no G4), pelo total de cada OC">
                                           Pago em OCs
                                         </th>
+                                        <th className={`${COL_VALOR} py-4 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`} title="Gasto com empreita: fornecedores escolhidos na aba Cotação Empreita do orçamento">
+                                          Empreitas
+                                        </th>
                                         {MOSTRAR_COLUNA_ACAO ? (
                                           <th className={`${listTableRowClasses.actionTh} ${COL_ACAO} !px-0 text-center`}>
                                             Ação
@@ -498,6 +503,15 @@ export default function AprovacaoFdsPage() {
                                             {row.totalPagoOcs ? (
                                               <span className="font-medium text-emerald-700 dark:text-emerald-400">
                                                 {formatCurrencyDisplay(row.totalPagoOcs)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td className={`${COL_VALOR} whitespace-nowrap py-4 tabular-nums`}>
+                                            {row.gastoEmpreita ? (
+                                              <span className="font-medium text-indigo-600 dark:text-indigo-400">
+                                                {formatCurrencyDisplay(row.gastoEmpreita)}
                                               </span>
                                             ) : (
                                               <span className="text-gray-400 dark:text-gray-500">—</span>

@@ -98,6 +98,7 @@ type OrcamentoListaRow = {
   numeroPasta?: string;
   encargos?: string;
   descontoPercentual?: number;
+  createdAt?: string;
   familiaId?: string;
   versao?: number;
   congelado?: boolean;
@@ -118,6 +119,8 @@ type OrcamentoListItem = {
   bdiPercentual?: number;
   totalComBdi?: number;
   descontoPercentual?: number;
+  /** Quando o orçamento foi criado (ISO). */
+  createdAt: string;
   /** Dados → Encargos do orçamento. */
   encargos: 'onerado' | 'desonerado' | '';
   familiaId: string;
@@ -278,6 +281,9 @@ export default function OrcamentosPage() {
   const contratoFromUrl = (searchParams?.get('contrato') || '').trim();
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
+  /** Período de criação (AAAA-MM-DD, inclusive). */
+  const [criadoDe, setCriadoDe] = useState('');
+  const [criadoAte, setCriadoAte] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [contratoActionModal, setContratoActionModal] = useState<'novo' | null>(null);
   const [actionContratoId, setActionContratoId] = useState('');
@@ -397,7 +403,7 @@ export default function OrcamentosPage() {
     setCurrentPage(1);
   };
 
-  const hasActiveFilters = Boolean(contratoFiltro);
+  const hasActiveFilters = Boolean(contratoFiltro || criadoDe || criadoAte);
 
   const contractsKey = contractsComOrcamento.map((c) => c.id).sort().join(',');
 
@@ -439,6 +445,7 @@ export default function OrcamentosPage() {
                 typeof o.descontoPercentual === 'number' && Number.isFinite(o.descontoPercentual)
                   ? o.descontoPercentual
                   : undefined,
+              createdAt: typeof o.createdAt === 'string' && o.createdAt ? o.createdAt : o.updatedAt || '',
               encargos: o.encargos === 'onerado' || o.encargos === 'desonerado' ? o.encargos : '',
               familiaId,
               versao,
@@ -474,9 +481,21 @@ export default function OrcamentosPage() {
   const orcamentosFiltrados = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const q = searchTerm.trim().toLowerCase();
+    // Período de criação: compara pela data local (AAAA-MM-DD), com as duas pontas incluídas.
+    const diaLocal = (iso: string) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
     return list.filter((o) => {
       if (ccFiltro && o.costCenterId !== ccFiltro) return false;
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
+      if (criadoDe || criadoAte) {
+        const dia = diaLocal(o.createdAt);
+        if (!dia) return false;
+        if (criadoDe && dia < criadoDe) return false;
+        if (criadoAte && dia > criadoAte) return false;
+      }
       if (!q) return true;
       const nome = (o.nome || '').toLowerCase();
       const os = (o.osCodigo || '').toLowerCase();
@@ -493,7 +512,7 @@ export default function OrcamentosPage() {
         status.includes(q)
       );
     });
-  }, [orcamentosData, searchTerm, contratoFiltro, ccFiltro]);
+  }, [orcamentosData, searchTerm, contratoFiltro, ccFiltro, criadoDe, criadoAte]);
 
   /** Todas as revisões por família (seletor do badge; ignora busca textual). */
   const revisoesPorFamilia = useMemo(() => {
@@ -992,11 +1011,48 @@ export default function OrcamentosPage() {
                   className="w-full"
                 />
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Período de criação
+                </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">De</span>
+                    <input
+                      type="date"
+                      value={criadoDe}
+                      max={criadoAte || undefined}
+                      onChange={(e) => {
+                        setCriadoDe(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
+                      aria-label="Criado a partir de"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Até</span>
+                    <input
+                      type="date"
+                      value={criadoAte}
+                      min={criadoDe || undefined}
+                      onChange={(e) => {
+                        setCriadoAte(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
+                      aria-label="Criado até"
+                    />
+                  </label>
+                </div>
+              </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
                   onClick={() => {
                     setContratoFiltro('');
+                    setCriadoDe('');
+                    setCriadoAte('');
                     setCurrentPage(1);
                   }}
                   className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"

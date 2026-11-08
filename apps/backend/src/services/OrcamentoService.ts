@@ -1,3 +1,4 @@
+import { gastoComEmpreita, preservarCotacaoEmpreitaFinalizada } from '../lib/cotacaoEmpreita';
 import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
@@ -26,6 +27,10 @@ export interface OrcamentoIndexEntry {
   id: string;
   nome: string;
   updatedAt: string;
+  /** Quando o orçamento (ou a revisão) foi criado no Conecta (ISO). Antigos: preenchido pelo histórico. */
+  createdAt?: string;
+  /** Gasto com empreita (aba Cotação Empreita): soma dos fornecedores escolhidos. */
+  gastoEmpreita?: number;
   /** Espelha sessao.meta.statusAprovacao para a lista sem abrir o detalhe. */
   statusAprovacao?: string;
   /** Progresso da ficha de demanda (0–100), espelhado da meta. */
@@ -119,6 +124,27 @@ function parseBdiPercentualPoints(raw: unknown): number | undefined {
     ? Number(limpo.replace(/\./g, '').replace(',', '.'))
     : Number(limpo);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Data de criação para orçamentos antigos (o índice não guardava): 1º movimento de importação do histórico,
+ * senão o movimento mais antigo; sem histórico, a última atualização.
+ */
+function extractCriadoEmFromMeta(meta: Record<string, unknown> | undefined, fallback: string): string {
+  const movs = Array.isArray(meta?.historicoMovimentos) ? (meta!.historicoMovimentos as unknown[]) : [];
+  const datas: { tipo: string; em: number; raw: string }[] = [];
+  for (const m of movs) {
+    if (!m || typeof m !== 'object') continue;
+    const raw = String((m as { em?: unknown }).em ?? '').trim();
+    const t = Date.parse(raw);
+    if (!raw || !Number.isFinite(t)) continue;
+    datas.push({ tipo: String((m as { tipo?: unknown }).tipo ?? ''), em: t, raw });
+  }
+  const imp = datas.filter((d) => d.tipo === 'importacao').sort((a, b) => a.em - b.em)[0];
+  if (imp) return new Date(imp.em).toISOString();
+  const primeiro = datas.sort((a, b) => a.em - b.em)[0];
+  if (primeiro) return new Date(primeiro.em).toISOString();
+  return fallback;
 }
 
 /** Encargos do orçamento (campo "Encargos" em Dados): desonerado quando o OrçaFascio marca `exempt`. */
@@ -464,8 +490,8 @@ export class OrcamentoService {
     centroCustoId: string,
     index: OrcamentoIndex
   ): Promise<OrcamentoIndex> {
-    // v5: encargos (onerado/desonerado); v6: desconto %, nos orçamentos já existentes.
-    const LISTA_FIN_VERSION = 6;
+    // v5: encargos; v6: desconto %; v7: data de criação; v8: gasto com empreita — nos orçamentos já existentes.
+    const LISTA_FIN_VERSION = 8;
     const needsBdiFill = index.orcamentos.some(o => o.bdiPercentual == null);
     const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < 2;
     const needsOsFill = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
@@ -517,6 +543,8 @@ export class OrcamentoService {
           obra: osPasta.obra,
           encargos: extractEncargosFromMeta(metaRaw),
           descontoPercentual: parseBdiPercentualPoints(metaRaw?.descontoPercentual) ?? 0,
+          createdAt: o.createdAt || extractCriadoEmFromMeta(metaRaw, o.updatedAt),
+          gastoEmpreita: gastoComEmpreita(file?.sessaoOrcamento),
         };
         if (
           next.bdiPercentual !== o.bdiPercentual ||
@@ -559,6 +587,8 @@ export class OrcamentoService {
           statusAprovacao: atual.statusAprovacao || enriched.statusAprovacao,
           encargos: atual.encargos ?? enriched.encargos,
           descontoPercentual: atual.descontoPercentual ?? enriched.descontoPercentual,
+          createdAt: atual.createdAt ?? enriched.createdAt,
+          gastoEmpreita: atual.gastoEmpreita ?? enriched.gastoEmpreita,
         };
       }
       return enriched;
@@ -906,6 +936,8 @@ export class OrcamentoService {
       aoGravarArquivo?: (revisao: number) => void;
       /** Gravação da tela: respeita a trava do orçamento/FD (conteúdo protegido não muda). */
       respeitarTrava?: boolean;
+      /** Cotação Empreita finalizada: só gestor do contrato / administrador altera (false = preserva a gravada). */
+      podeEditarCotacaoFinalizada?: boolean;
     } = {}
   ): Promise<
     | { ok: true; revisao: number }
@@ -936,6 +968,11 @@ export class OrcamentoService {
           patchFinal = orcamentoTrancado(statusDaSessao(gravado.sessaoOrcamento))
             ? preservarConteudoTrancado(gravado, patch)
             : impedirTrancarPelaTela(gravado, patch);
+          patchFinal = preservarCotacaoEmpreitaFinalizada(
+            gravado.sessaoOrcamento,
+            patchFinal,
+            opts.podeEditarCotacaoFinalizada === true
+          );
         }
         const { revisao } = await this.mergeOrcamentoArquivo(
           centroCustoId,
@@ -1045,6 +1082,7 @@ export class OrcamentoService {
               osCodigo: osPastaFromMeta.osCodigo,
               numeroPasta: osPastaFromMeta.numeroPasta,
               obra: osPastaFromMeta.obra,
+              gastoEmpreita: gastoComEmpreita(nextSessao),
               encargos: extractEncargosFromMeta(
                 meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
               ),
@@ -1166,6 +1204,7 @@ export class OrcamentoService {
       id,
       nome: n,
       updatedAt,
+      createdAt: updatedAt,
       familiaId: id,
       versao: 1,
       congelado: false,
@@ -1292,6 +1331,7 @@ export class OrcamentoService {
       id: newId,
       nome: origemNorm.nome,
       updatedAt,
+      createdAt: updatedAt,
       familiaId,
       versao: novaVersao,
       congelado: false,

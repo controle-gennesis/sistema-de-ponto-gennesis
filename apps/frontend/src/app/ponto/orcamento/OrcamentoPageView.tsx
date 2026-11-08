@@ -167,6 +167,13 @@ import {
 } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
+import {
+  CotacaoEmpreitaPainel,
+  parseCotacaoEmpreita,
+  itensFdComCotacaoRealizada,
+  type CotacaoEmpreitaData,
+  type EtapaFd,
+} from './CotacaoEmpreitaPainel';
 import { OrcamentoDetalhadoPainel, type LinhaOrcamentoDetalhado } from './OrcamentoDetalhadoPainel';
 import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
 import {
@@ -4575,6 +4582,8 @@ interface SessaoOrcamentoPersist {
    * composição, quando não tem analítico — que NÃO recebem o desconto do contrato.
    */
   insumosSemDesconto?: string[];
+  /** Aba Cotação Empreita: empreitas e cotações com empreiteiros (finalizada = só gestor/admin altera). */
+  cotacaoEmpreita?: CotacaoEmpreitaData;
   /**
    * Só em orçamentos `meta.importadoPlanilha`: árvore de serviços deste documento (importação + blocos adicionados).
    * O catálogo da planilha perfeita do contrato continua em `servicos-padrao.json` e vem em GET `servicos`.
@@ -5089,6 +5098,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       insumosAnaliticoOcultos: Array.isArray(p.insumosAnaliticoOcultos) ? p.insumosAnaliticoOcultos : [],
       insumosSemDesconto: parseListaChaves((p as { insumosSemDesconto?: unknown }).insumosSemDesconto),
+      cotacaoEmpreita: parseCotacaoEmpreita((p as { cotacaoEmpreita?: unknown }).cotacaoEmpreita),
       cronograma: normalizarCronograma((p as { cronograma?: unknown }).cronograma),
       meta,
       ...(Array.isArray(p.servicosDocumento) ? { servicosDocumento: p.servicosDocumento as ServicoPadrao[] } : {})
@@ -5506,6 +5516,7 @@ function parseOrcamentoDetailRaw(d: {
           itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
           insumosAnaliticoOcultos: Array.isArray(so.insumosAnaliticoOcultos) ? so.insumosAnaliticoOcultos : [],
           insumosSemDesconto: parseListaChaves(so.insumosSemDesconto),
+          cotacaoEmpreita: parseCotacaoEmpreita((so as { cotacaoEmpreita?: unknown }).cotacaoEmpreita),
           cronograma: normalizarCronograma(so.cronograma),
           meta,
           ...(Array.isArray(so.servicosDocumento) ? { servicosDocumento: so.servicosDocumento as ServicoPadrao[] } : {})
@@ -7955,6 +7966,7 @@ const ORCAFASCIO_META_EXTRA_VAZIO = {
 
 const ABA_ROTULO_PRESENCA: Record<string, string> = {
   dados: 'Dados',
+  cotacaoEmpreita: 'Cotação Empreita',
   detalhado: 'Orçamento detalhado',
   montagem: 'Orçamento',
   memorial: 'Memória de Cálculo',
@@ -8281,7 +8293,16 @@ export function OrcamentoPageView({
 
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
-    'dados' | 'detalhado' | 'montagem' | 'analitico' | 'memorial' | 'mapaCotacao' | 'planilhaAnalitica' | 'eap' | 'cronograma'
+    | 'dados'
+    | 'cotacaoEmpreita'
+    | 'detalhado'
+    | 'montagem'
+    | 'analitico'
+    | 'memorial'
+    | 'mapaCotacao'
+    | 'planilhaAnalitica'
+    | 'eap'
+    | 'cronograma'
   >(cronogramaOnly ? 'cronograma' : fichaDemandaOnly ? 'planilhaAnalitica' : 'montagem');
 
   useEffect(() => {
@@ -8307,6 +8328,17 @@ export function OrcamentoPageView({
   const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
   /** Orçamento detalhado: insumos (ou composições sem analítico) que não recebem o desconto do contrato. */
   const [insumosSemDesconto, setInsumosSemDesconto] = useState<string[]>([]);
+  const [cotacaoEmpreita, setCotacaoEmpreita] = useState<CotacaoEmpreitaData>({ empreitas: [] });
+  /** Gestor do contrato / administrador: altera a Cotação Empreita depois de finalizada. */
+  const { data: podeEditarCotacaoFinalizada = false } = useQuery({
+    queryKey: ['cotacao-empreita-permissao', centroCustoId],
+    queryFn: async () => {
+      const res = await api.get(`/orcamento/${centroCustoId}/cotacao-empreita/permissao`);
+      return !!res.data?.data?.podeEditarFinalizada;
+    },
+    enabled: !!centroCustoId,
+    staleTime: 5 * 60_000,
+  });
   /** Menu botão direito — Ficha de demanda: adicionar/excluir insumo (manual ou catálogo). */
   const [menuCtxFichaDemanda, setMenuCtxFichaDemanda] = useState<
     | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
@@ -9381,6 +9413,7 @@ export function OrcamentoPageView({
         Array.isArray(s.insumosAnaliticoOcultos) ? s.insumosAnaliticoOcultos : []
       );
       setInsumosSemDesconto(parseListaChaves(s.insumosSemDesconto));
+      setCotacaoEmpreita(parseCotacaoEmpreita(s.cotacaoEmpreita) ?? { empreitas: [] });
       setQuantidadesPorItem(s.quantidadesPorItem);
       setFormulasQuantidadePorItem(parseFormulasQuantidadePorItem(s.formulasQuantidadePorItem));
       setDimensoesPorItem(s.dimensoesPorItem);
@@ -9741,6 +9774,7 @@ export function OrcamentoPageView({
       itensOcultosNoOrcamento,
       insumosAnaliticoOcultos,
       insumosSemDesconto,
+      cotacaoEmpreita,
       cronograma
     };
     servicosImportsRef.current = { servicos, imports };
@@ -9789,6 +9823,7 @@ export function OrcamentoPageView({
     itensOcultosNoOrcamento,
     insumosAnaliticoOcultos,
     insumosSemDesconto,
+    cotacaoEmpreita,
     cronograma,
     servicos,
     imports
@@ -9833,6 +9868,7 @@ export function OrcamentoPageView({
     itensOcultosNoOrcamento,
     insumosAnaliticoOcultos,
     insumosSemDesconto,
+    cotacaoEmpreita,
     cronograma,
     servicos,
     imports,
@@ -15223,6 +15259,45 @@ export function OrcamentoPageView({
     custoOcPorItemFd,
   ]);
 
+  /** Cotação Empreita: etapas e itens da FD (insumos) para associar a cada empreita. */
+  const etapasFdCotacao = useMemo<EtapaFd[]>(() => {
+    if (orcamentoViewTab !== 'cotacaoEmpreita') return [];
+    const out: EtapaFd[] = [];
+    let atual: EtapaFd | null = null;
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'tituloServico') {
+        atual = { key: l.key, numero: String(l.main), nome: l.servicoNome, itens: [] };
+        out.push(atual);
+        continue;
+      }
+      if (l.kind === 'insumo' && atual) atual.itens.push({ key: l.key, item: l.item, descricao: l.descricao });
+    }
+    return out.filter((e) => e.itens.length > 0);
+  }, [orcamentoViewTab, linhasAnaliticoOrcamento]);
+
+  /** Itens da FD ligados a empreitas com cotação completa — etiqueta "COTAÇÃO REALIZADA" na FD. */
+  const itensFdCotados = useMemo(() => itensFdComCotacaoRealizada(cotacaoEmpreita), [cotacaoEmpreita]);
+
+  const [salvandoRascunhoCotacao, setSalvandoRascunhoCotacao] = useState(false);
+  /** "Salvar rascunho" da Cotação Empreita: grava agora, sem esperar o salvamento automático. */
+  const salvarRascunhoCotacao = async () => {
+    if (!orcamentoAtivoId || salvandoRascunhoCotacao) return;
+    setSalvandoRascunhoCotacao(true);
+    try {
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      flushOrcamentoPersistencia();
+      await aguardarSalvamentoEmAndamento(orcamentoAtivoId);
+      toast.success('Rascunho da cotação salvo.');
+    } catch {
+      toast.error('Não foi possível salvar o rascunho da cotação.');
+    } finally {
+      setSalvandoRascunhoCotacao(false);
+    }
+  };
+
   /** Total da coluna "Custo estimado (40%)" da FD (custo orçamento do insumo × 40%). */
   const custoEstimadoTotalFd = useMemo(() => {
     let total = 0;
@@ -16990,6 +17065,7 @@ export function OrcamentoPageView({
     }
     return [
       { value: 'dados' as const, label: 'Dados' },
+      { value: 'cotacaoEmpreita' as const, label: 'Cotação Empreita' },
       ...(meta.requerConfigDesconto === true
         ? [{ value: 'detalhado' as const, label: 'Orçamento detalhado' }]
         : []),
@@ -19720,6 +19796,18 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
+                {!loadingFromApi && orcamentoViewTab === 'cotacaoEmpreita' && (
+                  <CotacaoEmpreitaPainel
+                    valor={cotacaoEmpreita}
+                    onChange={setCotacaoEmpreita}
+                    podeEditarFinalizada={podeEditarCotacaoFinalizada}
+                    somenteLeitura={versaoCongelada || meta.congelado === true}
+                    usuarioNome={currentUserName}
+                    etapasFd={etapasFdCotacao}
+                    onSalvarRascunho={() => void salvarRascunhoCotacao()}
+                    salvandoRascunho={salvandoRascunhoCotacao}
+                  />
+                )}
                 {!loadingFromApi && orcamentoViewTab === 'eap' && (
                   <div className="flex min-h-0 flex-1 flex-col overflow-auto">
                     {resumoEap.linhas.length === 0 || !resumoEap.total ? (
@@ -20727,6 +20815,14 @@ export function OrcamentoPageView({
                                           <div className="min-w-0 whitespace-normal break-words uppercase">
                                             {l.descricao}
                                           </div>
+                                          {itensFdCotados.has(l.key) ? (
+                                            <span
+                                              className="mt-1 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                              title="Item associado a uma empreita com cotação completa (aba Cotação Empreita)"
+                                            >
+                                              COTAÇÃO REALIZADA
+                                            </span>
+                                          ) : null}
                                         </td>
                                       </>
                                     )}
