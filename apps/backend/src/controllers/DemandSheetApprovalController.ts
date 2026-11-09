@@ -1627,6 +1627,46 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /**
+   * Desfaz o cancelamento da FD — só administrador. O status anterior não fica guardado:
+   * cancelada em compras volta para Em Fila (sem status) ou Em Cotação, à escolha; cancelada no
+   * fluxo antigo de aprovação volta para Aprovada (se já tinha sido aprovada) ou Aguardando aprovação.
+   */
+  async desfazerCancelamento(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      if (!req.user.isAdmin) throw createError('Apenas o administrador pode desfazer o cancelamento da FD.', 403);
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+
+      const body = z
+        .object({ purchaseStatus: z.enum(['NONE', 'QUOTATION']).optional() })
+        .parse(req.body ?? {});
+
+      const data: Prisma.DemandSheetApprovalUncheckedUpdateInput = {};
+      if (row.status === 'CANCELLED') {
+        data.status = row.managerApprovedAt ? 'APPROVED' : 'WAITING_MANAGER';
+      }
+      if (row.purchaseStatus === 'CANCELLED') {
+        data.purchaseStatus = body.purchaseStatus === 'QUOTATION' ? 'QUOTATION' : null;
+        data.purchaseStatusUpdatedBy = req.user.id;
+        data.purchaseStatusUpdatedAt = new Date();
+        data.purchaseCancellationNote = null;
+      }
+      if (Object.keys(data).length === 0) throw createError('Esta ficha de demanda não está cancelada.', 400);
+
+      const updated = await prisma.demandSheetApproval.update({ where: { id }, data, include: includeDefault });
+      return res.json({ success: true, data: serializeRow(updated), message: 'Cancelamento desfeito.' });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao desfazer o cancelamento da FD' });
+    }
+  }
+
   /** Número da SC, ID da SC e ID da OC preenchidos em Suprimentos. */
   async updatePurchaseRefs(req: AuthRequest, res: Response) {
     try {

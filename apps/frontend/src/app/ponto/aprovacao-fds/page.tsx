@@ -16,6 +16,7 @@ import {
   Hourglass,
   List,
   ListTree,
+  RotateCcw,
   MoreVertical,
   Plus,
   Search,
@@ -286,6 +287,31 @@ export default function AprovacaoFdsPage() {
   const [showImport, setShowImport] = useState(false);
   const [editingRecord, setEditingRecord] = useState<FichaDemandaApprovalRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<FichaDemandaApprovalRecord | null>(null);
+  /** Desfazer cancelamento (só administrador): FD alvo e status de compras para onde volta. */
+  const [desfazerAlvo, setDesfazerAlvo] = useState<FichaDemandaApprovalRecord | null>(null);
+  const [desfazerPara, setDesfazerPara] = useState<'NONE' | 'QUOTATION'>('NONE');
+  const desfazerMutation = useMutation({
+    mutationFn: async ({ id, para }: { id: string; para: 'NONE' | 'QUOTATION' }) =>
+      (await api.post(`/demand-sheet-approvals/${id}/desfazer-cancelamento`, { purchaseStatus: para })).data,
+    onSuccess: (res) => {
+      toast.success('Cancelamento desfeito.');
+      setDesfazerAlvo(null);
+      if (res?.data && detailRecord && res.data.id === detailRecord.id) setDetailRecord(res.data);
+      void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Não foi possível desfazer o cancelamento.');
+    },
+  });
+  /** Cancelada em compras ou no fluxo antigo de aprovação. */
+  const fdEstaCancelada = (r: FichaDemandaApprovalRecord) => r.status === 'CANCELLED' || r.purchaseStatus === 'CANCELLED';
+  const abrirDesfazer = (r: FichaDemandaApprovalRecord) => {
+    // Sugestão: já tem pedidos de material → Em Cotação; senão → Em Fila.
+    setDesfazerPara(Array.isArray(r.itensPedidos) && r.itensPedidos.length > 0 ? 'QUOTATION' : 'NONE');
+    setDesfazerAlvo(r);
+  };
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [rowActionMenu, setRowActionMenu] = useState<{
     rowId: string;
@@ -969,6 +995,21 @@ export default function AprovacaoFdsPage() {
                         <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                         <span>Editar</span>
                       </button>
+                      {isAdministrator && fdEstaCancelada(rowForActionMenu) ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRowActionMenu(null);
+                            abrirDesfazer(rowForActionMenu);
+                          }}
+                          className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          <RotateCcw className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span>Desfazer cancelamento</span>
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         role="menuitem"
@@ -1004,6 +1045,11 @@ export default function AprovacaoFdsPage() {
             isAdministrator && detailRecord ? (
               // Administrador exclui a FD em qualquer etapa (ex.: FDs de teste).
               <div className="flex w-full items-center justify-end gap-2">
+                {fdEstaCancelada(detailRecord) ? (
+                  <Button type="button" variant="outline" onClick={() => abrirDesfazer(detailRecord)}>
+                    Desfazer cancelamento
+                  </Button>
+                ) : null}
                 <Button type="button" variant="outline" onClick={() => setDeleteId(detailRecord.id)}>
                   Excluir FD
                 </Button>
@@ -1014,6 +1060,65 @@ export default function AprovacaoFdsPage() {
             ) : undefined
           }
         />
+
+        {desfazerAlvo ? (
+          <div
+            className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/50 p-4"
+            onClick={() => !desfazerMutation.isPending && setDesfazerAlvo(null)}
+          >
+            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <RotateCcw className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
+              </div>
+              <h3 className="mb-1 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">Desfazer cancelamento?</h3>
+              <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+                {desfazerAlvo.codFichaDemanda}
+                {desfazerAlvo.purchaseCancellationNote ? ` · motivo do cancelamento: "${desfazerAlvo.purchaseCancellationNote}"` : ''}
+              </p>
+              {desfazerAlvo.purchaseStatus === 'CANCELLED' ? (
+                <div className="mb-5 space-y-2">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Voltar para qual status de compras?</p>
+                  {(
+                    [
+                      { id: 'NONE', titulo: 'Em Fila', texto: 'Aguardando a criação da solicitação de compra.' },
+                      { id: 'QUOTATION', titulo: 'Em Cotação', texto: 'Já tem pedidos de material ou ordens de compra em andamento.' },
+                    ] as const
+                  ).map((op) => (
+                    <button
+                      key={op.id}
+                      type="button"
+                      onClick={() => setDesfazerPara(op.id)}
+                      className={`w-full rounded-lg border-2 p-3 text-left transition-colors ${
+                        desfazerPara === op.id
+                          ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
+                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-600 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{op.titulo}</span>
+                      <span className="block text-xs text-gray-600 dark:text-gray-400">{op.texto}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mb-5 text-sm text-gray-600 dark:text-gray-400">
+                  Esta FD foi cancelada na aprovação: ela volta para {desfazerAlvo.managerApproverNome ? 'Aprovada' : 'Aguardando aprovação'}.
+                </p>
+              )}
+              <div className="flex justify-center gap-3">
+                <Button type="button" variant="outline" onClick={() => setDesfazerAlvo(null)} disabled={desfazerMutation.isPending}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => desfazerMutation.mutate({ id: desfazerAlvo.id, para: desfazerPara })}
+                  disabled={desfazerMutation.isPending}
+                >
+                  {desfazerMutation.isPending ? 'Desfazendo…' : 'Desfazer cancelamento'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <FichaDemandaApprovalFormModal
           isOpen={showForm}

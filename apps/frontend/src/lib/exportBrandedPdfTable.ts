@@ -34,6 +34,8 @@ export type ExportBrandedPdfOptions = {
   columns: BrandedPdfColumn[];
   rows: Record<string, string>[];
   footerLabel?: string;
+  /** Texto opcional abaixo da tabela (quebra de linha com \n). */
+  note?: string;
   /** Ambos mostram só a logo Gennesis (a logo ENG PAC não aparece em exportações). */
   logoMode?: 'dual' | 'gennesis';
   /** Orientação da folha A4 (padrão: paisagem). */
@@ -203,7 +205,7 @@ function drawFooter(doc: jsPDF, footerLabel: string) {
 }
 
 export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): Promise<void> {
-  const { title, subtitle, filename, columns, rows, footerLabel, logoMode = 'dual', orientation = 'landscape' } = options;
+  const { title, subtitle, filename, columns, rows, footerLabel, note, logoMode = 'dual', orientation = 'landscape' } = options;
   if (!rows.length) throw new Error('Nenhum registro para exportar');
 
   const generatedAt = new Date();
@@ -237,6 +239,24 @@ export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): P
     }
     y = drawRow(doc, y, columns, row, idx % 2 === 1);
   });
+
+  if (note && note.trim()) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...TEXT_MUTED);
+    const linhasNota = note
+      .split('\n')
+      .flatMap((t) => doc.splitTextToSize(t, pageWidth - MARGIN * 2) as string[]);
+    y += 4;
+    if (y + linhasNota.length * 4 > getPageBottom(doc)) {
+      doc.addPage();
+      y = drawHeader(doc, pageWidth, logo, title, generatedAt, rows.length);
+    }
+    for (const t of linhasNota) {
+      doc.text(t, MARGIN, y);
+      y += 4;
+    }
+  }
 
   drawFooter(doc, footerLabel || title);
   doc.save(filename);

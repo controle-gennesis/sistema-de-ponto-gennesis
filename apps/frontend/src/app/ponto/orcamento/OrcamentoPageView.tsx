@@ -171,6 +171,7 @@ import {
   CotacaoEmpreitaPainel,
   parseCotacaoEmpreita,
   itensFdComCotacaoRealizada,
+  valorCotacao,
   type CotacaoEmpreitaData,
   type EtapaFd,
 } from './CotacaoEmpreitaPainel';
@@ -7966,13 +7967,13 @@ const ORCAFASCIO_META_EXTRA_VAZIO = {
 
 const ABA_ROTULO_PRESENCA: Record<string, string> = {
   dados: 'Dados',
-  cotacaoEmpreita: 'Cotação Empreita',
   detalhado: 'Orçamento detalhado',
   montagem: 'Orçamento',
   memorial: 'Memória de Cálculo',
   mapaCotacao: 'Mapa de Cotação',
   analitico: 'Analítico',
   planilhaAnalitica: 'Ficha de Demanda',
+  cotacaoEmpreita: 'Cotação Empreita',
   eap: 'EAP',
   cronograma: 'Cronograma',
 };
@@ -15202,8 +15203,18 @@ export function OrcamentoPageView({
       temCustoReal: boolean;
       custoOc: number;
       temCustoOc: boolean;
+      /** Empreitas contratadas na etapa (rateadas pelo valor orçado quando a empreita tem 2+ etapas). */
+      empreitas: number;
+      temEmpreita: boolean;
+      /** Parte do valor vem de empreita vinculada a duas ou mais etapas (é estimativa). */
+      empreitaRateada: boolean;
     };
-    const vazio = { linhas: [] as LinhaEap[], total: null as LinhaEap | null };
+    const vazio = {
+      linhas: [] as LinhaEap[],
+      total: null as LinhaEap | null,
+      gastoEmpreita: 0,
+      temEmpreitaRateada: false,
+    };
     if (orcamentoViewTab !== 'eap') return vazio;
     const bdi = parsePercentualMeta(meta.bdiPercentual);
     const detalhado = meta.requerConfigDesconto === true;
@@ -15217,6 +15228,7 @@ export function OrcamentoPageView({
       custoPorEtapa.set(r.servicoNome, (custoPorEtapa.get(r.servicoNome) ?? 0) + r.total);
     }
     const linhas: LinhaEap[] = [];
+    const etapaDoItem = new Map<string, LinhaEap>();
     let atual: LinhaEap | null = null;
     for (const row of linhasAnaliticoComManuais) {
       if (row.kind === 'tituloServico') {
@@ -15231,11 +15243,15 @@ export function OrcamentoPageView({
           temCustoReal: false,
           custoOc: 0,
           temCustoOc: false,
+          empreitas: 0,
+          temEmpreita: false,
+          empreitaRateada: false,
         };
         linhas.push(atual);
         continue;
       }
       if (row.kind !== 'insumo' || !atual) continue;
+      etapaDoItem.set(row.key, atual);
       // Custo estimado = coluna "Custo estimado (40%)" da FD: custo orçamento do insumo × 40%.
       atual.custoEstimado += (Number(row.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO;
       const custoOc = custoOcPorItemFd.get(row.key);
@@ -15250,6 +15266,27 @@ export function OrcamentoPageView({
         atual.temCustoReal = true;
       }
     }
+    // Empreitas: valor do fornecedor contratado. Uma etapa → valor inteiro; duas ou mais → rateio pelo
+    // valor orçado de cada etapa (estimativa). Empreita sem item da FD entra só no custo total de empreita.
+    let gastoEmpreita = 0;
+    let temEmpreitaRateada = false;
+    for (const emp of cotacaoEmpreita?.empreitas ?? []) {
+      const contratada = emp.cotacoes.find((c) => c.escolhida);
+      const valor = contratada ? valorCotacao(contratada.valor) : NaN;
+      if (!Number.isFinite(valor) || valor <= 0) continue;
+      gastoEmpreita += valor;
+      const etapas = [...new Set(emp.itensFd.map((k) => etapaDoItem.get(k)).filter((e): e is LinhaEap => !!e))];
+      if (etapas.length === 0) continue;
+      const rateada = etapas.length > 1;
+      if (rateada) temEmpreitaRateada = true;
+      const somaOrcado = etapas.reduce((a, e) => a + Math.max(0, e.valorOrcado), 0);
+      for (const e of etapas) {
+        const peso = somaOrcado > 0 ? Math.max(0, e.valorOrcado) / somaOrcado : 1 / etapas.length;
+        e.empreitas += valor * peso;
+        e.temEmpreita = true;
+        if (rateada) e.empreitaRateada = true;
+      }
+    }
     const total: LinhaEap = {
       key: 'total',
       numero: '',
@@ -15261,8 +15298,11 @@ export function OrcamentoPageView({
       temCustoReal: linhas.some((l) => l.temCustoReal),
       custoOc: linhas.reduce((a, l) => a + l.custoOc, 0),
       temCustoOc: linhas.some((l) => l.temCustoOc),
+      empreitas: linhas.reduce((a, l) => a + l.empreitas, 0),
+      temEmpreita: linhas.some((l) => l.temEmpreita),
+      empreitaRateada: false,
     };
-    return { linhas, total };
+    return { linhas, total, gastoEmpreita: Math.round(gastoEmpreita * 100) / 100, temEmpreitaRateada };
   }, [
     orcamentoViewTab,
     meta.bdiPercentual,
@@ -15273,6 +15313,7 @@ export function OrcamentoPageView({
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
     custoOcPorItemFd,
+    cotacaoEmpreita,
   ]);
 
   /** Cotação Empreita: etapas e itens da FD (insumos) para associar a cada empreita. */
@@ -17081,7 +17122,6 @@ export function OrcamentoPageView({
     }
     return [
       { value: 'dados' as const, label: 'Dados' },
-      { value: 'cotacaoEmpreita' as const, label: 'Cotação Empreita' },
       ...(meta.requerConfigDesconto === true
         ? [{ value: 'detalhado' as const, label: 'Orçamento detalhado' }]
         : []),
@@ -17103,6 +17143,7 @@ export function OrcamentoPageView({
                 ? undefined
                 : 'Finalize o orçamento para liberar a ficha de demanda',
             },
+            { value: 'cotacaoEmpreita' as const, label: 'Cotação Empreita' },
             {
               value: 'eap' as const,
               label: 'EAP',
@@ -17112,7 +17153,7 @@ export function OrcamentoPageView({
                 : 'Finalize o orçamento para liberar a EAP',
             },
           ]
-        : []),
+        : [{ value: 'cotacaoEmpreita' as const, label: 'Cotação Empreita' }]),
     ];
   }, [
     fichaDemandaOnly,
@@ -18562,11 +18603,12 @@ export function OrcamentoPageView({
       valorOrcado: brl(l.valorOrcado),
       custoEstimado: brl(l.custoEstimado),
       custoOc: l.temCustoOc ? brl(l.custoOc) : '—',
+      empreitas: l.temEmpreita ? `${l.empreitaRateada ? '≈ ' : ''}${brl(l.empreitas)}` : '—',
       custoReal: l.temCustoReal ? brl(l.custoReal) : '—',
-      lucro: l.temCustoReal ? brl(l.valorOrcado - l.custoReal) : '—',
+      lucro: l.temCustoReal || l.temEmpreita ? brl(l.valorOrcado - l.custoReal - l.empreitas) : '—',
       custoSobreOrcado:
-        l.temCustoReal && l.valorOrcado > 0
-          ? `${((l.custoReal / l.valorOrcado) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+        (l.temCustoReal || l.temEmpreita) && l.valorOrcado > 0
+          ? `${(((l.custoReal + l.empreitas) / l.valorOrcado) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
           : '—',
     }));
     const nomeOrc = String(listaOrcamentos.find((o) => o.id === orcamentoAtivoId)?.nome || '').trim();
@@ -18584,12 +18626,19 @@ export function OrcamentoPageView({
           { key: 'etapa', label: 'Etapa', width: 64, tone: 'bold' },
           { key: 'valorOrcado', label: 'Valor orçado (com desconto e BDI)', width: 36 },
           { key: 'custoEstimado', label: 'Custo estimado (40%)', width: 32 },
-          { key: 'custoOc', label: 'Custo na OC', width: 32 },
-          { key: 'custoReal', label: 'Custo real', width: 32 },
-          { key: 'lucro', label: 'Lucro esperado', width: 33 },
-          { key: 'custoSobreOrcado', label: 'Custo real / orçado', width: 30 },
+          { key: 'custoOc', label: 'Custo na OC', width: 29 },
+          { key: 'custoReal', label: 'Custo real (OCs pagas)', width: 29 },
+          { key: 'empreitas', label: 'Empreitas', width: 29 },
+          { key: 'lucro', label: 'Lucro esperado', width: 30 },
+          { key: 'custoSobreOrcado', label: 'Custo real / orçado', width: 26 },
         ],
         rows: linhas,
+        note: [
+          resumoEap.gastoEmpreita > 0 ? `Custo total de empreita: ${brl(resumoEap.gastoEmpreita)}` : '',
+          resumoEap.temEmpreitaRateada ? 'Atenção: Empreitas vinculadas a duas ou mais etapas da FD recebem o valor proporcional da empreita contratada de acordo com o valor orçado. Portanto, o valor na etapa deve ser tratado como uma estimativa.' : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
         footerLabel: 'EAP — resumo da ficha de demanda por etapa',
       });
     } catch (err) {
@@ -19852,10 +19901,20 @@ export function OrcamentoPageView({
                           n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
                         const pct = (n: number) =>
                           `${(n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-                        /** Lucro esperado = valor orçado − custo real (só quando há custo real). */
-                        const celulaLucro = (l: { valorOrcado: number; custoReal: number; temCustoReal: boolean }) => {
-                          if (!l.temCustoReal) return <span className="text-gray-400 dark:text-gray-500">—</span>;
-                          const lucro = l.valorOrcado - l.custoReal;
+                        /** Gasto da etapa = custo real (OCs pagas) + empreitas. */
+                        type LinhaGasto = {
+                          valorOrcado: number;
+                          custoReal: number;
+                          temCustoReal: boolean;
+                          empreitas: number;
+                          temEmpreita: boolean;
+                        };
+                        const temGasto = (l: LinhaGasto) => l.temCustoReal || l.temEmpreita;
+                        const gasto = (l: LinhaGasto) => l.custoReal + l.empreitas;
+                        /** Lucro esperado = valor orçado − custo real − empreitas (quando há algum dos dois). */
+                        const celulaLucro = (l: LinhaGasto) => {
+                          if (!temGasto(l)) return <span className="text-gray-400 dark:text-gray-500">—</span>;
+                          const lucro = l.valorOrcado - gasto(l);
                           return (
                             <span className={lucro < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>
                               {brl(lucro)}
@@ -19866,14 +19925,11 @@ export function OrcamentoPageView({
                           );
                         };
                         /** Custo real / orçado: % e barra (laranja até 100%, vermelha acima). */
-                        const celulaCustoSobreOrcado = (
-                          l: { valorOrcado: number; custoReal: number; temCustoReal: boolean },
-                          forte?: boolean
-                        ) => {
-                          if (!l.temCustoReal || !(l.valorOrcado > 0)) {
+                        const celulaCustoSobreOrcado = (l: LinhaGasto, forte?: boolean) => {
+                          if (!temGasto(l) || !(l.valorOrcado > 0)) {
                             return <span className="text-gray-400 dark:text-gray-500">—</span>;
                           }
-                          const r = l.custoReal / l.valorOrcado;
+                          const r = gasto(l) / l.valorOrcado;
                           const acima = r > 1;
                           const largura = Math.max(2, Math.min(r / 1.2, 1) * 100);
                           return (
@@ -19914,17 +19970,39 @@ export function OrcamentoPageView({
                             cor: 'text-violet-600 dark:text-violet-400',
                           },
                           {
-                            titulo: 'Custo real',
+                            titulo: 'Custo real (OCs pagas)',
                             valor: tot.temCustoReal ? brl(tot.custoReal) : '—',
                             detalhe: tot.temCustoReal
                               ? 'Soma da coluna da ficha de demanda (OCs pagas)'
                               : 'Preenchido com as OCs pagas',
                             cor: 'text-blue-600 dark:text-blue-400',
                           },
+                          {
+                            titulo: 'Custo total de empreita',
+                            valor: resumoEap.gastoEmpreita > 0 ? brl(resumoEap.gastoEmpreita) : '—',
+                            detalhe: 'Fornecedores contratados na Cotação Empreita',
+                            cor: 'text-indigo-600 dark:text-indigo-400',
+                          },
                         ];
+                        const celulaEmpreita = (l: { empreitas: number; temEmpreita: boolean; empreitaRateada: boolean }) =>
+                          l.temEmpreita ? (
+                            <span
+                              className="text-indigo-600 dark:text-indigo-400"
+                              title={
+                                l.empreitaRateada
+                                  ? 'Inclui valor proporcional de empreita vinculada a duas ou mais etapas (estimativa)'
+                                  : undefined
+                              }
+                            >
+                              {l.empreitaRateada ? '≈ ' : ''}
+                              {brl(l.empreitas)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 dark:text-gray-500">—</span>
+                          );
                         return (
-                          <div className="mx-auto w-full max-w-[88rem] space-y-4 px-1 py-2">
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="mx-auto w-full max-w-[110rem] space-y-4 px-1 py-2">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                               {cards.map((c) => (
                                 <div
                                   key={c.titulo}
@@ -19938,6 +20016,17 @@ export function OrcamentoPageView({
                                 </div>
                               ))}
                             </div>
+
+                            {resumoEap.temEmpreitaRateada ? (
+                              <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/30 dark:text-amber-200">
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                                <p>
+                                  <span className="font-semibold">Atenção:</span> Empreitas vinculadas a duas ou mais etapas da FD recebem
+                                  o valor proporcional da empreita contratada de acordo com o valor orçado. Portanto, o valor na etapa deve
+                                  ser tratado como uma estimativa.
+                                </p>
+                              </div>
+                            ) : null}
 
                             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
                               <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
@@ -19957,17 +20046,18 @@ export function OrcamentoPageView({
                                 </button>
                               </div>
                               <div className="overflow-x-auto">
-                                <table className="w-full min-w-[64rem] text-sm">
+                                <table className="w-full min-w-max text-sm">
                                   <thead>
-                                    <tr className="bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+                                    <tr className="whitespace-nowrap bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
                                       <th className="w-14 px-4 py-2.5 text-center">Item</th>
                                       <th className="px-4 py-2.5 text-left">Etapa</th>
                                       <th className="px-4 py-2.5 text-right">Valor orçado (com desconto e BDI)</th>
                                       <th className="px-4 py-2.5 text-right">Custo estimado (40%)</th>
                                       <th className="px-4 py-2.5 text-right" title="Custo nas OCs emitidas (antes do pagamento)">Custo na OC</th>
-                                      <th className="px-4 py-2.5 text-right" title="OCs pagas e validadas pelo compras">Custo real</th>
-                                      <th className="px-4 py-2.5 text-right" title="Valor orçado − custo real">Lucro esperado</th>
-                                      <th className="px-4 py-2.5 text-right" title="Custo real ÷ valor orçado">Custo real / orçado</th>
+                                      <th className="px-4 py-2.5 text-right" title="OCs pagas e validadas pelo compras">Custo real (OCs pagas)</th>
+                                      <th className="px-4 py-2.5 text-right" title="Valor do fornecedor contratado na Cotação Empreita">Empreitas</th>
+                                      <th className="px-4 py-2.5 text-right" title="Valor orçado − custo real − empreitas">Lucro esperado</th>
+                                      <th className="px-4 py-2.5 text-right" title="(Custo real + empreitas) ÷ valor orçado">Custo real / orçado</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700/70">
@@ -20011,6 +20101,7 @@ export function OrcamentoPageView({
                                               <span className="text-gray-400 dark:text-gray-500">—</span>
                                             )}
                                           </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{celulaEmpreita(l)}</td>
                                           <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">{celulaLucro(l)}</td>
                                           <td className="whitespace-nowrap px-4 py-3 text-right">{celulaCustoSobreOrcado(l)}</td>
                                         </tr>
@@ -20041,6 +20132,7 @@ export function OrcamentoPageView({
                                           <span className="text-gray-400 dark:text-gray-500">—</span>
                                         )}
                                       </td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{celulaEmpreita(tot)}</td>
                                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{celulaLucro(tot)}</td>
                                       <td className="whitespace-nowrap px-4 py-3 text-right">{celulaCustoSobreOrcado(tot, true)}</td>
                                     </tr>
