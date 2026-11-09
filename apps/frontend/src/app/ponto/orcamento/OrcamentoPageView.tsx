@@ -17891,6 +17891,9 @@ export function OrcamentoPageView({
     const empty = () => Array.from({ length: NCOL }, () => '') as OrcamentoExcelRow['values'];
     const VERDE = '#166534';
     const VERMELHO = '#991B1B';
+    const VERDE_FUNDO = '#C4D79B';
+    const VERMELHO_FUNDO = '#E6B8B7';
+    const CINZA_CABECALHO = '#D9D9D9';
     const rows: OrcamentoExcelRow[] = [];
     const imagens: NonNullable<OrcamentoExcelSheetSpec['imagens']> = [];
     const dataBr = (ymd: string) => {
@@ -17921,7 +17924,17 @@ export function OrcamentoPageView({
       rotulosItem[3] = 'DESCRIÇÃO';
       rotulosItem[5] = 'UND';
       rotulosItem[6] = 'VALOR ADOTADO';
-      rows.push({ kind: 'cabecalho', values: rotulosItem, merges: [[3, 4]], altura: 24 });
+      const coresCabecalho = (cols: number[]) =>
+        Object.fromEntries(
+          cols.map((c) => [c, { fg: '#000000', bg: CINZA_CABECALHO, bold: true, tamanho: 10 }])
+        );
+      rows.push({
+        kind: 'cabecalho',
+        values: rotulosItem,
+        merges: [[3, 4]],
+        altura: 24,
+        cores: coresCabecalho([0, 1, 2, 3, 4, 5, 6]),
+      });
 
       const linhaItem = rows.length;
       // Depois do item: cabeçalho das propostas, fornecedor e valor.
@@ -17941,7 +17954,7 @@ export function OrcamentoPageView({
         formulas: { 6: `MIN(B{R${linhaValor}},D{R${linhaValor}},F{R${linhaValor}})` },
         formats: { 6: 'currency' },
         tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'plain', 4: 'plain', 5: 'plain', 6: 'plain' },
-        cores: { 6: { fg: VERDE, bold: true } },
+        cores: { 6: { fg: VERDE, bg: VERDE_FUNDO, bold: true, tamanho: 11 } },
       });
 
       // 2) Propostas: cada uma ocupa duas colunas.
@@ -17949,7 +17962,13 @@ export function OrcamentoPageView({
       COL_PROPOSTAS.forEach((col, i) => {
         rotulosProp[col] = `${i + 1}ª PROPOSTA`;
       });
-      rows.push({ kind: 'cabecalho', values: rotulosProp, merges: MERGES_PROPOSTAS, altura: 24 });
+      rows.push({
+        kind: 'cabecalho',
+        values: rotulosProp,
+        merges: MERGES_PROPOSTAS,
+        altura: 24,
+        cores: coresCabecalho([1, 2, 3, 4, 5, 6]),
+      });
 
       const linhaCampo = (
         rotulo: string,
@@ -17975,11 +17994,21 @@ export function OrcamentoPageView({
       // VALOR: menor proposta em verde, as demais em vermelho (como na planilha de referência).
       linhaCampo('VALOR', (i) => propostas[i]?.valor ?? '', {
         formats: Object.fromEntries(COL_PROPOSTAS.map((col) => [col, 'currency'])),
+        // Menor valor em verde, demais em vermelho: letra e fundo (nas duas colunas da célula mesclada).
         cores: Object.fromEntries(
-          COL_PROPOSTAS.map((col, i) => [
-            col,
-            { fg: menor && propostas[i]?.id === menor.id ? VERDE : VERMELHO, bold: true },
-          ])
+          PROPOSTAS_COLS.flatMap(([col, colAte], i) => {
+            const menorValor = !!menor && propostas[i]?.id === menor.id;
+            const estilo = {
+              fg: menorValor ? VERDE : VERMELHO,
+              bg: menorValor ? VERDE_FUNDO : VERMELHO_FUNDO,
+              bold: true,
+              tamanho: 11,
+            };
+            return [
+              [col, estilo],
+              [colAte, estilo],
+            ];
+          })
         ),
       });
       linhaCampo('CNPJ / CPF', (i) => propostas[i]?.cnpj || '');

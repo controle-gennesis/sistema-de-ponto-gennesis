@@ -88,7 +88,7 @@ export type OrcamentoExcelRow = {
   /** Altura da linha em pontos (padrão 30). */
   altura?: number;
   /** Cor da letra/fundo (hex) e negrito por célula, por cima de tudo. */
-  cores?: Record<number, { fg?: string; bg?: string; bold?: boolean }>;
+  cores?: Record<number, { fg?: string; bg?: string; bold?: boolean; tamanho?: number }>;
   /** Célula vira link: coluna 0-based → URL (o texto continua sendo o valor da célula). */
   links?: Record<number, string>;
 };
@@ -615,7 +615,7 @@ async function fillWorkbook(
           cell.font = {
             ...f,
             name: f.name ?? fontName,
-            size: f.size ?? tamItem,
+            size: cor.tamanho ?? f.size ?? tamItem,
             bold: cor.bold ?? f.bold,
             color: cor.fg ? { argb: hexToArgb(cor.fg, TITLE_TEXT) } : f.color,
           };
