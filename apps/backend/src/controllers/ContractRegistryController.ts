@@ -16,6 +16,17 @@ function str(v: unknown, max = 255): string | null {
   return s ? s.slice(0, max) : null;
 }
 
+/** Lista de ids de centros de custo: sem repetidos nem vazios (máx. 50). */
+function parseIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw.slice(0, 50)) {
+    const id = str(item, 60);
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 /** UF com 2 letras maiúsculas; vazio/inválida = sem estado (null). */
 function parseUf(raw: unknown): string | null {
   const v = String(raw ?? '').trim().toUpperCase();
@@ -99,6 +110,7 @@ function serialize(r: Row) {
     contractorName: r.contractorName,
     uf: r.uf,
     arts: parseArts(r.arts),
+    costCenterIds: r.costCenterIds ?? [],
     contractNumber: r.contractNumber,
     document: r.document,
     signedAt: ymd(r.signedAt),
@@ -193,6 +205,7 @@ function readBody(body: Record<string, unknown>, partial: boolean): Prisma.Contr
   }
   if (has('uf')) data.uf = parseUf(body.uf);
   if (has('arts')) data.arts = parseArts(body.arts) as unknown as Prisma.InputJsonValue;
+  if (has('costCenterIds')) data.costCenterIds = parseIds(body.costCenterIds);
   if (has('document')) data.document = str(body.document, 40);
   if (has('notes')) data.notes = str(body.notes, 2000);
   if (has('guarantee')) data.guarantee = str(body.guarantee, 500);

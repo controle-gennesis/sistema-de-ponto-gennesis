@@ -3902,6 +3902,15 @@ export class EmpreiteiroController {
 
       const number = optionalStr(req.body?.number)?.slice(0, 60);
       if (!number) throw createError('Informe o número da nota fiscal', 400);
+      // Número de nota não se repete na mesma empreita (ignora espaços, maiúsculas e zeros à esquerda).
+      const normalizarNota = (v: string) => v.trim().toUpperCase().replace(/\s+/g, '').replace(/^0+(?=\d)/, '');
+      const existentes = await prisma.empreiteiroServiceInvoice.findMany({
+        where: { empreiteiroContract: { empreiteiroId: id } },
+        select: { number: true },
+      });
+      if (existentes.some((nf) => normalizarNota(nf.number) === normalizarNota(number))) {
+        throw createError(`A nota fiscal ${number} já está anexada nesta empreita`, 409);
+      }
       const fileUrl = optionalStr(req.body?.fileUrl);
       if (!fileUrl) throw createError('Anexe o arquivo da nota fiscal', 400);
       const installmentIdRaw = optionalStr(req.body?.installmentId);
