@@ -1183,10 +1183,34 @@ function ControleContratosPage() {
                       ))}
                     </datalist>
                   </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Protocolo</span>
-                    <input value={catProtocol} onChange={(e) => setCatProtocol(e.target.value)} className={FORM_FIELD_INPUT_CLS} />
-                  </label>
+                  <div>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Protocolo (ART)</span>
+                    {(() => {
+                      const options = artOptions.map((a) => ({ value: a.art, label: a.art }));
+                      // Protocolo já salvo que não está na lista (digitado antes) continua selecionável.
+                      if (catProtocol && !options.some((o) => o.value === catProtocol)) {
+                        options.unshift({ value: catProtocol, label: catProtocol });
+                      }
+                      return (
+                        <StringSingleSelectDropdown
+                          value={catProtocol}
+                          onChange={(v) => {
+                            setCatProtocol(v);
+                            // Se o profissional ainda está vazio, preenche com o da ART escolhida.
+                            const picked = artOptions.find((a) => a.art === v);
+                            if (v && picked?.profissional) setCatProfessional((prev) => prev || picked.profissional || '');
+                          }}
+                          options={options}
+                          allowEmpty
+                          emptyOptionLabel="Sem protocolo"
+                          placeholder="Selecione a ART"
+                          searchPlaceholder="Pesquisar ART..."
+                          matchTriggerWidth
+                          className="w-full"
+                        />
+                      );
+                    })()}
+                  </div>
                   <div>
                     <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Data de emissão</span>
                     <TypedDateField value={catIssuedAt} onChange={setCatIssuedAt} ariaLabel="Data de emissão da CAT" />

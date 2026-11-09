@@ -92,6 +92,12 @@ router.put('/:id/contracts/:linkId/review', (req, res, next) =>
 router.get('/addenda/pending', (req, res, next) =>
   controller.listPendingAddenda(req as any, res as any, next)
 );
+router.post('/:id/contracts/:linkId/invoices', (req, res, next) =>
+  controller.addServiceInvoice(req as any, res as any, next)
+);
+router.delete('/:id/contracts/:linkId/invoices/:invoiceId', (req, res, next) =>
+  controller.removeServiceInvoice(req as any, res as any, next)
+);
 router.post('/:id/contracts', (req, res, next) =>
   controller.addContract(req as any, res as any, next)
 );
