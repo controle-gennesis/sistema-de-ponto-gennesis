@@ -790,6 +790,7 @@ enum DpRequestType {
   ADM_INFORMATICA
   ADM_TREINAMENTOS_NR
   ADM_ASOS
+  ADM_OUTROS
   CONVENCAO_COLETIVA
   FECHAMENTO_FOLHA
   IMPOSTOS_ENCARGOS
@@ -6087,6 +6088,8 @@ model ContractRegistryEntry {
   uf             String?
   /// ARTs do contrato: [{ art, professional }] (profissional vem da página ART's / Protocolos).
   arts           Json?
+  /// Centros de custo do contrato (ids de CostCenter; vários).
+  costCenterIds  String[]  @default([]) @map("cost_center_ids")
   contractNumber String
   document       String?
   signedAt       DateTime? @db.Date

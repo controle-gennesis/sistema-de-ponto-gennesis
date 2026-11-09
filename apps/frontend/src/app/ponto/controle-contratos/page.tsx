@@ -23,6 +23,8 @@ import {
   Wallet,
 } from 'lucide-react';
 import { DriveLinksMenu } from './DriveLinksMenu';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { useCostCenters } from '@/hooks/useCostCenters';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -48,6 +50,7 @@ type RegistryRow = {
   contractorName: string;
   uf: string | null;
   arts: ArtEntry[];
+  costCenterIds: string[];
   contractNumber: string;
   document: string | null;
   signedAt: string | null;
@@ -90,6 +93,8 @@ type RegistryForm = {
   contractorName: string;
   uf: string;
   arts: ArtEntry[];
+  /** Centros de custo do contrato (ids). */
+  costCenterIds: string[];
   contractNumber: string;
   document: string;
   signedAt: string;
@@ -104,6 +109,7 @@ const EMPTY_FORM: RegistryForm = {
   contractorName: '',
   uf: '',
   arts: [{ ...EMPTY_ART }],
+  costCenterIds: [],
   contractNumber: '',
   document: '',
   signedAt: '',
@@ -398,12 +404,30 @@ function ControleContratosPage() {
         ...r,
         arts: (r.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })),
         cats: r.cats ?? [],
+        costCenterIds: r.costCenterIds ?? [],
         looseArts: (r.looseArts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })),
         addenda: (r.addenda ?? []).map((x) => ({ ...x, arts: (x.arts ?? []).map((a) => ({ ...a, baixada: a.baixada ?? '' })) })),
         addendaTotal: r.addendaTotal ?? 0,
       })),
     enabled: !!user,
   });
+
+  const { costCenters } = useCostCenters();
+  const costCenterOptions = useMemo(
+    () =>
+      (costCenters as Array<{ id?: string; code?: string; name?: string; label?: string }>)
+        .map((cc) => {
+          const value = String(cc.id ?? cc.code ?? '');
+          const label = String(cc.label || cc.name || cc.code || '');
+          return value && label ? { value, label, searchText: `${label} ${cc.code ?? ''}` } : null;
+        })
+        .filter((o): o is { value: string; label: string; searchText: string } => o !== null),
+    [costCenters],
+  );
+  const costCenterNameById = useMemo(
+    () => new Map(costCenterOptions.map((o) => [o.value, o.label])),
+    [costCenterOptions],
+  );
 
   const { data: artOptions = [] } = useQuery({
     queryKey: ['contract-registry-art-options'],
@@ -676,6 +700,7 @@ function ControleContratosPage() {
       contractorName: r.contractorName,
       uf: r.uf ?? '',
       arts: r.arts.length ? r.arts.map((a) => ({ ...a })) : [{ ...EMPTY_ART }],
+      costCenterIds: r.costCenterIds ?? [],
       contractNumber: r.contractNumber,
       document: r.document ?? '',
       signedAt: r.signedAt ?? '',
@@ -951,6 +976,10 @@ function ControleContratosPage() {
                       ['Nº do contrato', viewing.contractNumber],
                       ['ARTs', viewing.arts.map((a) => [a.professional ? `${a.art || 'Sem número'} — ${a.professional}` : a.art, a.baixada ? `Baixada: ${a.baixada}` : ''].filter(Boolean).join(' · ')).filter(Boolean).join('\n') || '—'],
                       ['CPF/CNPJ', viewing.document || '—'],
+                      [
+                        'Centros de custo',
+                        (viewing.costCenterIds ?? []).map((id) => costCenterNameById.get(id) ?? '').filter(Boolean).join('\n') || '—',
+                      ],
                       ['Estado', viewing.uf ? `${UF_NAMES[viewing.uf] ?? viewing.uf} (${viewing.uf})` : '—'],
                       ['Assinado em', dateBr(viewing.signedAt)],
                       ['Observações', viewing.notes || '—'],
@@ -1552,6 +1581,19 @@ function ControleContratosPage() {
               <TypedDateField value={form.endDate} onChange={(v) => set('endDate', v)} ariaLabel="Término" />
             </div>
             <ArtsEditor value={form.arts} onChange={(next) => set('arts', next)} artOptions={artOptions} />
+            <div className="sm:col-span-3">
+              <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Centros de custo</span>
+              <MultiSelectSearchDropdown
+                options={costCenterOptions}
+                selected={form.costCenterIds}
+                onChange={(ids) => set('costCenterIds', ids)}
+                placeholder="Selecione um ou mais centros de custo"
+                searchPlaceholder="Pesquisar centro de custo..."
+                emptyOptionsMessage="Nenhum centro de custo cadastrado"
+                emptySearchMessage="Nenhum centro de custo encontrado"
+                className="w-full"
+              />
+            </div>
             <div className="sm:col-span-3">
               <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Garantia</span>
               <StringSingleSelectDropdown

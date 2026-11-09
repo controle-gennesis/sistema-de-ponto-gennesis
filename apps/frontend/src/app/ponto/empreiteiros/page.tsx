@@ -600,7 +600,7 @@ export default function EmpreiteirosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const crud = useCadastroCrudPermissions('/ponto/empreiteiros');
-  const { isLinkedEmpreiteiro, canApproveEmpreiteiroDaily } = usePermissions();
+  const { isLinkedEmpreiteiro, canApproveEmpreiteiroDaily, isAdministrator } = usePermissions();
   const { costCenters } = useCostCenters();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -750,6 +750,8 @@ export default function EmpreiteirosPage() {
 
   const ownEmpreiteiroId = userData?.data?.empreiteiro?.id as string | undefined;
   const isOwnEmpreiteiroAccount = isLinkedEmpreiteiro;
+  /** A aba "Solicitações Fluig" da empreita é só do administrador. */
+  const canSeeFluigTab = isAdministrator && !isLinkedEmpreiteiro;
   /** Gennesis (não o próprio empreiteiro) cadastra/completa a empreita nesta página. */
   const canCreate = crud.canCreate && !isLinkedEmpreiteiro;
   const canManageCadastro = crud.canEdit && !isLinkedEmpreiteiro;
@@ -1197,8 +1199,32 @@ export default function EmpreiteirosPage() {
     setInvoiceModal({ linkId, installmentId, label });
   };
 
+  /** Procura, em todos os serviços da empreita, uma nota com o mesmo número (ignora espaços, maiúsculas e zeros à esquerda). */
+  const acharNotaDuplicada = (numero: string) => {
+    const norm = (v: string) => v.trim().toUpperCase().replace(/\s+/g, '').replace(/^0+(?=\d)/, '');
+    const alvo = norm(numero);
+    if (!alvo) return null;
+    for (const l of viewingItem?.contracts ?? []) {
+      const nf = (l.invoices ?? []).find((n) => norm(String(n.number)) === alvo);
+      if (nf) {
+        const parcela = (l.installments ?? []).find((p) => p.id === nf.installmentId);
+        return {
+          numero: nf.number,
+          servico: l.contratoNome || l.name || 'serviço',
+          onde: parcela ? `parcela ${parcela.number}` : 'serviço inteiro',
+        };
+      }
+    }
+    return null;
+  };
+
   const salvarNotaFiscal = async () => {
     if (!invoiceModal || !viewingItem?.id || !canManageCadastro) return;
+    const duplicada = acharNotaDuplicada(invoiceNumber);
+    if (duplicada) {
+      toast.error(`A nota fiscal ${duplicada.numero} já está anexada (${duplicada.servico}, ${duplicada.onde}).`);
+      return;
+    }
     if (!invoiceNumber.trim()) {
       toast.error('Informe o número da nota fiscal');
       return;
@@ -4043,7 +4069,8 @@ export default function EmpreiteirosPage() {
                                     value={invoiceNumber}
                                     onChange={(e) => setInvoiceNumber(e.target.value)}
                                     placeholder="Ex.: 1234"
-                                    className={inputClass}
+                                    className={`${inputClass} ${acharNotaDuplicada(invoiceNumber) ? '!border-red-500' : ''}`}
+                                    aria-invalid={!!acharNotaDuplicada(invoiceNumber)}
                                     autoFocus
                                   />
                                 </div>
@@ -4059,6 +4086,19 @@ export default function EmpreiteirosPage() {
                                   />
                                 </div>
                               </div>
+                              {(() => {
+                                const dup = acharNotaDuplicada(invoiceNumber);
+                                if (!dup) return null;
+                                return (
+                                  <div
+                                    role="alert"
+                                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-200"
+                                  >
+                                    <strong>A nota fiscal {dup.numero} já foi anexada.</strong> Ela está no serviço{' '}
+                                    <strong>{dup.servico}</strong> ({dup.onde}). Não é possível anexar o mesmo número duas vezes.
+                                  </div>
+                                );
+                              })()}
                               <div>
                                 <label className={labelClass}>Data de emissão</label>
                                 <DatePickerField value={invoiceIssuedAt} onChange={setInvoiceIssuedAt} />
@@ -4083,7 +4123,9 @@ export default function EmpreiteirosPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={savingInvoice || !invoiceNumber.trim() || !invoiceFile}
+                                  disabled={
+                                    savingInvoice || !invoiceNumber.trim() || !invoiceFile || !!acharNotaDuplicada(invoiceNumber)
+                                  }
                                   onClick={() => void salvarNotaFiscal()}
                                   className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                 >
@@ -5035,7 +5077,7 @@ export default function EmpreiteirosPage() {
                     {(
                       [
                         { id: 'contratos', label: 'Contratos de Serviço' },
-                        ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'fluig', label: 'Solicitações Fluig' }]),
+                        ...(canSeeFluigTab ? [{ id: 'fluig', label: 'Solicitações Fluig' }] : []),
                         ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'avaliacoes', label: 'Avaliações' }]),
                         { id: 'dados', label: 'Dados' },
                       ] as const
@@ -5535,11 +5577,11 @@ export default function EmpreiteirosPage() {
             ) : null}
 
 
-            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+            {abaDetalhe === 'fluig' && canSeeFluigTab ? (
               <EmpreiteiroFluigResumoCards empreiteiroId={viewingItem.id} />
             ) : null}
 
-            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+            {abaDetalhe === 'fluig' && canSeeFluigTab ? (
               <Card className={cadastroListClasses.card}>
                 <CardHeader className="border-b-0 pb-1">
                   <div className="flex items-center space-x-3">

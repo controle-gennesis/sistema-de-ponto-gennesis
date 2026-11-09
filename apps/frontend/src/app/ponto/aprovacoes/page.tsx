@@ -163,7 +163,8 @@ type DpRequestType =
   | 'ADM_MATERIAL_ESCRITORIO'
   | 'ADM_INFORMATICA'
   | 'ADM_TREINAMENTOS_NR'
-  | 'ADM_ASOS';
+  | 'ADM_ASOS'
+  | 'ADM_OUTROS';
 
 type DpContractSummary = { id: string; number: string; name: string };
 type EspelhoApprovalItem = {
@@ -253,6 +254,7 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   ADM_INFORMATICA: 'Informática',
   ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
   ADM_ASOS: "ASO's",
+  ADM_OUTROS: 'Outros',
 };
 const ESPELHO_ACTION_MENU_WIDTH_PX = 224;
 const ESPELHO_MENU_ITEM_CLASS =

@@ -334,6 +334,19 @@ const solicitacaoGeralDetails = z.object({
   anexos: accountingAnexosField,
 });
 
+/** Anexo de "Outros" (ADM): chega em Base64 e o servidor grava no S3; o tipo do arquivo é opcional. */
+const admOutrosAnexosField = z
+  .array(dpAttachmentSchema.extend({ tipoArquivo: strOpt }))
+  .max(10)
+  .optional();
+
+const admOutrosDetails = z.object({
+  assunto: str,
+  colaboradorEmployeeId: strOpt,
+  descricao: str,
+  anexos: admOutrosAnexosField,
+});
+
 export const dpDetailsSchemas = {
   ADMISSAO: z.preprocess(
     normalizeAdmissaoDetails,
@@ -406,6 +419,7 @@ export const dpDetailsSchemas = {
       .object({ asos: employeeArraySchema(admAsosItemSchema) })
       .superRefine((data, ctx) => uniqueEmployeeRefine('asos', data, ctx))
   ),
+  ADM_OUTROS: admOutrosDetails,
   CONVENCAO_COLETIVA: convencaoColetivaDetails,
   FECHAMENTO_FOLHA: fechamentoFolhaDetails,
   IMPOSTOS_ENCARGOS: impostosEncargosDetails,
