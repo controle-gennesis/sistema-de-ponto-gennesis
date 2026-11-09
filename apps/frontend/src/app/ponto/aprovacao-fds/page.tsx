@@ -39,6 +39,7 @@ import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDet
 import { FichaDemandaImportModal } from '@/components/engenharia/FichaDemandaImportModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api from '@/lib/api';
+import { createPortal } from 'react-dom';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import {
   getListTableRowClassName,
@@ -1061,9 +1062,9 @@ export default function AprovacaoFdsPage() {
           }
         />
 
-        {desfazerAlvo ? (
+        {desfazerAlvo && typeof document !== 'undefined' ? createPortal(
           <div
-            className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/50 p-4"
+            className="app-modal-overlay fixed inset-0 z-[2300] flex items-center justify-center bg-black/50 p-4"
             onClick={() => !desfazerMutation.isPending && setDesfazerAlvo(null)}
           >
             <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
@@ -1117,7 +1118,8 @@ export default function AprovacaoFdsPage() {
                 </Button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         ) : null}
 
         <FichaDemandaApprovalFormModal

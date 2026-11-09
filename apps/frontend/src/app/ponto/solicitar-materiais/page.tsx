@@ -1,5 +1,5 @@
 'use client';
-import { RmCancelOcsAviso } from '@/components/material-requests/RmCancelOcsAviso';
+import { RmCancelOcsAviso, rmTemOcAtiva } from '@/components/material-requests/RmCancelOcsAviso';
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -3637,7 +3637,14 @@ function SolicitarMateriaisPage() {
               <button
                 type="button"
                 onClick={() => cancelRmMutation.mutate(cancelTargetId!)}
-                disabled={cancelRmMutation.isPending}
+                disabled={
+                  cancelRmMutation.isPending ||
+                  rmTemOcAtiva(
+                    (filteredRequests.find((r) => r.id === cancelTargetId) as
+                      | { purchaseOrders?: { status?: string | null; orderNumber?: string | null }[] }
+                      | undefined)?.purchaseOrders
+                  )
+                }
                 className="rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
               >
                 {cancelRmMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}
