@@ -178,6 +178,7 @@ export function usePermissions() {
     pleitos: boolean;
     faturamento: boolean;
     resumo: boolean;
+    fluig?: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
@@ -586,6 +587,11 @@ export function usePermissions() {
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.faturamento === true;
   };
 
+  const canAccessContractFluigTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.fluig === true;
+  };
+
   const canAccessContractResumoTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.resumo === true;
@@ -697,6 +703,7 @@ export function usePermissions() {
     canAccessContractReunioesTab,
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
+    canAccessContractFluigTab,
     canAccessContractResumoTab,
     isContractGestor,
     canAccessContractOrdemServicoTab,

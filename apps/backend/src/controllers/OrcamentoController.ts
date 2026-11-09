@@ -1,3 +1,4 @@
+import { podeEditarCotacaoEmpreitaFinalizada } from '../lib/cotacaoEmpreita';
 import { prisma } from '../lib/prisma';
 import { broadcastOrcamentoSalvo } from '../realtime/orcamentoPresence';
 import { Response, NextFunction } from 'express';
@@ -167,6 +168,9 @@ export class OrcamentoController {
             baseRevisao: typeof baseRevisao === 'number' ? baseRevisao : undefined,
             force: force === true,
             respeitarTrava: true,
+            podeEditarCotacaoFinalizada: req.user
+              ? await podeEditarCotacaoEmpreitaFinalizada(req.user.id, !!req.user.isAdmin, centroCustoId)
+              : false,
             autor: req.user ? { id: req.user.id, nome: autorNome } : undefined,
             // Os outros são avisados assim que o arquivo é gravado, sem esperar o resto do salvamento.
             aoGravarArquivo: (novaRevisao) => {

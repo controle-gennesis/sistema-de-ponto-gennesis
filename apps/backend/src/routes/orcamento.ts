@@ -4,11 +4,25 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { OrcamentoController } from '../controllers/OrcamentoController';
+import { userCanAccessOrcamentoCostCenter } from '../lib/orcamentoAcesso';
+import { podeEditarCotacaoEmpreitaFinalizada } from '../lib/cotacaoEmpreita';
 
 const router = Router();
 const controller = new OrcamentoController();
 
 router.use(authenticate);
+
+// Toda rota com centro de custo: só administrador ou quem tem contrato Liberado nesse centro de custo.
+router.param('centroCustoId', async (req: AuthRequest, _res: Response, next: NextFunction, centroCustoId: string) => {
+  try {
+    if (!req.user) return next(createError('Usuário não autenticado', 401));
+    const ok = await userCanAccessOrcamentoCostCenter(req.user.id, req.user.isAdmin, String(centroCustoId || ''));
+    if (!ok) return next(createError('Você não tem acesso aos orçamentos deste contrato.', 403));
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 const uploadMapaCotacao = multer({
   storage: multer.memoryStorage(),
@@ -46,6 +60,21 @@ router.post(
     }
   }
 );
+
+/** Cotação Empreita: o usuário pode alterar a cotação depois de finalizada (gestor do contrato / administrador)? */
+router.get('/:centroCustoId/cotacao-empreita/permissao', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw createError('Usuário não autenticado', 401);
+    const pode = await podeEditarCotacaoEmpreitaFinalizada(
+      req.user.id,
+      !!req.user.isAdmin,
+      String(req.params.centroCustoId || '')
+    );
+    res.json({ success: true, data: { podeEditarFinalizada: pode } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/composicoes/geral', (req, res, next) => controller.getComposicoesGeral(req as any, res, next));
 router.put('/composicoes/geral', (req, res, next) => controller.saveComposicoesGeral(req as any, res, next));

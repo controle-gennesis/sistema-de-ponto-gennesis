@@ -84,7 +84,9 @@ router.get('/materials', async (req: AuthRequest, res: Response, next: NextFunct
     const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
 
     if (search.length >= 2) {
-      const data = await materialRequestService.searchConstructionMaterialsForRmDropdown(search, limit);
+      // sugestao=1: sugestões pela descrição do item da FD (basta bater parte das palavras).
+      const sugestao = String(req.query.sugestao ?? '') === '1';
+      const data = await materialRequestService.searchConstructionMaterialsForRmDropdown(search, limit, { sugestao });
       res.json({ success: true, data });
       return;
     }

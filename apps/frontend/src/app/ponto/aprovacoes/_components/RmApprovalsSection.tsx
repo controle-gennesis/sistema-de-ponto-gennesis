@@ -52,7 +52,7 @@ import {
 } from '@/lib/rmItemProductKinds';
 import { parseRmDemandSheetAttachments } from '@/lib/rmDemandSheetAttachments';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
-import { RmFdAssociacaoSection } from '@/components/material-requests/RmFdAssociacaoSection';
+import { RmFdAssociacaoSection, rmFdAssociacaoQuery } from '@/components/material-requests/RmFdAssociacaoSection';
 import {
   ApprovalPhaseStatCards,
   type ApprovalPhaseStatCard,
@@ -284,9 +284,8 @@ export function RmApprovalsSection() {
     },
   });
 
-  /** Abre na hora com o dado da lista; itens completos entram em background (igual OC). */
-  const openRequestDetail = (request: MaterialRequest) => {
-    setDetailRequest(request);
+  /** Busca, em paralelo, o detalhe da RM e os itens da FD (com os alertas do aprovador). */
+  const prefetchRequestDetail = (request: MaterialRequest) => {
     void queryClient.prefetchQuery({
       queryKey: ['material-request-detail', request.id],
       queryFn: async () => {
@@ -295,9 +294,16 @@ export function RmApprovalsSection() {
       },
       staleTime: 60_000,
     });
+    void queryClient.prefetchQuery(rmFdAssociacaoQuery(request.id));
   };
 
-  const { data: detailFresh, isFetching: isFetchingDetail } = useQuery({
+  /** Abre o modal; o conteúdo aparece de uma vez quando a RM e os itens da FD chegam. */
+  const openRequestDetail = (request: MaterialRequest) => {
+    setDetailRequest(request);
+    prefetchRequestDetail(request);
+  };
+
+  const { data: detailFresh, isFetching: isFetchingDetail, isError: detailError } = useQuery({
     queryKey: ['material-request-detail', detailRequest?.id],
     queryFn: async () => {
       const res = await api.get(`/material-requests/${detailRequest!.id}`);
@@ -313,6 +319,14 @@ export function RmApprovalsSection() {
     if (!detailFresh || detailFresh.id !== detailRequest?.id) return;
     setDetailRequest(detailFresh);
   }, [detailFresh, detailRequest?.id]);
+
+  const { status: fdAssocStatus } = useQuery({
+    ...rmFdAssociacaoQuery(detailRequest?.id ?? ''),
+    enabled: !!detailRequest?.id,
+  });
+  // Tudo de uma vez: só mostra o conteúdo com a RM completa e os itens/alertas da FD carregados.
+  const detalheCompleto =
+    !!detailRequest && (detailFresh?.id === detailRequest.id || detailError) && fdAssocStatus !== 'pending';
 
   if (!canApproveMaterialRequests) {
     return null;
@@ -451,6 +465,7 @@ export function RmApprovalsSection() {
                       <tr
                         key={request.id}
                         onClick={() => void openRequestDetail(request)}
+                        onMouseEnter={() => prefetchRequestDetail(request)}
                         className={getListTableRowClassName(true)}
                       >
                         <td
@@ -527,6 +542,11 @@ export function RmApprovalsSection() {
 
       {detailRequest && (
         <Modal isOpen onClose={() => setDetailRequest(null)} title="Detalhes da Requisição" size="full">
+          {!detalheCompleto ? (
+            <div className="flex min-h-[50vh] items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <Loader2 className="h-5 w-5 animate-spin" /> Carregando requisição…
+            </div>
+          ) : (
           <div className="space-y-6">
             {/* Header com número e status */}
             <div className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50/80 px-5 py-4 dark:border-gray-700 dark:bg-gray-800/60">
@@ -658,6 +678,7 @@ export function RmApprovalsSection() {
               </div>
             )}
           </div>
+          )}
         </Modal>
       )}
 

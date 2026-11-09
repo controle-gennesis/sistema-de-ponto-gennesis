@@ -7,6 +7,7 @@ import { iguais, mesclarTresVias } from './orcamentoMerge';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BarChart3,
   Calculator,
   Upload,
   FileSpreadsheet,
@@ -97,6 +98,8 @@ import {
   type FdItemPedido,
   type FdMaterialMap,
 } from '@/components/engenharia/FdPedidoMaterialModal';
+import { FdResultadoPorOcModal } from '@/components/engenharia/FdResultadoPorOcModal';
+import type { ItemResumo } from '@/components/engenharia/FdPedidosResumoModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import {
   currencyDigitsToFormatted,
@@ -164,6 +167,14 @@ import {
 } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
+import {
+  CotacaoEmpreitaPainel,
+  parseCotacaoEmpreita,
+  itensFdComCotacaoRealizada,
+  type CotacaoEmpreitaData,
+  type EtapaFd,
+} from './CotacaoEmpreitaPainel';
+import { OrcamentoDetalhadoPainel, type LinhaOrcamentoDetalhado } from './OrcamentoDetalhadoPainel';
 import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
 import {
   downloadCronogramaExcel,
@@ -310,6 +321,13 @@ export interface LinhaAnaliticoComposicao {
   codigo?: string;
   banco?: string;
   tipoLabel?: string;
+  /** % adicional do insumo no Orçafascio (coluna "%"): total = VU × coeficiente × (1 + %/100). */
+  percentual?: number;
+  /**
+   * Valores lidos dos campos oficiais do Orçafascio (VU = prices.plus_ls, coeficiente = qty,
+   * total = prices.plus_ls_qty). As correções automáticas de dados antigos não se aplicam.
+   */
+  oficial?: boolean;
 }
 
 export interface AnaliticoComposicao {
@@ -344,6 +362,10 @@ export interface OrcafascioComposicaoItem {
   pnd: number;
   pd: number;
   is_resource: boolean;
+  /** % adicional do insumo (coluna "%" do Orçafascio). */
+  percentual?: number;
+  /** VU, coeficiente e total vieram dos campos oficiais do analítico (sem heurística). */
+  oficial?: boolean;
 }
 
 export interface OrcafascioComposicaoDetalhe {
@@ -728,9 +750,12 @@ function contribuicaoLinhaAnalitico(
     total?: number;
     precoUnitario?: number;
     quantidade?: number;
+    oficial?: boolean;
   },
   opts?: { qtdOrcamento?: number | null; qtdOrcamentoAlt?: number | null }
 ): number {
+  // Valores oficiais do Orçafascio: a contribuição é o TOTAL da linha (já com o % adicional).
+  if (l.oficial === true) return Math.max(0, Number(l.total) || 0);
   const qtd = Number(l.quantidade) || 0;
   const vu = Number(l.precoUnitario) || 0;
   const tot = Number(l.total) || 0;
@@ -885,6 +910,90 @@ function analiticoPareceSomaDeVuSemCoef(
     return true;
   }
   return false;
+}
+
+/**
+ * VU e contribuição por unidade da composição de cada linha do analítico, com as mesmas correções
+ * de dados corrompidos da aba Analítico. `valorUnitComposicao` = preço unitário da composição (referência).
+ */
+function contribuicoesLinhasAnalitico(
+  linhasAna: LinhaAnaliticoComposicao[],
+  valorUnitComposicao: number
+): Array<{ valorUnit: number; totalUnitario: number }> {
+  const somaContrib = linhasAna.reduce((acc, l) => {
+    const q = Number(l.quantidade) || 0;
+    const p = Number(l.precoUnitario) || 0;
+    const t = Number(l.total) || 0;
+    return acc + (t > 0 ? t : p * q);
+  }, 0);
+  // Dados corrompidos: VU salvo como (preço real ÷ coeficiente) → soma das contribuições >> preço da composição.
+  const precosInsumoInflacionados = valorUnitComposicao > 0 && somaContrib > valorUnitComposicao * 2.5;
+  return linhasAna.map((ln) => {
+    const quantBase = Number(ln.quantidade) || 0;
+    const precoSalvo = Number(ln.precoUnitario) || 0;
+    const totalSalvo = Number(ln.total) || 0;
+    // Valores oficiais do Orçafascio: VU e TOTAL como vieram (sem correção de dados antigos).
+    if (ln.oficial === true) return { valorUnit: precoSalvo, totalUnitario: totalSalvo };
+    let valorUnit = precoSalvo;
+    let totalUnitario = totalSalvo > 0 ? totalSalvo : quantBase > 0 ? precoSalvo * quantBase : 0;
+    if (precosInsumoInflacionados && quantBase > 0) {
+      // precoSalvo ≈ preçoReal/coef → preçoReal = precoSalvo * coef (≈ totalSalvo).
+      valorUnit = totalSalvo > 0 ? totalSalvo : precoSalvo * quantBase;
+      totalUnitario = valorUnit * quantBase;
+    } else if (
+      quantBase > 0 &&
+      quantBase < 1 &&
+      precoSalvo > 0 &&
+      totalSalvo > 0 &&
+      Math.abs(precoSalvo * quantBase - totalSalvo) <= Math.max(0.02, totalSalvo * 0.02) &&
+      precoSalvo > totalSalvo * 5
+    ) {
+      valorUnit = totalSalvo;
+      totalUnitario = valorUnit * quantBase;
+    }
+    return { valorUnit, totalUnitario };
+  });
+}
+
+/**
+ * Orçamento detalhado: fator (1 − desconto × parte com desconto) para MO, MAT e o total da composição.
+ * Sem analítico, a composição inteira entra ou sai do desconto. Com tudo marcado, os fatores são (1 − desconto).
+ */
+function fatoresDescontoDetalhado(
+  itemKey: string,
+  linhasAna: LinhaAnaliticoComposicao[],
+  valorUnitComposicao: number,
+  descontoPct: number,
+  semDesconto: ReadonlySet<string>,
+  ocultos: ReadonlySet<string>
+): { mo: number; mat: number; tot: number } {
+  if (!(descontoPct > 0)) return { mo: 1, mat: 1, tot: 1 };
+  if (linhasAna.length === 0) {
+    const f = semDesconto.has(itemKey) ? 1 : 1 - descontoPct;
+    return { mo: f, mat: f, tot: f };
+  }
+  const contrib = contribuicoesLinhasAnalitico(linhasAna, valorUnitComposicao);
+  let mo = 0;
+  let moDesc = 0;
+  let mat = 0;
+  let matDesc = 0;
+  linhasAna.forEach((l, i) => {
+    const key = `${itemKey}|insumo|${i}`;
+    if (ocultos.has(key)) return;
+    const v = Math.max(0, contrib[i]?.totalUnitario ?? 0);
+    const comDesconto = !semDesconto.has(key);
+    if (categoriaEfetivaLinhaAnalitico(l) === 'MÃO DE OBRA') {
+      mo += v;
+      if (comDesconto) moDesc += v;
+    } else {
+      mat += v;
+      if (comDesconto) matDesc += v;
+    }
+  });
+  const fracTot = mo + mat > 0 ? (moDesc + matDesc) / (mo + mat) : 1;
+  const fracMo = mo > 0 ? moDesc / mo : fracTot;
+  const fracMat = mat > 0 ? matDesc / mat : fracTot;
+  return { mo: 1 - descontoPct * fracMo, mat: 1 - descontoPct * fracMat, tot: 1 - descontoPct * fracTot };
 }
 
 /** Preenche MO/MAT a partir do analítico gravado na linha (orçamentos já importados). */
@@ -1396,13 +1505,23 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
           prices.pnd ??
           prices.pd
       ) ?? 0;
+    // Campos oficiais do analítico do Orçafascio: VU = prices.plus_ls, coeficiente = qty,
+    // % adicional = pct e TOTAL = prices.plus_ls_qty (= VU × coef × (1 + %)). Ex.: caminhão EMOP 01602:
+    // 422.626,30 × 0,000096 × 1,2227 = 49,6075. Quando vierem, valem como estão (sem heurística).
+    const vuOficial = valorNumericoOrcafascio(prices.plus_ls ?? prices.plus_ls_as_subitem ?? prices.sem_encargos);
+    const totalOficial = valorNumericoOrcafascio(prices.plus_ls_qty);
+    const pctOficial = valorNumericoOrcafascio(s.pct);
+    const usarOficial =
+      totalOficial != null && totalOficial >= 0 && vuOficial != null && vuOficial >= 0 && qty > 0;
     const fromCoef = unitary > 0 && qty > 0 ? unitary * qty : 0;
     const totEhVu =
       unitary > 0 &&
       totalClaimed > 0 &&
       Math.abs(totalClaimed - unitary) <= Math.max(0.02, Math.abs(unitary) * 0.001);
     let totalLinha = 0;
-    if (totalClaimed > 0 && unitary > 0 && !totEhVu && totalClaimed + 1e-9 < unitary) {
+    if (usarOficial) {
+      totalLinha = totalOficial!;
+    } else if (totalClaimed > 0 && unitary > 0 && !totEhVu && totalClaimed + 1e-9 < unitary) {
       // TOTAL real (plus_ls) — menor que o VU.
       totalLinha = totalClaimed;
     } else if (fromCoef > 0) {
@@ -1426,8 +1545,13 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
         valorNumericoOrcafascio(prices.type_mat) ??
         0;
     }
-    const unitaryFinal =
-      unitary > 0 ? unitary : qty > 0 && totalLinha > 0 ? totalLinha / qty : totalLinha;
+    const unitaryFinal = usarOficial
+      ? vuOficial!
+      : unitary > 0
+        ? unitary
+        : qty > 0 && totalLinha > 0
+          ? totalLinha / qty
+          : totalLinha;
     const kind = String(s.kind ?? '').toLowerCase().trim();
     const typeStr = String(s.type ?? '').trim();
     const typeNum = Number(typeStr);
@@ -1462,6 +1586,8 @@ function detalheCatalogoAPartirAnaliticoOrcamento(row: Record<string, unknown>):
       pnd: totalLinha,
       pd: totalLinha,
       is_resource: isResource,
+      ...(usarOficial ? { oficial: true } : {}),
+      ...(usarOficial && pctOficial != null && pctOficial !== 0 ? { percentual: pctOficial } : {}),
     };
   });
   const splitRow = precosMoMatDeLinhaOrcafascio(row);
@@ -2555,21 +2681,23 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
           comp as unknown as Record<string, unknown>
         ).items ?? []);
   const preco = comp.prices?.pnd ?? 0;
+  const linhasConvertidas: LinhaAnaliticoComposicao[] = itemsSrc.map(item => ({
+    categoria: categoriaOrcafascioItem(item),
+    descricao: decodificarEntidadesHtml(String(item.description ?? '')),
+    unidade: item.unit,
+    quantidade: item.coefficient,
+    precoUnitario: item.unitary_pnd,
+    total: item.pnd,
+    codigo: item.code,
+    banco: item.banco,
+    tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
+    ...(item.oficial ? { oficial: true } : {}),
+    ...(item.percentual != null ? { percentual: item.percentual } : {}),
+  }));
   const analiticoLinhas: LinhaAnaliticoComposicao[] =
-    normalizarLinhasAnaliticoDeslocadas(
-      itemsSrc.map(item => ({
-        categoria: categoriaOrcafascioItem(item),
-        descricao: decodificarEntidadesHtml(String(item.description ?? '')),
-        unidade: item.unit,
-        quantidade: item.coefficient,
-        precoUnitario: item.unitary_pnd,
-        total: item.pnd,
-        codigo: item.code,
-        banco: item.banco,
-        tipoLabel: tipoInsumoCodigoParaDescricao(item.type),
-      })),
-      preco
-    ) ?? [];
+    linhasConvertidas.length > 0 && linhasConvertidas.every((l) => l.oficial)
+      ? linhasConvertidas
+      : normalizarLinhasAnaliticoDeslocadas(linhasConvertidas, preco) ?? [];
 
   // MO/MAT = soma da coluna TOTAL (VU × coef) de cada insumo — nunca o VU isolado.
   let mo = 0;
@@ -3092,7 +3220,11 @@ function servicosParaLocalStorage(servicos: ServicoPadrao[]): ServicoPadrao[] {
             total: Number(ln.total) || 0,
             ...(ln.codigo != null && String(ln.codigo).trim() ? { codigo: String(ln.codigo).trim() } : {}),
             ...(ln.banco != null && String(ln.banco).trim() ? { banco: String(ln.banco).trim() } : {}),
-            ...(ln.tipoLabel != null ? { tipoLabel: ln.tipoLabel } : {})
+            ...(ln.tipoLabel != null ? { tipoLabel: ln.tipoLabel } : {}),
+            ...(ln.oficial === true ? { oficial: true } : {}),
+            ...(Number.isFinite(Number(ln.percentual)) && Number(ln.percentual) !== 0
+              ? { percentual: Number(ln.percentual) }
+              : {})
           }));
         }
         return row;
@@ -3437,6 +3569,13 @@ type OrcamentoMeta = {
   usarMemoriaCalculo?: boolean;
   /** `false` = planilha sem aba/dados analíticos — esconde Analítico e Ficha de demanda. */
   temAnalitico?: boolean;
+  /**
+   * «Requer configuração de desconto?» (importação / Dados): o desconto do contrato vale por insumo
+   * (aba Orçamento detalhado) e entra embutido nos preços — sem linha de desconto separada.
+   */
+  requerConfigDesconto?: boolean;
+  /** Orçamento detalhado: configuração do desconto finalizada (marcações travadas) — exigida para finalizar. */
+  descontoConfigFinalizada?: { por: string; em: string };
   /**
    * Escolha feita na importação do Orçafascio: como calcular os subtotais por item.
    * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (truncar, igual sempre foi).
@@ -4342,6 +4481,12 @@ function parseObservacoesPorItem(raw: unknown): Record<string, string> {
   return out;
 }
 
+/** Lista de chaves (strings não vazias, sem repetição). */
+function parseListaChaves(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((k): k is string => typeof k === 'string' && k.trim() !== ''))];
+}
+
 function parseInsumosAnaliticoManuais(raw: unknown): Record<string, InsumoAnaliticoManual[]> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out: Record<string, InsumoAnaliticoManual[]> = {};
@@ -4432,6 +4577,13 @@ interface SessaoOrcamentoPersist {
   itensOcultosNoOrcamento?: string[];
   /** Chaves `${composicaoKey}|insumo|${i}` ocultas na aba Orçamento analítico. */
   insumosAnaliticoOcultos?: string[];
+  /**
+   * Orçamento detalhado (meta.requerConfigDesconto): insumos `${composicaoKey}|insumo|${i}` — ou a própria
+   * composição, quando não tem analítico — que NÃO recebem o desconto do contrato.
+   */
+  insumosSemDesconto?: string[];
+  /** Aba Cotação Empreita: empreitas e cotações com empreiteiros (finalizada = só gestor/admin altera). */
+  cotacaoEmpreita?: CotacaoEmpreitaData;
   /**
    * Só em orçamentos `meta.importadoPlanilha`: árvore de serviços deste documento (importação + blocos adicionados).
    * O catálogo da planilha perfeita do contrato continua em `servicos-padrao.json` e vem em GET `servicos`.
@@ -4789,6 +4941,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     insumosAnaliticoManuais: {},
     itensOcultosNoOrcamento: [],
     insumosAnaliticoOcultos: [],
+    insumosSemDesconto: [],
     cronograma: cronogramaVazio(),
     meta: {
       osNumeroPasta: '',
@@ -4852,6 +5005,16 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           usarMemoriaCalculo:
             typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
           temAnalitico: typeof metaRaw.temAnalitico === 'boolean' ? metaRaw.temAnalitico : undefined,
+          requerConfigDesconto: metaRaw.requerConfigDesconto === true ? true : undefined,
+          descontoConfigFinalizada:
+            metaRaw.descontoConfigFinalizada &&
+            typeof metaRaw.descontoConfigFinalizada === 'object' &&
+            typeof (metaRaw.descontoConfigFinalizada as { em?: unknown }).em === 'string'
+              ? {
+                  por: String((metaRaw.descontoConfigFinalizada as { por?: unknown }).por ?? ''),
+                  em: String((metaRaw.descontoConfigFinalizada as { em?: unknown }).em),
+                }
+              : undefined,
           modoArredondamento:
             metaRaw.modoArredondamento === 'truncar' ||
             metaRaw.modoArredondamento === 'arredondar' ||
@@ -4934,6 +5097,8 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
       insumosAnaliticoManuais: parseInsumosAnaliticoManuais(p.insumosAnaliticoManuais),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       insumosAnaliticoOcultos: Array.isArray(p.insumosAnaliticoOcultos) ? p.insumosAnaliticoOcultos : [],
+      insumosSemDesconto: parseListaChaves((p as { insumosSemDesconto?: unknown }).insumosSemDesconto),
+      cotacaoEmpreita: parseCotacaoEmpreita((p as { cotacaoEmpreita?: unknown }).cotacaoEmpreita),
       cronograma: normalizarCronograma((p as { cronograma?: unknown }).cronograma),
       meta,
       ...(Array.isArray(p.servicosDocumento) ? { servicosDocumento: p.servicosDocumento as ServicoPadrao[] } : {})
@@ -5260,6 +5425,16 @@ function parseOrcamentoDetailRaw(d: {
         usarMemoriaCalculo:
           typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
         temAnalitico: typeof metaRaw.temAnalitico === 'boolean' ? metaRaw.temAnalitico : undefined,
+        requerConfigDesconto: metaRaw.requerConfigDesconto === true ? true : undefined,
+        descontoConfigFinalizada:
+          metaRaw.descontoConfigFinalizada &&
+          typeof metaRaw.descontoConfigFinalizada === 'object' &&
+          typeof (metaRaw.descontoConfigFinalizada as { em?: unknown }).em === 'string'
+            ? {
+                por: String((metaRaw.descontoConfigFinalizada as { por?: unknown }).por ?? ''),
+                em: String((metaRaw.descontoConfigFinalizada as { em?: unknown }).em),
+              }
+            : undefined,
         modoArredondamento:
           metaRaw.modoArredondamento === 'truncar' ||
           metaRaw.modoArredondamento === 'arredondar' ||
@@ -5340,6 +5515,8 @@ function parseOrcamentoDetailRaw(d: {
           insumosAnaliticoManuais: parseInsumosAnaliticoManuais(so.insumosAnaliticoManuais),
           itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
           insumosAnaliticoOcultos: Array.isArray(so.insumosAnaliticoOcultos) ? so.insumosAnaliticoOcultos : [],
+          insumosSemDesconto: parseListaChaves(so.insumosSemDesconto),
+          cotacaoEmpreita: parseCotacaoEmpreita((so as { cotacaoEmpreita?: unknown }).cotacaoEmpreita),
           cronograma: normalizarCronograma(so.cronograma),
           meta,
           ...(Array.isArray(so.servicosDocumento) ? { servicosDocumento: so.servicosDocumento as ServicoPadrao[] } : {})
@@ -7111,13 +7288,15 @@ function OrcamentoAditivoEscolha({
   value,
   onChange,
   disabled,
+  ariaLabel,
 }: {
   value: boolean | null | undefined;
   onChange: (next: boolean) => void;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   return (
-    <div className="flex gap-2" role="group" aria-label="Orçamento aditivo">
+    <div className="flex gap-2" role="group" aria-label={ariaLabel ?? 'Orçamento aditivo'}>
       {(
         [
           { v: true, label: 'Sim' },
@@ -7359,17 +7538,22 @@ const MoedaCelula = memo(function MoedaCelula({
   valor,
   className,
   valorClassName,
-  simboloClassName
+  simboloClassName,
+  exato
 }: {
   valor: number;
   className?: string;
   valorClassName?: string;
   simboloClassName?: string;
+  /** Sem arredondar (até 7 casas), como o valor unitário do insumo no Orçafascio. */
+  exato?: boolean;
 }) {
-  const formatted = arredondarMoeda2(valor).toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+  const formatted = exato
+    ? (Number.isFinite(valor) ? valor : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 7 })
+    : arredondarMoeda2(valor).toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
   const titulo = `R$ ${formatted}`;
   return (
     <div
@@ -7782,11 +7966,14 @@ const ORCAFASCIO_META_EXTRA_VAZIO = {
 
 const ABA_ROTULO_PRESENCA: Record<string, string> = {
   dados: 'Dados',
+  cotacaoEmpreita: 'Cotação Empreita',
+  detalhado: 'Orçamento detalhado',
   montagem: 'Orçamento',
   memorial: 'Memória de Cálculo',
   mapaCotacao: 'Mapa de Cotação',
   analitico: 'Analítico',
   planilhaAnalitica: 'Ficha de Demanda',
+  eap: 'EAP',
   cronograma: 'Cronograma',
 };
 
@@ -7985,6 +8172,8 @@ export function OrcamentoPageView({
   const [orcafascioMetaExtra, setOrcafascioMetaExtra] = useState(() => ({ ...ORCAFASCIO_META_EXTRA_VAZIO }));
   const [orcafascioImportBdi, setOrcafascioImportBdi] = useState('');
   const [orcafascioImportDesconto, setOrcafascioImportDesconto] = useState('');
+  /** «Requer configuração de desconto?» na importação (null = ainda não respondeu). */
+  const [orcafascioRequerConfigDesconto, setOrcafascioRequerConfigDesconto] = useState<boolean | null>(null);
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
   const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
     useState<ModoArredondamento>('arredondar');
@@ -8104,7 +8293,16 @@ export function OrcamentoPageView({
 
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
-    'dados' | 'montagem' | 'analitico' | 'memorial' | 'mapaCotacao' | 'planilhaAnalitica' | 'cronograma'
+    | 'dados'
+    | 'cotacaoEmpreita'
+    | 'detalhado'
+    | 'montagem'
+    | 'analitico'
+    | 'memorial'
+    | 'mapaCotacao'
+    | 'planilhaAnalitica'
+    | 'eap'
+    | 'cronograma'
   >(cronogramaOnly ? 'cronograma' : fichaDemandaOnly ? 'planilhaAnalitica' : 'montagem');
 
   useEffect(() => {
@@ -8128,6 +8326,19 @@ export function OrcamentoPageView({
   const [memorialItemKey, setMemorialItemKey] = useState<string | null>(null);
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
   const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
+  /** Orçamento detalhado: insumos (ou composições sem analítico) que não recebem o desconto do contrato. */
+  const [insumosSemDesconto, setInsumosSemDesconto] = useState<string[]>([]);
+  const [cotacaoEmpreita, setCotacaoEmpreita] = useState<CotacaoEmpreitaData>({ empreitas: [] });
+  /** Gestor do contrato / administrador: altera a Cotação Empreita depois de finalizada. */
+  const { data: podeEditarCotacaoFinalizada = false } = useQuery({
+    queryKey: ['cotacao-empreita-permissao', centroCustoId],
+    queryFn: async () => {
+      const res = await api.get(`/orcamento/${centroCustoId}/cotacao-empreita/permissao`);
+      return !!res.data?.data?.podeEditarFinalizada;
+    },
+    enabled: !!centroCustoId,
+    staleTime: 5 * 60_000,
+  });
   /** Menu botão direito — Ficha de demanda: adicionar/excluir insumo (manual ou catálogo). */
   const [menuCtxFichaDemanda, setMenuCtxFichaDemanda] = useState<
     | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
@@ -9201,6 +9412,8 @@ export function OrcamentoPageView({
       setInsumosAnaliticoOcultos(
         Array.isArray(s.insumosAnaliticoOcultos) ? s.insumosAnaliticoOcultos : []
       );
+      setInsumosSemDesconto(parseListaChaves(s.insumosSemDesconto));
+      setCotacaoEmpreita(parseCotacaoEmpreita(s.cotacaoEmpreita) ?? { empreitas: [] });
       setQuantidadesPorItem(s.quantidadesPorItem);
       setFormulasQuantidadePorItem(parseFormulasQuantidadePorItem(s.formulasQuantidadePorItem));
       setDimensoesPorItem(s.dimensoesPorItem);
@@ -9560,6 +9773,8 @@ export function OrcamentoPageView({
       meta,
       itensOcultosNoOrcamento,
       insumosAnaliticoOcultos,
+      insumosSemDesconto,
+      cotacaoEmpreita,
       cronograma
     };
     servicosImportsRef.current = { servicos, imports };
@@ -9607,6 +9822,8 @@ export function OrcamentoPageView({
     meta,
     itensOcultosNoOrcamento,
     insumosAnaliticoOcultos,
+    insumosSemDesconto,
+    cotacaoEmpreita,
     cronograma,
     servicos,
     imports
@@ -9650,6 +9867,8 @@ export function OrcamentoPageView({
     meta,
     itensOcultosNoOrcamento,
     insumosAnaliticoOcultos,
+    insumosSemDesconto,
+    cotacaoEmpreita,
     cronograma,
     servicos,
     imports,
@@ -11423,6 +11642,15 @@ export function OrcamentoPageView({
       toast.error('Aguarde o carregamento das composições.');
       return false;
     }
+    if (orcafascioRequerConfigDesconto === null) {
+      toast.error('Informe se o orçamento requer configuração de desconto.');
+      return false;
+    }
+    const padraoContratoImp = padraoBdiDescontoDoContrato(importContractId);
+    if (!padraoContratoImp?.bdiPercentual || !padraoContratoImp?.descontoPercentual) {
+      toast.error('Cadastre o BDI e o desconto no contrato (Engenharia › Contratos) antes de importar.');
+      return false;
+    }
 
     importOrcamentoInFlightRef.current = true;
     setIsImportandoOrcamento(true);
@@ -11518,16 +11746,11 @@ export function OrcamentoPageView({
 
       const base = sessaoVazia();
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
-      // BDI, desconto e reajustes do contrato têm prioridade; sem padrão, vale o digitado no modal.
-      const padraoImp = padraoBdiDescontoDoContrato(
-        (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
-      );
-      const bdiPercentual = percentualInformadoOuFallback(
-        padraoImp?.bdiPercentual || orcafascioImportBdi,
-        finApi.bdiPercentual
-      );
+      // BDI, desconto e reajustes vêm do cadastro do contrato (validado antes de importar).
+      const padraoImp = padraoContratoImp;
+      const bdiPercentual = percentualInformadoOuFallback(padraoImp.bdiPercentual, finApi.bdiPercentual);
       const descontoPercentual = percentualInformadoOuFallback(
-        padraoImp?.descontoPercentual || orcafascioImportDesconto,
+        padraoImp.descontoPercentual,
         finApi.descontoPercentual
       );
       const reajustesImportacao = (padraoImp?.reajustes ?? [])
@@ -11549,10 +11772,11 @@ export function OrcamentoPageView({
         obra: orcafascioObra.trim(),
         isAditivo: orcafascioOsDraft.isAditivo === true,
         orcamentoRealizadoPor: currentUserName || '',
-        // BDI e desconto: o que foi digitado no modal; vazio usa o sintético do Orçafascio.
+        // BDI e desconto: os do cadastro do contrato.
         descontoPercentual,
         bdiPercentual,
         reajustes: reajustesImportacao,
+        ...(orcafascioRequerConfigDesconto === true ? { requerConfigDesconto: true } : {}),
         ...(padraoImp?.tituloFundo
           ? { aparenciaAbas: aparenciaAbasComTituloFundo(padraoImp.tituloFundo) }
           : {}),
@@ -11676,10 +11900,11 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
       abrirAposImportarOrcamento(importContractId, entry.id);
-      setOrcamentoViewTab('montagem');
+      setOrcamentoViewTab(meta.requerConfigDesconto === true ? 'detalhado' : 'montagem');
 
       setOrcafascioImportBdi('');
       setOrcafascioImportDesconto('');
+      setOrcafascioRequerConfigDesconto(null);
       setOrcafascioImportModoArredondamento('arredondar');
       resetOrcafascioOsDraft();
       setOrcafascioModalOpen(false);
@@ -11948,6 +12173,7 @@ export function OrcamentoPageView({
       const observacoesOrcNext = remapearRegistroPorChave(observacoesPorItem, chaveParaNovaKey);
       const ocultosNext = remapearListaChavesOrcamento(itensOcultosNoOrcamento, chaveParaNovaKey);
       const insumosOcultosNext = remapearListaChavesOrcamento(insumosAnaliticoOcultos, chaveParaNovaKey);
+      const insumosSemDescontoNext = remapearListaChavesOrcamento(insumosSemDesconto, chaveParaNovaKey);
       const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
       const valoresManuaisNext = remapearRegistroPorChave(moMatManualPorItem, chaveParaNovaKey);
 
@@ -11993,6 +12219,7 @@ export function OrcamentoPageView({
         moMatManualPorItem: valoresManuaisNext,
         itensOcultosNoOrcamento: ocultosNext,
         insumosAnaliticoOcultos: insumosOcultosNext,
+        insumosSemDesconto: insumosSemDescontoNext,
         meta: nextMeta,
         servicosDocumento: servicosParaApi,
       };
@@ -12024,6 +12251,7 @@ export function OrcamentoPageView({
       setObservacoesPorItem(observacoesOrcNext);
       setItensOcultosNoOrcamento(ocultosNext);
       setInsumosAnaliticoOcultos(insumosOcultosNext);
+      setInsumosSemDesconto(insumosSemDescontoNext);
       setInsumosAnaliticoManuais(manuaisNext);
       setMoMatManualPorItem(valoresManuaisNext);
       setMeta(nextMeta);
@@ -12729,7 +12957,20 @@ export function OrcamentoPageView({
     return m;
   }, [composicoes]);
 
-  const { itensCalculados, total, totalComBdi: totalGeralComBdi } = useMemo(() => {
+  /**
+   * Orçamento detalhado ligado: % do desconto do contrato aplicado por insumo e embutido nos preços.
+   * Desligado = 0 (o desconto segue sobre o total, no rodapé).
+   */
+  const descontoDetalhadoPct =
+    meta.requerConfigDesconto === true ? parsePercentualMeta(meta.descontoPercentual) : 0;
+
+  const {
+    itensCalculados,
+    total,
+    totalComBdi: totalGeralComBdi,
+    totalSemDescontoDetalhado: totalSemDescontoDetalhadoGeral,
+    totalDescontoDetalhado: totalDescontoDetalhadoGeral,
+  } = useMemo(() => {
     const lista: {
       key: string;
       blocoKey: string;
@@ -12746,11 +12987,19 @@ export function OrcamentoPageView({
       quantidade: number;
       total: number;
       totalComBdi: number;
+      /** Total sem o desconto do Orçamento detalhado (igual a `total` com o modo desligado). */
+      totalSemDescontoDetalhado: number;
+      /** Orçamento detalhado: desconto do item (só os insumos marcados); vai para o valor final. */
+      descontoDetalhado: number;
+      /** Algum valor da linha foi digitado à mão na grade (o desconto do detalhado não mexe nele). */
+      temValorDigitado: boolean;
       dimensoes?: DimensoesItem;
       tipoUnidade: TipoUnidadeFormula;
       unidadeComposicao?: string;
     }[] = [];
     const ocultosSet = new Set(itensOcultosNoOrcamento);
+    const insumosSemDescontoSet = new Set(insumosSemDesconto);
+    const insumosOcultosSet = new Set(insumosAnaliticoOcultos);
     const bdiPctLinha = parsePercentualMeta(meta.bdiPercentual);
     for (const bloco of subtitulosAdicionados) {
       for (const i of bloco.itens) {
@@ -12791,57 +13040,100 @@ export function OrcamentoPageView({
         const { mo: maoDeObraUnitarioAuto, mat: materialUnitarioAuto } =
           moMatUnitarioDeItemOuComposicao(i, composicao, qtd);
         const valoresManuais = moMatManualPorItem[itemKey];
-        const moUnit = valorManualOuAuto(valoresManuais, 'mo', maoDeObraUnitarioAuto);
-        const matUnit = valorManualOuAuto(valoresManuais, 'mat', materialUnitarioAuto);
-        const somaMoMatUnit = moUnit + matUnit;
-        // PU = MO + MAT quando houver split; senão preço de catálogo/importação.
-        let preco = somaMoMatUnit > 0 ? somaMoMatUnit : precoCatalogo;
-        preco = valorManualOuAuto(valoresManuais, 'pu', preco);
-        // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
-        let precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
-        precoComBdi = valorManualOuAuto(valoresManuais, 'puBdi', precoComBdi);
         const modoArred = meta.modoArredondamento;
-        const subMoRaw = moUnit * qtd;
-        const subMatRaw = matUnit * qtd;
-        let subMaoDeObra = aplicarModoArredondamento(subMoRaw, modoArred);
-        let subMaterial = aplicarModoArredondamento(subMatRaw, modoArred);
-        subMaoDeObra = valorManualOuAuto(valoresManuais, 'subMo', subMaoDeObra);
-        subMaterial = valorManualOuAuto(valoresManuais, 'subMat', subMaterial);
-        const subMatMaisMo = aplicarModoArredondamento(subMoRaw + subMatRaw, modoArred);
-        const puManual = temValorManual(valoresManuais, 'pu');
-        const subManual =
-          temValorManual(valoresManuais, 'subMo') || temValorManual(valoresManuais, 'subMat');
+        // Valores do item com os fatores do desconto (Orçamento detalhado); fatores 1 = sem desconto.
+        // Valores digitados à mão na grade continuam valendo como estão.
+        const calcularItem = (f: { mo: number; mat: number; tot: number }) => {
+          const moUnit = valorManualOuAuto(valoresManuais, 'mo', maoDeObraUnitarioAuto * f.mo);
+          const matUnit = valorManualOuAuto(valoresManuais, 'mat', materialUnitarioAuto * f.mat);
+          const somaMoMatUnit = moUnit + matUnit;
+          // PU = MO + MAT quando houver split; senão preço de catálogo/importação.
+          let preco = somaMoMatUnit > 0 ? somaMoMatUnit : precoCatalogo * f.tot;
+          preco = valorManualOuAuto(valoresManuais, 'pu', preco);
+          // Sempre recalcula com o BDI atual da meta (não congela o valor importado).
+          let precoComBdi = preco > 0 ? preco * (1 + bdiPctLinha) : 0;
+          precoComBdi = valorManualOuAuto(valoresManuais, 'puBdi', precoComBdi);
+          const subMoRaw = moUnit * qtd;
+          const subMatRaw = matUnit * qtd;
+          let subMaoDeObra = aplicarModoArredondamento(subMoRaw, modoArred);
+          let subMaterial = aplicarModoArredondamento(subMatRaw, modoArred);
+          subMaoDeObra = valorManualOuAuto(valoresManuais, 'subMo', subMaoDeObra);
+          subMaterial = valorManualOuAuto(valoresManuais, 'subMat', subMaterial);
+          const subMatMaisMo = aplicarModoArredondamento(subMoRaw + subMatRaw, modoArred);
+          const puManual = temValorManual(valoresManuais, 'pu');
+          const subManual =
+            temValorManual(valoresManuais, 'subMo') || temValorManual(valoresManuais, 'subMat');
 
-        // Com split MO/MAT: total = Sub MO + Sub MAT (mesma base das colunas de cálculo).
-        // Sem split: mantém total importado (escalado pela qtd) ou PU × qtd.
-        // Override de PU ou de sub totais altera a base do total automático.
-        let totalItem: number;
-        if (temValorManual(valoresManuais, 'total')) {
-          totalItem = valorManualOuAuto(valoresManuais, 'total', 0);
-        } else if (somaMoMatUnit > 0 && !puManual) {
-          totalItem = subManual ? subMaoDeObra + subMaterial : subMatMaisMo;
-        } else {
-          const qOrig = Number(i.quantidadeImportada);
-          const temTotaisImportados =
-            meta.importadoPlanilha === true &&
-            ((i.totalSemBdiImportado != null && Number.isFinite(i.totalSemBdiImportado)) ||
-              (i.totalComBdiImportado != null && Number.isFinite(i.totalComBdiImportado)));
-          const fatorQtd =
-            temTotaisImportados && qOrig > 0 && Number.isFinite(qOrig)
-              ? qtd / qOrig
-              : 1;
-          if (temTotaisImportados && !puManual) {
-            const semImp = Number(i.totalSemBdiImportado);
-            totalItem =
-              Number.isFinite(semImp) && semImp !== 0
-                ? aplicarModoArredondamento(semImp * fatorQtd, modoArred)
-                : aplicarModoArredondamento(preco * qtd, modoArred);
+          // Com split MO/MAT: total = Sub MO + Sub MAT (mesma base das colunas de cálculo).
+          // Sem split: mantém total importado (escalado pela qtd) ou PU × qtd.
+          // Override de PU ou de sub totais altera a base do total automático.
+          let totalItem: number;
+          if (temValorManual(valoresManuais, 'total')) {
+            totalItem = valorManualOuAuto(valoresManuais, 'total', 0);
+          } else if (somaMoMatUnit > 0 && !puManual) {
+            totalItem = subManual ? subMaoDeObra + subMaterial : subMatMaisMo;
           } else {
-            totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
+            const qOrig = Number(i.quantidadeImportada);
+            const temTotaisImportados =
+              meta.importadoPlanilha === true &&
+              ((i.totalSemBdiImportado != null && Number.isFinite(i.totalSemBdiImportado)) ||
+                (i.totalComBdiImportado != null && Number.isFinite(i.totalComBdiImportado)));
+            const fatorQtd =
+              temTotaisImportados && qOrig > 0 && Number.isFinite(qOrig)
+                ? qtd / qOrig
+                : 1;
+            if (temTotaisImportados && !puManual) {
+              const semImp = Number(i.totalSemBdiImportado);
+              totalItem =
+                Number.isFinite(semImp) && semImp !== 0
+                  ? aplicarModoArredondamento(semImp * fatorQtd * f.tot, modoArred)
+                  : aplicarModoArredondamento(preco * qtd, modoArred);
+            } else {
+              totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
+            }
           }
-        }
-        let totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
-        totalComBdiItem = valorManualOuAuto(valoresManuais, 'totalBdi', totalComBdiItem);
+          let totalComBdiItem = aplicarModoArredondamento(totalItem * (1 + bdiPctLinha), modoArred);
+          totalComBdiItem = valorManualOuAuto(valoresManuais, 'totalBdi', totalComBdiItem);
+          return {
+            moUnit,
+            matUnit,
+            preco,
+            precoComBdi,
+            subMaoDeObra,
+            subMaterial,
+            subMatMaisMo,
+            totalItem,
+            totalComBdiItem,
+          };
+        };
+        const semFator = { mo: 1, mat: 1, tot: 1 };
+        const base = calcularItem(semFator);
+        const fatores =
+          descontoDetalhadoPct > 0
+            ? fatoresDescontoDetalhado(
+                itemKey,
+                composicao?.analiticoLinhas?.length ? composicao.analiticoLinhas : [],
+                qtd > 0 ? base.totalItem / qtd : base.preco,
+                descontoDetalhadoPct,
+                insumosSemDescontoSet,
+                insumosOcultosSet
+              )
+            : semFator;
+        const efetivo = fatores === semFator ? base : calcularItem(fatores);
+        // As colunas mostram o valor original; o desconto do detalhado só entra no valor final (rodapé).
+        const descontoDetalhadoItem = Math.max(0, base.totalItem - efetivo.totalItem);
+        const {
+          moUnit,
+          matUnit,
+          preco,
+          precoComBdi,
+          subMaoDeObra,
+          subMaterial,
+          subMatMaisMo,
+          totalItem,
+          totalComBdiItem,
+        } = base;
+        const temValorDigitado = Object.keys(valoresManuais ?? {}).length > 0;
         const precisaDecodeDesc =
           typeof i.descricao === 'string' && i.descricao.includes('&');
         const precisaDecodeAnalitico =
@@ -12883,6 +13175,9 @@ export function OrcamentoPageView({
           quantidade: qtd,
           total: totalItem,
           totalComBdi: totalComBdiItem,
+          totalSemDescontoDetalhado: base.totalItem,
+          descontoDetalhado: descontoDetalhadoItem,
+          temValorDigitado,
           dimensoes: dim,
           tipoUnidade,
           unidadeComposicao: composicao?.unidade
@@ -12891,7 +13186,16 @@ export function OrcamentoPageView({
     }
     const soma = lista.reduce((acc, x) => acc + x.total, 0);
     const somaComBdi = lista.reduce((acc, x) => acc + x.totalComBdi, 0);
-    return { itensCalculados: lista, total: soma, totalComBdi: somaComBdi };
+    const somaSemDesconto = lista.reduce((acc, x) => acc + x.totalSemDescontoDetalhado, 0);
+    // Orçamento detalhado: desconto total (só o dos insumos marcados) — aplicado no valor final.
+    const somaDescontoDetalhado = lista.reduce((acc, x) => acc + x.descontoDetalhado, 0);
+    return {
+      itensCalculados: lista,
+      total: soma,
+      totalComBdi: somaComBdi,
+      totalSemDescontoDetalhado: somaSemDesconto,
+      totalDescontoDetalhado: somaDescontoDetalhado,
+    };
   }, [
     meta.bdiPercentual,
     meta.importadoPlanilha,
@@ -12903,7 +13207,22 @@ export function OrcamentoPageView({
     mapaComposicoes,
     itensOcultosNoOrcamento,
     moMatManualPorItem,
+    descontoDetalhadoPct,
+    insumosSemDesconto,
+    insumosAnaliticoOcultos,
   ]);
+
+  /**
+   * % do desconto sobre o total (rodapé/Excel). No Orçamento detalhado é o % efetivo
+   * (desconto dos insumos marcados ÷ total); as colunas seguem com o valor original.
+   */
+  const descontoRodapePct =
+    meta.requerConfigDesconto === true
+      ? total > 0
+        ? totalDescontoDetalhadoGeral / total
+        : 0
+      : parsePercentualMeta(meta.descontoPercentual);
+  void totalSemDescontoDetalhadoGeral;
 
   const itensCalculadosPorBlocoNome = useMemo(() => {
     const m = new Map<string, typeof itensCalculados>();
@@ -13105,6 +13424,12 @@ export function OrcamentoPageView({
           quantidadeOrcada: number;
           valorUnit: number;
           total: number;
+          /** Total antes do desconto do Orçamento detalhado (igual a `total` com o modo desligado). */
+          totalSemDesconto: number;
+          /** Orçamento detalhado: desconto da composição (insumos marcados). */
+          descontoDetalhado?: number;
+          /** Algum valor da linha foi digitado à mão na aba Orçamento. */
+          temValorDigitado: boolean;
         }
       | {
           kind: 'insumo';
@@ -13122,12 +13447,22 @@ export function OrcamentoPageView({
           quantidadeOrcada: number;
           valorUnit: number;
           total: number;
+          /** VU e total antes do desconto do Orçamento detalhado (ausentes nos insumos manuais da FD). */
+          valorUnitSemDesconto?: number;
+          totalSemDesconto?: number;
+          /** Orçamento detalhado: o insumo recebe o desconto do contrato. */
+          aplicaDesconto?: boolean;
+          /** Contribuição do insumo por unidade da composição (TOTAL do Orçafascio, já com o % adicional). */
+          totalUnit?: number;
+          /** Orçamento detalhado: desconto do insumo (0 quando desmarcado). */
+          descontoInsumo?: number;
         };
 
     const out: Linha[] = [];
     // Sempre monta a árvore (também fora das abas pesadas) para exportar Orçamento completo.
     if (subtitulosAdicionados.length === 0) return out;
     const insumosOcultosSet = new Set(insumosAnaliticoOcultos);
+    const insumosSemDescontoSet = new Set(insumosSemDesconto);
     const itensPorBlocoNome = itensCalculadosPorBlocoNome;
 
     const servicoNumero = new Map<string, number>();
@@ -13194,46 +13529,30 @@ export function OrcamentoPageView({
           quantidadeReal: qtdOrcadaComp,
           quantidadeOrcada: qtdOrcadaComp,
           valorUnit,
-          total: valorUnit * qtdOrcadaComp
+          total: valorUnit * qtdOrcadaComp,
+          totalSemDesconto: row.totalSemDescontoDetalhado,
+          descontoDetalhado: row.descontoDetalhado,
+          temValorDigitado: row.temValorDigitado
         });
 
         const linhasAna = comp?.analiticoLinhas?.length ? comp.analiticoLinhas : [];
-        const somaContrib = linhasAna.reduce((acc, l) => {
-          const q = Number(l.quantidade) || 0;
-          const p = Number(l.precoUnitario) || 0;
-          const t = Number(l.total) || 0;
-          return acc + (t > 0 ? t : p * q);
-        }, 0);
-        // Dados corrompidos: VU salvo como (preço real ÷ coeficiente) → soma das contribuições >> preço da composição.
-        const precosInsumoInflacionados =
-          valorUnit > 0 && somaContrib > valorUnit * 2.5;
+        // A referência é o preço sem o desconto do detalhado (mesma base do cálculo dos fatores).
+        const valorUnitRef =
+          qtdOrcadaComp > 0 ? row.totalSemDescontoDetalhado / qtdOrcadaComp : (row.precoUnitario ?? 0);
+        const contribuicoes = contribuicoesLinhasAnalitico(linhasAna, valorUnitRef);
 
         for (let i = 0; i < linhasAna.length; i++) {
           const ln = linhasAna[i];
           const insumoKey = `${key}|insumo|${i}`;
           if (insumosOcultosSet.has(insumoKey)) continue;
           const quantBase = Number(ln.quantidade) || 0;
-          const precoSalvo = Number(ln.precoUnitario) || 0;
-          const totalSalvo = Number(ln.total) || 0;
-          let valorUnitInsumo = precoSalvo;
-          let totalUnitario =
-            totalSalvo > 0 ? totalSalvo : quantBase > 0 ? precoSalvo * quantBase : 0;
-          if (precosInsumoInflacionados && quantBase > 0) {
-            // precoSalvo ≈ preçoReal/coef → preçoReal = precoSalvo * coef (≈ totalSalvo).
-            valorUnitInsumo =
-              totalSalvo > 0 ? totalSalvo : precoSalvo * quantBase;
-            totalUnitario = valorUnitInsumo * quantBase;
-          } else if (
-            quantBase > 0 &&
-            quantBase < 1 &&
-            precoSalvo > 0 &&
-            totalSalvo > 0 &&
-            Math.abs(precoSalvo * quantBase - totalSalvo) <= Math.max(0.02, totalSalvo * 0.02) &&
-            precoSalvo > totalSalvo * 5
-          ) {
-            valorUnitInsumo = totalSalvo;
-            totalUnitario = valorUnitInsumo * quantBase;
-          }
+          // Orçamento detalhado: o insumo marcado já sai com o desconto do contrato.
+          const fatorInsumo =
+            descontoDetalhadoPct > 0 && !insumosSemDescontoSet.has(insumoKey) ? 1 - descontoDetalhadoPct : 1;
+          // Valor original nas colunas; o desconto do insumo marcado fica à parte (aba Orçamento detalhado).
+          const valorUnitInsumo = contribuicoes[i]?.valorUnit ?? 0;
+          const totalUnitario = contribuicoes[i]?.totalUnitario ?? 0;
+          const descontoInsumo = totalUnitario * qtdOrcadaComp * (1 - fatorInsumo);
           const qtdOrcamento = quantBase * qtdOrcadaComp;
           out.push({
             kind: 'insumo',
@@ -13251,7 +13570,12 @@ export function OrcamentoPageView({
             quantidadeOrcada: qtdOrcamento,
             valorUnit: valorUnitInsumo,
             /** Total = contribuição unitária × quantidade orçada da composição. */
-            total: totalUnitario * qtdOrcadaComp
+            total: totalUnitario * qtdOrcadaComp,
+            valorUnitSemDesconto: contribuicoes[i]?.valorUnit ?? 0,
+            totalSemDesconto: (contribuicoes[i]?.totalUnitario ?? 0) * qtdOrcadaComp,
+            aplicaDesconto: !insumosSemDescontoSet.has(insumoKey),
+            totalUnit: totalUnitario,
+            descontoInsumo,
           });
         }
       }
@@ -13262,7 +13586,113 @@ export function OrcamentoPageView({
     itensCalculadosPorBlocoNome,
     mapaComposicoes,
     insumosAnaliticoOcultos,
+    insumosSemDesconto,
+    descontoDetalhadoPct,
   ]);
+
+  /** Aba Orçamento detalhado: composições abertas em insumos, com valores antes e depois do desconto. */
+  const orcamentoDetalhado = useMemo(() => {
+    const vazio = { linhas: [] as LinhaOrcamentoDetalhado[], totais: { semDesconto: 0, desconto: 0, comDesconto: 0 } };
+    if (meta.requerConfigDesconto !== true || orcamentoViewTab !== 'detalhado') return vazio;
+    const semDescontoSet = new Set(insumosSemDesconto);
+    const linhas: LinhaOrcamentoDetalhado[] = [];
+    type Agrupador = { semDesconto: number; desconto: number };
+    let titulo: Agrupador | null = null;
+    let subtitulo: Agrupador | null = null;
+    let totalSem = 0;
+    let totalDesc = 0;
+    const src = linhasAnaliticoOrcamento;
+    for (let idx = 0; idx < src.length; idx++) {
+      const l = src[idx]!;
+      if (l.kind === 'tituloServico') {
+        const linha = { kind: 'titulo' as const, key: l.key, numero: String(l.main), texto: l.servicoNome, semDesconto: 0, desconto: 0 };
+        linhas.push(linha);
+        titulo = linha;
+        subtitulo = null;
+        continue;
+      }
+      if (l.kind === 'subtituloBloco') {
+        const linha = { kind: 'subtitulo' as const, key: l.key, numero: `${l.main}.${l.subIdx}`, texto: l.texto, semDesconto: 0, desconto: 0 };
+        linhas.push(linha);
+        subtitulo = linha;
+        continue;
+      }
+      if (l.kind === 'composicao') {
+        const insumos: Array<Extract<(typeof src)[number], { kind: 'insumo' }>> = [];
+        for (let j = idx + 1; j < src.length; j++) {
+          const prox = src[j]!;
+          if (prox.kind !== 'insumo' || prox.parentKey !== l.key) break;
+          insumos.push(prox);
+        }
+        const semDesconto = l.totalSemDesconto;
+        const desconto = Math.max(0, l.descontoDetalhado ?? l.totalSemDesconto - l.total);
+        const chaves = insumos.length > 0 ? insumos.map((ins) => ins.key) : [l.key];
+        const marcados =
+          insumos.length > 0 ? insumos.filter((ins) => ins.aplicaDesconto !== false).length : semDescontoSet.has(l.key) ? 0 : 1;
+        const totalChaves = insumos.length > 0 ? insumos.length : 1;
+        linhas.push({
+          kind: 'composicao',
+          key: l.key,
+          item: l.item,
+          codigo: l.codigo,
+          banco: l.banco,
+          descricao: l.descricao,
+          und: l.und,
+          quant: l.quantidadeOrcada,
+          valorUnit: l.quantidadeOrcada > 0 ? semDesconto / l.quantidadeOrcada : 0,
+          semDesconto,
+          desconto,
+          marcacao: marcados === 0 ? 'nenhum' : marcados === totalChaves ? 'todos' : 'parcial',
+          chaves,
+          temValorDigitado: l.temValorDigitado,
+        });
+        for (const g of [titulo, subtitulo]) {
+          if (!g) continue;
+          g.semDesconto += semDesconto;
+          g.desconto += desconto;
+        }
+        totalSem += semDesconto;
+        totalDesc += desconto;
+        continue;
+      }
+      linhas.push({
+        kind: 'insumo',
+        key: l.key,
+        item: l.item,
+        codigo: l.codigo,
+        banco: l.banco,
+        descricao: l.descricao,
+        und: l.und,
+        quant: l.quantidadeOrcada,
+        valorUnit: l.valorUnitSemDesconto ?? l.valorUnit,
+        semDesconto: l.totalSemDesconto ?? l.total,
+        desconto: Math.max(0, l.descontoInsumo ?? 0),
+        marcado: l.aplicaDesconto !== false,
+      });
+    }
+    return { linhas, totais: { semDesconto: totalSem, desconto: totalDesc, comDesconto: totalSem - totalDesc } };
+  }, [meta.requerConfigDesconto, orcamentoViewTab, linhasAnaliticoOrcamento, insumosSemDesconto]);
+
+  /** Marca/desmarca o desconto do contrato nos insumos (ou composições sem analítico) da aba Orçamento detalhado. */
+  /** Configuração do desconto finalizada: as marcações do Orçamento detalhado ficam travadas. */
+  const descontoConfigFinalizadaRef = useRef(false);
+  descontoConfigFinalizadaRef.current = !!meta.descontoConfigFinalizada;
+  const [confirmFinalizarConfigDesconto, setConfirmFinalizarConfigDesconto] = useState(false);
+
+  const alternarDescontoDetalhado = useCallback(
+    (chaves: string[], aplicar: boolean) => {
+      if (gradeTravadaRef.current || descontoConfigFinalizadaRef.current || chaves.length === 0) return;
+      setInsumosSemDesconto((prev) => {
+        const set = new Set(prev);
+        for (const k of chaves) {
+          if (aplicar) set.delete(k);
+          else set.add(k);
+        }
+        return set.size === prev.length && chaves.every((k) => prev.includes(k) === !aplicar) ? prev : [...set];
+      });
+    },
+    []
+  );
 
   /** Lookups O(1) para render do analítico / ficha (evita .find/.filter por linha). */
   const analiticoComposicaoPorKey = useMemo(() => {
@@ -13364,7 +13794,7 @@ export function OrcamentoPageView({
   const linhasCronograma = useMemo((): CronogramaLinhaServico[] => {
     type Acc = CronogramaLinhaServico & { blocosMap: Map<string, CronogramaLinhaSubtitulo> };
     const map = new Map<string, Acc>();
-    const descontoPct = parsePercentualMeta(meta.descontoPercentual);
+    const descontoPct = descontoRodapePct;
     for (const row of itensCalculados) {
       const blocoKey = row.blocoKey;
       const sep = blocoKey.lastIndexOf('|');
@@ -13414,7 +13844,7 @@ export function OrcamentoPageView({
       ...linha,
       subtitulos: Array.from(blocosMap.values())
     }));
-  }, [itensCalculados, meta.descontoPercentual]);
+  }, [itensCalculados, descontoRodapePct]);
 
   const resumoCronograma = useMemo(
     () => calcularResumoCronograma(linhasCronograma, cronograma),
@@ -13980,8 +14410,10 @@ export function OrcamentoPageView({
 
   const linhasAnaliticoComManuais = useMemo(() => {
     if (
-      (orcamentoViewTab !== 'planilhaAnalitica' && orcamentoViewTab !== 'analitico') ||
-      (deferredOrcamentoViewTab !== 'planilhaAnalitica' && deferredOrcamentoViewTab !== 'analitico')
+      (orcamentoViewTab !== 'planilhaAnalitica' && orcamentoViewTab !== 'analitico' && orcamentoViewTab !== 'eap') ||
+      (deferredOrcamentoViewTab !== 'planilhaAnalitica' &&
+        deferredOrcamentoViewTab !== 'analitico' &&
+        deferredOrcamentoViewTab !== 'eap')
     ) {
       return [];
     }
@@ -14279,7 +14711,8 @@ export function OrcamentoPageView({
   }, [meta.bdiPercentual]);
 
   const resumoFinanceiro = useMemo(() => {
-    const descontoPct = parsePercentualMeta(meta.descontoPercentual);
+    // Com o Orçamento detalhado o desconto já está nos preços: aqui fica zero.
+    const descontoPct = descontoRodapePct;
     const bdiPctMeta = parsePercentualMeta(meta.bdiPercentual);
 
     // Fonte da verdade: soma das linhas da montagem (custo direto) + % da meta.
@@ -14320,7 +14753,7 @@ export function OrcamentoPageView({
       reajustesAplicados,
       valorFinal
     };
-  }, [meta.bdiPercentual, meta.descontoPercentual, meta.reajustes, total]);
+  }, [meta.bdiPercentual, descontoRodapePct, meta.reajustes, total]);
   resumoFinanceiroTotalRef.current = resumoFinanceiro.totalComDescontoEBdi;
 
   /** Rodapé da Ficha de demanda: totais por MA/MO/LO e painel de faturamento vs orçamento. */
@@ -14442,8 +14875,11 @@ export function OrcamentoPageView({
     idMovRm: string;
     itensPedidos: FdItemPedido[];
     pedidosEncerrados: boolean;
+    /** Status de compras: `CANCELLED` = FD cancelada (não aceita pedido de material). */
+    purchaseStatus: string;
   } | null>(null);
   const [pedidoMaterialModalOpen, setPedidoMaterialModalOpen] = useState(false);
+  const [resultadoPorOcOpen, setResultadoPorOcOpen] = useState(false);
 
   useEffect(() => {
     if (statusAprovacaoAtivo !== 'aprovado' && statusAprovacaoAtivo !== 'aguardando_aprovacao') {
@@ -14502,6 +14938,7 @@ export function OrcamentoPageView({
           idMovRm: d.idMovRm || '',
           itensPedidos: Array.isArray(d.itensPedidos) ? d.itensPedidos : [],
           pedidosEncerrados: !!d.pedidosEncerrados,
+          purchaseStatus: String(d.purchaseStatus || ''),
         });
       } catch (err: any) {
         if (cancelled) return;
@@ -14533,6 +14970,23 @@ export function OrcamentoPageView({
   /** Todos os insumos da FD (MA/MO/LO), com etapa/subetapa/composição; cada linha é associada separadamente. */
   const insumosParaPedido = useMemo<FdInsumoLine[]>(() => {
     if (!podeFazerPedidoMaterial) return [];
+    // Faturamento do insumo = (custo do orçamento − desconto) × (1 + BDI), como na EAP.
+    // Orçamento detalhado: desconto do contrato só nos insumos marcados (desmarcados sem desconto);
+    // nos demais, o % de desconto do contrato.
+    const detalhado = meta.requerConfigDesconto === true;
+    const bdiFat = parsePercentualMeta(meta.bdiPercentual);
+    // Os valores fecham com os totais gerais do orçamento: em cada composição, os insumos são ajustados
+    // na proporção para somarem exatamente o total da composição (e o desconto dela).
+    const somaInsumos = new Map<string, { custo: number; desconto: number }>();
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind !== 'insumo') continue;
+      const acc = somaInsumos.get(l.parentKey) ?? { custo: 0, desconto: 0 };
+      acc.custo += Number(l.total) || 0;
+      acc.desconto += Number(l.descontoInsumo) || 0;
+      somaInsumos.set(l.parentKey, acc);
+    }
+    let fatorCusto = 1;
+    let fatorDesconto = 1;
     const out: FdInsumoLine[] = [];
     let etapa = '';
     let subetapa = '';
@@ -14548,6 +15002,11 @@ export function OrcamentoPageView({
       }
       if (l.kind === 'composicao') {
         composicao = `${l.item} ${l.descricao}`;
+        const soma = somaInsumos.get(l.key);
+        const totalComp = Number(l.totalSemDesconto) || 0;
+        fatorCusto = soma && soma.custo > 0 ? totalComp / soma.custo : 1;
+        const descComp = Number(l.descontoDetalhado) || 0;
+        fatorDesconto = soma && soma.desconto > 0 ? descComp / soma.desconto : fatorCusto;
         continue;
       }
       if (l.kind !== 'insumo') continue;
@@ -14565,10 +15024,31 @@ export function OrcamentoPageView({
         etapa,
         subetapa,
         composicao,
+        ...(() => {
+          const custo = (Number(l.total) || 0) * fatorCusto;
+          const desconto = detalhado
+            ? (Number(l.descontoInsumo) || 0) * fatorDesconto
+            : custo * descontoRodapePct;
+          const bdi = (custo - desconto) * bdiFat;
+          return {
+            custoOrcamento: custo,
+            descontoOrcamento: desconto,
+            bdiOrcamento: bdi,
+            valorOrcado: Math.round((custo - desconto + bdi) * 100) / 100,
+          };
+        })(),
       });
     }
     return out;
-  }, [podeFazerPedidoMaterial, linhasAnaliticoOrcamento, planilhaTipoInsumo, planilhaQuantidadeCompra]);
+  }, [
+    podeFazerPedidoMaterial,
+    linhasAnaliticoOrcamento,
+    planilhaTipoInsumo,
+    planilhaQuantidadeCompra,
+    descontoRodapePct,
+    meta.bdiPercentual,
+    meta.requerConfigDesconto,
+  ]);
 
   /** Quantos itens da FD atual já entraram em alguma RM. */
   const fdItensSolicitados = useMemo(() => {
@@ -14593,6 +15073,34 @@ export function OrcamentoPageView({
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+
+  /**
+   * EAP: custo de cada item da FD nas OCs emitidas (não canceladas/reprovadas), pelo mesmo resumo do
+   * "Resultado por OC". Entra assim que a OC é emitida; o custo real só depois do pagamento validado.
+   */
+  const { data: pedidosResumoEap } = useQuery({
+    queryKey: ['fd-pedidos-resumo', fdIdParaCustos],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${fdIdParaCustos}/pedidos-resumo`);
+      return res.data?.data as { itens: ItemResumo[] } | undefined;
+    },
+    enabled: !!fdIdParaCustos && orcamentoViewTab === 'eap',
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+  const custoOcPorItemFd = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of pedidosResumoEap?.itens ?? []) {
+      for (const mat of it.materiais) {
+        for (const oc of mat.ocs) {
+          if (oc.status === 'CANCELLED' || oc.status === 'REJECTED') continue;
+          const v = Number(oc.valorOc) || 0;
+          if (v > 0) m.set(it.fdItemKey, (m.get(it.fdItemKey) ?? 0) + v);
+        }
+      }
+    }
+    return m;
+  }, [pedidosResumoEap]);
 
   /** Valores da OC por item da FD: 1:1 usa qtd./preço da OC; 1:N usa qtd. da FD e o custo total rateado. */
   const compraOcPorKey = useMemo(() => {
@@ -14659,6 +15167,145 @@ export function OrcamentoPageView({
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+
+  /**
+   * Aba EAP: resumo da FD por etapa (título de 1º nível).
+   * Valor orçado = (total sem BDI − desconto) × (1 + BDI): no Orçamento detalhado, desconto do contrato só
+   * nos insumos marcados (desmarcados sem desconto); nos demais, o % de desconto do contrato.
+   * Custos = soma das colunas da FD (custo orçamento, estimado 40% e real das OCs pagas).
+   */
+  const resumoEap = useMemo(() => {
+    type LinhaEap = {
+      key: string;
+      numero: string;
+      etapa: string;
+      valorOrcado: number;
+      custoOrcamento: number;
+      custoEstimado: number;
+      custoReal: number;
+      temCustoReal: boolean;
+      custoOc: number;
+      temCustoOc: boolean;
+    };
+    const vazio = { linhas: [] as LinhaEap[], total: null as LinhaEap | null };
+    if (orcamentoViewTab !== 'eap') return vazio;
+    const bdi = parsePercentualMeta(meta.bdiPercentual);
+    const detalhado = meta.requerConfigDesconto === true;
+    // Fecha com os totais gerais: soma do valor orçado = Total geral; soma do custo orçamento = Orçamento
+    // sem desconto; custo estimado e custo real = colunas da FD (somadas na etapa).
+    const orcadoPorEtapa = new Map<string, number>();
+    const custoPorEtapa = new Map<string, number>();
+    for (const r of itensCalculados) {
+      const desc = detalhado ? r.descontoDetalhado : r.total * descontoRodapePct;
+      orcadoPorEtapa.set(r.servicoNome, (orcadoPorEtapa.get(r.servicoNome) ?? 0) + (r.total - desc) * (1 + bdi));
+      custoPorEtapa.set(r.servicoNome, (custoPorEtapa.get(r.servicoNome) ?? 0) + r.total);
+    }
+    const linhas: LinhaEap[] = [];
+    let atual: LinhaEap | null = null;
+    for (const row of linhasAnaliticoComManuais) {
+      if (row.kind === 'tituloServico') {
+        atual = {
+          key: row.key,
+          numero: String(row.main),
+          etapa: row.servicoNome,
+          valorOrcado: orcadoPorEtapa.get(row.servicoNome) ?? 0,
+          custoOrcamento: custoPorEtapa.get(row.servicoNome) ?? 0,
+          custoEstimado: 0,
+          custoReal: 0,
+          temCustoReal: false,
+          custoOc: 0,
+          temCustoOc: false,
+        };
+        linhas.push(atual);
+        continue;
+      }
+      if (row.kind !== 'insumo' || !atual) continue;
+      // Custo estimado = coluna "Custo estimado (40%)" da FD: custo orçamento do insumo × 40%.
+      atual.custoEstimado += (Number(row.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO;
+      const custoOc = custoOcPorItemFd.get(row.key);
+      if (custoOc != null) {
+        atual.custoOc += custoOc;
+        atual.temCustoOc = true;
+      }
+      const qC = planilhaQuantidadeCompra[row.key];
+      const vR = planilhaValorUnitCompraReal[row.key];
+      if (Number.isFinite(qC) && Number.isFinite(vR)) {
+        atual.custoReal += qC * vR;
+        atual.temCustoReal = true;
+      }
+    }
+    const total: LinhaEap = {
+      key: 'total',
+      numero: '',
+      etapa: 'Total',
+      valorOrcado: linhas.reduce((a, l) => a + l.valorOrcado, 0),
+      custoOrcamento: linhas.reduce((a, l) => a + l.custoOrcamento, 0),
+      custoEstimado: linhas.reduce((a, l) => a + l.custoEstimado, 0),
+      custoReal: linhas.reduce((a, l) => a + l.custoReal, 0),
+      temCustoReal: linhas.some((l) => l.temCustoReal),
+      custoOc: linhas.reduce((a, l) => a + l.custoOc, 0),
+      temCustoOc: linhas.some((l) => l.temCustoOc),
+    };
+    return { linhas, total };
+  }, [
+    orcamentoViewTab,
+    meta.bdiPercentual,
+    meta.requerConfigDesconto,
+    itensCalculados,
+    descontoRodapePct,
+    linhasAnaliticoComManuais,
+    planilhaQuantidadeCompra,
+    planilhaValorUnitCompraReal,
+    custoOcPorItemFd,
+  ]);
+
+  /** Cotação Empreita: etapas e itens da FD (insumos) para associar a cada empreita. */
+  const etapasFdCotacao = useMemo<EtapaFd[]>(() => {
+    if (orcamentoViewTab !== 'cotacaoEmpreita') return [];
+    const out: EtapaFd[] = [];
+    let atual: EtapaFd | null = null;
+    for (const l of linhasAnaliticoOrcamento) {
+      if (l.kind === 'tituloServico') {
+        atual = { key: l.key, numero: String(l.main), nome: l.servicoNome, itens: [] };
+        out.push(atual);
+        continue;
+      }
+      if (l.kind === 'insumo' && atual) atual.itens.push({ key: l.key, item: l.item, descricao: l.descricao });
+    }
+    return out.filter((e) => e.itens.length > 0);
+  }, [orcamentoViewTab, linhasAnaliticoOrcamento]);
+
+  /** Itens da FD ligados a empreitas com cotação completa — etiqueta "COTAÇÃO REALIZADA" na FD. */
+  const itensFdCotados = useMemo(() => itensFdComCotacaoRealizada(cotacaoEmpreita), [cotacaoEmpreita]);
+
+  const [salvandoRascunhoCotacao, setSalvandoRascunhoCotacao] = useState(false);
+  /** "Salvar rascunho" da Cotação Empreita: grava agora, sem esperar o salvamento automático. */
+  const salvarRascunhoCotacao = async () => {
+    if (!orcamentoAtivoId || salvandoRascunhoCotacao) return;
+    setSalvandoRascunhoCotacao(true);
+    try {
+      if (orcamentoAutosaveTimerRef.current) {
+        clearTimeout(orcamentoAutosaveTimerRef.current);
+        orcamentoAutosaveTimerRef.current = null;
+      }
+      flushOrcamentoPersistencia();
+      await aguardarSalvamentoEmAndamento(orcamentoAtivoId);
+      toast.success('Rascunho da cotação salvo.');
+    } catch {
+      toast.error('Não foi possível salvar o rascunho da cotação.');
+    } finally {
+      setSalvandoRascunhoCotacao(false);
+    }
+  };
+
+  /** Total da coluna "Custo estimado (40%)" da FD (custo orçamento do insumo × 40%). */
+  const custoEstimadoTotalFd = useMemo(() => {
+    let total = 0;
+    for (const row of linhasAnaliticoComManuais) {
+      if (row.kind === 'insumo') total += (Number(row.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO;
+    }
+    return total;
+  }, [linhasAnaliticoComManuais]);
 
   /** Custo real total da FD (Σ qtd. compra × valor unitário real dos insumos). */
   const custoRealTotalFd = useMemo(() => {
@@ -16182,8 +16829,17 @@ export function OrcamentoPageView({
           [rotD('Nº DO CONTRATO', 2, 2), val(numeroContratoCab.toUpperCase(), 3, 3)],
           [rotD('ENCARGOS SOCIAIS', 2, 2), val(encargosTexto, 3, 3)],
           [rotD('BDI', 2, 2), val(pctTextoCab(rf.bdiPct), 3, 3)],
-          [rotD('DESCONTO', 2, 2), val(pctTextoCab(rf.descontoPct), 3, 3)],
-          [rotD('DATA BASE', 2, 2), val((padraoContratoCab?.dataBase ?? 'ATUAL').toUpperCase(), 3, 3)],
+          // Orçamento detalhado: o desconto é interno (já está nos preços) e não sai no Excel.
+          // A linha vazia no fim mantém as 5 linhas ao lado do logo.
+          ...(meta.requerConfigDesconto === true
+            ? [
+                [rotD('DATA BASE', 2, 2), val((padraoContratoCab?.dataBase ?? 'ATUAL').toUpperCase(), 3, 3)],
+                [],
+              ]
+            : [
+                [rotD('DESCONTO', 2, 2), val(pctTextoCab(rf.descontoPct), 3, 3)],
+                [rotD('DATA BASE', 2, 2), val((padraoContratoCab?.dataBase ?? 'ATUAL').toUpperCase(), 3, 3)],
+              ]),
           // Linha 7: respiro.
           [],
           // Linhas 8–14: identificação da OS (esquerda) e do local/status (direita).
@@ -16404,10 +17060,15 @@ export function OrcamentoPageView({
       return [
         { value: 'dados' as const, label: 'Dados' },
         { value: 'planilhaAnalitica' as const, label: 'Ficha de Demanda' },
+        { value: 'eap' as const, label: 'EAP' },
       ];
     }
     return [
       { value: 'dados' as const, label: 'Dados' },
+      { value: 'cotacaoEmpreita' as const, label: 'Cotação Empreita' },
+      ...(meta.requerConfigDesconto === true
+        ? [{ value: 'detalhado' as const, label: 'Orçamento detalhado' }]
+        : []),
       { value: 'montagem' as const, label: 'Orçamento' },
       ...(memorialDisponivel
         ? [{ value: 'memorial' as const, label: 'Memória de Cálculo' }]
@@ -16426,10 +17087,32 @@ export function OrcamentoPageView({
                 ? undefined
                 : 'Finalize o orçamento para liberar a ficha de demanda',
             },
+            {
+              value: 'eap' as const,
+              label: 'EAP',
+              disabled: !fichaDemandaLiberada(statusAprovacaoAtivo),
+              title: fichaDemandaLiberada(statusAprovacaoAtivo)
+                ? 'Resumo da ficha de demanda por etapa'
+                : 'Finalize o orçamento para liberar a EAP',
+            },
           ]
         : []),
     ];
-  }, [fichaDemandaOnly, memorialDisponivel, mapaCotacaoDisponivel, analiticoDisponivel, statusAprovacaoAtivo]);
+  }, [
+    fichaDemandaOnly,
+    memorialDisponivel,
+    mapaCotacaoDisponivel,
+    analiticoDisponivel,
+    statusAprovacaoAtivo,
+    meta.requerConfigDesconto,
+  ]);
+
+  // Orçamento detalhado desligado (Dados) com a aba aberta: volta para o Orçamento.
+  useEffect(() => {
+    if (meta.requerConfigDesconto !== true && orcamentoViewTab === 'detalhado') {
+      setOrcamentoViewTab('montagem');
+    }
+  }, [meta.requerConfigDesconto, orcamentoViewTab]);
 
   const gradeZoomAtivo =
     orcamentoViewTab === 'montagem' ||
@@ -16452,14 +17135,21 @@ export function OrcamentoPageView({
   }, [mapaCotacaoDisponivel, orcamentoViewTab]);
 
   useEffect(() => {
-    if (!analiticoDisponivel && (orcamentoViewTab === 'analitico' || orcamentoViewTab === 'planilhaAnalitica')) {
+    if (
+      !analiticoDisponivel &&
+      !fichaDemandaOnly &&
+      (orcamentoViewTab === 'analitico' || orcamentoViewTab === 'planilhaAnalitica' || orcamentoViewTab === 'eap')
+    ) {
       setOrcamentoViewTab('montagem');
     }
   }, [analiticoDisponivel, orcamentoViewTab]);
 
   useEffect(() => {
     if (fichaDemandaOnly) return;
-    if (orcamentoViewTab === 'planilhaAnalitica' && !fichaDemandaLiberada(statusAprovacaoAtivo)) {
+    if (
+      (orcamentoViewTab === 'planilhaAnalitica' || orcamentoViewTab === 'eap') &&
+      !fichaDemandaLiberada(statusAprovacaoAtivo)
+    ) {
       setOrcamentoViewTab('montagem');
     }
   }, [fichaDemandaOnly, orcamentoViewTab, statusAprovacaoAtivo]);
@@ -17782,6 +18472,9 @@ export function OrcamentoPageView({
   const podeDestrancarOrcamento = canUnlockOrcamento(centroCustoId);
   const [confirmDestrancarOrcamento, setConfirmDestrancarOrcamento] = useState(false);
   const [destrancandoOrcamento, setDestrancandoOrcamento] = useState(false);
+  /** Uma janela só: destranca e já reabre (revisão nova ou mesma versão), ou só destranca. */
+  const [modoDestrancar, setModoDestrancar] = useState<'nova' | 'mesma' | 'so'>('nova');
+  const [reabrirAposDestrancar, setReabrirAposDestrancar] = useState(false);
 
   /** Destranca orçamento + FD (volta para Finalizado). Só administrador ou autorizado no centro de custo. */
   const destrancarOrcamento = async () => {
@@ -17803,13 +18496,76 @@ export function OrcamentoPageView({
       );
       orcamentosListaCache.delete(centroCustoId);
       void queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
-      toast.success('Orçamento e FD destrancados. Novos pedidos de material ficam bloqueados até trancar de novo.');
+      if (modoDestrancar === 'so') {
+        toast.success('Orçamento e FD destrancados. Novos pedidos de material ficam bloqueados até trancar de novo.');
+      } else {
+        // A reabertura roda assim que o estado mostrar Finalizado (efeito abaixo), sem segunda confirmação.
+        setModoReabertura(modoDestrancar);
+        setReabrirAposDestrancar(true);
+      }
       setConfirmDestrancarOrcamento(false);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
       toast.error(msg?.message || msg?.error || 'Não foi possível destrancar o orçamento.');
     } finally {
       setDestrancandoOrcamento(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!reabrirAposDestrancar || reabrindoOrcamento) return;
+    if (statusAprovacaoAtivo !== 'finalizado') return;
+    setReabrirAposDestrancar(false);
+    void reabrirOrcamento();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reabrirAposDestrancar, statusAprovacaoAtivo, reabrindoOrcamento]);
+
+  /** EAP em PDF: uma linha por etapa e o total, com as quatro colunas da aba. */
+  const exportarEapPdf = async () => {
+    if (resumoEap.linhas.length === 0 || !resumoEap.total) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const brl = (n: number) =>
+      n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
+    const linhas = [...resumoEap.linhas, resumoEap.total].map((l) => ({
+      item: l.numero,
+      etapa: l.key === 'total' ? 'TOTAL' : l.etapa.toUpperCase(),
+      valorOrcado: brl(l.valorOrcado),
+      custoEstimado: brl(l.custoEstimado),
+      custoOc: l.temCustoOc ? brl(l.custoOc) : '—',
+      custoReal: l.temCustoReal ? brl(l.custoReal) : '—',
+      lucro: l.temCustoReal ? brl(l.valorOrcado - l.custoReal) : '—',
+      custoSobreOrcado:
+        l.temCustoReal && l.valorOrcado > 0
+          ? `${((l.custoReal / l.valorOrcado) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+          : '—',
+    }));
+    const nomeOrc = String(listaOrcamentos.find((o) => o.id === orcamentoAtivoId)?.nome || '').trim();
+    const titulo = `EAP${nomeOrc ? ` · ${nomeOrc}` : ''}`;
+    try {
+      const { exportBrandedPdfTable } = await import('@/lib/exportBrandedPdfTable');
+      await exportBrandedPdfTable({
+        title: titulo,
+        subtitle: [nomeContratoExport(), meta.osNumeroPasta ? `OS/Pasta ${meta.osNumeroPasta}` : '']
+          .filter(Boolean)
+          .join(' · '),
+        filename: `EAP_${(nomeOrc || 'orcamento').replace(/[^\w.-]+/g, '_')}.pdf`,
+        columns: [
+          { key: 'item', label: 'Item', width: 14 },
+          { key: 'etapa', label: 'Etapa', width: 64, tone: 'bold' },
+          { key: 'valorOrcado', label: 'Valor orçado (com desconto e BDI)', width: 36 },
+          { key: 'custoEstimado', label: 'Custo estimado (40%)', width: 32 },
+          { key: 'custoOc', label: 'Custo na OC', width: 32 },
+          { key: 'custoReal', label: 'Custo real', width: 32 },
+          { key: 'lucro', label: 'Lucro esperado', width: 33 },
+          { key: 'custoSobreOrcado', label: 'Custo real / orçado', width: 30 },
+        ],
+        rows: linhas,
+        footerLabel: 'EAP — resumo da ficha de demanda por etapa',
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível exportar a EAP.');
     }
   };
 
@@ -18851,6 +19607,42 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
+                {!loadingFromApi && orcamentoViewTab === 'detalhado' && meta.requerConfigDesconto === true && (
+                  orcamentoDetalhado.linhas.length === 0 ? (
+                    <OrcamentoSecaoVazia
+                      titulo="Orçamento detalhado vazio"
+                      texto="Monte serviços e itens na aba Orçamento para configurar o desconto por insumo."
+                      Icon={Table2}
+                      onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                    />
+                  ) : (
+                    <OrcamentoDetalhadoPainel
+                      linhas={orcamentoDetalhado.linhas}
+                      descontoPct={descontoDetalhadoPct}
+                      editavel={!gradeTravada && !meta.descontoConfigFinalizada}
+                      configFinalizada={meta.descontoConfigFinalizada ?? null}
+                      podeFinalizarConfig={!gradeTravada && !versaoCongelada && meta.congelado !== true}
+                      onFinalizarConfig={() => setConfirmFinalizarConfigDesconto(true)}
+                      onReabrirConfig={() => {
+                        setMeta((prev) => ({ ...prev, descontoConfigFinalizada: undefined }));
+                        toast.success('Configuração do desconto reaberta: as marcações podem ser alteradas.');
+                      }}
+                      motivoBloqueio={
+                        versaoCongelada
+                          ? 'Revisão congelada: só leitura.'
+                          : orcamentoTrancado
+                            ? 'Orçamento trancado (FD lançada): peça para destrancar antes de mudar o desconto.'
+                            : orcamentoFechado
+                              ? 'Orçamento finalizado: reabra para mudar o desconto.'
+                              : gradeTravada
+                                ? 'Grade travada: destrave para mudar o desconto.'
+                                : null
+                      }
+                      totais={orcamentoDetalhado.totais}
+                      onAlternar={alternarDescontoDetalhado}
+                    />
+                  )
+                )}
                 {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'analitico' && (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     {linhasAnaliticoOrcamento.length === 0 ? (
@@ -18883,9 +19675,11 @@ export function OrcamentoPageView({
                           {linhasAnaliticoOrcamento.slice(janelaAnalitico.start, janelaAnalitico.end).map((l, i) => {
                             const idxLinha = janelaAnalitico.start + i;
                             const totalUnitarioLinha =
-                              l.kind === 'composicao' || l.kind === 'insumo'
-                                ? (Number(l.quant) || 0) * (Number(l.valorUnit) || 0)
-                                : 0;
+                              l.kind === 'insumo' && typeof l.totalUnit === 'number'
+                                ? l.totalUnit
+                                : l.kind === 'composicao' || l.kind === 'insumo'
+                                  ? (Number(l.quant) || 0) * (Number(l.valorUnit) || 0)
+                                  : 0;
                             if (l.kind === 'tituloServico') {
                               return (
                                 <tr key={l.key} className={`${clsTituloOrc(aparenciaAnalitico)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
@@ -18980,9 +19774,9 @@ export function OrcamentoPageView({
                                   <div className="whitespace-normal break-words uppercase">{l.descricao}</div>
                                 </td>
                                 <td className="px-3 py-2.5 text-center text-sm uppercase text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
-                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 7 })}</td>
                                 <td className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
-                                  <MoedaCelula valor={l.valorUnit} className="text-gray-700 dark:text-gray-300" />
+                                  <MoedaCelula valor={l.valorUnit} exato className="text-gray-700 dark:text-gray-300" />
                                 </td>
                                 <td className={`${GRADE_COL_MOEDA_TOTAL} px-2 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700`}>
                                   <MoedaCelula valor={totalUnitarioLinha} className="text-gray-900 dark:text-gray-100" />
@@ -19002,6 +19796,236 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
+                {!loadingFromApi && orcamentoViewTab === 'cotacaoEmpreita' && (
+                  <CotacaoEmpreitaPainel
+                    valor={cotacaoEmpreita}
+                    onChange={setCotacaoEmpreita}
+                    podeEditarFinalizada={podeEditarCotacaoFinalizada}
+                    somenteLeitura={versaoCongelada || meta.congelado === true}
+                    usuarioNome={currentUserName}
+                    etapasFd={etapasFdCotacao}
+                    onSalvarRascunho={() => void salvarRascunhoCotacao()}
+                    salvandoRascunho={salvandoRascunhoCotacao}
+                  />
+                )}
+                {!loadingFromApi && orcamentoViewTab === 'eap' && (
+                  <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+                    {resumoEap.linhas.length === 0 || !resumoEap.total ? (
+                      <OrcamentoSecaoVazia
+                        titulo="EAP vazia"
+                        texto="Monte serviços e itens na aba Orçamento para ver o resumo da ficha de demanda por etapa."
+                        Icon={Table2}
+                        onIrOrcamento={() => setOrcamentoViewTab(fichaDemandaOnly ? 'planilhaAnalitica' : 'montagem')}
+                      />
+                    ) : (
+                      (() => {
+                        const tot = resumoEap.total;
+                        const brl = (n: number) =>
+                          n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
+                        const pct = (n: number) =>
+                          `${(n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+                        /** Lucro esperado = valor orçado − custo real (só quando há custo real). */
+                        const celulaLucro = (l: { valorOrcado: number; custoReal: number; temCustoReal: boolean }) => {
+                          if (!l.temCustoReal) return <span className="text-gray-400 dark:text-gray-500">—</span>;
+                          const lucro = l.valorOrcado - l.custoReal;
+                          return (
+                            <span className={lucro < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>
+                              {brl(lucro)}
+                              {l.valorOrcado > 0 ? (
+                                <span className="ml-1 text-[11px] font-normal opacity-80">({pct(lucro / l.valorOrcado)})</span>
+                              ) : null}
+                            </span>
+                          );
+                        };
+                        /** Custo real / orçado: % e barra (laranja até 100%, vermelha acima). */
+                        const celulaCustoSobreOrcado = (
+                          l: { valorOrcado: number; custoReal: number; temCustoReal: boolean },
+                          forte?: boolean
+                        ) => {
+                          if (!l.temCustoReal || !(l.valorOrcado > 0)) {
+                            return <span className="text-gray-400 dark:text-gray-500">—</span>;
+                          }
+                          const r = l.custoReal / l.valorOrcado;
+                          const acima = r > 1;
+                          const largura = Math.max(2, Math.min(r / 1.2, 1) * 100);
+                          return (
+                            <span className="flex items-center justify-end gap-2">
+                              <span
+                                className={`w-14 text-right tabular-nums ${forte ? 'font-bold' : ''} ${
+                                  acima ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
+                                }`}
+                              >
+                                {pct(r)}
+                              </span>
+                              <span className="h-2.5 w-24 shrink-0 overflow-hidden rounded-sm bg-gray-100 dark:bg-gray-700" aria-hidden>
+                                <span
+                                  className={`block h-full rounded-sm ${acima ? 'bg-red-600 dark:bg-red-500' : 'bg-orange-500'}`}
+                                  style={{ width: `${largura}%` }}
+                                />
+                              </span>
+                            </span>
+                          );
+                        };
+                        const cards: { titulo: string; valor: string; detalhe: string; cor: string }[] = [
+                          {
+                            titulo: 'Valor orçado (com desconto e BDI)',
+                            valor: brl(tot.valorOrcado),
+                            detalhe: 'Valor total sem BDI − desconto + BDI · igual ao Total geral',
+                            cor: 'text-green-600 dark:text-green-400',
+                          },
+                          {
+                            titulo: 'Custo estimado (40%)',
+                            valor: brl(tot.custoEstimado),
+                            detalhe: 'Coluna da ficha de demanda (40% do custo orçamento)',
+                            cor: 'text-amber-600 dark:text-amber-400',
+                          },
+                          {
+                            titulo: 'Custo na OC',
+                            valor: tot.temCustoOc ? brl(tot.custoOc) : '—',
+                            detalhe: 'OCs emitidas (antes do pagamento)',
+                            cor: 'text-violet-600 dark:text-violet-400',
+                          },
+                          {
+                            titulo: 'Custo real',
+                            valor: tot.temCustoReal ? brl(tot.custoReal) : '—',
+                            detalhe: tot.temCustoReal
+                              ? 'Soma da coluna da ficha de demanda (OCs pagas)'
+                              : 'Preenchido com as OCs pagas',
+                            cor: 'text-blue-600 dark:text-blue-400',
+                          },
+                        ];
+                        return (
+                          <div className="mx-auto w-full max-w-[88rem] space-y-4 px-1 py-2">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                              {cards.map((c) => (
+                                <div
+                                  key={c.titulo}
+                                  className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                                >
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    {c.titulo}
+                                  </p>
+                                  <p className={`mt-1 text-xl font-bold tabular-nums ${c.cor}`}>{c.valor}</p>
+                                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{c.detalhe}</p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                              <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Resultado por etapa</h3>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Resumo da ficha de demanda · {resumoEap.linhas.length} etapa(s)
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void exportarEapPdf()}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                >
+                                  <FileText className="h-3.5 w-3.5" aria-hidden />
+                                  Exportar PDF
+                                </button>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[64rem] text-sm">
+                                  <thead>
+                                    <tr className="bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+                                      <th className="w-14 px-4 py-2.5 text-center">Item</th>
+                                      <th className="px-4 py-2.5 text-left">Etapa</th>
+                                      <th className="px-4 py-2.5 text-right">Valor orçado (com desconto e BDI)</th>
+                                      <th className="px-4 py-2.5 text-right">Custo estimado (40%)</th>
+                                      <th className="px-4 py-2.5 text-right" title="Custo nas OCs emitidas (antes do pagamento)">Custo na OC</th>
+                                      <th className="px-4 py-2.5 text-right" title="OCs pagas e validadas pelo compras">Custo real</th>
+                                      <th className="px-4 py-2.5 text-right" title="Valor orçado − custo real">Lucro esperado</th>
+                                      <th className="px-4 py-2.5 text-right" title="Custo real ÷ valor orçado">Custo real / orçado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/70">
+                                    {resumoEap.linhas.map((l) => {
+                                      const part = tot.valorOrcado > 0 ? l.valorOrcado / tot.valorOrcado : 0;
+                                      return (
+                                        <tr key={l.key} className="hover:bg-gray-50/70 dark:hover:bg-gray-900/40">
+                                          <td className="px-4 py-3 text-center">
+                                            <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-md bg-red-50 px-1.5 text-xs font-bold tabular-nums text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                                              {l.numero}
+                                            </span>
+                                          </td>
+                                          <td className="px-4 py-3">
+                                            <p className="font-medium text-gray-900 dark:text-gray-100">{l.etapa}</p>
+                                            <div className="mt-1.5 flex items-center gap-2">
+                                              <div className="h-1.5 w-40 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                                                <div className="h-full rounded-full bg-red-500/80" style={{ width: `${Math.min(100, part * 100)}%` }} />
+                                              </div>
+                                              <span className="whitespace-nowrap text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                                                {pct(part)} do orçado
+                                              </span>
+                                            </div>
+                                          </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                            {brl(l.valorOrcado)}
+                                          </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400">
+                                            {brl(l.custoEstimado)}
+                                          </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                                            {l.temCustoOc ? (
+                                              <span className="text-violet-600 dark:text-violet-400">{brl(l.custoOc)}</span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                                            {l.temCustoReal ? (
+                                              <span className="text-blue-600 dark:text-blue-400">{brl(l.custoReal)}</span>
+                                            ) : (
+                                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">{celulaLucro(l)}</td>
+                                          <td className="whitespace-nowrap px-4 py-3 text-right">{celulaCustoSobreOrcado(l)}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold dark:border-gray-600 dark:bg-gray-900/50">
+                                      <td className="px-4 py-3" />
+                                      <td className="px-4 py-3 uppercase text-gray-900 dark:text-gray-100">Total</td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-green-600 dark:text-green-400">
+                                        {brl(tot.valorOrcado)}
+                                      </td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400">
+                                        {brl(tot.custoEstimado)}
+                                      </td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                                        {tot.temCustoOc ? (
+                                          <span className="text-violet-600 dark:text-violet-400">{brl(tot.custoOc)}</span>
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500">—</span>
+                                        )}
+                                      </td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                                        {tot.temCustoReal ? (
+                                          <span className="text-blue-600 dark:text-blue-400">{brl(tot.custoReal)}</span>
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500">—</span>
+                                        )}
+                                      </td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{celulaLucro(tot)}</td>
+                                      <td className="whitespace-nowrap px-4 py-3 text-right">{celulaCustoSobreOrcado(tot, true)}</td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                )}
                 {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'planilhaAnalitica' && (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     {linhasAnaliticoOrcamento.length === 0 ? (
@@ -19014,7 +20038,11 @@ export function OrcamentoPageView({
                     ) : (
                         <>
                         {podeFazerPedidoMaterial && (() => {
-                          const encerrado = !!(fdAprovadaRecord?.pedidosEncerrados || fichaDemandaRecord?.pedidosEncerrados);
+                          const fdCancelada =
+                            fdAprovadaRecord?.purchaseStatus === 'CANCELLED' ||
+                            fichaDemandaRecord?.purchaseStatus === 'CANCELLED';
+                          const encerrado =
+                            fdCancelada || !!(fdAprovadaRecord?.pedidosEncerrados || fichaDemandaRecord?.pedidosEncerrados);
                           const estado = encerrado
                             ? 'todos' as const
                             : fdItensSolicitados === 0
@@ -19045,7 +20073,12 @@ export function OrcamentoPageView({
                                 {estado === 'nenhum' && 'FD aprovada — vincule os materiais para preparar o pedido de compra.'}
                                 {estado === 'parcial' &&
                                   `Pedido parcial — ${fdItensSolicitados} de ${insumosParaPedido.length} itens da FD já solicitados.`}
-                                {estado === 'todos' && (encerrado ? 'Pedidos encerrados para esta FD.' : 'Todos os itens da FD já foram solicitados.')}
+                                {estado === 'todos' &&
+                                  (fdCancelada
+                                    ? 'FD cancelada — não é possível solicitar material por esta FD.'
+                                    : encerrado
+                                      ? 'Pedidos encerrados para esta FD.'
+                                      : 'Todos os itens da FD já foram solicitados.')}
                               </p>
                               {!encerrado && estado !== 'nenhum' && (
                                 <button
@@ -19058,7 +20091,7 @@ export function OrcamentoPageView({
                                   {encerrandoPedidos ? 'Encerrando…' : 'Encerrar pedidos'}
                                 </button>
                               )}
-                              {encerrado && (
+                              {encerrado && !fdCancelada && (
                                 <button
                                   type="button"
                                   onClick={handleReabrirPedidos}
@@ -19068,12 +20101,30 @@ export function OrcamentoPageView({
                                   {reabrindoPedidos ? 'Reabrindo…' : 'Reabrir pedidos'}
                                 </button>
                               )}
-                              <div className="ml-auto flex shrink-0 items-center">
+                              <div className="ml-auto flex shrink-0 items-center gap-2">
+                                {(fdAprovadaRecord?.itensPedidos?.length ?? 0) > 0 && !!meta.fichaDemandaApprovalId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setResultadoPorOcOpen(true)}
+                                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                  >
+                                    <BarChart3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                    Resultado por OC
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => setPedidoMaterialModalOpen(true)}
                                   disabled={estado === 'todos' || encerrado}
-                                  title={encerrado ? 'Pedidos encerrados para esta FD' : estado === 'todos' ? 'Todos os itens da FD já foram solicitados' : undefined}
+                                  title={
+                                    fdCancelada
+                                      ? 'FD cancelada'
+                                      : encerrado
+                                        ? 'Pedidos encerrados para esta FD'
+                                        : estado === 'todos'
+                                          ? 'Todos os itens da FD já foram solicitados'
+                                          : undefined
+                                  }
                                   className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors ${cores.botao}`}
                                 >
                                   {estado === 'todos' ? (
@@ -19081,7 +20132,9 @@ export function OrcamentoPageView({
                                   ) : (
                                     <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden />
                                   )}
-                                  {estado === 'todos'
+                                  {fdCancelada
+                                    ? 'FD cancelada'
+                                    : estado === 'todos'
                                     ? 'Pedido concluído'
                                     : estado === 'parcial'
                                       ? 'Continuar pedido de material'
@@ -19762,6 +20815,14 @@ export function OrcamentoPageView({
                                           <div className="min-w-0 whitespace-normal break-words uppercase">
                                             {l.descricao}
                                           </div>
+                                          {itensFdCotados.has(l.key) ? (
+                                            <span
+                                              className="mt-1 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                              title="Item associado a uma empreita com cotação completa (aba Cotação Empreita)"
+                                            >
+                                              COTAÇÃO REALIZADA
+                                            </span>
+                                          ) : null}
                                         </td>
                                       </>
                                     )}
@@ -20582,6 +21643,15 @@ export function OrcamentoPageView({
                             <th data-orc-col="subMo" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub mão de obra</th>
                             <th data-orc-col="subMat" className={`${GRADE_TH_STICKY} min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Sub material</th>
                             <th data-orc-col="total" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total sem BDI</th>
+                            {meta.requerConfigDesconto === true && (
+                              <th
+                                data-orc-col="totalDesc"
+                                className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}
+                                title="Orçamento detalhado: valor total sem BDI já com o desconto dos insumos marcados"
+                              >
+                                Valor total com desconto sem BDI
+                              </th>
+                            )}
                             <th data-orc-col="totalBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
                             <th data-orc-col="peso" className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
                             <th data-orc-col="obs" className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
@@ -20598,20 +21668,24 @@ export function OrcamentoPageView({
                               totalComBdi: number;
                               totalLinha: number;
                               pesoPct: number;
+                              totalComDesconto: number;
                             } => {
                               let mo = 0;
                               let mat = 0;
                               let custoDir = 0;
                               let totalComBdi = 0;
                               let totalLinha = 0;
+                              let totalComDesconto = 0;
                               for (const r of rows) {
                                 mo += r.subMaoDeObra;
                                 mat += r.subMaterial;
+                                totalComDesconto += r.total - (r.descontoDetalhado ?? 0);
                                 custoDir += r.total;
                                 totalComBdi += r.totalComBdi;
                                 totalLinha += r.total;
                               }
                               return {
+                                totalComDesconto,
                                 mo,
                                 mat,
                                 custoDir,
@@ -20746,6 +21820,11 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                                 )}
                               </td>
+                              {meta.requerConfigDesconto === true && (
+                                <td data-orc-col="totalDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                                  <MoedaCelula valor={resumoTitulo.totalComDesconto} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                                </td>
+                              )}
                               <td
                                 ref={refTextoSomaOrc(`t:${bloco.servicoNome}`, 'totalBdi')}
                                 data-orc-col="totalBdi"
@@ -20857,6 +21936,11 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                 )}
                               </td>
+                              {meta.requerConfigDesconto === true && (
+                                <td data-orc-col="totalDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                                  <MoedaCelula valor={resumoSubtitulo.totalComDesconto} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                </td>
+                              )}
                               <td
                                 ref={refTextoSomaOrc(`s:${bloco.key}`, 'totalBdi')}
                                 data-orc-col="totalBdi"
@@ -21099,8 +22183,8 @@ export function OrcamentoPageView({
                                         );
                                         const inputId = `orc-campo-${colDef.campo}-${String(row.key).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
                                         return (
+                                      <React.Fragment key={colDef.col}>
                                       <td
-                                        key={colDef.col}
                                         data-orc-col={colDef.col}
                                         style={estiloCelulaComDestaqueFonte(colDef.col, colDef.campo)}
                                         className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 ${
@@ -21245,6 +22329,16 @@ export function OrcamentoPageView({
                                           />
                                         </div>
                                       </td>
+                                      {colDef.col === 'total' && meta.requerConfigDesconto === true && (
+                                        <td
+                                          data-orc-col="totalDesc"
+                                          className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 font-semibold text-gray-900 dark:text-gray-50"
+                                          title={row.descontoDetalhado > 0.004 ? `Desconto dos insumos marcados: R$ ${row.descontoDetalhado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Sem desconto nesta composição'}
+                                        >
+                                          <MoedaCelula valor={row.total - row.descontoDetalhado} />
+                                        </td>
+                                      )}
+                                      </React.Fragment>
                                         );
                                       })}
                                       <td data-orc-col="peso" style={estiloFundoPinturaOrc(row.key, 'peso', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
@@ -21476,7 +22570,7 @@ export function OrcamentoPageView({
                   {!naFichaDemanda && (resumoFinanceiro.descontoPct > 0 || resumoFinanceiro.bdiPct > 0) && (
                   <div className="shrink-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Orçamento
+                      {resumoFinanceiro.descontoPct > 0 ? 'Orçamento sem desconto' : 'Orçamento'}
                     </p>
                     <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
                       {formatarBRLExport(resumoFinanceiro.totalBase)}
@@ -21490,10 +22584,10 @@ export function OrcamentoPageView({
                           {`Desconto (${(resumoFinanceiro.descontoPct * 100).toLocaleString('pt-BR', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
-                          })}%)`}
+                          })}%${meta.requerConfigDesconto === true ? ' efetivo' : ''})`}
                         </p>
-                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
-                          {formatarBRLExport(resumoFinanceiro.valorDesconto)}
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-red-600 dark:text-red-400 sm:text-base whitespace-nowrap">
+                          − {formatarBRLExport(resumoFinanceiro.valorDesconto)}
                         </p>
                       </div>
                       <div className="shrink-0">
@@ -21531,26 +22625,42 @@ export function OrcamentoPageView({
                   )}
                   {naFichaDemanda && (
                     <>
+                      <div className="shrink-0" title="Total geral do orçamento: com desconto e BDI">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Total geral (orçado)
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-green-600 dark:text-green-400 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
+                        </p>
+                      </div>
+                      <div className="shrink-0" title="Orçamento sem desconto e sem BDI">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Custo orçamento
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100 sm:text-base whitespace-nowrap">
+                          {formatarBRLExport(resumoFinanceiro.totalBase)}
+                        </p>
+                      </div>
                       <div className="shrink-0">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                           Custo estimado (40%)
                         </p>
                         <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-amber-600 dark:text-amber-400 sm:text-base whitespace-nowrap">
-                          {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi * 0.4)}
+                          {formatarBRLExport(custoEstimadoTotalFd)}
+                        </p>
+                      </div>
+                      <div className="shrink-0" title="Preenchido com as OCs pagas">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Custo real
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-blue-600 dark:text-blue-400 sm:text-base whitespace-nowrap">
+                          {custoRealTotalFd > 0 ? formatarBRLExport(custoRealTotalFd) : '—'}
                         </p>
                       </div>
                       {custoRealTotalFd > 0 && (
                         <>
-                          <div className="shrink-0">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                              Custo real
-                            </p>
-                            <p className="mt-0.5 text-sm font-bold tabular-nums tracking-tight text-blue-600 dark:text-blue-400 sm:text-base whitespace-nowrap">
-                              {formatarBRLExport(custoRealTotalFd)}
-                            </p>
-                          </div>
                           {(() => {
-                            const diferenca = resumoFinanceiro.totalComDescontoEBdi * 0.4 - custoRealTotalFd;
+                            const diferenca = custoEstimadoTotalFd - custoRealTotalFd;
                             return (
                               <div className="shrink-0" title="Custo estimado (40%) − custo real">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -21614,7 +22724,7 @@ export function OrcamentoPageView({
                     value={orcamentoViewTab}
                     onChange={(next) => {
                       if (
-                        next === 'planilhaAnalitica' &&
+                        (next === 'planilhaAnalitica' || next === 'eap') &&
                         !fichaDemandaOnly &&
                         !fichaDemandaLiberada(statusAprovacaoAtivo)
                       ) {
@@ -21675,8 +22785,11 @@ export function OrcamentoPageView({
                     podeDestrancarOrcamento ? (
                       <button
                         type="button"
-                        onClick={() => setConfirmDestrancarOrcamento(true)}
-                        disabled={destrancandoOrcamento}
+                        onClick={() => {
+                          setModoDestrancar('nova');
+                          setConfirmDestrancarOrcamento(true);
+                        }}
+                        disabled={destrancandoOrcamento || reabrindoOrcamento}
                         className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-600 bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700 hover:border-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
                         title="Destrancar orçamento e FD"
                         aria-label="Destrancar orçamento e FD"
@@ -21721,6 +22834,16 @@ export function OrcamentoPageView({
                       onClick={() => {
                         if (itensCalculados.length === 0) {
                           toast.error('Adicione itens ao orçamento antes de finalizar.');
+                          return;
+                        }
+                        // Orçamento detalhado: a configuração do desconto tem que estar finalizada.
+                        if (
+                          meta.requerConfigDesconto === true &&
+                          descontoDetalhadoPct > 0 &&
+                          !meta.descontoConfigFinalizada
+                        ) {
+                          toast.error('Finalize a configuração do desconto antes de finalizar o orçamento.');
+                          setOrcamentoViewTab('detalhado');
                           return;
                         }
                         setConfirmFinalizarOrcamento(true);
@@ -21894,6 +23017,13 @@ export function OrcamentoPageView({
         textoSalvar="Lançar e trancar"
       />
 
+      <FdResultadoPorOcModal
+        isOpen={resultadoPorOcOpen}
+        onClose={() => setResultadoPorOcOpen(false)}
+        fdApprovalId={meta.fichaDemandaApprovalId || ''}
+        insumos={insumosParaPedido}
+      />
+
       <FdPedidoMaterialModal
         isOpen={pedidoMaterialModalOpen}
         onClose={() => setPedidoMaterialModalOpen(false)}
@@ -22050,6 +23180,47 @@ export function OrcamentoPageView({
         </AppModalOverlay>
       )}
 
+      {confirmFinalizarConfigDesconto && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmFinalizarConfigDesconto(false)} />
+          <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/30">
+              <Lock className="h-6 w-6 text-teal-700 dark:text-teal-300" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Finalizar configuração do desconto?
+            </h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              As marcações de desconto ficam travadas. Os valores do orçamento passam a valer com essa configuração.
+              Depois, finalize e tranque o orçamento e lance a FD.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmFinalizarConfigDesconto(false)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMeta((prev) => ({
+                    ...prev,
+                    descontoConfigFinalizada: { por: currentUserName || '', em: new Date().toISOString() },
+                  }));
+                  setConfirmFinalizarConfigDesconto(false);
+                  toast.success('Configuração do desconto finalizada.');
+                }}
+                className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800"
+              >
+                Finalizar configuração
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
       {confirmDestrancarOrcamento && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div
@@ -22063,14 +23234,62 @@ export function OrcamentoPageView({
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
               <Unlock className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
             </div>
-            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Destrancar orçamento e FD?
+            <h3 className="mb-1 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Destrancar e reabrir orçamento
             </h3>
-            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
-              O orçamento volta para Finalizado e a FD pode ser alterada. Enquanto estiver destrancado, ninguém
-              faz pedido de material por esta FD. Para liberar os pedidos de novo, lance a FD outra vez — a
-              mesma FD é atualizada e os pedidos já feitos continuam nela.
+            <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+              Enquanto estiver destrancado, ninguém faz pedido de material por esta FD. Para liberar os pedidos de
+              novo, lance a FD outra vez — a mesma FD é atualizada e os pedidos já feitos continuam nela.
             </p>
+            <div className="mb-6 space-y-2.5">
+              {(
+                [
+                  {
+                    modo: 'nova' as const,
+                    titulo: `Criar a revisão ${formatOrcamentoRevisao(versaoNumero + 1)}`,
+                    texto: `A ${formatOrcamentoRevisao(versaoNumero)} fica congelada como foi finalizada. O cronograma é mantido e acertado com o orçamento quando você finalizar de novo. O valor na OS permanece até lá.`,
+                  },
+                  {
+                    modo: 'mesma' as const,
+                    titulo: `Editar a mesma versão (${formatOrcamentoRevisao(versaoNumero)})`,
+                    texto:
+                      'Não cria revisão: a edição acontece direto nesta versão. O cronograma e o valor na OS só mudam quando você finalizar de novo.',
+                  },
+                  {
+                    modo: 'so' as const,
+                    titulo: 'Só destrancar',
+                    texto: 'O orçamento volta para Finalizado, sem abrir para edição. A FD pode ser alterada.',
+                  },
+                ]
+              ).map((op) => (
+                <button
+                  key={op.modo}
+                  type="button"
+                  onClick={() => setModoDestrancar(op.modo)}
+                  disabled={destrancandoOrcamento}
+                  className={`w-full rounded-lg border-2 p-3 text-left transition-colors ${
+                    modoDestrancar === op.modo
+                      ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
+                      : 'border-gray-200 hover:border-gray-300 dark:border-gray-600 dark:hover:border-gray-500'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    <span
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                        modoDestrancar === op.modo ? 'border-amber-600' : 'border-gray-400 dark:border-gray-500'
+                      }`}
+                      aria-hidden
+                    >
+                      {modoDestrancar === op.modo ? <span className="h-2 w-2 rounded-full bg-amber-600" /> : null}
+                    </span>
+                    {op.titulo}
+                  </span>
+                  <span className="mt-1 block pl-6 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+                    {op.texto}
+                  </span>
+                </button>
+              ))}
+            </div>
             <div className="flex items-center justify-center space-x-3">
               <button
                 type="button"
@@ -22086,7 +23305,13 @@ export function OrcamentoPageView({
                 disabled={destrancandoOrcamento}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
               >
-                {destrancandoOrcamento ? 'Destrancando...' : 'Destrancar'}
+                {destrancandoOrcamento
+                  ? 'Destrancando...'
+                  : modoDestrancar === 'nova'
+                    ? 'Destrancar e criar revisão'
+                    : modoDestrancar === 'mesma'
+                      ? 'Destrancar e reabrir'
+                      : 'Destrancar'}
               </button>
             </div>
           </div>
@@ -22922,6 +24147,7 @@ export function OrcamentoPageView({
           setOrcafascioOrcamentoLinhaChave(null);
           setOrcafascioImportBdi('');
           setOrcafascioImportDesconto('');
+          setOrcafascioRequerConfigDesconto(null);
           setOrcafascioImportModoArredondamento('arredondar');
           resetOrcafascioOsDraft();
           dismissImportShellIfNeeded();
@@ -23204,48 +24430,68 @@ export function OrcamentoPageView({
                   </div>
                 ) : null}
                 {(() => {
-                  // BDI e desconto vêm do cadastro do contrato. Só aparecem aqui os que o contrato deixou vazios.
-                  const padraoUi = padraoBdiDescontoDoContrato(
+                  // BDI e desconto vêm só do cadastro do contrato (Engenharia › Contratos): aqui é só leitura.
+                  const padraoImp = padraoBdiDescontoDoContrato(
                     (importContratoSelecionadoId || resolveContractIdForOsSync() || '').trim() || undefined
                   );
-                  const pedeBdi = !padraoUi?.bdiPercentual;
-                  const pedeDesconto = !padraoUi?.descontoPercentual;
-                  if (!pedeBdi && !pedeDesconto) return null;
+                  const faltaNoContrato = !padraoImp?.bdiPercentual || !padraoImp?.descontoPercentual;
+                  const campoTravadoCls = `${FORM_FIELD_INPUT_CLS} disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed dark:disabled:bg-gray-700 dark:disabled:text-gray-200`;
                   return (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {pedeBdi ? (
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             BDI (%)
                           </label>
                           <input
-                            value={orcafascioImportBdi}
-                            onChange={(e) => setOrcafascioImportBdi(e.target.value)}
-                            className={FORM_FIELD_INPUT_CLS}
-                            placeholder="Ex: 28,35"
-                            inputMode="decimal"
-                            disabled={isImportandoOrcamento}
+                            value={padraoImp?.bdiPercentual || ''}
+                            readOnly
+                            disabled
+                            className={campoTravadoCls}
+                            placeholder="Não cadastrado no contrato"
+                            title="Definido no cadastro do contrato"
                           />
                         </div>
-                      ) : null}
-                      {pedeDesconto ? (
                         <div>
                           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Desconto (%)
                           </label>
                           <input
-                            value={orcafascioImportDesconto}
-                            onChange={(e) => setOrcafascioImportDesconto(e.target.value)}
-                            className={FORM_FIELD_INPUT_CLS}
-                            placeholder="Ex: 25,01"
-                            inputMode="decimal"
-                            disabled={isImportandoOrcamento}
+                            value={padraoImp?.descontoPercentual || ''}
+                            readOnly
+                            disabled
+                            className={campoTravadoCls}
+                            placeholder="Não cadastrado no contrato"
+                            title="Definido no cadastro do contrato"
                           />
                         </div>
-                      ) : null}
+                      </div>
+                      <p
+                        className={`text-xs ${
+                          faltaNoContrato ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                      >
+                        {faltaNoContrato
+                          ? 'Cadastre o BDI e o desconto no contrato (Engenharia › Contratos) para poder importar.'
+                          : 'Definidos no cadastro do contrato (Engenharia › Contratos).'}
+                      </p>
                     </div>
                   );
                 })()}
+                <div>
+                  <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Requer configuração de desconto? *
+                  </p>
+                  <OrcamentoAditivoEscolha
+                    value={orcafascioRequerConfigDesconto}
+                    disabled={isImportandoOrcamento}
+                    onChange={setOrcafascioRequerConfigDesconto}
+                    ariaLabel="Requer configuração de desconto"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Sim: cria a aba Orçamento detalhado para escolher, insumo a insumo, onde o desconto do contrato não se aplica.
+                  </p>
+                </div>
               </div>
             ) : null}
           </>
@@ -23267,6 +24513,7 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoLinhaChave(null);
               setOrcafascioImportBdi('');
               setOrcafascioImportDesconto('');
+              setOrcafascioRequerConfigDesconto(null);
               setOrcafascioImportModoArredondamento('arredondar');
               resetOrcafascioOsDraft();
               dismissImportShellIfNeeded();
@@ -23560,6 +24807,29 @@ export function OrcamentoPageView({
                   }))
                 }
               />
+            </div>
+            <div className="sm:col-span-2">
+              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Requer configuração de desconto?
+              </p>
+              <OrcamentoAditivoEscolha
+                value={editarDadosDraft.requerConfigDesconto === true}
+                disabled={gradeTravada || !!meta.descontoConfigFinalizada}
+                ariaLabel="Requer configuração de desconto"
+                onChange={(next) =>
+                  setEditarDadosDraft((p) => ({
+                    ...p,
+                    requerConfigDesconto: next ? true : undefined,
+                  }))
+                }
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {gradeTravada
+                  ? 'Orçamento travado: não dá para mudar agora.'
+                  : meta.descontoConfigFinalizada
+                    ? 'Configuração do desconto finalizada: reabra a configuração na aba Orçamento detalhado para mudar.'
+                    : 'Sim: aba Orçamento detalhado, com desconto por insumo. Não: desconto sobre o total (as marcações ficam guardadas).'}
+              </p>
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome do orçamento *</label>
@@ -24395,6 +25665,20 @@ export function OrcamentoPageView({
                 ) : (
                   <RefreshCw className="h-5 w-5 shrink-0" aria-hidden />
                 )}
+              </button>
+            )}
+            {orcamentoViewTab === 'eap' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuAcoesGrade(null);
+                  void exportarEapPdf();
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                title="Exportar EAP em PDF"
+                aria-label="Exportar EAP em PDF"
+              >
+                <FileText className="h-5 w-5 shrink-0" aria-hidden />
               </button>
             )}
             <button

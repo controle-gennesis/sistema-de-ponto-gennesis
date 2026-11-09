@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import { prisma } from '../lib/prisma';
 import { OrcamentoService } from '../services/OrcamentoService';
+import { userCanAccessOrcamentoCostCenter } from '../lib/orcamentoAcesso';
 
 let orcamentoService: OrcamentoService | null = null;
 
@@ -87,10 +88,16 @@ export async function registerOrcamentoSocket(
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { name: true, profilePhotoUrl: true },
+    select: { name: true, profilePhotoUrl: true, employee: { select: { position: true } } },
   });
   if (!user || ws.readyState !== WebSocket.OPEN) {
     ws.close(4004, 'usuario invalido');
+    return;
+  }
+  // Mesma regra das rotas de orçamento: administrador ou contrato Liberado neste centro de custo.
+  const isAdmin = (user.employee?.position || '').toLowerCase() === 'administrador';
+  if (!(await userCanAccessOrcamentoCostCenter(userId, isAdmin, centroCustoId))) {
+    ws.close(4005, 'sem acesso ao orcamento');
     return;
   }
 

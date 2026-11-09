@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { fasesFluigDasOcs, type FluigOcFase } from '../lib/fluigOcFase';
 import { type EngineeringMaterial, Prisma, PurchaseOrderStatus } from '@prisma/client';
 import { remapExactUnbCostCenterIdToConsorcio } from '../lib/migrarRmUnbParaConsorcio';
 import { isUnbCostCenterRecord, unbCostCenterLabelPrismaWhere } from '../lib/unbCostCenterScope';
@@ -108,29 +109,40 @@ async function persistDemandSheetAttachmentsJson(
 
 type NestedPurchaseOrderWithCondition = {
   paymentCondition: string | null;
+  totvsIdMov?: number | null;
 };
 
-/** Mesma lógica da listagem de OC: parcelCount vem da condição de pagamento. */
+/**
+ * Mesma lógica da listagem de OC: parcelCount vem da condição de pagamento.
+ * OC enviada ao TOTVS ganha a fase atual no Fluig (G3/G4), lida do espelho.
+ */
 async function enrichNestedPurchaseOrdersParcelCount<T extends NestedPurchaseOrderWithCondition>(
   orders: T[]
-): Promise<Array<T & { paymentParcelCount: number }>> {
+): Promise<Array<T & { paymentParcelCount: number; fluigFase: FluigOcFase | null }>> {
   if (orders.length === 0) return [];
   const codes = [...new Set(orders.map((o) => o.paymentCondition).filter(Boolean))] as string[];
   const countByCode = new Map<string, number>();
-  if (codes.length > 0) {
-    const conds = await prisma.paymentCondition.findMany({
-      where: { code: { in: codes } },
-      select: { code: true, parcelCount: true }
-    });
-    for (const c of conds) {
-      countByCode.set(c.code, c.parcelCount && c.parcelCount >= 1 ? c.parcelCount : 1);
-    }
+  const [conds, fases] = await Promise.all([
+    codes.length > 0
+      ? prisma.paymentCondition.findMany({
+          where: { code: { in: codes } },
+          select: { code: true, parcelCount: true }
+        })
+      : Promise.resolve([]),
+    fasesFluigDasOcs(orders.map((o) => o.totvsIdMov)).catch((err) => {
+      console.error('[MaterialRequest] fase Fluig das OCs', err);
+      return new Map<number, FluigOcFase>();
+    })
+  ]);
+  for (const c of conds) {
+    countByCode.set(c.code, c.parcelCount && c.parcelCount >= 1 ? c.parcelCount : 1);
   }
   return orders.map((o) => ({
     ...o,
     paymentParcelCount: o.paymentCondition
       ? countByCode.get(o.paymentCondition) ?? 1
-      : 1
+      : 1,
+    fluigFase: o.totvsIdMov ? fases.get(o.totvsIdMov) ?? null : null
   }));
 }
 
@@ -401,6 +413,36 @@ export interface UpdateMaterialRequestCorrectionData {
   submitForApproval?: boolean;
 }
 
+/** Busca de materiais: letras com acento → sem acento (o mesmo par usado no SQL com translate). */
+const ACENTOS_BUSCA = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+const SEM_ACENTOS_BUSCA = 'aaaaaeeeeiiiiooooouuuucn';
+const PALAVRAS_IGNORADAS_BUSCA = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'em', 'com', 'para', 'por', 'p', 'e', 'a', 'o', 'as', 'os', 'ou', 'x', 'c',
+  'inclusive', 'tipo', 'comum', 'ref', 'sob', 'sobre',
+]);
+
+function normalizarBuscaMaterial(v: string): string {
+  return String(v || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Palavras da busca (sem acento, sem palavras vazias); números curtos ("12", "3/4") contam. */
+function tokensBuscaMaterial(texto: string, tamanhoMin: number): string[] {
+  const out: string[] = [];
+  for (const t of normalizarBuscaMaterial(texto).split(/[^a-z0-9.,/-]+/)) {
+    const tok = t.replace(/^[.,/-]+|[.,/-]+$/g, '');
+    if (!tok || PALAVRAS_IGNORADAS_BUSCA.has(tok)) continue;
+    const ehNumero = /\d/.test(tok);
+    if (!ehNumero && tok.length < tamanhoMin) continue;
+    if (!out.includes(tok)) out.push(tok);
+  }
+  return out;
+}
+
 export class MaterialRequestService {
   /** FD obrigatória exceto quando o centro de custo é UNB. */
   private async assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
@@ -509,25 +551,67 @@ export class MaterialRequestService {
   /** Busca paginada para dropdown da RM (sem carregar o catálogo inteiro). */
   async searchConstructionMaterialsForRmDropdown(
     search: string,
-    limit = 50
+    limit = 50,
+    opts?: { sugestao?: boolean }
   ): Promise<RmDropdownMaterial[]> {
     const term = search.trim();
     if (term.length < 2) return [];
+    const take = Math.min(Math.max(limit, 1), 100);
+    const sugestao = opts?.sugestao === true;
 
-    const constructionMaterials = await prisma.constructionMaterial.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { name: { contains: term, mode: 'insensitive' } },
-          { description: { contains: term, mode: 'insensitive' } },
-          { code: { contains: term, mode: 'insensitive' } }
-        ]
-      },
-      orderBy: { name: 'asc' },
-      take: Math.min(Math.max(limit, 1), 100)
+    // Palavras soltas, sem acento e em qualquer ordem ("jan bas alu" acha "JANELA BASCULANTE EM ALUMINIO").
+    // Sugestão (descrição do item da FD): basta bater parte das palavras; o ranking põe as melhores no topo.
+    const termoNorm = normalizarBuscaMaterial(term);
+    let tokens = tokensBuscaMaterial(term, sugestao ? 3 : 1);
+    if (sugestao) tokens = tokens.slice(0, 8);
+    if (tokens.length === 0) tokens = [termoNorm];
+
+    const campo = `translate(lower(coalesce("code", '') || ' ' || coalesce("name", '') || ' ' || coalesce("description", '')), $1, $2)`;
+    const conds = tokens.map((_, i) => `${campo} LIKE $${i + 3}`);
+    const linhas = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT "id" FROM "construction_materials" WHERE "isActive" = true AND (${conds.join(sugestao ? ' OR ' : ' AND ')}) LIMIT 600`,
+      ACENTOS_BUSCA,
+      SEM_ACENTOS_BUSCA,
+      ...tokens.map((t) => `%${t}%`)
+    );
+    if (linhas.length === 0) return [];
+
+    const candidatos = await prisma.constructionMaterial.findMany({
+      where: { id: { in: linhas.map((l) => l.id) } },
     });
 
-    return this.mapConstructionMaterialsToRmDropdown(constructionMaterials);
+    // Relevância: código exato > código começando > nome começando > todas as palavras no nome >
+    // palavras no início das palavras do nome > só na descrição; nome mais curto desempata.
+    const pontuar = (cm: { code: string | null; name: string; description: string | null }) => {
+      const code = normalizarBuscaMaterial(cm.code || '');
+      const name = normalizarBuscaMaterial(cm.name || '');
+      const desc = normalizarBuscaMaterial(cm.description || '');
+      let p = 0;
+      if (code && code === termoNorm) p += 10000;
+      else if (code && code.startsWith(termoNorm)) p += 3000;
+      if (name.startsWith(termoNorm)) p += 1500;
+      const palavrasNome = name.split(/[^a-z0-9]+/).filter(Boolean);
+      let noNome = 0;
+      let inicioPalavra = 0;
+      for (const t of tokens) {
+        if (name.includes(t)) noNome += 1;
+        else if (!desc.includes(t) && !code.includes(t)) continue;
+        if (palavrasNome.some((w) => w.startsWith(t))) inicioPalavra += 1;
+      }
+      p += noNome * (sugestao ? 120 : 60);
+      if (noNome === tokens.length) p += 400;
+      p += inicioPalavra * 40;
+      if (palavrasNome[0] && tokens[0] && palavrasNome[0].startsWith(tokens[0])) p += 200;
+      p -= Math.min(name.length, 200) / 10;
+      return p;
+    };
+    const ordenados = candidatos
+      .map((cm) => ({ cm, p: pontuar(cm) }))
+      .sort((a, b) => b.p - a.p || a.cm.name.localeCompare(b.cm.name, 'pt-BR'))
+      .slice(0, take)
+      .map((x) => x.cm);
+
+    return this.mapConstructionMaterialsToRmDropdown(ordenados);
   }
 
   private async mapConstructionMaterialsToRmDropdown(
@@ -921,6 +1005,8 @@ export class MaterialRequestService {
           boletoAttachmentUrl: true,
           paymentBoletoInstallments: true,
           paymentBoletoPhaseReleased: true,
+          totvsIdMov: true,
+          totvsFluxoDireto: true,
           items: { select: { materialRequestItemId: true } }
         },
         orderBy: { createdAt: 'asc' as const }
@@ -1057,6 +1143,8 @@ export class MaterialRequestService {
             boletoAttachmentUrl: true,
             paymentBoletoInstallments: true,
             paymentBoletoPhaseReleased: true,
+            totvsIdMov: true,
+            totvsFluxoDireto: true,
             items: { select: { materialRequestItemId: true } }
           },
           orderBy: { createdAt: 'asc' }
@@ -1184,7 +1272,11 @@ export class MaterialRequestService {
     if (nextStatus === 'CANCELLED') {
       const canCancelAsOwnerOrAdmin = existing.requestedBy === userId || isAdmin;
       if (canCancelAsOwnerOrAdmin) {
-        if (existing.status === 'FULFILLED' || existing.status === 'CANCELLED') {
+        if (existing.status === 'CANCELLED') {
+          throw new Error('A requisição já está cancelada');
+        }
+        // Administrador cancela em qualquer fase (inclusive atendida); o solicitante, não.
+        if (existing.status === 'FULFILLED' && !isAdmin) {
           throw new Error('Não é possível cancelar uma requisição já atendida ou cancelada');
         }
       } else if (existing.status !== 'PENDING' && existing.status !== 'IN_REVIEW') {
@@ -1540,7 +1632,11 @@ export class MaterialRequestService {
       throw new Error('Apenas o solicitante ou o administrador pode cancelar a requisição');
     }
 
-    if (request.status === 'FULFILLED' || request.status === 'CANCELLED') {
+    if (request.status === 'CANCELLED') {
+      throw new Error('A requisição já está cancelada');
+    }
+    // Administrador cancela em qualquer fase (inclusive atendida); o solicitante, não.
+    if (request.status === 'FULFILLED' && !isAdmin) {
       throw new Error('Não é possível cancelar uma requisição já atendida ou cancelada');
     }
 

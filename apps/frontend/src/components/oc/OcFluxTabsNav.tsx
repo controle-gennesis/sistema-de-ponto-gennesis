@@ -147,7 +147,7 @@ export function OcFluxTabsNav({
               className={idx > 0 ? 'border-t border-gray-200 dark:border-gray-700' : undefined}
             >
               {showFluxLabels ? (
-                <p className="pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500">
+                <p className="pt-2 text-center text-xs font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500">
                   {row.label}
                 </p>
               ) : null}
@@ -164,7 +164,7 @@ export function OcFluxTabsNav({
                       key={tab.id}
                       active={active}
                       onClick={() => onActiveTab(tab.id)}
-                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                      className="flex items-center gap-2 whitespace-nowrap px-2.5 py-2 text-sm font-medium sm:px-3.5 sm:text-base"
                     >
                       {tab.label}
                       <span className="app-tab__badge">

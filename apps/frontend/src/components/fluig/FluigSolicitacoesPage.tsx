@@ -903,7 +903,62 @@ function fluigDetailModalSectionIndex(colRaw: string): number {
   return FLUIG_DETAIL_MODAL_SECTIONS.length;
 }
 
+function normalizeFluigMatchText(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function fluigCellText(val: unknown): string {
+  if (val != null && typeof val === 'object') {
+    const o = val as Record<string, unknown>;
+    return String(o.display ?? o.displayValue ?? o.internalValue ?? o.value ?? '').trim();
+  }
+  return String(val ?? '').trim();
+}
+
+/** Linha pertence ao centro de custo fixo (código ou nome, em qualquer coluna de CC). */
+function rowMatchesFixedCostCenter(
+  row: Record<string, unknown>,
+  fixed: { code?: string | null; name?: string | null }
+): boolean {
+  const code = normalizeFluigMatchText(fixed.code ?? '');
+  const name = normalizeFluigMatchText(fixed.name ?? '');
+  if (!code && !name) return true;
+  for (const key of Object.keys(row)) {
+    const n = key.toLowerCase().replace(/\s+/g, ' ').trim();
+    const isCcKey =
+      n === 'cc' ||
+      /ccusto|cc_custo|centro[\s_-]?custo|centrocusto|cod[\s_-]?ccusto/.test(n);
+    if (!isCcKey) continue;
+    const v = normalizeFluigMatchText(fluigCellText(row[key]));
+    if (!v) continue;
+    if (name && v.includes(name)) return true;
+    if (code && /^[\d.\s]+$/.test(v) && v.replace(/\s/g, '') === code.replace(/\s/g, '')) return true;
+    if (code && !/^[\d.\s]+$/.test(v) && v.includes(code)) return true;
+  }
+  return false;
+}
+
+function rowSetorSolicitante(row: Record<string, unknown>): string {
+  for (const key of Object.keys(row)) {
+    if (/^setor[_\s-]?solicitante$/i.test(key) || /setor.*solicitante|solicitante.*setor/i.test(key)) {
+      return normalizeFluigMatchText(fluigCellText(row[key]));
+    }
+  }
+  return '';
+}
+
 type FluigSolicitacoesPageConfig = {
+  /** Sem MainLayout/cabeçalho: para uso embutido em outra página (ex.: aba do contrato). */
+  embedded?: boolean;
+  /** Mantém só solicitações deste centro de custo (código e/ou nome). */
+  fixedCostCenter?: { code?: string | null; name?: string | null };
+  /** Remove solicitações cujo setor solicitante seja um destes (comparação sem acento/caixa). */
+  excludedSetoresSolicitantes?: readonly string[];
   title?: string;
   subtitle?: string;
   datasets?: readonly string[];
@@ -936,6 +991,21 @@ type FluigSolicitacoesPageConfig = {
    */
   otimizarFiltros?: boolean;
 };
+
+function LayoutShell({
+  embedded,
+  children,
+  ...layoutProps
+}: {
+  embedded: boolean;
+  children: React.ReactNode;
+  userRole: React.ComponentProps<typeof MainLayout>['userRole'];
+  userName: string;
+  onLogout: () => void;
+}) {
+  if (embedded) return <>{children}</>;
+  return <MainLayout {...layoutProps}>{children}</MainLayout>;
+}
 
 /** Histórico / título com “Ver mais”, no padrão PNCP. */
 function FluigHistoricoExpandable({ text }: { text: string }) {
@@ -1624,13 +1694,31 @@ export function FluigSolicitacoesPage({
     return String(val ?? '').trim();
   };
 
+  const fixedCcCode = config?.fixedCostCenter?.code ?? null;
+  const fixedCcName = config?.fixedCostCenter?.name ?? null;
+  const hasFixedCc = !!(fixedCcCode || fixedCcName);
+  const excludedSetoresKey = (config?.excludedSetoresSolicitantes ?? []).join('|');
+  const currentValuesPreFiltered = useMemo(() => {
+    const excluded = excludedSetoresKey
+      ? new Set(excludedSetoresKey.split('|').map(normalizeFluigMatchText))
+      : null;
+    if (!hasFixedCc && !excluded) return currentValues;
+    return currentValues.filter((row) => {
+      if (hasFixedCc && !rowMatchesFixedCostCenter(row, { code: fixedCcCode, name: fixedCcName })) {
+        return false;
+      }
+      if (excluded && excluded.has(rowSetorSolicitante(row))) return false;
+      return true;
+    });
+  }, [currentValues, hasFixedCc, fixedCcCode, fixedCcName, excludedSetoresKey]);
+
   const currentValuesFilteredByFilial = useMemo(() => {
-    if (!filialCol || currentValues.length === 0) return currentValues;
+    if (!filialCol || currentValuesPreFiltered.length === 0) return currentValuesPreFiltered;
 
     const hasAllowedFilter = !!(allowedFiliais && allowedFiliais.length > 0);
     const allowedSet = hasAllowedFilter ? new Set<string>(allowedFiliais) : null;
 
-    return currentValues.filter((row) => {
+    return currentValuesPreFiltered.filter((row) => {
       const filial = getFilialValue(row);
       const filialNorm = filial.trim().toLowerCase();
 
@@ -1638,7 +1726,7 @@ export function FluigSolicitacoesPage({
       if (allowedSet && !allowedSet.has(filial)) return false;
       return true;
     });
-  }, [currentValues, filialCol, allowedFiliais, excludedFiliaisSet]);
+  }, [currentValuesPreFiltered, filialCol, allowedFiliais, excludedFiliaisSet]);
 
   const movimentoDataHoraCol = useMemo(() => {
     const firstEarly = currentValuesFilteredByFilial[0] as Record<string, unknown> | undefined;
@@ -2430,10 +2518,10 @@ export function FluigSolicitacoesPage({
   const isEmpty = currentValues.length === 0;
 
   return (
-    <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+    <LayoutShell embedded={!!config?.embedded} userRole={user.role} userName={user.name} onLogout={handleLogout}>
       <div className="space-y-6">
         {/* Header */}
-        <div className="text-center">
+        <div className={config?.embedded ? 'hidden' : 'text-center'}>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
             {config?.title ?? 'Fluig - Processos'}
           </h1>
@@ -2491,7 +2579,7 @@ export function FluigSolicitacoesPage({
                     noFocusRing
                   />
                 ) : null}
-                {ccColResolved ? (
+                {ccColResolved && !hasFixedCc ? (
                   <MultiSelectSearchDropdown
                     label="Centro de custo"
                     options={centrosCusto.map((c) => {
@@ -2915,7 +3003,7 @@ export function FluigSolicitacoesPage({
                         (safePage - 1) * FLUIG_LIST_PAGE_SIZE + FLUIG_LIST_PAGE_SIZE
                       );
                       const listShowFilial = useEmployeeListLayout && !!filialCol && !hideFilialFilter;
-                      const listShowCC = useEmployeeListLayout && !!ccColResolved;
+                      const listShowCC = useEmployeeListLayout && !!ccColResolved && !hasFixedCc;
                       const listShowNatureza = useEmployeeListLayout && !!naturezaOrcamentariaCol;
                       const listShowEmpreiteiro = useEmployeeListLayout && !!empreitaCol;
                       const listShowFornecedor = useEmployeeListLayout && !!fornecedorCol;
@@ -2956,7 +3044,7 @@ export function FluigSolicitacoesPage({
                             />
                           ) : null}
                           <div className="table-scroll">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                               <thead
                                 className={
                                   useEmployeeListLayout
@@ -2968,7 +3056,7 @@ export function FluigSolicitacoesPage({
                                   {useEmployeeListLayout ? (
                                     <>
                                       <th
-                                        className={`px-3 sm:px-4 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24 sm:w-28 shrink-0`}
+                                        className={`px-3 sm:px-4 ${thPad} ${config?.embedded ? 'text-center' : 'text-left'} text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24 sm:w-28 shrink-0`}
                                       >
                                         ID
                                       </th>
@@ -3134,7 +3222,7 @@ export function FluigSolicitacoesPage({
                                           className={getListTableRowClassName(true)}
                                         >
                                           <td
-                                            className={`px-3 sm:px-4 ${tdPad} align-middle text-left whitespace-nowrap`}
+                                            className={`px-3 sm:px-4 ${tdPad} align-middle ${config?.embedded ? 'text-center' : 'text-left'} whitespace-nowrap`}
                                           >
                                             <ListRowNavigableLabel className="font-mono font-medium tabular-nums">
                                               {idStr}
@@ -3624,6 +3712,6 @@ export function FluigSolicitacoesPage({
             );
           })()}
       </Modal>
-    </MainLayout>
+    </LayoutShell>
   );
 }

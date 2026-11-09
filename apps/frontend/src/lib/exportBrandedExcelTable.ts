@@ -37,6 +37,8 @@ export type ExportBrandedExcelOptions = {
   filename: string;
   columns: BrandedExcelColumn[];
   rows: (string | number | Date)[][];
+  /** Orientação de impressão da planilha (padrão: paisagem). */
+  orientation?: 'landscape' | 'portrait';
 };
 
 function statusStyle(value: string): { bg: string; fg: string } | null {
@@ -84,7 +86,7 @@ function placeLogoStrip(
 export async function exportBrandedExcelTable(
   options: ExportBrandedExcelOptions
 ): Promise<void> {
-  const { title, subtitle, sheetName, filename, columns, rows } = options;
+  const { title, subtitle, sheetName, filename, columns, rows, orientation = 'landscape' } = options;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = EXPORT_COMPANY;
   workbook.created = new Date();
@@ -94,7 +96,7 @@ export async function exportBrandedExcelTable(
     views: [{ state: 'frozen', ySplit: 5 }],
     properties: { defaultRowHeight: 18 },
     pageSetup: {
-      orientation: 'landscape',
+      orientation,
       fitToPage: true,
       fitToWidth: 1,
       fitToHeight: 0,

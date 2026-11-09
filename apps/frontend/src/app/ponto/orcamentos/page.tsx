@@ -54,8 +54,29 @@ type ContractRow = {
   name?: string;
   number?: string;
   costCenterId?: string | null;
+  costCenter?: { code?: string | null; name?: string | null } | null;
   orcafascioClientId?: string | null;
 };
+
+/** Centro de custo escolhido na lista (por navegador). */
+const CC_FILTRO_STORAGE_KEY = 'orcamentos.centroCusto';
+
+function lerCcFiltroSalvo(): string {
+  try {
+    return localStorage.getItem(CC_FILTRO_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function salvarCcFiltro(valor: string) {
+  try {
+    if (valor) localStorage.setItem(CC_FILTRO_STORAGE_KEY, valor);
+    else localStorage.removeItem(CC_FILTRO_STORAGE_KEY);
+  } catch {
+    /* sem storage: só não lembra */
+  }
+}
 
 type OrcamentoStatusAprovacao =
   | 'rascunho'
@@ -75,6 +96,9 @@ type OrcamentoListaRow = {
   totalComBdi?: number;
   osCodigo?: string;
   numeroPasta?: string;
+  encargos?: string;
+  descontoPercentual?: number;
+  createdAt?: string;
   familiaId?: string;
   versao?: number;
   congelado?: boolean;
@@ -94,6 +118,11 @@ type OrcamentoListItem = {
   status: OrcamentoStatusAprovacao;
   bdiPercentual?: number;
   totalComBdi?: number;
+  descontoPercentual?: number;
+  /** Quando o orçamento foi criado (ISO). */
+  createdAt: string;
+  /** Dados → Encargos do orçamento. */
+  encargos: 'onerado' | 'desonerado' | '';
   familiaId: string;
   versao: number;
   congelado: boolean;
@@ -252,12 +281,19 @@ export default function OrcamentosPage() {
   const contratoFromUrl = (searchParams?.get('contrato') || '').trim();
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
+  /** Período de criação (AAAA-MM-DD, inclusive). */
+  const [criadoDe, setCriadoDe] = useState('');
+  const [criadoAte, setCriadoAte] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [contratoActionModal, setContratoActionModal] = useState<'novo' | null>(null);
   const [actionContratoId, setActionContratoId] = useState('');
   const [importShellOpen, setImportShellOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [statusCard, setStatusCard] = useState<StatusCard>('all');
+  const [ccFiltroEscolhido, setCcFiltroEscolhido] = useState('');
+  useEffect(() => {
+    setCcFiltroEscolhido(lerCcFiltroSalvo());
+  }, []);
   const [deleteTarget, setDeleteTarget] = useState<OrcamentoListItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const {
@@ -310,18 +346,64 @@ export default function OrcamentosPage() {
       );
   }, [contractsData, isAdministrator, canAccessContractOrcamentoTab]);
 
+  /** Centros de custo dos contratos liberados (cada usuário vê só os seus). */
+  const ccOptions = useMemo(() => {
+    const porId = new Map<string, string>();
+    for (const c of contractsComOrcamento) {
+      const id = String(c.costCenterId || '');
+      if (!id || porId.has(id)) continue;
+      const nome = (c.costCenter?.name || '').trim();
+      const codigo = (c.costCenter?.code || '').trim();
+      porId.set(id, nome || codigo || (c.name || c.number || id).trim());
+    }
+    return [...porId.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' }));
+  }, [contractsComOrcamento]);
+
+  // Lista sempre separada por centro de custo: vale a escolha salva; sem ela (ou sem acesso), o primeiro.
+  const ccFiltro = ccOptions.some((o) => o.value === ccFiltroEscolhido)
+    ? ccFiltroEscolhido
+    : ccOptions[0]?.value ?? '';
+
+  const contractsDoCc = useMemo(
+    () =>
+      ccFiltro
+        ? contractsComOrcamento.filter((c) => String(c.costCenterId) === ccFiltro)
+        : contractsComOrcamento,
+    [contractsComOrcamento, ccFiltro]
+  );
+
   const contratoFilterOptions = useMemo(
     () =>
       labeledToSelectOptions(
-        contractsComOrcamento.map((c) => ({
+        contractsDoCc.map((c) => ({
           value: c.id,
           label: (c.name || c.number || c.id).trim(),
         }))
       ),
-    [contractsComOrcamento]
+    [contractsDoCc]
   );
 
-  const hasActiveFilters = Boolean(contratoFiltro);
+  // Contrato do filtro fora do centro de custo escolhido: o que veio pela URL leva ao CC dele; o resto é limpo.
+  useEffect(() => {
+    if (!contratoFiltro || loadingContracts) return;
+    if (contractsDoCc.some((c) => c.id === contratoFiltro)) return;
+    const contrato = contractsComOrcamento.find((c) => c.id === contratoFiltro);
+    if (contrato && contratoFiltro === contratoFromUrl) {
+      setCcFiltroEscolhido(String(contrato.costCenterId));
+      return;
+    }
+    setContratoFiltro('');
+  }, [contratoFiltro, contractsDoCc, contractsComOrcamento, contratoFromUrl, loadingContracts]);
+
+  const escolherCc = (valor: string) => {
+    setCcFiltroEscolhido(valor);
+    salvarCcFiltro(valor);
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters = Boolean(contratoFiltro || criadoDe || criadoAte);
 
   const contractsKey = contractsComOrcamento.map((c) => c.id).sort().join(',');
 
@@ -359,6 +441,12 @@ export default function OrcamentosPage() {
                 typeof o.totalComBdi === 'number' && Number.isFinite(o.totalComBdi)
                   ? o.totalComBdi
                   : undefined,
+              descontoPercentual:
+                typeof o.descontoPercentual === 'number' && Number.isFinite(o.descontoPercentual)
+                  ? o.descontoPercentual
+                  : undefined,
+              createdAt: typeof o.createdAt === 'string' && o.createdAt ? o.createdAt : o.updatedAt || '',
+              encargos: o.encargos === 'onerado' || o.encargos === 'desonerado' ? o.encargos : '',
               familiaId,
               versao,
               congelado: o.congelado === true,
@@ -393,8 +481,21 @@ export default function OrcamentosPage() {
   const orcamentosFiltrados = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const q = searchTerm.trim().toLowerCase();
+    // Período de criação: compara pela data local (AAAA-MM-DD), com as duas pontas incluídas.
+    const diaLocal = (iso: string) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
     return list.filter((o) => {
+      if (ccFiltro && o.costCenterId !== ccFiltro) return false;
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
+      if (criadoDe || criadoAte) {
+        const dia = diaLocal(o.createdAt);
+        if (!dia) return false;
+        if (criadoDe && dia < criadoDe) return false;
+        if (criadoAte && dia > criadoAte) return false;
+      }
       if (!q) return true;
       const nome = (o.nome || '').toLowerCase();
       const os = (o.osCodigo || '').toLowerCase();
@@ -411,13 +512,14 @@ export default function OrcamentosPage() {
         status.includes(q)
       );
     });
-  }, [orcamentosData, searchTerm, contratoFiltro]);
+  }, [orcamentosData, searchTerm, contratoFiltro, ccFiltro, criadoDe, criadoAte]);
 
   /** Todas as revisões por família (seletor do badge; ignora busca textual). */
   const revisoesPorFamilia = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const map = new Map<string, OrcamentoListItem[]>();
     for (const o of list) {
+      if (ccFiltro && o.costCenterId !== ccFiltro) continue;
       if (contratoFiltro && o.contractId !== contratoFiltro) continue;
       const key = `${o.costCenterId}::${o.familiaId}`;
       const arr = map.get(key) ?? [];
@@ -428,7 +530,7 @@ export default function OrcamentosPage() {
       arr.sort((a, b) => b.versao - a.versao);
     }
     return map;
-  }, [orcamentosData, contratoFiltro]);
+  }, [orcamentosData, contratoFiltro, ccFiltro]);
 
   /** Uma linha por família — só a revisão atual (maior número). */
   const familiasAtuais = useMemo(() => {
@@ -513,12 +615,12 @@ export default function OrcamentosPage() {
       toast.error('Nenhum contrato com permissão de orçamento.');
       return;
     }
-    if (contratoFiltro && contractsComOrcamento.some((c) => c.id === contratoFiltro)) {
+    if (contratoFiltro && contractsDoCc.some((c) => c.id === contratoFiltro)) {
       irParaNovoNoContrato(contratoFiltro);
       return;
     }
-    if (contractsComOrcamento.length === 1) {
-      irParaNovoNoContrato(contractsComOrcamento[0].id);
+    if (contractsDoCc.length === 1) {
+      irParaNovoNoContrato(contractsDoCc[0].id);
       return;
     }
     setActionContratoId('');
@@ -535,9 +637,10 @@ export default function OrcamentosPage() {
     irParaNovoNoContrato(id);
   };
 
+  // Importação vai para o centro de custo escolhido no menu.
   const importContractOptions = useMemo(
     () =>
-      contractsComOrcamento
+      contractsDoCc
         .filter((c) => Boolean(c.costCenterId))
         .map((c) => ({
           id: c.id,
@@ -545,7 +648,7 @@ export default function OrcamentosPage() {
           label: (c.name || c.number || c.id).trim(),
           orcafascioClientId: c.orcafascioClientId?.trim() || null,
         })),
-    [contractsComOrcamento]
+    [contractsDoCc]
   );
 
   const confirmarExclusao = async () => {
@@ -623,6 +726,25 @@ export default function OrcamentosPage() {
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
+              {ccOptions.length > 0 ? (
+                <div className="mb-5 flex flex-col items-center gap-1.5 border-b border-gray-200 pb-5 dark:border-gray-700">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Centro de custo
+                  </span>
+                  <StringSingleSelectDropdown
+                    value={ccFiltro}
+                    onChange={escolherCc}
+                    options={ccOptions}
+                    allowEmpty={false}
+                    placeholder="Selecione o centro de custo"
+                    searchPlaceholder="Pesquisar centro de custo..."
+                    emptyOptionsMessage="Nenhum centro de custo disponível."
+                    matchTriggerWidth
+                    className="w-full max-w-md"
+                    triggerClassName="relative flex h-12 w-full items-center justify-center rounded-xl border-2 border-red-300 bg-white px-10 text-center text-base font-semibold text-gray-900 shadow-sm outline-none transition-colors hover:border-red-400 dark:border-red-800/70 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-red-700"
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
                   <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
@@ -742,11 +864,17 @@ export default function OrcamentosPage() {
                           <th className="min-w-[12rem] px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Contrato
                           </th>
+                          <th className="w-[8%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
+                            Encargos
+                          </th>
                           <th className="w-[11%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
                             Status
                           </th>
                           <th className="w-[7%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
                             BDI
+                          </th>
+                          <th className="w-[7%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3">
+                            Desconto
                           </th>
                           <th className="w-[12%] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
                             Total
@@ -790,6 +918,9 @@ export default function OrcamentosPage() {
                                 {o.contractName}
                               </span>
                             </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 sm:px-3">
+                              {o.encargos === 'desonerado' ? 'Desonerado' : o.encargos === 'onerado' ? 'Onerado' : '—'}
+                            </td>
                             <td className="whitespace-nowrap px-3 py-3 text-center sm:px-4">
                               <span className={orcamentoStatusBadgeClass(o.status)}>
                                 {ORCAMENTO_STATUS_LABELS[o.status]}
@@ -797,6 +928,9 @@ export default function OrcamentosPage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 sm:px-4">
                               {formatBdiPct(o.bdiPercentual)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 sm:px-4">
+                              {formatBdiPct(o.descontoPercentual)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 text-right text-sm tabular-nums font-medium text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCurrencyBrl(o.totalComBdi)}
@@ -877,11 +1011,48 @@ export default function OrcamentosPage() {
                   className="w-full"
                 />
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Período de criação
+                </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">De</span>
+                    <input
+                      type="date"
+                      value={criadoDe}
+                      max={criadoAte || undefined}
+                      onChange={(e) => {
+                        setCriadoDe(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
+                      aria-label="Criado a partir de"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Até</span>
+                    <input
+                      type="date"
+                      value={criadoAte}
+                      min={criadoDe || undefined}
+                      onChange={(e) => {
+                        setCriadoAte(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
+                      aria-label="Criado até"
+                    />
+                  </label>
+                </div>
+              </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
                   onClick={() => {
                     setContratoFiltro('');
+                    setCriadoDe('');
+                    setCriadoAte('');
                     setCurrentPage(1);
                   }}
                   className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -952,10 +1123,10 @@ export default function OrcamentosPage() {
               autoOpenImportOrcamento
               importContractOptions={importContractOptions}
               initialImportContractId={
-                contratoFiltro && contractsComOrcamento.some((c) => c.id === contratoFiltro)
+                contratoFiltro && contractsDoCc.some((c) => c.id === contratoFiltro)
                   ? contratoFiltro
-                  : contractsComOrcamento.length === 1
-                    ? contractsComOrcamento[0].id
+                  : contractsDoCc.length === 1
+                    ? contractsDoCc[0].id
                     : null
               }
               onImportShellDismiss={() => {

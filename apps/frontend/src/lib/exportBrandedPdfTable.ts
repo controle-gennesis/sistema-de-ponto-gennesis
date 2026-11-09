@@ -34,9 +34,16 @@ export type ExportBrandedPdfOptions = {
   columns: BrandedPdfColumn[];
   rows: Record<string, string>[];
   footerLabel?: string;
-  /** `dual` = Gennesis + Engpac (padrão). `gennesis` = só Gennesis. */
+  /** Ambos mostram só a logo Gennesis (a logo ENG PAC não aparece em exportações). */
   logoMode?: 'dual' | 'gennesis';
+  /** Orientação da folha A4 (padrão: paisagem). */
+  orientation?: 'landscape' | 'portrait';
 };
+
+/** Largura útil da folha A4 (mm), descontadas as margens — para ajustar colunas à orientação. */
+export function brandedPdfUsableWidth(orientation: 'landscape' | 'portrait' = 'landscape'): number {
+  return (orientation === 'portrait' ? 210 : 297) - MARGIN * 2;
+}
 
 function statusColor(value: string): [number, number, number] {
   const v = value.trim().toUpperCase();
@@ -97,20 +104,24 @@ function drawHeader(
 }
 
 function drawTableHeader(doc: jsPDF, y: number, columns: BrandedPdfColumn[]): number {
-  const rowH = 8;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  // Rótulo longo quebra em linhas dentro da coluna (não invade a coluna vizinha).
+  const linhas = columns.map((col) => doc.splitTextToSize(col.label, Math.max(4, col.width - 3)) as string[]);
+  const maxLinhas = Math.max(1, ...linhas.map((l) => l.length));
+  const rowH = maxLinhas <= 1 ? 8 : maxLinhas * 3.2 + 3.6;
   const tableW = columns.reduce((a, c) => a + c.width, 0);
   doc.setFillColor(...SECTION_BG);
   doc.setDrawColor(...BORDER);
   doc.rect(MARGIN, y, tableW, rowH, 'FD');
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
   doc.setTextColor(...TEXT_MUTED);
   let x = MARGIN;
-  for (const col of columns) {
-    doc.text(col.label, x + 1.5, y + 5.2);
+  columns.forEach((col, i) => {
+    if (maxLinhas <= 1) doc.text(col.label, x + 1.5, y + 5.2);
+    else doc.text(linhas[i], x + 1.5, y + 4);
     x += col.width;
-  }
+  });
   return y + rowH;
 }
 
@@ -192,11 +203,11 @@ function drawFooter(doc: jsPDF, footerLabel: string) {
 }
 
 export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): Promise<void> {
-  const { title, subtitle, filename, columns, rows, footerLabel, logoMode = 'dual' } = options;
+  const { title, subtitle, filename, columns, rows, footerLabel, logoMode = 'dual', orientation = 'landscape' } = options;
   if (!rows.length) throw new Error('Nenhum registro para exportar');
 
   const generatedAt = new Date();
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const logo =
     logoMode === 'gennesis'

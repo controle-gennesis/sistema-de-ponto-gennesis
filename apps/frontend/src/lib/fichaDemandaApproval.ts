@@ -215,6 +215,8 @@ export interface FichaDemandaApprovalRecord {
   osNumeroPasta?: string | null;
   /** Soma das OCs pagas (validadas pelo compras no G4), cada OC uma vez, pelo total da OC. */
   totalPagoOcs?: number;
+  /** Empreitas cotadas: gasto com empreita (fornecedores escolhidos na aba Cotação Empreita do orçamento). */
+  gastoEmpreita?: number;
   /** false quando o orçamento de origem foi excluído; null quando a FD não tem orçamento vinculado. */
   orcamentoExiste?: boolean | null;
 }

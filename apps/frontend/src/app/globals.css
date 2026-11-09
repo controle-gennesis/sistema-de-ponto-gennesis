@@ -2317,3 +2317,32 @@ tr.orc-lista-row-enter > td {
     animation: none;
   }
 }
+
+
+/* Quadradinhos do cartão de Reuniões (Resumo do contrato): enchem, esvaziam e ficam listrados. */
+@keyframes reuniao-cell-fill {
+  0%, 22% { opacity: var(--cell-op, 0.4); }
+  36%, 78% { opacity: 0; }
+  92%, 100% { opacity: var(--cell-op, 0.4); }
+}
+@keyframes reuniao-cell-stripe {
+  0%, 22% { opacity: 0; }
+  36%, 52% { opacity: 1; }
+  66%, 100% { opacity: 0; }
+}
+.reuniao-cell-fill,
+.reuniao-cell-stripe {
+  animation-name: reuniao-cell-fill;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+.reuniao-cell-stripe {
+  animation-name: reuniao-cell-stripe;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reuniao-cell-fill,
+  .reuniao-cell-stripe {
+    animation: none;
+  }
+}

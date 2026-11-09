@@ -8,7 +8,13 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import type { FdInsumoLine } from '@/components/engenharia/FdPedidoMaterialModal';
 
 export type OcResumo = {
+  ocId?: string;
   orderNumber: string;
+  /** Custo deste material na OC, rateado para o item da FD (previsto, pago ou não). */
+  valorOc?: number;
+  quantidadeOc?: number;
+  /** Fase atual no Fluig (G3/G4), pelo espelho. */
+  fluigFase?: { fluxo: 'G3' | 'G4'; etapa: string } | null;
   status: string;
   totvsIdMov: number | null;
   totvsNumMovimento: string | null;
@@ -33,7 +39,15 @@ export type ItemResumo = {
   alertas: string[];
   requestedAt: string;
   rm: { id: string; requestNumber: string; status: string | null };
-  materiais: { materialId: string; materialLabel: string; quantity: number; unit: string; ocs: OcResumo[] }[];
+  materiais: {
+    materialId: string;
+    materialLabel: string;
+    quantity: number;
+    unit: string;
+    /** Detalhamento escrito pelo solicitante no pedido. */
+    detalhamento?: string;
+    ocs: OcResumo[];
+  }[];
 };
 
 export const RM_STATUS: Record<string, string> = {
@@ -146,7 +160,7 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
             </p>
           </div>
           <div
-            className="ml-auto shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-right dark:border-emerald-800/60 dark:bg-emerald-950/30"
+            className={`ml-auto shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-right dark:border-emerald-800/60 dark:bg-emerald-950/30`}
             title={
               ocsPagas.length
                 ? ocsPagas
@@ -245,7 +259,14 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                   </td>
                                 </>
                               )}
-                              <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{m?.materialLabel || '—'}</td>
+                              <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                                {m?.materialLabel || '—'}
+                                {m?.detalhamento ? (
+                                  <p className="mt-0.5 text-[11px] italic text-gray-500 dark:text-gray-400">
+                                    Detalhamento: {m.detalhamento}
+                                  </p>
+                                ) : null}
+                              </td>
                               <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900 dark:text-gray-100">
                                 {m ? `${fmtQtd(m.quantity)} ${m.unit}` : '—'}
                               </td>

@@ -21,10 +21,12 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
-import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';
-import {
+import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';import {
   getRmMaterialLabel,
+  isRmServiceMaterial,
+  palavrasDaBusca,
   searchRmMaterials,
+  sugerirRmMaterials,
   type RmMaterialListItem,
 } from '@/lib/searchRmMaterials';
 
@@ -42,6 +44,12 @@ export interface FdInsumoLine {
   etapa: string;
   subetapa: string;
   composicao: string;
+  /** Valor de faturamento do item no orçamento: (custo − desconto) × (1 + BDI). */
+  valorOrcado?: number;
+  /** Partes do valor orçado: custo do orçamento (sem desconto/BDI), desconto e BDI. */
+  custoOrcamento?: number;
+  descontoOrcamento?: number;
+  bdiOrcamento?: number;
 }
 
 /** Material do cadastro associado a um item da FD (1 item → N materiais). */
@@ -53,7 +61,12 @@ export interface FdMaterialMapping {
   /** Unidade do pedido = unidade do material no cadastro (a mesma do TOTVS); não editável. */
   unidade: string;
   quantity: number;
+  /** Detalhamento do material escrito pelo solicitante (vai para a observação do item da RM). */
+  detalhamento?: string;
 }
+
+/** Detalhamento por material: limite do campo. */
+const DETALHAMENTO_MAX = 500;
 
 /** Rascunho das associações, por chave do insumo da FD (persistido na meta do orçamento). */
 export type FdMaterialMap = Record<string, FdMaterialMapping[]>;
@@ -76,9 +89,42 @@ export interface FdItemPedido {
   /** Soma só dos materiais pedidos na unidade da FD (base do saldo). */
   quantidadeNaUnidadeFd?: number;
   /** Materiais associados ao item naquele pedido. */
-  materiais?: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+  materiais?: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
   /** '1:N' e/ou 'unidade' — itens destacados para o gestor. */
   alertas?: string[];
+}
+
+/** Opção da busca de material: código, nome com as palavras buscadas em destaque, unidade e tipo. */
+function OpcaoMaterial({ material, busca }: { material: RmMaterialListItem; busca: string }) {
+  const nome = material.name?.trim() || material.description?.trim() || 'Material sem nome';
+  const termos = palavrasDaBusca(busca);
+  const normal = (w: string) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const partes = nome.split(/(\s+)/);
+  return (
+    <span className="block min-w-0">
+      <span className="flex items-baseline gap-2">
+        {material.code ? (
+          <span className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">{material.code}</span>
+        ) : null}
+        <span className="min-w-0 whitespace-normal break-words text-sm text-gray-900 dark:text-gray-100">
+          {partes.map((parte, i) =>
+            termos.length > 0 && termos.some((t) => normal(parte).includes(t)) ? (
+              <mark key={i} className="rounded bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-500/30">
+                {parte}
+              </mark>
+            ) : (
+              <React.Fragment key={i}>{parte}</React.Fragment>
+            )
+          )}
+        </span>
+      </span>
+      <span className="mt-0.5 block text-[11px] text-gray-500 dark:text-gray-400">
+        {material.unit?.trim() ? `Unidade: ${material.unit.trim()}` : 'Sem unidade'}
+        {' · '}
+        {isRmServiceMaterial(material) ? 'Serviço' : 'Produto'}
+      </span>
+    </span>
+  );
 }
 
 /** Tolerância de arredondamento ao comparar com a quantidade da FD. */
@@ -98,6 +144,7 @@ export function parseFdMaterialMap(raw: unknown): FdMaterialMap | undefined {
           materialUnit: typeof o.materialUnit === 'string' ? o.materialUnit : '',
           unidade: typeof o.unidade === 'string' ? o.unidade : '',
           quantity: Number.isFinite(Number(o.quantity)) ? Number(o.quantity) : 0,
+          ...(typeof o.detalhamento === 'string' && o.detalhamento ? { detalhamento: o.detalhamento } : {}),
         };
       })
       .filter((r) => r.materialId);
@@ -204,7 +251,6 @@ export function FdPedidoMaterialModal({
   const [etapasExpandidas, setEtapasExpandidas] = useState<Set<string>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
   const [resumoAberto, setResumoAberto] = useState(false);
-
   // Recria as linhas a cada abertura (insumos chegam depois do primeiro render da página).
   useEffect(() => {
     if (!isOpen) return;
@@ -388,7 +434,8 @@ export function FdPedidoMaterialModal({
         materialLabel: r.materialLabel,
         quantity: r.quantity,
         unit: r.unidade.trim() || ins.unidade,
-        description: `FD ${ins.item} — ${ins.descricao}`,
+        // Só o que o solicitante escreveu; sem texto automático.
+        description: (r.detalhamento || '').trim().slice(0, DETALHAMENTO_MAX) || undefined,
       })),
     );
 
@@ -494,6 +541,11 @@ export function FdPedidoMaterialModal({
             {materiaisPedidos.map((m, idx) => (
               <p key={`${m.materialId}-${idx}`}>
                 → {m.materialLabel || 'Material'} · {fmtQtd(m.quantity)} {m.unit}
+                {m.detalhamento ? (
+                  <span className="block pl-3 italic text-gray-500 dark:text-gray-400">
+                    Detalhamento: {m.detalhamento}
+                  </span>
+                ) : null}
               </p>
             ))}
             <p className="italic">Item já solicitado — não pode entrar em um novo pedido.</p>
@@ -501,7 +553,8 @@ export function FdPedidoMaterialModal({
         ) : (
           <div className="mt-2 space-y-1.5 pl-6">
             {rows.map((row, ri) => (
-              <div key={ri} className="flex items-center gap-2">
+              <div key={ri} className="space-y-1.5">
+              <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
                   {/* Mesma busca da RM: retorna IDs de engenharia, que a RM exige. */}
                   <AsyncSearchSelectDropdown<RmMaterialListItem>
@@ -522,8 +575,16 @@ export function FdPedidoMaterialModal({
                       m.unit?.trim() ? `${getRmMaterialLabel(m)} · ${m.unit.trim()}` : getRmMaterialLabel(m)
                     }
                     placeholder="Buscar material..."
+                    searchPlaceholder="Digite palavras do material, em qualquer ordem (ex.: jan bas alu)"
                     minSearchLength={2}
                     queryKeyPrefix="rm-materials-search"
+                    listMaxPx={440}
+                    showResultCount
+                    defaultOptionsFn={() => sugerirRmMaterials(ins.descricao)}
+                    defaultOptionsKey={ins.key}
+                    defaultOptionsLabel="Sugestões para este item"
+                    renderOptionWithQuery={(m, q) => <OpcaoMaterial material={m} busca={q} />}
+                    openDownOnly
                   />
                 </div>
                 <input
@@ -567,6 +628,25 @@ export function FdPedidoMaterialModal({
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
+              <div className="relative pr-9">
+                <textarea
+                  value={row.detalhamento ?? ''}
+                  onChange={(e) =>
+                    updateMapping(ins.key, ri, { detalhamento: e.target.value.slice(0, DETALHAMENTO_MAX) })
+                  }
+                  rows={2}
+                  maxLength={DETALHAMENTO_MAX}
+                  placeholder="Detalhamento (opcional): cor, marca, medida, local de entrega…"
+                  aria-label="Detalhamento do material"
+                  className="block w-full resize-y rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+                />
+                {(row.detalhamento?.length ?? 0) > 0 && (
+                  <span className="pointer-events-none absolute bottom-1 right-11 text-[11px] tabular-nums text-gray-400">
+                    {row.detalhamento!.length}/{DETALHAMENTO_MAX}
+                  </span>
+                )}
+              </div>
+              </div>
             ))}
             {analise.quantidadeDiferente && (
               <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
@@ -599,7 +679,7 @@ export function FdPedidoMaterialModal({
       }}
     >
       <div
-        className="relative flex h-[90vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-2xl dark:bg-gray-900 dark:shadow-black/40"
+        className="relative flex h-[90vh] w-full max-w-7xl flex-col rounded-xl bg-white shadow-2xl dark:bg-gray-900 dark:shadow-black/40"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

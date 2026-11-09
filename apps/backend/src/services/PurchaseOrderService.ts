@@ -2255,6 +2255,30 @@ export class PurchaseOrderService {
       let itemsSum = new Decimal(0);
 
       if (items && Array.isArray(items)) {
+        // Linha sem vínculo (tela antiga): mantém o item da RM que o mesmo material já atendia,
+        // senão a RM volta a mostrar o item como pendente mesmo estando nesta OC.
+        const vinculosAntigos = await tx.purchaseOrderItem.findMany({
+          where: { purchaseOrderId: id, materialRequestItemId: { not: null } },
+          select: { materialId: true, materialRequestItemId: true },
+        });
+        const vinculoPorMaterial = new Map<string, string[]>();
+        for (const v of vinculosAntigos) {
+          if (!v.materialRequestItemId) continue;
+          const lista = vinculoPorMaterial.get(v.materialId) ?? [];
+          lista.push(v.materialRequestItemId);
+          vinculoPorMaterial.set(v.materialId, lista);
+        }
+        const jaUsados = new Set(
+          items.map((i) => i.materialRequestItemId).filter((v): v is string => Boolean(v))
+        );
+        const vinculoDaLinha = (i: (typeof items)[number]): string | null => {
+          if (i.materialRequestItemId) return i.materialRequestItemId;
+          const livre = (vinculoPorMaterial.get(i.materialId) ?? []).find((v) => !jaUsados.has(v));
+          if (!livre) return null;
+          jaUsados.add(livre);
+          return livre;
+        };
+
         await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } });
         const createdItems = items.map((i) => {
           const qty = new Decimal(i.quantity);
@@ -2263,7 +2287,7 @@ export class PurchaseOrderService {
           itemsSum = itemsSum.plus(total);
           return {
             purchaseOrderId: id,
-            materialRequestItemId: i.materialRequestItemId ?? null,
+            materialRequestItemId: vinculoDaLinha(i),
             materialId: i.materialId,
             quantity: qty,
             unit: i.unit,
