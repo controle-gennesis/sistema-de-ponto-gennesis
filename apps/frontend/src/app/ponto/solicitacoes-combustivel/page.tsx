@@ -1135,10 +1135,10 @@ function SolicitacoesCombustivelPageContent() {
                               <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>
                                 Litros
                               </th>
-                              <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap`}>
+                              <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>
                                 Valor por litro
                               </th>
-                              <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap`}>
+                              <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>
                                 Valor total
                               </th>
                             </>
@@ -1220,7 +1220,7 @@ function SolicitacoesCombustivelPageContent() {
                                       })
                                     : '—'}
                                 </td>
-                                <td className={cadastroListClasses.tdNumeric}>
+                                <td className={`${cadastroListClasses.tdCenter} whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-400`}>
                                   {row.pricePerLiter != null
                                     ? Number(row.pricePerLiter).toLocaleString('pt-BR', {
                                         style: 'currency',
@@ -1228,7 +1228,7 @@ function SolicitacoesCombustivelPageContent() {
                                       })
                                     : '—'}
                                 </td>
-                                <td className={`${cadastroListClasses.tdNumeric} font-medium text-gray-900 dark:text-gray-100`}>
+                                <td className={`${cadastroListClasses.tdCenter} whitespace-nowrap tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
                                   {totalValue != null
                                     ? totalValue.toLocaleString('pt-BR', {
                                         style: 'currency',

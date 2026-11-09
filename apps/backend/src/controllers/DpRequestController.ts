@@ -62,6 +62,7 @@ const DP_REQUEST_TYPES = [
   'ADM_INFORMATICA',
   'ADM_TREINAMENTOS_NR',
   'ADM_ASOS',
+  'ADM_OUTROS',
   'CONVENCAO_COLETIVA',
   'FECHAMENTO_FOLHA',
   'IMPOSTOS_ENCARGOS',
@@ -676,6 +677,7 @@ export class DpRequestController {
         ADM_INFORMATICA: 'Informática',
         ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
         ADM_ASOS: "ASO's",
+        ADM_OUTROS: 'Outros',
         CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
         FECHAMENTO_FOLHA: 'Fechamento da folha',
         IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
@@ -706,6 +708,14 @@ export class DpRequestController {
       let storedAttachmentKeys: string[] = [];
       if (isAccountingDirect) {
         const stored = await storeAccountingAttachments(parsedDetails);
+        parsedDetails = stored.details;
+        storedAttachmentKeys = stored.storedKeys;
+      } else if (validated.requestType === 'ADM_OUTROS') {
+        // "Outros" (ADM): anexos opcionais, também gravados no S3 (no banco fica só a referência).
+        const stored = await storeAccountingAttachments(parsedDetails, {
+          folder: 'dp-adm-outros',
+          fileNamePrefix: 'adm-',
+        });
         parsedDetails = stored.details;
         storedAttachmentKeys = stored.storedKeys;
       }

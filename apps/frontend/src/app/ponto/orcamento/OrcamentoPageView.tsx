@@ -7989,8 +7989,8 @@ function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
         <div
           key={u.userId}
           title={`${u.name} · ${ABA_ROTULO_PRESENCA[u.aba ?? ''] ?? 'Orçamento'}${u.editing ? ' (editando)' : ''}`}
-          className="rounded-full"
-          style={{ boxShadow: `0 0 0 2px ${u.color}` }}
+          className="rounded-full p-[2px]"
+          style={{ backgroundColor: u.color }}
         >
           <KanbanUserAvatar
             name={u.name}
@@ -7998,7 +7998,6 @@ function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
             colorKey={u.userId}
             size="sm"
             showNativeTitle={false}
-            className="ring-2 ring-white dark:ring-gray-900"
           />
         </div>
       ))}
@@ -17083,7 +17082,8 @@ export function OrcamentoPageView({
       }
       porChave.set(chave, {
         item: rotuloItemComposicaoPorKey.get(row.key) ?? '',
-        banco: (row.item.banco || '').trim(),
+        // "EMP/DF" (base Emp do Orçafascio) aparece como PROPRIO, igual nas outras telas do orçamento.
+        banco: nomeBancoParaExibicao(row.item.banco),
         codigo: row.item.codigo.trim(),
         descricao: row.item.descricao || '',
         unidade: unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade),
@@ -17879,8 +17879,15 @@ export function OrcamentoPageView({
   /** Mapa de Cotação das composições próprias com "COMP. COTAÇÃO": 1 bloco por composição, com as 3 propostas e os prints. */
   const montarSheetMapaCotacao = (): OrcamentoExcelSheetSpec | null => {
     if (composicoesCotacao.length === 0) return null;
-    const NCOL = 9;
-    const COL_PROPOSTAS = [6, 7, 8];
+    // Grade de 7 colunas: rótulo + 3 propostas de 2 colunas cada (células largas para links e prints).
+    const NCOL = 7;
+    const PROPOSTAS_COLS: Array<[number, number]> = [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ];
+    const COL_PROPOSTAS = PROPOSTAS_COLS.map(([c]) => c);
+    const MERGES_PROPOSTAS = PROPOSTAS_COLS.map(([c, d]) => [c, d] as [number, number]);
     const empty = () => Array.from({ length: NCOL }, () => '') as OrcamentoExcelRow['values'];
     const VERDE = '#166534';
     const VERMELHO = '#991B1B';
@@ -17890,35 +17897,59 @@ export function OrcamentoPageView({
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
       return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
     };
+    const tonesPlain = (): Record<number, 'item' | 'plain' | 'label'> => ({
+      0: 'label',
+      1: 'plain',
+      2: 'plain',
+      3: 'plain',
+      4: 'plain',
+      5: 'plain',
+      6: 'plain',
+    });
 
     composicoesCotacao.forEach((comp, idx) => {
       if (idx > 0) rows.push({ kind: 'blank', values: empty() });
       const mapa: MapaCotacao = mapasCotacao[chaveMapaCotacao(comp.codigo)] ?? { propostas: [] };
       const propostas = COL_PROPOSTAS.map((_, i) => mapa.propostas[i]);
       const menor = propostaMenorValor({ propostas: mapa.propostas });
-      const linhaItem = rows.length;
-      const linhaValor = linhaItem + 1;
 
-      // Faixa da composição (padrão da memória): item, código, banco, descrição, unidade, valor adotado e fornecedores.
+      // 1) Identificação da composição, em cima e na largura toda: rótulos e depois os dados.
+      const rotulosItem = empty();
+      rotulosItem[0] = 'ITEM';
+      rotulosItem[1] = 'CÓDIGO';
+      rotulosItem[2] = 'BANCO';
+      rotulosItem[3] = 'DESCRIÇÃO';
+      rotulosItem[5] = 'UND';
+      rotulosItem[6] = 'VALOR ADOTADO';
+      rows.push({ kind: 'cabecalho', values: rotulosItem, merges: [[3, 4]], altura: 24 });
+
+      const linhaItem = rows.length;
+      // Depois do item: cabeçalho das propostas, fornecedor e valor.
+      const linhaValor = linhaItem + 3;
       const itemValues = empty();
       itemValues[0] = comp.item || '';
       itemValues[1] = comp.codigo;
       itemValues[2] = comp.banco;
       itemValues[3] = (comp.descricao || '').toUpperCase();
-      itemValues[4] = comp.unidade;
-      itemValues[5] = menor?.valor ?? '';
-      COL_PROPOSTAS.forEach((col, i) => {
-        itemValues[col] = (propostas[i]?.fornecedor || '').trim().toUpperCase();
-      });
+      itemValues[5] = comp.unidade;
+      itemValues[6] = menor?.valor ?? '';
       rows.push({
         kind: 'item',
         values: itemValues,
-        altura: 36,
-        formulas: { 5: `MIN(G{R${linhaValor}}:I{R${linhaValor}})` },
-        formats: { 5: 'currency' },
-        tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'label', 4: 'plain', 5: 'plain', 6: 'plain', 7: 'plain', 8: 'plain' },
-        cores: { 5: { fg: VERDE, bold: true } },
+        altura: 46,
+        merges: [[3, 4]],
+        formulas: { 6: `MIN(B{R${linhaValor}},D{R${linhaValor}},F{R${linhaValor}})` },
+        formats: { 6: 'currency' },
+        tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'plain', 4: 'plain', 5: 'plain', 6: 'plain' },
+        cores: { 6: { fg: VERDE, bold: true } },
       });
+
+      // 2) Propostas: cada uma ocupa duas colunas.
+      const rotulosProp = empty();
+      COL_PROPOSTAS.forEach((col, i) => {
+        rotulosProp[col] = `${i + 1}ª PROPOSTA`;
+      });
+      rows.push({ kind: 'cabecalho', values: rotulosProp, merges: MERGES_PROPOSTAS, altura: 24 });
 
       const linhaCampo = (
         rotulo: string,
@@ -17926,21 +17957,24 @@ export function OrcamentoPageView({
         extra?: Partial<OrcamentoExcelRow>
       ) => {
         const values = empty();
-        values[5] = rotulo;
+        values[0] = rotulo;
         COL_PROPOSTAS.forEach((col, i) => {
           values[col] = valor(i);
         });
         rows.push({
           kind: 'item',
           values,
-          tones: { 5: 'label', 6: 'plain', 7: 'plain', 8: 'plain' },
+          merges: MERGES_PROPOSTAS,
+          tones: tonesPlain(),
+          altura: 30,
           ...extra,
         });
       };
 
+      linhaCampo('FORNECEDOR', (i) => (propostas[i]?.fornecedor || '').trim().toUpperCase(), { altura: 34 });
       // VALOR: menor proposta em verde, as demais em vermelho (como na planilha de referência).
       linhaCampo('VALOR', (i) => propostas[i]?.valor ?? '', {
-        formats: { 6: 'currency', 7: 'currency', 8: 'currency' },
+        formats: Object.fromEntries(COL_PROPOSTAS.map((col) => [col, 'currency'])),
         cores: Object.fromEntries(
           COL_PROPOSTAS.map((col, i) => [
             col,
@@ -17954,17 +17988,17 @@ export function OrcamentoPageView({
         const site = (propostas[i]?.site || '').trim();
         if (site) links[col] = /^https?:\/\//i.test(site) ? site : `https://${site}`;
       });
-      linhaCampo('SITE', (i) => (propostas[i]?.site || '').trim(), { altura: 54, links });
+      linhaCampo('SITE', (i) => (propostas[i]?.site || '').trim(), { altura: 58, links });
       linhaCampo('TELEFONE', (i) => propostas[i]?.telefone || '');
       linhaCampo('DATA', (i) => (propostas[i]?.data ? dataBr(propostas[i]!.data) : ''));
 
-      // Prints das propostas (quadro de anexos).
+      // Prints das propostas: células grandes, para dar para ler o conteúdo.
       if (propostas.some((p) => p?.anexo)) {
-        linhaCampo('PRINT', () => '', { altura: 190 });
+        linhaCampo('PRINT', () => '', { altura: 390 });
         const linhaPrint = rows.length - 1;
-        COL_PROPOSTAS.forEach((col, i) => {
+        PROPOSTAS_COLS.forEach(([col, colAte], i) => {
           const anexo = propostas[i]?.anexo;
-          if (anexo) imagens.push({ url: absoluteUploadUrl(anexo.url), row: linhaPrint, col });
+          if (anexo) imagens.push({ url: absoluteUploadUrl(anexo.url), row: linhaPrint, col, colAte });
         });
       }
     });
@@ -17999,19 +18033,17 @@ export function OrcamentoPageView({
       },
       subtitle: 'Propostas de fornecedores das composições próprias, com o menor valor adotado',
       autoFilter: false,
-      showHeader: true,
+      showHeader: false,
       semZebra: true,
       aparencia: aparenciaMemorial,
       columns: [
-        { header: 'ITEM', width: 10, align: 'center' },
-        { header: 'CÓDIGO', width: 16, align: 'center' },
-        { header: 'BANCO', width: 12, align: 'center' },
-        { header: 'DESCRIÇÃO', width: 46, larguraFixa: true },
-        { header: 'UND', width: 8, align: 'center' },
-        { header: 'VALOR ADOTADO', width: 20, align: 'center', format: 'currency' },
-        { header: '1ª PROPOSTA', width: 30, align: 'center' },
-        { header: '2ª PROPOSTA', width: 30, align: 'center' },
-        { header: '3ª PROPOSTA', width: 30, align: 'center' },
+        { header: ' ', width: 20, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
       ],
       rows,
       imagens,

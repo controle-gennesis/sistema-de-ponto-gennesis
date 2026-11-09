@@ -28,6 +28,7 @@ import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './Dp
 import {
   AdmTstSolicitacaoTypeFields,
   ADM_TYPE_LABELS,
+  type AdmAnexoDraft,
   isDepartamentoPessoalSector,
   type AdmFormRequestType,
 } from './AdmTstSolicitacaoTypeFields';
@@ -504,6 +505,7 @@ export function SolicitacoesGeraisPage() {
   );
 
   const [details, setDetails] = useState<Record<string, unknown>>({});
+  const [admAnexos, setAdmAnexos] = useState<AdmAnexoDraft[]>([]);
   const [atestadoFiles, setAtestadoFiles] = useState<Record<number, File>>({});
   const [horaExtraFiles, setHoraExtraFiles] = useState<Record<number, File>>({});
   const [admissaoDocumentoFiles, setAdmissaoDocumentoFiles] = useState<Record<number, File>>({});
@@ -549,6 +551,7 @@ export function SolicitacoesGeraisPage() {
       polo: '',
     }));
     setDetails({});
+    setAdmAnexos([]);
     setAtestadoFiles({});
     setHoraExtraFiles({});
     setAdmissaoDocumentoFiles({});
@@ -568,6 +571,7 @@ export function SolicitacoesGeraisPage() {
     setCreateTargetDepartment(null);
     setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
     setDetails({});
+    setAdmAnexos([]);
     setAtestadoFiles({});
     setHoraExtraFiles({});
     setAdmissaoDocumentoFiles({});
@@ -938,6 +942,18 @@ export function SolicitacoesGeraisPage() {
           : [];
         if (!rescisoes.length) throw new Error('Informe ao menos uma rescisão');
         d.rescisoes = await attachOptionalDocumentosToItems(rescisoes, rescisaoDocumentoFiles);
+      }
+      if (form.requestType === 'ADM_OUTROS') {
+        if (!String(d.assunto ?? '').trim()) throw new Error('Informe o assunto');
+        if (!String(d.descricao ?? '').trim()) throw new Error('Descreva a solicitação');
+        const anexosPayload: Record<string, unknown>[] = [];
+        for (let i = 0; i < admAnexos.length; i++) {
+          const file = admAnexos[i].file;
+          if (!file) throw new Error(`Selecione o arquivo do anexo ${i + 1} ou remova-o`);
+          anexosPayload.push(await fileToDpAttachment(file));
+        }
+        d.anexos = anexosPayload;
+        if (!String(d.colaboradorEmployeeId ?? '').trim()) delete d.colaboradorEmployeeId;
       }
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
@@ -1507,6 +1523,7 @@ export function SolicitacoesGeraisPage() {
                   setDetails(
                     getInitialSolicitacaoDetails(rt as DpFormRequestType | AdmFormRequestType)
                   );
+                  setAdmAnexos([]);
                   setAtestadoFiles({});
                   setHoraExtraFiles({});
                   setAdmissaoDocumentoFiles({});
@@ -1563,6 +1580,8 @@ export function SolicitacoesGeraisPage() {
                 details={details}
                 patchDetails={patchDetails}
                 employees={payrollEmployees}
+                anexos={admAnexos}
+                onAnexosChange={setAdmAnexos}
               />
             )}
 

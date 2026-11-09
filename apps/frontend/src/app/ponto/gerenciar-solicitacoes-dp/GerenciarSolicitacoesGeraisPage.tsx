@@ -104,7 +104,8 @@ type DpRequestType =
   | 'ADM_MATERIAL_ESCRITORIO'
   | 'ADM_INFORMATICA'
   | 'ADM_TREINAMENTOS_NR'
-  | 'ADM_ASOS';
+  | 'ADM_ASOS'
+  | 'ADM_OUTROS';
 
 type DpContractSummary = { id: string; number: string; name: string };
 
@@ -237,6 +238,7 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   ADM_INFORMATICA: 'Informática',
   ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
   ADM_ASOS: "ASO's",
+  ADM_OUTROS: 'Outros',
 };
 
 const DP_URGENCY_FILTER_OPTIONS = labeledToSelectOptions([

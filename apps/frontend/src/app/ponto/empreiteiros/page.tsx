@@ -600,7 +600,7 @@ export default function EmpreiteirosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const crud = useCadastroCrudPermissions('/ponto/empreiteiros');
-  const { isLinkedEmpreiteiro, canApproveEmpreiteiroDaily } = usePermissions();
+  const { isLinkedEmpreiteiro, canApproveEmpreiteiroDaily, isAdministrator } = usePermissions();
   const { costCenters } = useCostCenters();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -750,6 +750,8 @@ export default function EmpreiteirosPage() {
 
   const ownEmpreiteiroId = userData?.data?.empreiteiro?.id as string | undefined;
   const isOwnEmpreiteiroAccount = isLinkedEmpreiteiro;
+  /** A aba "Solicitações Fluig" da empreita é só do administrador. */
+  const canSeeFluigTab = isAdministrator && !isLinkedEmpreiteiro;
   /** Gennesis (não o próprio empreiteiro) cadastra/completa a empreita nesta página. */
   const canCreate = crud.canCreate && !isLinkedEmpreiteiro;
   const canManageCadastro = crud.canEdit && !isLinkedEmpreiteiro;
@@ -5075,7 +5077,7 @@ export default function EmpreiteirosPage() {
                     {(
                       [
                         { id: 'contratos', label: 'Contratos de Serviço' },
-                        ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'fluig', label: 'Solicitações Fluig' }]),
+                        ...(canSeeFluigTab ? [{ id: 'fluig', label: 'Solicitações Fluig' }] : []),
                         ...(isOwnEmpreiteiroAccount ? [] : [{ id: 'avaliacoes', label: 'Avaliações' }]),
                         { id: 'dados', label: 'Dados' },
                       ] as const
@@ -5575,11 +5577,11 @@ export default function EmpreiteirosPage() {
             ) : null}
 
 
-            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+            {abaDetalhe === 'fluig' && canSeeFluigTab ? (
               <EmpreiteiroFluigResumoCards empreiteiroId={viewingItem.id} />
             ) : null}
 
-            {abaDetalhe === 'fluig' && !isOwnEmpreiteiroAccount ? (
+            {abaDetalhe === 'fluig' && canSeeFluigTab ? (
               <Card className={cadastroListClasses.card}>
                 <CardHeader className="border-b-0 pb-1">
                   <div className="flex items-center space-x-3">
