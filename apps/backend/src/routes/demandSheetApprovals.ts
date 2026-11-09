@@ -127,6 +127,8 @@ router.post(
 router.get('/notification-counts', controller.getNotificationCounts.bind(controller));
 // Detalhe da RM na aprovação: mesma visibilidade do GET /material-requests/:id (usuário autenticado).
 // Etiqueta "FD" na lista de RMs (só IDs; o acesso às RMs continua pela rota de RMs).
+// Desfazer cancelamento da FD (só administrador; checado no controller).
+router.post('/:id/desfazer-cancelamento', controller.desfazerCancelamento.bind(controller));
 router.get('/material-request-ids', controller.listFdMaterialRequestIds.bind(controller));
 // Obra das FDs por orçamento (detalhes da OS em Contratos) — só leitura.
 router.get('/obras-por-orcamento', controller.obrasPorOrcamento.bind(controller));
