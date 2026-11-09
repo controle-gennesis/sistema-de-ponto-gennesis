@@ -42,7 +42,12 @@ import {
   RowActionMenuPortal,
   cadastroListClasses,
 } from '@/components/ui/RowActionMenu';
-import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -2608,6 +2613,18 @@ export default function EmpreiteirosPage() {
 
   const { data: reviewsData } = useEmpreiteiroReviews(viewingItem?.id);
   const { data: reviewsSummaryMap } = useReviewsSummaryByEmpreiteiro();
+  const parcelMenuRows = (viewingItem?.contracts ?? []).flatMap((l) =>
+    (l.installments ?? []).map((p) => ({ id: p.id, linkId: l.id, parcel: p }))
+  );
+  const {
+    rowActionMenu: parcelMenu,
+    rowForActionMenu: parcelMenuRow,
+    toggleRowActionMenu: toggleParcelMenu,
+    closeRowActionMenu: closeParcelMenu,
+    isRowMenuOpen: isParcelMenuOpen,
+  } = useRowActionMenu(parcelMenuRows);
+  const proofInputRef = useRef<HTMLInputElement>(null);
+  const proofTargetRef = useRef<{ linkId: string; parcelId: string } | null>(null);
   const contractLinksForMenu = viewingItem?.contracts ?? [];
   const {
     rowActionMenu: contractRowActionMenu,
@@ -3831,79 +3848,17 @@ export default function EmpreiteirosPage() {
                                               </td>
                                               <td className={`${cadastroListClasses.td} text-right`}>
                                                 <div className="flex items-center justify-end gap-1">
-                                                  {(parcel.proofFiles || []).map((pf, pfIndex) => (
+                                                  {numeroFluig ? (
                                                     <a
-                                                      key={`${pf.url}-${pfIndex}`}
-                                                      href={resolveApiMediaUrl(pf.url) || pf.url}
+                                                      href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
                                                       target="_blank"
                                                       rel="noopener noreferrer"
-                                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
-                                                      aria-label={`Ver comprovante: ${pf.name || 'arquivo'}`}
-                                                      title={`Ver comprovante: ${pf.name || 'arquivo'}`}
+                                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                      aria-label={`Abrir solicitação ${numeroFluig} no Fluig`}
+                                                      title={`Abrir solicitação ${numeroFluig} no Fluig`}
                                                     >
-                                                      <CheckCircle2 className="h-4 w-4" />
+                                                      <ExternalLink className="h-4 w-4" />
                                                     </a>
-                                                  ))}
-                                                  {canManageCadastro ? (
-                                                    <label
-                                                      className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                                                      title={
-                                                        parcel.proofFiles?.length
-                                                          ? 'Trocar o comprovante'
-                                                          : numeroFluig
-                                                            ? 'Anexar comprovante (do Fluig ou outro)'
-                                                            : 'Anexar comprovante (marca a parcela como paga)'
-                                                      }
-                                                    >
-                                                      <Paperclip className="h-4 w-4" />
-                                                      <input
-                                                        type="file"
-                                                        accept=".pdf,image/*"
-                                                        className="sr-only"
-                                                        disabled={savingContractLink}
-                                                        onChange={(e) => {
-                                                          const f = e.target.files?.[0];
-                                                          e.target.value = '';
-                                                          void handleAttachInstallmentProof(link.id, parcel.id, f);
-                                                        }}
-                                                      />
-                                                    </label>
-                                                  ) : null}
-                                                  {numeroFluig ? (
-                                                    <>
-                                                      <a
-                                                        href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                                                        aria-label={`Abrir solicitação ${numeroFluig} no Fluig`}
-                                                        title={`Abrir solicitação ${numeroFluig} no Fluig`}
-                                                      >
-                                                        <ExternalLink className="h-4 w-4" />
-                                                      </a>
-                                                      {canManageCadastro ? (
-                                                        <>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => abrirModalFluig(link.id, parcel)}
-                                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                                                            aria-label="Trocar a solicitação do Fluig"
-                                                            title="Trocar a solicitação do Fluig"
-                                                          >
-                                                            <Pencil className="h-4 w-4" />
-                                                          </button>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => void desvincularSolicitacaoFluig(link.id, parcel)}
-                                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                                                            aria-label="Remover a solicitação do Fluig"
-                                                            title="Remover a solicitação do Fluig"
-                                                          >
-                                                            <Link2Off className="h-4 w-4" />
-                                                          </button>
-                                                        </>
-                                                      ) : null}
-                                                    </>
                                                   ) : canManageCadastro ? (
                                                     <button
                                                       type="button"
@@ -3913,6 +3868,18 @@ export default function EmpreiteirosPage() {
                                                       title="Informar solicitação do Fluig"
                                                     >
                                                       <Link2 className="h-4 w-4" />
+                                                    </button>
+                                                  ) : null}
+                                                  {canManageCadastro || (parcel.proofFiles || []).length > 0 ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => toggleParcelMenu(parcel.id, e.currentTarget as HTMLButtonElement)}
+                                                      className={rowActionMenuButtonClass(isParcelMenuOpen(parcel.id))}
+                                                      aria-label="Mais ações da parcela"
+                                                      aria-haspopup="menu"
+                                                      aria-expanded={isParcelMenuOpen(parcel.id)}
+                                                    >
+                                                      <MoreVertical className="h-4 w-4" />
                                                     </button>
                                                   ) : null}
                                                 </div>
@@ -3926,6 +3893,63 @@ export default function EmpreiteirosPage() {
                                 </tbody>
                               </table>
                             </div>
+                          ) : null}
+                          <input
+                            ref={proofInputRef}
+                            type="file"
+                            accept=".pdf,image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              e.target.value = '';
+                              const alvo = proofTargetRef.current;
+                              if (alvo && f) void handleAttachInstallmentProof(alvo.linkId, alvo.parcelId, f);
+                            }}
+                          />
+                          {parcelMenu && parcelMenuRow && parcelMenuRow.linkId === link.id ? (
+                            <RowActionMenuPortal
+                              menu={parcelMenu}
+                              onClose={closeParcelMenu}
+                              hideDefaultActions
+                              extraItems={[
+                                ...(parcelMenuRow.parcel.proofFiles || []).map((pf, i) => ({
+                                  label: `Ver comprovante${(parcelMenuRow.parcel.proofFiles || []).length > 1 ? ` ${i + 1}` : ''}`,
+                                  icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />,
+                                  onClick: () => window.open(resolveApiMediaUrl(pf.url) || pf.url, '_blank', 'noopener,noreferrer'),
+                                })),
+                                ...(canManageCadastro
+                                  ? [
+                                      {
+                                        label: (parcelMenuRow.parcel.proofFiles || []).length
+                                          ? 'Trocar comprovante'
+                                          : parcelMenuRow.parcel.fluigRequestNumber
+                                            ? 'Anexar comprovante (do Fluig ou outro)'
+                                            : 'Anexar comprovante',
+                                        icon: <Paperclip className="h-4 w-4 shrink-0" />,
+                                        onClick: () => {
+                                          proofTargetRef.current = { linkId: link.id, parcelId: parcelMenuRow.parcel.id };
+                                          proofInputRef.current?.click();
+                                        },
+                                      },
+                                    ]
+                                  : []),
+                                ...(canManageCadastro && parcelMenuRow.parcel.fluigRequestNumber
+                                  ? [
+                                      {
+                                        label: 'Trocar solicitação do Fluig',
+                                        icon: <Pencil className="h-4 w-4 shrink-0" />,
+                                        onClick: () => abrirModalFluig(link.id, parcelMenuRow.parcel),
+                                      },
+                                      {
+                                        label: 'Remover solicitação do Fluig',
+                                        icon: <Link2Off className="h-4 w-4 shrink-0" />,
+                                        tone: 'danger' as const,
+                                        onClick: () => void desvincularSolicitacaoFluig(link.id, parcelMenuRow.parcel),
+                                      },
+                                    ]
+                                  : []),
+                              ]}
+                            />
                           ) : null}
                           <Modal
                             isOpen={invoiceModal?.linkId === link.id}
