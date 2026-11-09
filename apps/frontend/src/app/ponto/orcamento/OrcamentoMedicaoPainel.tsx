@@ -3993,7 +3993,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         <td
           ref={totalCelulaRef}
           rowSpan={Math.max(1, linhasEfetivas.length)}
-          className={`${tdCalc} !h-auto !max-h-none align-middle relative !border-l border-gray-200 outline-none dark:border-gray-600 ${
+          className={`${tdCalc} !h-auto !max-h-none align-middle relative !border-b-0 !border-l border-gray-200 outline-none dark:border-gray-600 ${
             marcaSub || corItemClasse
           } ${podeEscolherSub || !readOnly ? 'cursor-pointer' : ''} ${
             somaTotalVisivel ? 'ring-2 ring-inset ring-red-950 dark:ring-red-400' : ''

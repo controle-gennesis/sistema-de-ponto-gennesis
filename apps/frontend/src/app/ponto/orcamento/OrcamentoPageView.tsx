@@ -3854,9 +3854,9 @@ function abaAparenciaTemComposicao(aba: AparenciaAbaOrcamento): boolean {
   return aba === 'analitico' || aba === 'fichaDemanda' || aba === 'cronograma';
 }
 
-/** Subtítulo custom só nas abas Orçamento / Analítico / Ficha (não na Memória). */
+/** Subtítulo custom nas abas Orçamento / Memória / Analítico / Ficha (não no Cronograma). */
 function abaAparenciaTemSubtitulo(aba: AparenciaAbaOrcamento): boolean {
-  return aba !== 'memorial' && aba !== 'cronograma';
+  return aba !== 'cronograma';
 }
 
 /** Badge do item só na Memória de cálculo. */
@@ -11193,7 +11193,13 @@ export function OrcamentoPageView({
     setSubtitulosNoOrcamento((prev) => {
       const bk = `${servicoId}|${novoSubId}`;
       if (prev.includes(bk)) return prev;
-      return [...prev, bk];
+      // Entra logo depois do último subtítulo do mesmo título (e não no fim da lista inteira).
+      let ultimo = -1;
+      prev.forEach((k, i) => {
+        if (k.startsWith(`${servicoId}|`)) ultimo = i;
+      });
+      if (ultimo < 0) return [...prev, bk];
+      return [...prev.slice(0, ultimo + 1), bk, ...prev.slice(ultimo + 1)];
     });
     toast.success(`Subtítulo "${subtituloNome}" adicionado.`);
   };
@@ -12522,7 +12528,7 @@ export function OrcamentoPageView({
 
 
   const subtitulosAdicionados = useMemo(() => {
-    return subtitulosNoOrcamento
+    const lista = subtitulosNoOrcamento
       .map(key => {
         const sep = key.lastIndexOf('|');
         if (sep <= 0) return null;
@@ -12533,6 +12539,16 @@ export function OrcamentoPageView({
         return sub ? { key, servicoNome: svc!.nome, subtituloNome: sub.nome, itens: sub.itens } : null;
       })
       .filter(Boolean) as { key: string; servicoNome: string; subtituloNome: string; itens: ItemServico[] }[];
+    // Subtítulos do mesmo título ficam juntos, na posição do primeiro deles (um subtítulo criado depois
+    // não vai para o fim da lista nem repete o título).
+    const porServico = new Map<string, typeof lista>();
+    for (const bloco of lista) {
+      const servicoId = bloco.key.slice(0, bloco.key.lastIndexOf('|'));
+      const grupo = porServico.get(servicoId);
+      if (grupo) grupo.push(bloco);
+      else porServico.set(servicoId, [bloco]);
+    }
+    return Array.from(porServico.values()).flat();
   }, [subtitulosNoOrcamento, servicos, servicosParaDropdown]);
 
   const assinaturasItensVisiveisNoOrcamento = useMemo(() => {
@@ -17589,6 +17605,7 @@ export function OrcamentoPageView({
     const pendentesMemoria: Array<{ row: number; col: number; raw: string }> = [];
 
     let servicoAnterior: string | null = null;
+    let blocoAnterior: string | null = null;
     itensCalculados.forEach((row, rowIdx) => {
       // Barra com o nome do serviço sempre que ele muda (os itens vêm agrupados por serviço).
       const servicoAtual = normalizarNomeServicoOrcamento(row.servicoNome);
@@ -17605,6 +17622,17 @@ export function OrcamentoPageView({
         const barra = empty();
         barra[0] = String(row.servicoNome || '').trim().toUpperCase();
         rows.push({ kind: 'servico', values: barra, merge: [0, 10] });
+      }
+      // Barra do subtítulo (abaixo da do serviço) sempre que o bloco do item muda.
+      const blocoAtual = row.blocoKey || `${row.servicoNome} ${row.subtituloNome}`;
+      if (blocoAtual !== blocoAnterior) {
+        blocoAnterior = blocoAtual;
+        const nomeSubtitulo = String(row.subtituloNome || '').trim();
+        if (nomeSubtitulo) {
+          const barraSub = empty();
+          barraSub[0] = nomeSubtitulo.toUpperCase();
+          rows.push({ kind: 'subtitulo', values: barraSub, merge: [0, 10] });
+        }
       }
 
       const linhasExport = linhasMedicaoEfetivas(row.dimensoes);
@@ -21442,13 +21470,13 @@ export function OrcamentoPageView({
                               className="scroll-mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
                             >
                               <div
-                                className={`px-3 py-2.5 text-sm font-bold uppercase text-white ${clsTituloOrc(aparenciaMemorial)}`}
+                                className={`px-3 py-2.5 text-center text-sm font-bold uppercase text-white ${clsTituloOrc(aparenciaMemorial)}`}
                                 style={estiloLinhaTituloOrc(aparenciaMemorial, isDark)}
                               >
                                 {servicoGrupo.servicoNome || 'Serviço'}
                               </div>
                               <div
-                                className={`flex flex-col gap-4 p-4 ${
+                                className={`flex flex-col gap-4 px-4 pb-4 pt-0 ${
                                   fundoServico ? '' : 'bg-red-600 dark:bg-red-950/90'
                                 }`}
                                 style={
@@ -21461,15 +21489,44 @@ export function OrcamentoPageView({
                                   return (
                                     <div
                                       key={etapa.blocoKey || etapa.subtituloNome}
-                                      className="flex flex-col gap-4"
+                                      className={
+                                        etapa.subtituloNome.trim()
+                                          ? `flex flex-col gap-3 rounded-lg px-3 pb-3 pt-0 ${
+                                              aparenciaMemorial ? '' : 'bg-slate-200/90 dark:bg-gray-900'
+                                            }`
+                                          : 'flex flex-col gap-4'
+                                      }
+                                      style={
+                                        etapa.subtituloNome.trim() && aparenciaMemorial
+                                          ? {
+                                              backgroundColor: estiloLinhaSubtituloOrc(
+                                                aparenciaMemorial,
+                                                isDark
+                                              )?.backgroundColor,
+                                            }
+                                          : undefined
+                                      }
                                     >
+                                      {etapa.subtituloNome.trim() ? (
+                                        <div
+                                          id={`memorial-subtitulo-${etapa.blocoKey || etapa.subtituloNome}`}
+                                          className="scroll-mt-4 -mb-0.5 px-3 pt-2.5 text-center text-sm font-bold uppercase text-gray-800 dark:text-gray-200"
+                                          style={
+                                            aparenciaMemorial
+                                              ? { color: estiloLinhaSubtituloOrc(aparenciaMemorial, isDark)?.color }
+                                              : undefined
+                                          }
+                                        >
+                                          {etapa.subtituloNome}
+                                        </div>
+                                      ) : null}
                                       {etapa.itens.map(row => {
                                         const rowIdx = idxPorKey.get(row.key) ?? 0;
                                         return (
                                           <div
                                             key={row.key}
                                             id={`memorial-medicoes-${row.key}`}
-                                            className="scroll-mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+                                            className="scroll-mt-4 overflow-hidden rounded-lg bg-white dark:bg-gray-900"
                                           >
                                             <OrcamentoMedicaoPainel
                                               rowKey={row.key}
@@ -22396,42 +22453,7 @@ export function OrcamentoPageView({
                         panelClassName="w-64 py-1"
                       >
                             {menuCtxMontagem.kind === 'composicao' && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60"
-                                onClick={() => {
-                                  setMenuCtxMontagem(null);
-                                  abrirModalNovoTituloViaMenu();
-                                }}
-                              >
-                                <Plus className="h-4 w-4 shrink-0" aria-hidden />
-                                Adicionar título
-                              </button>
-                            )}
-                            {menuCtxMontagem.kind === 'composicao' && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/60"
-                                onClick={() => {
-                                  const parsedItem = parseItemKeyOrcamento(menuCtxMontagem.composicaoKey);
-                                  const parsedBloco = parsedItem ? parseBlocoKeyOrcamento(parsedItem.blocoKey) : null;
-                                  const servicoId = parsedBloco?.servicoId ?? null;
-                                  setMenuCtxMontagem(null);
-                                  if (!servicoId) {
-                                    toast.error('Não foi possível identificar o título para incluir o subtítulo.');
-                                    return;
-                                  }
-                                  abrirModalNovoSubtituloViaMenu(servicoId);
-                                }}
-                              >
-                                <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
-                                Adicionar subtítulo
-                              </button>
-                            )}
-                            {menuCtxMontagem.kind === 'composicao' && (
-                              <div className="border-t border-gray-100 px-3 py-2 dark:border-gray-700">
+                              <div className="px-3 py-2">
                                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                   Pintar linha
                                 </p>
@@ -23960,6 +23982,16 @@ export function OrcamentoPageView({
                     label="Letra do título"
                     value={aparenciaDraft.tituloTexto}
                     onChange={(tituloTexto) => patchAparenciaDraft({ tituloTexto })}
+                  />
+                  <CampoCorOrcamento
+                    label="Fundo do subtítulo"
+                    value={aparenciaDraft.subtituloFundo}
+                    onChange={(subtituloFundo) => patchAparenciaDraft({ subtituloFundo })}
+                  />
+                  <CampoCorOrcamento
+                    label="Letra do subtítulo"
+                    value={aparenciaDraft.subtituloTexto}
+                    onChange={(subtituloTexto) => patchAparenciaDraft({ subtituloTexto })}
                   />
                   <CampoCorOrcamento
                     label="Fundo do item"
