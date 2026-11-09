@@ -29,6 +29,7 @@ const contractLinkInclude = {
   installments: { orderBy: { number: 'asc' as const } },
   addenda: { orderBy: { number: 'asc' as const } },
   teamMembers: { orderBy: { sortOrder: 'asc' as const } },
+  invoices: { orderBy: { createdAt: 'asc' as const } },
 } as const;
 
 function serializeTeamMember(member: {
@@ -1004,6 +1005,16 @@ type ContractLinkRow = {
     costCenter?: { id: string; name: string } | null;
   } | null;
   costCenter?: { id: string; name: string; code?: string | null } | null;
+  invoices?: Array<{
+    id: string;
+    installmentId: string | null;
+    number: string;
+    fileUrl: string;
+    fileName: string | null;
+    amount: Prisma.Decimal | null;
+    issuedAt: Date | null;
+    createdAt: Date;
+  }>;
   installments?: Array<{
     id: string;
     number: number;
@@ -1148,6 +1159,16 @@ function serializeContractLink(
   const centroCustoNome =
     row.costCenter?.name || row.contract?.costCenter?.name || '';
   const installments = (row.installments ?? []).map(serializeInstallment);
+  const invoices = (row.invoices ?? []).map((nf) => ({
+    id: nf.id,
+    installmentId: nf.installmentId,
+    number: nf.number,
+    fileUrl: nf.fileUrl,
+    fileName: nf.fileName,
+    amount: nf.amount != null ? Number(nf.amount) : null,
+    issuedAt: nf.issuedAt ? formatWorkDate(nf.issuedAt) : null,
+    createdAt: nf.createdAt.toISOString(),
+  }));
   const addenda = (row.addenda ?? []).map(serializeAddendum);
   const approvedAddenda = addenda.filter((a) => a.status === 'APPROVED');
   const baseValue = row.plannedValue != null ? Number(row.plannedValue) : 0;
@@ -1177,6 +1198,8 @@ function serializeContractLink(
     note: row.note,
     files: Array.isArray(row.files) ? row.files : [],
     installments,
+    /** Notas fiscais (de parcelas e do serviço inteiro). */
+    invoices,
     installmentsCount: installments.length,
     installmentsPending: installments.filter((i) => i.status === 'PENDING').length,
     installmentsReleased: installments.filter((i) => i.status === 'RELEASED').length,
@@ -3773,6 +3796,35 @@ export class EmpreiteiroController {
         ? ((installment as { proofFiles: unknown[] }).proofFiles as PaymentFile[])
         : [];
 
+      // Parcela ligada ao Fluig ou já paga: o comprovante é só um anexo (mantém status, data e quem pagou).
+      const somenteAnexo =
+        nextStatus === 'PAID' &&
+        (Boolean((installment as { fluigRequestNumber?: string | null }).fluigRequestNumber) ||
+          String(installment.status).toUpperCase() === 'PAID');
+      if (somenteAnexo) {
+        const proofs = proofFiles && proofFiles.length > 0 ? proofFiles : existingProof;
+        if (!proofs.length) {
+          throw createError('Anexe o arquivo do comprovante', 400);
+        }
+        await prisma.empreiteiroContractInstallment.update({
+          where: { id: installmentId },
+          data: {
+            proofFiles: proofs as Prisma.InputJsonValue,
+          } as Prisma.EmpreiteiroContractInstallmentUpdateInput,
+        });
+        const empreiteiroAnexo = await prisma.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
+        const contagensAnexo = await measurementCountsForEmpreiteiro(id);
+        res.json({
+          success: true,
+          data: serializeEmpreiteiro(empreiteiroAnexo, contagensAnexo),
+          message: 'Comprovante anexado à parcela',
+        });
+        return;
+      }
+
       if (nextStatus === 'PAID') {
         const proofs = proofFiles && proofFiles.length > 0 ? proofFiles : existingProof;
         if (!proofs.length) {
@@ -3831,6 +3883,89 @@ export class EmpreiteiroController {
             ? 'Comprovante anexado · parcela marcada como paga'
             : 'Parcela atualizada',
         contractCompleted: autoCompleted,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Anexa uma nota fiscal ao serviço (installmentId opcional: sem ele, a nota é do serviço inteiro). */
+  async addServiceInvoice(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const { id, linkId } = req.params;
+      const link = await prisma.empreiteiroContract.findFirst({
+        where: { id: linkId, empreiteiroId: id },
+        select: { id: true },
+      });
+      if (!link) throw createError('Contrato de serviço não encontrado', 404);
+
+      const number = optionalStr(req.body?.number)?.slice(0, 60);
+      if (!number) throw createError('Informe o número da nota fiscal', 400);
+      const fileUrl = optionalStr(req.body?.fileUrl);
+      if (!fileUrl) throw createError('Anexe o arquivo da nota fiscal', 400);
+      const installmentIdRaw = optionalStr(req.body?.installmentId);
+      if (installmentIdRaw) {
+        const parcela = await prisma.empreiteiroContractInstallment.findFirst({
+          where: { id: installmentIdRaw, empreiteiroContractId: linkId },
+          select: { id: true },
+        });
+        if (!parcela) throw createError('Parcela não encontrada neste serviço', 404);
+      }
+      const amountRaw = req.body?.amount;
+      const amountNum =
+        amountRaw === undefined || amountRaw === null || String(amountRaw).trim() === ''
+          ? null
+          : parseMoneyInput(amountRaw);
+      const issuedAt = parseDateField(req.body?.issuedAt, 'Data de emissão');
+
+      await prisma.empreiteiroServiceInvoice.create({
+        data: {
+          empreiteiroContractId: linkId,
+          installmentId: installmentIdRaw ?? null,
+          number,
+          fileUrl,
+          fileName: optionalStr(req.body?.fileName)?.slice(0, 200) ?? null,
+          fileKey: optionalStr(req.body?.fileKey)?.slice(0, 300) ?? null,
+          amount: amountNum != null ? new Prisma.Decimal(amountNum.toFixed(2)) : null,
+          issuedAt,
+          createdBy: req.user?.id ?? null,
+        },
+      });
+      const empreiteiro = await prisma.empreiteiro.findUniqueOrThrow({
+        where: { id },
+        include: empreiteiroInclude,
+      });
+      const counts = await measurementCountsForEmpreiteiro(id);
+      res.status(201).json({
+        success: true,
+        data: serializeEmpreiteiro(empreiteiro, counts),
+        message: 'Nota fiscal anexada',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async removeServiceInvoice(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const { id, linkId, invoiceId } = req.params;
+      const nf = await prisma.empreiteiroServiceInvoice.findFirst({
+        where: { id: invoiceId, empreiteiroContractId: linkId, empreiteiroContract: { empreiteiroId: id } },
+        select: { id: true },
+      });
+      if (!nf) throw createError('Nota fiscal não encontrada', 404);
+      await prisma.empreiteiroServiceInvoice.delete({ where: { id: nf.id } });
+      const empreiteiro = await prisma.empreiteiro.findUniqueOrThrow({
+        where: { id },
+        include: empreiteiroInclude,
+      });
+      const counts = await measurementCountsForEmpreiteiro(id);
+      res.json({
+        success: true,
+        data: serializeEmpreiteiro(empreiteiro, counts),
+        message: 'Nota fiscal removida',
       });
     } catch (error) {
       next(error);

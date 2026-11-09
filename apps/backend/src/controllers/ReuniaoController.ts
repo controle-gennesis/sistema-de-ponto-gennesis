@@ -115,9 +115,17 @@ export class ReuniaoController {
         return res.json({ success: true, data: { count: 0, contractIds: [] } });
       }
 
-      const where = access.filter === 'ids' ? { id: { in: access.ids } } : {};
+      let ids: string[] | null = null;
+      if (access.filter === 'ids') {
+        // O aviso leva às reuniões, que se abrem pelo Resumo do contrato: sem Resumo, sem aviso.
+        const withResumo = await prisma.userContractPermission.findMany({
+          where: { userId: req.user.id, contractId: { in: access.ids }, accessResumo: true },
+          select: { contractId: true },
+        });
+        ids = withResumo.map((r) => r.contractId);
+      }
       const contracts = await prisma.contract.findMany({
-        where,
+        where: ids ? { id: { in: ids } } : {},
         select: { id: true },
       });
       const summary = await service.getMensalPendingSummary(contracts.map((c) => c.id));

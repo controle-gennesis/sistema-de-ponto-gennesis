@@ -2569,6 +2569,7 @@ model EmpreiteiroContract {
   addenda           EmpreiteiroContractAddendum[]
   teamMembers       EmpreiteiroTeamMember[]
   review            EmpreiteiroServiceReview?
+  invoices          EmpreiteiroServiceInvoice[]
 
   @@index([empreiteiroId])
   @@index([contractId])
@@ -2642,12 +2643,36 @@ model EmpreiteiroContractInstallment {
 
   empreiteiroContract EmpreiteiroContract          @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
   measurement         EmpreiteiroDailyMeasurement? @relation(fields: [measurementId], references: [id], onDelete: SetNull)
+  invoices            EmpreiteiroServiceInvoice[]
 
   @@unique([empreiteiroContractId, number])
   @@index([empreiteiroContractId])
   @@index([status])
   @@index([measurementId])
   @@map("empreiteiro_contract_installments")
+}
+
+/// Nota fiscal do contrato de serviço: ligada a uma parcela ou ao serviço inteiro (installmentId nulo).
+model EmpreiteiroServiceInvoice {
+  id                    String    @id @default(cuid())
+  empreiteiroContractId String
+  /// Parcela da nota (nulo = nota do serviço inteiro).
+  installmentId         String?
+  number                String
+  fileUrl               String
+  fileName              String?
+  fileKey               String?
+  amount                Decimal?  @db.Decimal(15, 2)
+  issuedAt              DateTime? @db.Date
+  createdBy             String?
+  createdAt             DateTime  @default(now())
+
+  empreiteiroContract EmpreiteiroContract             @relation(fields: [empreiteiroContractId], references: [id], onDelete: Cascade)
+  installment         EmpreiteiroContractInstallment? @relation(fields: [installmentId], references: [id], onDelete: SetNull)
+
+  @@index([empreiteiroContractId])
+  @@index([installmentId])
+  @@map("empreiteiro_service_invoices")
 }
 
 /// Avaliação (1 a 5 estrelas) do contrato de serviço concluído: preço, prazo e pagamento. Uma por serviço.
@@ -3054,6 +3079,8 @@ model UserContractPermission {
   accessFaturamento         Boolean  @default(true)
   /// Aba Resumo do contrato (separada de Gestor).
   accessResumo              Boolean  @default(true)
+  /// Aba Fluig do contrato (solicitações G5 do centro de custo).
+  accessFluig               Boolean  @default(false)
   updatedBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
@@ -3583,6 +3610,8 @@ model KanbanColumn {
   color     String   @default("#6B7280")
   position  Int      @default(0)
   cardLimit Int?
+  /// Lista arquivada: some do quadro (os cards ficam guardados) e pode ser restaurada.
+  archivedAt DateTime? @map("archived_at")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

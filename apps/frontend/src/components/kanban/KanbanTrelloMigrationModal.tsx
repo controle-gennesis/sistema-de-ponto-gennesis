@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
   fetchTrelloAttachmentMigration,
   startTrelloAttachmentMigration,
@@ -26,6 +27,8 @@ function formatBytes(bytes: number) {
 export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [status, setStatus] = useState<TrelloAttachmentMigrationStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Quadro escolhido para copiar ('' = todos). */
+  const [boardFilter, setBoardFilter] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -60,6 +63,14 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
     }
   };
 
+  const boardOptions = [
+    { value: '', label: `Todos os quadros — ${status?.pending ?? 0} no Trello` },
+    ...((status?.byBoard ?? [])
+      .filter((b) => b.pending > 0)
+      .map((b) => ({ value: b.boardId, label: `${b.board} — ${b.pending} no Trello` }))),
+  ];
+  const selectedBoard = status?.byBoard.find((b) => b.boardId === boardFilter) ?? null;
+  const pendingSelected = selectedBoard ? selectedBoard.pending : status?.pending ?? 0;
   const total = (status?.pending ?? 0) + (status?.migrated ?? 0);
   const pct = total > 0 ? Math.round(((status?.migrated ?? 0) / total) * 100) : 0;
 
@@ -89,6 +100,22 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
           <p className="mt-1 text-right text-xs text-gray-500 dark:text-gray-400">{pct}%</p>
         </div>
 
+        {status && !running && (status.pending ?? 0) > 0 ? (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Copiar anexos de</label>
+            <StringSingleSelectDropdown
+              value={boardFilter}
+              onChange={setBoardFilter}
+              options={boardOptions}
+              allowEmpty={false}
+              placeholder="Selecione o quadro..."
+              disableSearch={boardOptions.length < 8}
+              matchTriggerWidth
+              className="w-full"
+            />
+          </div>
+        ) : null}
+
         {status && status.byBoard.length > 0 ? (
           <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
             <table className="w-full text-xs">
@@ -102,7 +129,13 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {status.byBoard.map((row) => (
-                  <tr key={row.board} className="text-gray-700 dark:text-gray-200">
+                  <tr
+                    key={row.boardId}
+                    onClick={() => !running && row.pending > 0 && setBoardFilter(row.boardId)}
+                    className={`text-gray-700 dark:text-gray-200 ${
+                      row.pending > 0 && !running ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800' : ''
+                    } ${boardFilter === row.boardId ? 'bg-red-50/60 dark:bg-red-950/20' : ''}`}
+                  >
                     <td className="px-3 py-1.5">
                       <span className="font-medium">{row.board}</span>
                       <span className="block text-[11px] text-gray-500 dark:text-gray-400">
@@ -127,6 +160,7 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
           <div className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
             <p className="font-medium text-gray-800 dark:text-gray-100">
               {running ? (status.job.stopRequested ? 'Parando…' : 'Copiando…') : 'Última execução'}
+              {status.job.boardName ? ` · ${status.job.boardName}` : ' · todos os quadros'}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               {status.job.copied} copiados · {status.job.failed} com falha ·{' '}
@@ -184,19 +218,23 @@ export function KanbanTrelloMigrationModal({ isOpen, onClose }: { isOpen: boolea
               <Button
                 type="button"
                 variant="outline"
-                disabled={busy || !status?.configured || (status?.pending ?? 0) === 0}
-                onClick={() => void act(() => startTrelloAttachmentMigration(10), 'Copiando 10 arquivos de teste')}
+                disabled={busy || !status?.configured || pendingSelected === 0}
+                onClick={() =>
+                  void act(() => startTrelloAttachmentMigration(10, boardFilter || undefined), 'Copiando 10 arquivos de teste')
+                }
               >
                 Testar com 10
               </Button>
               <Button
                 type="button"
                 variant="primary"
-                disabled={busy || !status?.configured || (status?.pending ?? 0) === 0}
+                disabled={busy || !status?.configured || pendingSelected === 0}
                 className="!border-transparent !bg-red-600 !text-white hover:!bg-red-700"
-                onClick={() => void act(() => startTrelloAttachmentMigration(), 'Cópia iniciada')}
+                onClick={() =>
+                  void act(() => startTrelloAttachmentMigration(undefined, boardFilter || undefined), 'Cópia iniciada')
+                }
               >
-                Copiar todos
+                {boardFilter ? 'Copiar este quadro' : 'Copiar todos'}
               </Button>
             </>
           )}

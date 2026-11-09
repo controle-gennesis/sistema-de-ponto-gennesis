@@ -42,7 +42,12 @@ import {
   RowActionMenuPortal,
   cadastroListClasses,
 } from '@/components/ui/RowActionMenu';
-import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -126,6 +131,18 @@ interface ServiceInstallment {
   fluigRequestNumber?: string | null;
 }
 
+interface ServiceInvoice {
+  id: string;
+  /** Parcela da nota; vazio = nota do serviço inteiro. */
+  installmentId?: string | null;
+  number: string;
+  fileUrl: string;
+  fileName?: string | null;
+  amount?: number | null;
+  issuedAt?: string | null;
+  createdAt?: string;
+}
+
 interface ServiceAddendum {
   id: string;
   number: number;
@@ -167,6 +184,8 @@ interface EmpreiteiroContractLink {
   note?: string | null;
   files?: PaymentFile[];
   installments?: ServiceInstallment[];
+  /** Notas fiscais (das parcelas e do serviço inteiro). */
+  invoices?: ServiceInvoice[];
   installmentsPending?: number;
   installmentsReleased?: number;
   installmentsPaid?: number;
@@ -752,6 +771,14 @@ export default function EmpreiteirosPage() {
   const [fluigModal, setFluigModal] = useState<{ linkId: string; parcelId: string; number: number } | null>(null);
   const [fluigNumeroInput, setFluigNumeroInput] = useState('');
   const [savingFluigNumero, setSavingFluigNumero] = useState(false);
+  // Nota fiscal (por parcela ou do serviço inteiro)
+  const [invoiceModal, setInvoiceModal] = useState<{ linkId: string; installmentId: string | null; label: string } | null>(null);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [invoiceIssuedAt, setInvoiceIssuedAt] = useState('');
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const [invoiceInstallmentId, setInvoiceInstallmentId] = useState('');
   const [teamModal, setTeamModal] = useState<{ linkId: string; index: number | null } | null>(null);
   const [teamModalForm, setTeamModalForm] = useState<TeamMemberForm>(() => emptyTeamMember());
   const [abaServico, setAbaServico] = useState<'parcelas' | 'aditivos' | 'anexos' | 'equipe' | 'medicoes' | 'dados'>('medicoes');
@@ -1158,6 +1185,75 @@ export default function EmpreiteirosPage() {
     } finally {
       setUploadingFile(false);
       setSavingContractLink(false);
+    }
+  };
+
+  const abrirModalNota = (linkId: string, installmentId: string | null, label: string) => {
+    setInvoiceNumber('');
+    setInvoiceAmount('');
+    setInvoiceIssuedAt('');
+    setInvoiceFile(null);
+    setInvoiceInstallmentId(installmentId ?? '');
+    setInvoiceModal({ linkId, installmentId, label });
+  };
+
+  const salvarNotaFiscal = async () => {
+    if (!invoiceModal || !viewingItem?.id || !canManageCadastro) return;
+    if (!invoiceNumber.trim()) {
+      toast.error('Informe o número da nota fiscal');
+      return;
+    }
+    if (!invoiceFile) {
+      toast.error('Anexe o arquivo da nota fiscal');
+      return;
+    }
+    setSavingInvoice(true);
+    try {
+      const data = new FormData();
+      data.append('file', invoiceFile);
+      const uploadRes = await api.post('/empreiteiros/upload-file', data);
+      const uploaded = uploadRes.data?.data as { url?: string; name?: string; key?: string } | undefined;
+      if (!uploaded?.url) throw new Error('Upload sem URL');
+      const valor = invoiceAmount.trim() ? parseCurrencyInputBr(invoiceAmount) : null;
+      const res = await api.post(
+        `/empreiteiros/${viewingItem.id}/contracts/${invoiceModal.linkId}/invoices`,
+        {
+          number: invoiceNumber.trim(),
+          fileUrl: uploaded.url,
+          fileName: uploaded.name || invoiceFile.name,
+          fileKey: uploaded.key,
+          installmentId: invoiceInstallmentId || null,
+          amount: valor != null && valor > 0 ? valor : null,
+          issuedAt: invoiceIssuedAt || null,
+        }
+      );
+      const row = res.data?.data as EmpreiteiroRow | undefined;
+      if (row?.id) {
+        setViewingItem(row);
+        queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      }
+      toast.success(res.data?.message || 'Nota fiscal anexada');
+      setInvoiceModal(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || error.message || 'Não foi possível anexar a nota fiscal');
+    } finally {
+      setSavingInvoice(false);
+    }
+  };
+
+  const removerNotaFiscal = async (linkId: string, invoiceId: string) => {
+    if (!viewingItem?.id || !canManageCadastro) return;
+    if (!window.confirm('Remover esta nota fiscal?')) return;
+    try {
+      const res = await api.delete(`/empreiteiros/${viewingItem.id}/contracts/${linkId}/invoices/${invoiceId}`);
+      const row = res.data?.data as EmpreiteiroRow | undefined;
+      if (row?.id) {
+        setViewingItem(row);
+        queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      }
+      toast.success(res.data?.message || 'Nota fiscal removida');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível remover a nota fiscal');
     }
   };
 
@@ -2517,6 +2613,18 @@ export default function EmpreiteirosPage() {
 
   const { data: reviewsData } = useEmpreiteiroReviews(viewingItem?.id);
   const { data: reviewsSummaryMap } = useReviewsSummaryByEmpreiteiro();
+  const parcelMenuRows = (viewingItem?.contracts ?? []).flatMap((l) =>
+    (l.installments ?? []).map((p) => ({ id: p.id, linkId: l.id, parcel: p }))
+  );
+  const {
+    rowActionMenu: parcelMenu,
+    rowForActionMenu: parcelMenuRow,
+    toggleRowActionMenu: toggleParcelMenu,
+    closeRowActionMenu: closeParcelMenu,
+    isRowMenuOpen: isParcelMenuOpen,
+  } = useRowActionMenu(parcelMenuRows);
+  const proofInputRef = useRef<HTMLInputElement>(null);
+  const proofTargetRef = useRef<{ linkId: string; parcelId: string } | null>(null);
   const contractLinksForMenu = viewingItem?.contracts ?? [];
   const {
     rowActionMenu: contractRowActionMenu,
@@ -2613,6 +2721,26 @@ export default function EmpreiteirosPage() {
   const abrirModalFluig = (linkId: string, parcel: ServiceInstallment) => {
     setFluigNumeroInput(parcel.fluigRequestNumber || '');
     setFluigModal({ linkId, parcelId: parcel.id, number: parcel.number });
+  };
+
+  const desvincularSolicitacaoFluig = async (linkId: string, parcel: ServiceInstallment) => {
+    if (!viewingItem || !canManageCadastro) return;
+    const quitadaPeloFluig = String(parcel.status || '').toUpperCase() === 'PAID';
+    const aviso = quitadaPeloFluig
+      ? `Remover a solicitação ${parcel.fluigRequestNumber} da parcela ${parcel.number}? Se ela foi quitada pelo Fluig, volta para pendente.`
+      : `Remover a solicitação ${parcel.fluigRequestNumber} da parcela ${parcel.number}?`;
+    if (!window.confirm(aviso)) return;
+    try {
+      const res = await api.patch(
+        `/empreiteiros/${viewingItem.id}/contracts/${linkId}/installments/${parcel.id}`,
+        { fluigRequestNumber: '' }
+      );
+      const data = res.data?.data as EmpreiteiroRow | undefined;
+      if (data?.id) applySelfUpdate(data);
+      toast.success(res.data?.message || 'Solicitação removida da parcela');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível remover a solicitação');
+    }
   };
 
   const salvarSolicitacaoFluig = async () => {
@@ -3639,6 +3767,21 @@ export default function EmpreiteirosPage() {
                                 <p className="text-sm text-gray-600 dark:text-gray-400">Pagamentos previstos e liberados deste serviço</p>
                               </div>
                             </div>
+                            {canManageCadastro || (link.invoices || []).length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => abrirModalNota(link.id, null, 'Serviço inteiro')}
+                                className="relative flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                              >
+                                <FileText className="h-4 w-4 shrink-0" />
+                                <span>Nota fiscal do serviço</span>
+                                {(link.invoices || []).length > 0 ? (
+                                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1 text-[11px] font-bold leading-none text-white">
+                                    {(link.invoices || []).length}
+                                  </span>
+                                ) : null}
+                              </button>
+                            ) : null}
                           </div>
                         </CardHeader>
                                 <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
@@ -3704,30 +3847,42 @@ export default function EmpreiteirosPage() {
                                                 )}
                                               </td>
                                               <td className={`${cadastroListClasses.td} text-right`}>
-                                                {numeroFluig ? (
-                                                  <a
-                                                    href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                                                    aria-label={`Abrir solicitação ${numeroFluig} no Fluig`}
-                                                    title={`Abrir solicitação ${numeroFluig} no Fluig`}
-                                                  >
-                                                    <ExternalLink className="h-4 w-4" />
-                                                  </a>
-                                                ) : canManageCadastro ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => abrirModalFluig(link.id, parcel)}
-                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                                                    aria-label="Informar solicitação do Fluig"
-                                                    title="Informar solicitação do Fluig"
-                                                  >
-                                                    <Link2 className="h-4 w-4" />
-                                                  </button>
-                                                ) : (
-                                                  '—'
-                                                )}
+                                                <div className="flex items-center justify-end gap-1">
+                                                  {numeroFluig ? (
+                                                    <a
+                                                      href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                      aria-label={`Abrir solicitação ${numeroFluig} no Fluig`}
+                                                      title={`Abrir solicitação ${numeroFluig} no Fluig`}
+                                                    >
+                                                      <ExternalLink className="h-4 w-4" />
+                                                    </a>
+                                                  ) : canManageCadastro ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => abrirModalFluig(link.id, parcel)}
+                                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                                                      aria-label="Informar solicitação do Fluig"
+                                                      title="Informar solicitação do Fluig"
+                                                    >
+                                                      <Link2 className="h-4 w-4" />
+                                                    </button>
+                                                  ) : null}
+                                                  {canManageCadastro || (parcel.proofFiles || []).length > 0 ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => toggleParcelMenu(parcel.id, e.currentTarget as HTMLButtonElement)}
+                                                      className={rowActionMenuButtonClass(isParcelMenuOpen(parcel.id))}
+                                                      aria-label="Mais ações da parcela"
+                                                      aria-haspopup="menu"
+                                                      aria-expanded={isParcelMenuOpen(parcel.id)}
+                                                    >
+                                                      <MoreVertical className="h-4 w-4" />
+                                                    </button>
+                                                  ) : null}
+                                                </div>
                                               </td>
                                             </>
                                           );
@@ -3739,6 +3894,204 @@ export default function EmpreiteirosPage() {
                               </table>
                             </div>
                           ) : null}
+                          <input
+                            ref={proofInputRef}
+                            type="file"
+                            accept=".pdf,image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              e.target.value = '';
+                              const alvo = proofTargetRef.current;
+                              if (alvo && f) void handleAttachInstallmentProof(alvo.linkId, alvo.parcelId, f);
+                            }}
+                          />
+                          {parcelMenu && parcelMenuRow && parcelMenuRow.linkId === link.id ? (
+                            <RowActionMenuPortal
+                              menu={parcelMenu}
+                              onClose={closeParcelMenu}
+                              hideDefaultActions
+                              extraItems={[
+                                ...(parcelMenuRow.parcel.proofFiles || []).map((pf, i) => ({
+                                  label: `Ver comprovante${(parcelMenuRow.parcel.proofFiles || []).length > 1 ? ` ${i + 1}` : ''}`,
+                                  icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />,
+                                  onClick: () => window.open(resolveApiMediaUrl(pf.url) || pf.url, '_blank', 'noopener,noreferrer'),
+                                })),
+                                ...(canManageCadastro
+                                  ? [
+                                      {
+                                        label: (parcelMenuRow.parcel.proofFiles || []).length
+                                          ? 'Trocar comprovante'
+                                          : parcelMenuRow.parcel.fluigRequestNumber
+                                            ? 'Anexar comprovante (do Fluig ou outro)'
+                                            : 'Anexar comprovante',
+                                        icon: <Paperclip className="h-4 w-4 shrink-0" />,
+                                        onClick: () => {
+                                          proofTargetRef.current = { linkId: link.id, parcelId: parcelMenuRow.parcel.id };
+                                          proofInputRef.current?.click();
+                                        },
+                                      },
+                                    ]
+                                  : []),
+                                ...(canManageCadastro && parcelMenuRow.parcel.fluigRequestNumber
+                                  ? [
+                                      {
+                                        label: 'Trocar solicitação do Fluig',
+                                        icon: <Pencil className="h-4 w-4 shrink-0" />,
+                                        onClick: () => abrirModalFluig(link.id, parcelMenuRow.parcel),
+                                      },
+                                      {
+                                        label: 'Remover solicitação do Fluig',
+                                        icon: <Link2Off className="h-4 w-4 shrink-0" />,
+                                        tone: 'danger' as const,
+                                        onClick: () => void desvincularSolicitacaoFluig(link.id, parcelMenuRow.parcel),
+                                      },
+                                    ]
+                                  : []),
+                              ]}
+                            />
+                          ) : null}
+                          <Modal
+                            isOpen={invoiceModal?.linkId === link.id}
+                            onClose={() => !savingInvoice && setInvoiceModal(null)}
+                            title="Nota fiscal"
+                            size="md"
+                          >
+                            <div className="space-y-4">
+                              {(() => {
+                                const existentes = link.invoices || [];
+                                if (existentes.length === 0) return null;
+                                return (
+                                  <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      Já anexadas
+                                    </p>
+                                    <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                                      {existentes.map((nf) => (
+                                        <li key={nf.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                                          <div className="min-w-0">
+                                            <p className="font-medium text-gray-900 dark:text-gray-100">
+                                              NF {nf.number}
+                                              <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                                {(() => {
+                                                  const p = (link.installments || []).find((x) => x.id === nf.installmentId);
+                                                  return p ? `Parcela ${p.number}` : 'Serviço inteiro';
+                                                })()}
+                                              </span>
+                                            </p>
+                                            <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                              {[
+                                                nf.amount != null ? formatMoneyBr(nf.amount) : '',
+                                                nf.issuedAt ? `Emissão ${formatDateBr(nf.issuedAt)}` : '',
+                                                nf.fileName || '',
+                                              ]
+                                                .filter(Boolean)
+                                                .join(' · ')}
+                                            </p>
+                                          </div>
+                                          <div className="flex shrink-0 items-center gap-1">
+                                            <a
+                                              href={resolveApiMediaUrl(nf.fileUrl) || nf.fileUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                                            >
+                                              <ExternalLink className="h-3.5 w-3.5" /> Abrir
+                                            </a>
+                                            {canManageCadastro ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => void removerNotaFiscal(link.id, nf.id)}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                                aria-label="Remover nota fiscal"
+                                                title="Remover nota fiscal"
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </button>
+                                            ) : null}
+                                          </div>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              })()}
+                              <div>
+                                <label className={labelClass}>Referente a</label>
+                                <StringSingleSelectDropdown
+                                  value={invoiceInstallmentId}
+                                  onChange={(v) => setInvoiceInstallmentId(v)}
+                                  options={[
+                                    { value: '', label: 'Serviço inteiro (nota geral)' },
+                                    ...(link.installments || []).map((p) => ({
+                                      value: p.id,
+                                      label: `Parcela ${p.number} — ${formatMoneyBr(p.amount) || 'R$ 0,00'}`,
+                                    })),
+                                  ]}
+                                  allowEmpty={false}
+                                  placeholder="Selecione a parcela..."
+                                  disableSearch
+                                  matchTriggerWidth
+                                  className="w-full"
+                                />
+                              </div>
+                              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div>
+                                  <label className={labelClass}>Número da nota *</label>
+                                  <input
+                                    type="text"
+                                    value={invoiceNumber}
+                                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                                    placeholder="Ex.: 1234"
+                                    className={inputClass}
+                                    autoFocus
+                                  />
+                                </div>
+                                <div>
+                                  <label className={labelClass}>Valor (R$)</label>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={invoiceAmount}
+                                    onChange={(e) => setInvoiceAmount(maskCurrencyInputBrOrEmpty(e.target.value))}
+                                    placeholder="R$ 0,00"
+                                    className={inputClass}
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className={labelClass}>Data de emissão</label>
+                                <DatePickerField value={invoiceIssuedAt} onChange={setInvoiceIssuedAt} />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Arquivo da nota *</label>
+                                <input
+                                  type="file"
+                                  accept=".pdf,image/*,.xml"
+                                  onChange={(e) => setInvoiceFile(e.target.files?.[0] ?? null)}
+                                  className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200 dark:text-gray-300 dark:file:bg-gray-700 dark:file:text-gray-200"
+                                />
+                              </div>
+                              <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                                <button
+                                  type="button"
+                                  onClick={() => setInvoiceModal(null)}
+                                  disabled={savingInvoice}
+                                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingInvoice || !invoiceNumber.trim() || !invoiceFile}
+                                  onClick={() => void salvarNotaFiscal()}
+                                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                >
+                                  {savingInvoice ? 'Salvando…' : 'Anexar nota'}
+                                </button>
+                              </div>
+                            </div>
+                          </Modal>
                           <Modal
                             isOpen={fluigModal?.linkId === link.id}
                             onClose={() => setFluigModal(null)}

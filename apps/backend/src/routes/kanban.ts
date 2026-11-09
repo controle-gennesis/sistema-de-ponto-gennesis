@@ -42,6 +42,11 @@ router.patch('/board/label-presets', (req, res, next) =>
 router.post('/columns', (req, res, next) => controller.createColumn(req, res, next));
 router.patch('/columns/:id', (req, res, next) => controller.updateColumn(req, res, next));
 router.delete('/columns/:id', (req, res, next) => controller.deleteColumn(req, res, next));
+router.post('/columns/:id/archive', (req, res, next) => controller.archiveColumn(req, res, next));
+router.post('/columns/:id/unarchive', (req, res, next) => controller.unarchiveColumn(req, res, next));
+router.get('/boards/:boardId/archived-columns', (req, res, next) =>
+  controller.listArchivedColumns(req, res, next),
+);
 
 router.post('/cards', (req, res, next) => controller.createCard(req, res, next));
 router.post('/cards/:cardId/members', (req, res, next) => controller.addCardMember(req, res, next));

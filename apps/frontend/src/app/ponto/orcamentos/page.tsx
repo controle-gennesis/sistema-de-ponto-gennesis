@@ -28,6 +28,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { AppTabButton } from '@/components/ui/AppTabButton';
 import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -57,26 +58,6 @@ type ContractRow = {
   costCenter?: { code?: string | null; name?: string | null } | null;
   orcafascioClientId?: string | null;
 };
-
-/** Centro de custo escolhido na lista (por navegador). */
-const CC_FILTRO_STORAGE_KEY = 'orcamentos.centroCusto';
-
-function lerCcFiltroSalvo(): string {
-  try {
-    return localStorage.getItem(CC_FILTRO_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function salvarCcFiltro(valor: string) {
-  try {
-    if (valor) localStorage.setItem(CC_FILTRO_STORAGE_KEY, valor);
-    else localStorage.removeItem(CC_FILTRO_STORAGE_KEY);
-  } catch {
-    /* sem storage: só não lembra */
-  }
-}
 
 type OrcamentoStatusAprovacao =
   | 'rascunho'
@@ -290,10 +271,6 @@ export default function OrcamentosPage() {
   const [importShellOpen, setImportShellOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [statusCard, setStatusCard] = useState<StatusCard>('all');
-  const [ccFiltroEscolhido, setCcFiltroEscolhido] = useState('');
-  useEffect(() => {
-    setCcFiltroEscolhido(lerCcFiltroSalvo());
-  }, []);
   const [deleteTarget, setDeleteTarget] = useState<OrcamentoListItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const {
@@ -346,33 +323,7 @@ export default function OrcamentosPage() {
       );
   }, [contractsData, isAdministrator, canAccessContractOrcamentoTab]);
 
-  /** Centros de custo dos contratos liberados (cada usuário vê só os seus). */
-  const ccOptions = useMemo(() => {
-    const porId = new Map<string, string>();
-    for (const c of contractsComOrcamento) {
-      const id = String(c.costCenterId || '');
-      if (!id || porId.has(id)) continue;
-      const nome = (c.costCenter?.name || '').trim();
-      const codigo = (c.costCenter?.code || '').trim();
-      porId.set(id, nome || codigo || (c.name || c.number || id).trim());
-    }
-    return [...porId.entries()]
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' }));
-  }, [contractsComOrcamento]);
-
-  // Lista sempre separada por centro de custo: vale a escolha salva; sem ela (ou sem acesso), o primeiro.
-  const ccFiltro = ccOptions.some((o) => o.value === ccFiltroEscolhido)
-    ? ccFiltroEscolhido
-    : ccOptions[0]?.value ?? '';
-
-  const contractsDoCc = useMemo(
-    () =>
-      ccFiltro
-        ? contractsComOrcamento.filter((c) => String(c.costCenterId) === ccFiltro)
-        : contractsComOrcamento,
-    [contractsComOrcamento, ccFiltro]
-  );
+  const contractsDoCc = contractsComOrcamento;
 
   const contratoFilterOptions = useMemo(
     () =>
@@ -385,23 +336,12 @@ export default function OrcamentosPage() {
     [contractsDoCc]
   );
 
-  // Contrato do filtro fora do centro de custo escolhido: o que veio pela URL leva ao CC dele; o resto é limpo.
+  // Contrato do filtro sem acesso ao orçamento: limpa.
   useEffect(() => {
     if (!contratoFiltro || loadingContracts) return;
     if (contractsDoCc.some((c) => c.id === contratoFiltro)) return;
-    const contrato = contractsComOrcamento.find((c) => c.id === contratoFiltro);
-    if (contrato && contratoFiltro === contratoFromUrl) {
-      setCcFiltroEscolhido(String(contrato.costCenterId));
-      return;
-    }
     setContratoFiltro('');
-  }, [contratoFiltro, contractsDoCc, contractsComOrcamento, contratoFromUrl, loadingContracts]);
-
-  const escolherCc = (valor: string) => {
-    setCcFiltroEscolhido(valor);
-    salvarCcFiltro(valor);
-    setCurrentPage(1);
-  };
+  }, [contratoFiltro, contractsDoCc, loadingContracts]);
 
   const hasActiveFilters = Boolean(contratoFiltro || criadoDe || criadoAte);
 
@@ -488,7 +428,6 @@ export default function OrcamentosPage() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
     return list.filter((o) => {
-      if (ccFiltro && o.costCenterId !== ccFiltro) return false;
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
       if (criadoDe || criadoAte) {
         const dia = diaLocal(o.createdAt);
@@ -512,14 +451,13 @@ export default function OrcamentosPage() {
         status.includes(q)
       );
     });
-  }, [orcamentosData, searchTerm, contratoFiltro, ccFiltro, criadoDe, criadoAte]);
+  }, [orcamentosData, searchTerm, contratoFiltro, criadoDe, criadoAte]);
 
   /** Todas as revisões por família (seletor do badge; ignora busca textual). */
   const revisoesPorFamilia = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const map = new Map<string, OrcamentoListItem[]>();
     for (const o of list) {
-      if (ccFiltro && o.costCenterId !== ccFiltro) continue;
       if (contratoFiltro && o.contractId !== contratoFiltro) continue;
       const key = `${o.costCenterId}::${o.familiaId}`;
       const arr = map.get(key) ?? [];
@@ -530,7 +468,7 @@ export default function OrcamentosPage() {
       arr.sort((a, b) => b.versao - a.versao);
     }
     return map;
-  }, [orcamentosData, contratoFiltro, ccFiltro]);
+  }, [orcamentosData, contratoFiltro]);
 
   /** Uma linha por família — só a revisão atual (maior número). */
   const familiasAtuais = useMemo(() => {
@@ -637,7 +575,7 @@ export default function OrcamentosPage() {
     irParaNovoNoContrato(id);
   };
 
-  // Importação vai para o centro de custo escolhido no menu.
+  // Importação vai para o centro de custo do contrato escolhido.
   const importContractOptions = useMemo(
     () =>
       contractsDoCc
@@ -726,25 +664,6 @@ export default function OrcamentosPage() {
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
-              {ccOptions.length > 0 ? (
-                <div className="mb-5 flex flex-col items-center gap-1.5 border-b border-gray-200 pb-5 dark:border-gray-700">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Centro de custo
-                  </span>
-                  <StringSingleSelectDropdown
-                    value={ccFiltro}
-                    onChange={escolherCc}
-                    options={ccOptions}
-                    allowEmpty={false}
-                    placeholder="Selecione o centro de custo"
-                    searchPlaceholder="Pesquisar centro de custo..."
-                    emptyOptionsMessage="Nenhum centro de custo disponível."
-                    matchTriggerWidth
-                    className="w-full max-w-md"
-                    triggerClassName="relative flex h-12 w-full items-center justify-center rounded-xl border-2 border-red-300 bg-white px-10 text-center text-base font-semibold text-gray-900 shadow-sm outline-none transition-colors hover:border-red-400 dark:border-red-800/70 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-red-700"
-                  />
-                </div>
-              ) : null}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
                   <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
@@ -1011,39 +930,38 @@ export default function OrcamentosPage() {
                   className="w-full"
                 />
               </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Período de criação
-                </label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">De</span>
-                    <input
-                      type="date"
-                      value={criadoDe}
-                      max={criadoAte || undefined}
-                      onChange={(e) => {
-                        setCriadoDe(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
-                      aria-label="Criado a partir de"
-                    />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Criação (de)
                   </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Até</span>
-                    <input
-                      type="date"
-                      value={criadoAte}
-                      min={criadoDe || undefined}
-                      onChange={(e) => {
-                        setCriadoAte(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 [color-scheme:light] dark:[color-scheme:dark]"
-                      aria-label="Criado até"
-                    />
+                  <DatePickerField
+                    value={criadoDe}
+                    onChange={(value) => {
+                      setCriadoDe(value);
+                      if (value && criadoAte && value > criadoAte) setCriadoAte(value);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="dd/mm/aaaa"
+                    noFocusRing
+                    aria-label="Data inicial da criação"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Criação (até)
                   </label>
+                  <DatePickerField
+                    value={criadoAte}
+                    onChange={(value) => {
+                      setCriadoAte(value);
+                      if (value && criadoDe && criadoDe > value) setCriadoDe(value);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="dd/mm/aaaa"
+                    noFocusRing
+                    aria-label="Data final da criação"
+                  />
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
