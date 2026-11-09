@@ -14,6 +14,7 @@ import {
   Search,
   Trash2,
   TrendingDown,
+  Unlock,
   User,
   Wallet,
 } from 'lucide-react';
@@ -155,7 +156,7 @@ function pendenciasEmpreita(e: EmpreitaCotada): string[] {
   const docs = e.cotacoes.filter((c) => faltasCotacao(c).length === 0).map((c) => digitos(c.documento));
   const distintos = new Set(docs).size;
   if (docs.length !== distintos) p.push('há cotações repetidas do mesmo empreiteiro (CPF/CNPJ)');
-  if (!e.cotacoes.some((c) => c.escolhida)) p.push('marque o fornecedor que será utilizado');
+  if (!e.cotacoes.some((c) => c.escolhida)) p.push('marque o fornecedor contratado');
   if (distintos < MIN_COTACOES) {
     const falta = MIN_COTACOES - distintos;
     p.push(`falta${falta > 1 ? 'm' : ''} ${falta} cotação(ões) de empreiteiros diferentes (mínimo ${MIN_COTACOES})`);
@@ -533,7 +534,7 @@ export function CotacaoEmpreitaPainel({
   salvandoRascunho: boolean;
   valor: CotacaoEmpreitaData;
   onChange: (next: CotacaoEmpreitaData) => void;
-  /** Gestor do contrato ou administrador: altera mesmo depois de finalizada. */
+  /** Pode reabrir a cotação finalizada: administrador, gestor do contrato ou quem destranca orçamento. */
   podeEditarFinalizada: boolean;
   /** Revisão congelada: só leitura. */
   somenteLeitura: boolean;
@@ -555,7 +556,9 @@ export function CotacaoEmpreitaPainel({
     return () => window.cancelAnimationFrame(id);
   }, [focarEmpreitaId, valor.empreitas.length]);
   const finalizada = !!valor.finalizada;
-  const editavel = !somenteLeitura && (!finalizada || podeEditarFinalizada);
+  // Finalizada = travada para todos; quem pode (admin, gestor do contrato ou quem destranca orçamento) reabre.
+  const editavel = !somenteLeitura && !finalizada;
+  const [confirmarReabrir, setConfirmarReabrir] = useState(false);
   const valida = useMemo(() => cotacaoEmpreitaValida(valor), [valor]);
   /** Gasto com empreita: soma dos fornecedores marcados como "será utilizado". */
   const gastoEmpreita = useMemo(() => {
@@ -595,8 +598,8 @@ export function CotacaoEmpreitaPainel({
             <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Gasto com empreita</p>
             <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{brl(gastoEmpreita.total)}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Soma dos fornecedores marcados como "será utilizado" · {gastoEmpreita.escolhidas} de {gastoEmpreita.empreitas}{' '}
-              empreita(s) com fornecedor escolhido
+              Soma dos fornecedores contratados · {gastoEmpreita.escolhidas} de {gastoEmpreita.empreitas}{' '}
+              empreita(s) com fornecedor contratado
             </p>
           </div>
         </div>
@@ -679,6 +682,16 @@ export function CotacaoEmpreitaPainel({
                 {salvandoRascunho ? 'Salvando…' : 'Salvar rascunho'}
               </button>
             ) : null}
+            {finalizada && podeEditarFinalizada && !somenteLeitura ? (
+              <button
+                type="button"
+                onClick={() => setConfirmarReabrir(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+              >
+                <Unlock className="h-3.5 w-3.5" aria-hidden />
+                Reabrir cotação
+              </button>
+            ) : null}
             {!finalizada && !somenteLeitura ? (
               <button
                 type="button"
@@ -712,9 +725,13 @@ export function CotacaoEmpreitaPainel({
 
         <p className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-          Depois de finalizada, somente o gestor do contrato e o administrador do sistema podem editar ou excluir a
-          cotação.
-          {finalizada && !podeEditarFinalizada && !somenteLeitura ? ' Esta cotação está finalizada: só leitura para você.' : ''}
+          Depois de finalizada, a cotação fica travada para edição. Somente o administrador, o gestor do contrato ou
+          quem tem permissão para destrancar orçamentos pode reabri-la para editar.
+          {finalizada
+            ? podeEditarFinalizada
+              ? ' Esta cotação está finalizada: use "Reabrir cotação" para editar.'
+              : ' Esta cotação está finalizada: só leitura.'
+            : ''}
         </p>
 
         {valor.empreitas.length === 0 ? (
@@ -774,13 +791,13 @@ export function CotacaoEmpreitaPainel({
                     {escolhida ? (
                       <span className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-xs text-indigo-800 dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-300">
                         <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-                        Fornecedor escolhido: <strong>{escolhida.nome || 'sem nome'}</strong>
+                        Fornecedor contratado: <strong>{escolhida.nome || 'sem nome'}</strong>
                         {valorCotacao(escolhida.valor) > 0 ? ` · ${brl(valorCotacao(escolhida.valor))}` : ''}
                         {escolhida.prazoEntrega.trim() ? ` · ${escolhida.prazoEntrega.trim()}` : ''}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-2.5 py-1 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                        Nenhum fornecedor escolhido ainda
+                        Nenhum fornecedor contratado ainda
                       </span>
                     )}
                     {maisBarata ? (
@@ -902,7 +919,7 @@ export function CotacaoEmpreitaPainel({
                           }}
                           className="h-4 w-4 rounded border-gray-300 accent-indigo-600"
                         />
-                        Este fornecedor será utilizado
+                        Fornecedor contratado
                       </label>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-500 sm:col-span-2 dark:text-gray-400">
@@ -1009,8 +1026,8 @@ export function CotacaoEmpreitaPainel({
             </div>
             <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">Finalizar cotação?</h3>
             <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
-              Depois de finalizada, somente o gestor do contrato e o administrador do sistema podem editar ou excluir a
-              cotação.
+              Depois de finalizada, a cotação fica travada. Para editar, o administrador, o gestor do contrato ou quem
+              pode destrancar orçamentos precisa reabri-la.
             </p>
             <div className="flex justify-center gap-3">
               <button
@@ -1029,6 +1046,40 @@ export function CotacaoEmpreitaPainel({
                 className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
               >
                 Finalizar cotação
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmarReabrir ? (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmarReabrir(false)}>
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <Unlock className="h-6 w-6 text-amber-700 dark:text-amber-300" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">Reabrir cotação?</h3>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              A cotação volta a ser editável e deixa de contar como preenchida até ser finalizada de novo. Enquanto isso,
+              a aprovação das RMs desta FD mostra o alerta "COTAÇÃO EMPREITA NÃO PREENCHIDA".
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmarReabrir(false)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange({ ...valor, finalizada: undefined });
+                  setConfirmarReabrir(false);
+                }}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+              >
+                Reabrir cotação
               </button>
             </div>
           </div>

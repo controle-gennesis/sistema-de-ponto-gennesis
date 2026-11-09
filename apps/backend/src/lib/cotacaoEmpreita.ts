@@ -1,4 +1,5 @@
 import { getContractGestorCostCenterIds } from './contractGestorApprovalAccess';
+import { userCanUnlockOrcamento } from './orcamentoTrava';
 
 /**
  * Cotação Empreita (aba do orçamento): empreitas com as cotações feitas com empreiteiros.
@@ -128,6 +129,10 @@ function cotacaoFinalizada(sessaoOrcamento: unknown): boolean {
 }
 
 /** Gestor do contrato (coluna «Gestor» em Contratos) do centro de custo, ou administrador. */
+/**
+ * Pode reabrir a cotação finalizada: administrador, gestor do contrato (coluna «Gestor» em Contratos)
+ * ou quem pode destrancar orçamento e FD nesse centro de custo (mesma permissão do destrancar).
+ */
 export async function podeEditarCotacaoEmpreitaFinalizada(
   userId: string,
   isAdmin: boolean,
@@ -136,20 +141,24 @@ export async function podeEditarCotacaoEmpreitaFinalizada(
   if (isAdmin) return true;
   if (!userId || !centroCustoId) return false;
   const ccs = await getContractGestorCostCenterIds(userId);
-  return ccs.includes(centroCustoId);
+  if (ccs.includes(centroCustoId)) return true;
+  return userCanUnlockOrcamento(userId, isAdmin, centroCustoId);
 }
 
 /**
- * Gravação da tela: se a cotação gravada está finalizada e o usuário não pode alterá-la,
- * a cotação volta ao que está gravado (o resto da sessão segue normalmente).
+ * Gravação da tela: cotação finalizada fica travada para todos. A única mudança aceita é reabrir
+ * (tirar a finalização), e só por quem pode (`podeReabrir`). Fora isso, a cotação volta ao que está
+ * gravado (o resto da sessão segue normalmente).
  */
 export function preservarCotacaoEmpreitaFinalizada(
   gravadoSessao: unknown,
   patch: { sessaoOrcamento?: unknown; servicos?: unknown[] },
-  podeEditar: boolean
+  podeReabrir: boolean
 ): { sessaoOrcamento?: unknown; servicos?: unknown[] } {
-  if (podeEditar || patch.sessaoOrcamento === undefined) return patch;
+  if (patch.sessaoOrcamento === undefined) return patch;
   if (!cotacaoFinalizada(gravadoSessao)) return patch;
+  // Reabrir: a gravação nova vem sem finalização — aceita só de quem pode reabrir.
+  if (podeReabrir && !cotacaoFinalizada(patch.sessaoOrcamento)) return patch;
   const sessao = { ...(patch.sessaoOrcamento as Record<string, unknown>) };
   const gravada = (gravadoSessao as { cotacaoEmpreita?: unknown }).cotacaoEmpreita;
   sessao.cotacaoEmpreita = gravada;
