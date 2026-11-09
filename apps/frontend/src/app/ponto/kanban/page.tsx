@@ -42,6 +42,9 @@ import {
   fetchKanbanBoard,
   archiveKanbanBoard,
   unarchiveKanbanBoard,
+  archiveKanbanColumn,
+  unarchiveKanbanColumn,
+  fetchArchivedKanbanColumns,
   fetchKanbanBoards,
   createKanbanBoard,
   updateKanbanBoard,
@@ -1394,8 +1397,8 @@ interface KanbanColumnProps {
   onDrop: (e: React.DragEvent, columnId: string, index?: number) => void;
   onEditColumn: (column: KanbanColumn) => void;
   onDeleteColumn: (columnId: string) => void;
-  /** Arquivar o quadro inteiro (só aparece para quem pode). */
-  onArchiveBoard?: () => void;
+  /** Arquivar esta lista (a coluna some do quadro e pode ser restaurada). */
+  onArchiveColumn?: (column: KanbanColumn) => void;
   onSortColumn: (columnId: string, mode: KanbanColumnSortMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -1426,7 +1429,7 @@ function KanbanColumnComponent({
   onDrop,
   onEditColumn,
   onDeleteColumn,
-  onArchiveBoard,
+  onArchiveColumn,
   onSortColumn,
   collapsed = false,
   onToggleCollapse,
@@ -1802,17 +1805,17 @@ function KanbanColumnComponent({
                       >
                         <ArrowUpDown className="h-4 w-4" /> Ordenar lista
                       </button>
-                      {onArchiveBoard ? (
+                      {onArchiveColumn ? (
                         <button
                           type="button"
                           role="menuitem"
                           onClick={() => {
                             setMenuOpen(false);
-                            onArchiveBoard();
+                            onArchiveColumn(column);
                           }}
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
-                          <Archive className="h-4 w-4" /> Arquivar quadro
+                          <Archive className="h-4 w-4" /> Arquivar lista
                         </button>
                       ) : null}
                       <hr className="my-1 border-gray-200 dark:border-gray-700" />
@@ -2833,8 +2836,8 @@ function KanbanPage() {
   } | null>(null);
   const [renamingBoard, setRenamingBoard] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState<KanbanBoardSummary | null>(null);
-  const [boardArchiveTarget, setBoardArchiveTarget] = useState<KanbanBoardSummary | null>(null);
-  const [archivingBoard, setArchivingBoard] = useState(false);
+  const [columnArchiveTarget, setColumnArchiveTarget] = useState<{ id: string; title: string } | null>(null);
+  const [archivingColumn, setArchivingColumn] = useState(false);
   const [deletingBoard, setDeletingBoard] = useState(false);
   const [shareTarget, setShareTarget] = useState<{
     boardId: string;
@@ -2883,10 +2886,6 @@ function KanbanPage() {
   ]);
 
   const boardReadOnly = board?.canWrite === false;
-  const currentBoardSummary = useMemo(
-    () => (boardsList ?? []).find((b) => b.departmentKey === (board?.departmentKey ?? boardScopeKey)) ?? null,
-    [boardsList, board?.departmentKey, boardScopeKey],
-  );
 
   useDocumentTitle(
     board?.department ? `Tasks - ${board.department}` : 'Tasks'
@@ -2942,32 +2941,46 @@ function KanbanPage() {
     [queryClient, kanbanBoardQueryKey, renameBoardTarget],
   );
 
-  const handleArchiveBoard = useCallback(async () => {
-    if (!boardArchiveTarget?.id || !meUser) return;
-    setArchivingBoard(true);
+  const handleArchiveColumn = useCallback(async () => {
+    if (!columnArchiveTarget) return;
+    setArchivingColumn(true);
     try {
-      await archiveKanbanBoard(boardArchiveTarget.id);
-      if (getKanbanDefaultBoard(meUser.id) === boardArchiveTarget.departmentKey) {
-        clearKanbanDefaultBoard(meUser.id);
-      }
-      const remaining = (boardsList ?? []).filter(
-        (b) => b.departmentKey !== boardArchiveTarget.departmentKey,
-      );
-      await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
-      const archivedKey = boardArchiveTarget.departmentKey;
-      setBoardArchiveTarget(null);
-      toast.success('Quadro arquivado');
-      const nextKey = resolveKanbanDefaultBoard(meUser.id, remaining);
-      if (nextKey && nextKey !== archivedKey) openBoard(nextKey);
+      await archiveKanbanColumn(columnArchiveTarget.id);
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        if (!old) return old;
+        const next = { ...old, columns: old.columns.filter((c) => c.id !== columnArchiveTarget.id) };
+        if (boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: ['kanban-archived-columns'] });
+      setColumnArchiveTarget(null);
+      toast.success('Lista arquivada');
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        'Erro ao arquivar quadro';
+        'Erro ao arquivar a lista';
       toast.error(msg);
     } finally {
-      setArchivingBoard(false);
+      setArchivingColumn(false);
     }
-  }, [boardArchiveTarget, meUser, boardsList, queryClient, openBoard]);
+  }, [columnArchiveTarget, queryClient, kanbanBoardQueryKey, boardScopeKey]);
+
+  const handleUnarchiveColumn = useCallback(
+    async (col: { id: string }) => {
+      try {
+        await unarchiveKanbanColumn(col.id);
+        await queryClient.invalidateQueries({ queryKey: kanbanBoardQueryKey });
+        void queryClient.invalidateQueries({ queryKey: ['kanban-archived-columns'] });
+        toast.success('Lista restaurada');
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+          'Erro ao restaurar a lista';
+        toast.error(msg);
+      }
+    },
+    [queryClient, kanbanBoardQueryKey],
+  );
 
   const handleRestoreBoard = useCallback(
     async (target: KanbanBoardSummary) => {
@@ -3494,6 +3507,13 @@ function KanbanPage() {
     queryFn: () => fetchKanbanArchivedCards(boardScopeKey || undefined),
     enabled: archivedModalOpen && canLoadBoard,
     staleTime: 30_000,
+  });
+
+  const { data: archivedColumns = [] } = useQuery({
+    queryKey: ['kanban-archived-columns', board?.id ?? ''] as const,
+    queryFn: () => fetchArchivedKanbanColumns(board!.id),
+    enabled: archivedModalOpen && !!board?.id,
+    staleTime: 10_000,
   });
 
   const handleUnarchiveCard = useCallback(
@@ -4680,10 +4700,8 @@ function KanbanPage() {
                     onDrop={handleDrop}
                     onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
                     onDeleteColumn={handleDeleteColumn}
-                    onArchiveBoard={
-                      !boardReadOnly && currentBoardSummary && (isAdministrator || currentBoardSummary.isOwner)
-                        ? () => setBoardArchiveTarget(currentBoardSummary)
-                        : undefined
+                    onArchiveColumn={
+                      boardReadOnly ? undefined : (col) => setColumnArchiveTarget({ id: col.id, title: col.title })
                     }
                     onSortColumn={handleSortColumn}
                     collapsed={collapsedColumnIds.has(column.id)}
@@ -4794,9 +4812,44 @@ function KanbanPage() {
           isOpen
           onClose={() => setArchivedModalOpen(false)}
           size="md"
-          title="Cartões arquivados"
+          title="Arquivados"
         >
           <div className="space-y-3">
+            {archivedColumns.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Listas arquivadas
+                </p>
+                <ul className="space-y-2">
+                  {archivedColumns.map((col) => (
+                    <li
+                      key={col.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800/60"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{col.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {col.cardCount} {col.cardCount === 1 ? 'card' : 'cards'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={boardReadOnly}
+                        onClick={() => void handleUnarchiveColumn(col)}
+                        className="shrink-0"
+                      >
+                        Restaurar
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Cartões arquivados
+                </p>
+              </div>
+            ) : null}
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Cards arquivados somem do quadro, mas ficam aqui. Restaure para colocá-los de volta na
               coluna original.
@@ -5205,29 +5258,29 @@ function KanbanPage() {
         hint=""
       />
 
-      {boardArchiveTarget && (
+      {columnArchiveTarget && (
         <Modal
           isOpen
-          onClose={() => !archivingBoard && setBoardArchiveTarget(null)}
+          onClose={() => !archivingColumn && setColumnArchiveTarget(null)}
           size="sm"
           confirmBeforeClose={false}
-          title="Arquivar quadro"
+          title="Arquivar lista"
         >
           <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
-            Arquivar o quadro <strong>{boardArchiveTarget.department}</strong> inteiro? Ele some da lista de quadros,
-            mas as colunas e os cards são mantidos. Você pode restaurá-lo depois, na seção «Arquivados» do seletor de quadros.
+            Arquivar a lista <strong>{columnArchiveTarget.title}</strong>? Ela some do quadro, mas os cards continuam
+            guardados nela. Você pode restaurá-la depois, em «Arquivados» no menu do quadro.
           </p>
           <div className="flex justify-end gap-3">
             <Button
               type="button"
               variant="outline"
-              onClick={() => setBoardArchiveTarget(null)}
-              disabled={archivingBoard}
+              onClick={() => setColumnArchiveTarget(null)}
+              disabled={archivingColumn}
             >
               Cancelar
             </Button>
-            <Button type="button" onClick={handleArchiveBoard} disabled={archivingBoard}>
-              {archivingBoard ? 'Arquivando…' : 'Arquivar quadro'}
+            <Button type="button" onClick={handleArchiveColumn} disabled={archivingColumn}>
+              {archivingColumn ? 'Arquivando…' : 'Arquivar lista'}
             </Button>
           </div>
         </Modal>

@@ -121,6 +121,27 @@ export async function fetchKanbanBoards(archived = false): Promise<KanbanBoardSu
   return res.data.data;
 }
 
+export type KanbanArchivedColumn = {
+  id: string;
+  title: string;
+  color: string;
+  archivedAt: string | null;
+  cardCount: number;
+};
+
+export async function archiveKanbanColumn(columnId: string): Promise<void> {
+  await api.post(`/kanban/columns/${columnId}/archive`);
+}
+
+export async function unarchiveKanbanColumn(columnId: string): Promise<void> {
+  await api.post(`/kanban/columns/${columnId}/unarchive`);
+}
+
+export async function fetchArchivedKanbanColumns(boardId: string): Promise<KanbanArchivedColumn[]> {
+  const res = await api.get(`/kanban/boards/${boardId}/archived-columns`);
+  return (res.data.data ?? []) as KanbanArchivedColumn[];
+}
+
 export async function archiveKanbanBoard(boardId: string): Promise<{ departmentKey: string }> {
   const res = await api.post(`/kanban/boards/${boardId}/archive`);
   return res.data.data;
@@ -848,6 +869,7 @@ export type TrelloAttachmentMigrationStatus = {
   migrated: number;
   /** Por quadro: ainda no Trello, copiados, enviados direto no Conecta e links externos. */
   byBoard: Array<{
+    boardId: string;
     board: string;
     pending: number;
     migrated: number;
@@ -868,6 +890,9 @@ export type TrelloAttachmentMigrationStatus = {
     failed: number;
     bytesCopied: number;
     limit: number | null;
+    /** Quadro em cópia (null = todos). */
+    boardId?: string | null;
+    boardName?: string | null;
     lastError: string | null;
     failures: Array<{
       attachmentId: string;
@@ -885,8 +910,14 @@ export async function fetchTrelloAttachmentMigration(): Promise<TrelloAttachment
   return res.data.data;
 }
 
-export async function startTrelloAttachmentMigration(limit?: number): Promise<TrelloAttachmentMigrationStatus> {
-  const res = await api.post('/kanban/admin/trello-attachments/start', limit ? { limit } : {});
+export async function startTrelloAttachmentMigration(
+  limit?: number,
+  boardId?: string,
+): Promise<TrelloAttachmentMigrationStatus> {
+  const res = await api.post('/kanban/admin/trello-attachments/start', {
+    ...(limit ? { limit } : {}),
+    ...(boardId ? { boardId } : {}),
+  });
   return res.data.data;
 }
 

@@ -33,6 +33,9 @@ type JobState = {
   failed: number;
   bytesCopied: number;
   limit: number | null;
+  /** Quadro que está sendo copiado (null = todos). */
+  boardId: string | null;
+  boardName: string | null;
   lastError: string | null;
   failures: Failure[];
   /** Total de falhas por motivo (a lista `failures` guarda só as mais recentes). */
@@ -49,6 +52,8 @@ const state: JobState = {
   failed: 0,
   bytesCopied: 0,
   limit: null,
+  boardId: null,
+  boardName: null,
   lastError: null,
   failures: [],
   failureCounts: {},
@@ -61,6 +66,7 @@ function trelloCredentials(): { key: string; token: string } | null {
 }
 
 type BoardBreakdownRow = {
+  board_id: string;
   board: string;
   pending: bigint;
   migrated: bigint;
@@ -77,7 +83,7 @@ async function getBoardBreakdown() {
   // "Importado por": quem aparece como dono dos anexos vindos do Trello (a importação grava no nome
   // de quem importou). "Criado por": usuário que criou o quadro.
   const rows = await prisma.$queryRaw<BoardBreakdownRow[]>`
-    SELECT t.board, t.pending, t.migrated, t.native, t.external,
+    SELECT t.board_id, t.board, t.pending, t.migrated, t.native, t.external,
            cu.name AS created_by, t.board_created_at,
            iu.name AS imported_by, t.first_import_at
     FROM (
@@ -111,6 +117,7 @@ async function getBoardBreakdown() {
     LEFT JOIN users iu ON iu.id = t.importer_id
     ORDER BY (t.pending + t.migrated + t.native + t.external) DESC`;
   return rows.map((r) => ({
+    boardId: r.board_id,
     board: r.board,
     pending: Number(r.pending),
     migrated: Number(r.migrated),
@@ -193,7 +200,7 @@ async function copyOne(
   }
 }
 
-async function runJob(limit: number | null) {
+async function runJob(limit: number | null, boardId: string | null) {
   const auth = trelloCredentials();
   if (!auth) return;
   const failedIds = new Set<string>();
@@ -204,6 +211,7 @@ async function runJob(limit: number | null) {
       const batch = await prisma.kanbanCardAttachment.findMany({
         where: {
           fileUrl: { startsWith: TRELLO_URL_PREFIX },
+          ...(boardId ? { card: { column: { boardId } } } : {}),
           ...(failedIds.size > 0 ? { id: { notIn: Array.from(failedIds) } } : {}),
         },
         select: { id: true, fileName: true, fileUrl: true },
@@ -273,7 +281,10 @@ function storageIsSafeForMigration(): boolean {
   );
 }
 
-export function startTrelloMigration(limit: number | null): { started: boolean; reason?: string } {
+export async function startTrelloMigration(
+  limit: number | null,
+  boardId: string | null = null,
+): Promise<{ started: boolean; reason?: string }> {
   if (state.running) return { started: false, reason: 'A cópia já está em andamento.' };
   if (!trelloCredentials()) {
     return { started: false, reason: 'Configure TRELLO_API_KEY e TRELLO_API_TOKEN no servidor.' };
@@ -285,6 +296,15 @@ export function startTrelloMigration(limit: number | null): { started: boolean; 
         'O armazenamento em produção não está no S3 (STORAGE_PROVIDER=local ou chaves da AWS ausentes). Copiar agora gravaria no disco do servidor, que é apagado a cada deploy.',
     };
   }
+  let boardName: string | null = null;
+  if (boardId) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: { departmentLabel: true },
+    });
+    if (!board) return { started: false, reason: 'Quadro não encontrado.' };
+    boardName = board.departmentLabel;
+  }
   Object.assign(state, {
     running: true,
     stopRequested: false,
@@ -295,11 +315,13 @@ export function startTrelloMigration(limit: number | null): { started: boolean; 
     failed: 0,
     bytesCopied: 0,
     limit,
+    boardId,
+    boardName,
     lastError: null,
     failures: [],
     failureCounts: {},
   } satisfies Partial<JobState>);
-  void runJob(limit);
+  void runJob(limit, boardId);
   return { started: true };
 }
 

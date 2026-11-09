@@ -109,6 +109,41 @@ export class KanbanController {
     }
   }
 
+  async archiveColumn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      await kanbanService.setColumnArchived(userId, req.params.id, true);
+      res.json({ success: true });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async unarchiveColumn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      await kanbanService.setColumnArchived(userId, req.params.id, false);
+      res.json({ success: true });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async listArchivedColumns(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const columns = await kanbanService.listArchivedColumns(userId, req.params.boardId);
+      res.json({ success: true, data: columns });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
   async archiveBoard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);
@@ -842,7 +877,8 @@ export class KanbanController {
     try {
       const raw = Number(req.body?.limit);
       const limit = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
-      const result = startTrelloMigration(limit);
+      const boardId = typeof req.body?.boardId === 'string' && req.body.boardId.trim() ? req.body.boardId.trim() : null;
+      const result = await startTrelloMigration(limit, boardId);
       if (!result.started) return next(createError(result.reason || 'Não foi possível iniciar', 409));
       res.json({ success: true, data: await getTrelloMigrationStatus() });
     } catch (error) {

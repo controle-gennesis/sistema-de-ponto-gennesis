@@ -3610,6 +3610,8 @@ model KanbanColumn {
   color     String   @default("#6B7280")
   position  Int      @default(0)
   cardLimit Int?
+  /// Lista arquivada: some do quadro (os cards ficam guardados) e pode ser restaurada.
+  archivedAt DateTime? @map("archived_at")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

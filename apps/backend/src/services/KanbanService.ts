@@ -396,6 +396,7 @@ const activeBoardCards = {
 
 const boardListInclude = {
   columns: {
+    where: { archivedAt: null },
     orderBy: { position: 'asc' as const },
     include: {
       cards: activeBoardCards,
@@ -1810,6 +1811,42 @@ export class KanbanService {
       limit: column.cardLimit ?? undefined,
       cards: column.cards.map(formatCard),
     };
+  }
+
+  /** Arquiva (ou restaura) uma lista: ela some do quadro e os cards continuam guardados nela. */
+  async setColumnArchived(userId: string, id: string, archive: boolean) {
+    await this.assertColumnAccess(userId, id);
+    await prisma.kanbanColumn.update({
+      where: { id },
+      data: { archivedAt: archive ? new Date() : null },
+    });
+  }
+
+  async listArchivedColumns(userId: string, boardId: string) {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: this.boardAccessSelect,
+    });
+    if (!board) throw new Error('Quadro não encontrado');
+    await this.assertBoardAccess(userId, board, 'read');
+    const columns = await prisma.kanbanColumn.findMany({
+      where: { boardId, archivedAt: { not: null } },
+      orderBy: { archivedAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        color: true,
+        archivedAt: true,
+        _count: { select: { cards: true } },
+      },
+    });
+    return columns.map((c) => ({
+      id: c.id,
+      title: c.title,
+      color: c.color,
+      archivedAt: c.archivedAt ? c.archivedAt.toISOString() : null,
+      cardCount: c._count.cards,
+    }));
   }
 
   async deleteColumn(userId: string, id: string) {
