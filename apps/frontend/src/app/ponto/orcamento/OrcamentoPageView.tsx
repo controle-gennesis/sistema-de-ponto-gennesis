@@ -17987,6 +17987,11 @@ export function OrcamentoPageView({
           tones: tonesPlain(),
           altura: 30,
           ...extra,
+          // Rótulo da linha (FORNECEDOR, VALOR, SITE...) com o mesmo cinza dos cabeçalhos.
+          cores: {
+            0: { fg: '#000000', bg: CINZA_CABECALHO, bold: true, tamanho: 10 },
+            ...(extra?.cores ?? {}),
+          },
         });
       };
 
