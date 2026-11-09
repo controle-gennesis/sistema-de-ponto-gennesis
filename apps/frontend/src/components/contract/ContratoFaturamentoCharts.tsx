@@ -1206,24 +1206,26 @@ function CalendarioDecorativo({ pendente }: { pendente: boolean }) {
       {Array.from({ length: linhas }).map((_, l) =>
         Array.from({ length: colunas }).map((__, c) => {
           const cheio = cheios.has(`${c},${l}`);
-          const opacidade = 0.12 + (c / (colunas - 1)) * 0.5;
+          const opacidade = 0.12 + (c / (colunas - 1)) * 0.5 + 0.1;
+          // Cada quadradinho tem duração e atraso próprios: uns enchem, outros esvaziam ou ficam listrados.
+          const seed = (c * 7 + l * 13 + c * l * 3) % 11;
+          const duracao = 12 + (seed % 5) * 2;
+          const atraso = cheio ? -(seed * 0.45) : -(duracao * 0.55 + seed * 0.35);
+          const geom = { x: c * 28 + 2, y: l * 28 + 2, width: 24, height: 24, rx: 5 };
+          const anim = {
+            animationDuration: `${duracao}s`,
+            animationDelay: `${atraso}s`,
+            '--cell-op': opacidade,
+          } as React.CSSProperties;
           return (
-            <rect
-              key={`${c}-${l}`}
-              x={c * 28 + 2}
-              y={l * 28 + 2}
-              width="24"
-              height="24"
-              rx="5"
-              fill={cheio ? 'currentColor' : 'none'}
-              stroke="currentColor"
-              strokeWidth="1.5"
-              opacity={cheio ? opacidade + 0.1 : 0.14}
-            />
+            <g key={`${c}-${l}`}>
+              <rect {...geom} fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.14" />
+              <rect {...geom} fill="currentColor" className="reuniao-cell-fill" style={anim} />
+              <rect {...geom} fill="url(#reunioes-listras)" className="reuniao-cell-stripe" style={anim} />
+            </g>
           );
         })
       )}
-      <rect x="86" y="58" width="24" height="24" rx="5" fill="url(#reunioes-listras)" />
     </svg>
   );
 }

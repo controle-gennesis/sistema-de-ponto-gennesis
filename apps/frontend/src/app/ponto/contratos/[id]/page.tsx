@@ -73,6 +73,7 @@ import {
 } from '@/lib/contractPaidNaturezaExclusions';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { ContractCronogramaMensalPanel } from '@/components/contract/ContractCronogramaMensalPanel';
+import { FluigSolicitacoesPage, G5_RELATORIO_DATASET_ID } from '@/components/fluig/FluigSolicitacoesPage';
 import { ContractHistoricoPleitosPanel } from '@/components/contract/ContractHistoricoPleitosPanel';
 import { ContratoControleGeralFluxoChart } from '@/components/contract/ContratoControleGeralFluxoChart';
 import { ContractOsDetailModal } from '@/components/contract/ContractOsDetailModal';
@@ -1078,6 +1079,7 @@ export default function ContractDetailPage() {
     canAccessContractReunioesTab,
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
+    canAccessContractFluigTab,
     canAccessContractResumoTab,
     isContractGestor,
     canAccessContractOrdemServicoTab,
@@ -1097,6 +1099,7 @@ export default function ContractDetailPage() {
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
   const canAccessPleitosModulo = canAccessContractPleitosTab(contractId);
   const canAccessFaturamentoModulo = canAccessContractFaturamentoTab(contractId);
+  const canAccessFluigModulo = canAccessContractFluigTab(contractId);
   const canAccessResumoModulo = canAccessContractResumoTab(contractId);
   /** Gestor do contrato: Controle Geral e Dados. */
   const canAccessGestorTabs = isContractGestor(contractId);
@@ -1131,7 +1134,7 @@ export default function ContractDetailPage() {
     setPeriodTo(to);
   }, []);
   const [mainTab, setMainTab] = useState<
-    'resumo' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'dados'
+    'resumo' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
   >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
@@ -2043,6 +2046,7 @@ export default function ContractDetailPage() {
     if (canAccessOrdemServicoModulo) tabs.push('os');
     if (canAccessPleitosModulo) tabs.push('pleitos');
     if (canAccessFaturamentoModulo) tabs.push('faturamento');
+    if (canAccessFluigModulo) tabs.push('fluig');
     if (canAccessGestorTabs) tabs.push('dados');
     return tabs;
   }, [
@@ -2052,6 +2056,7 @@ export default function ContractDetailPage() {
     canAccessOrdemServicoModulo,
     canAccessPleitosModulo,
     canAccessFaturamentoModulo,
+    canAccessFluigModulo,
   ]);
 
   useEffect(() => {
@@ -4939,6 +4944,15 @@ export default function ContractDetailPage() {
                 Faturamento
               </AppUnderlineTabButton>
             ) : null}
+            {canAccessFluigModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'fluig'}
+                onClick={() => setMainTab('fluig')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Fluig
+              </AppUnderlineTabButton>
+            ) : null}
             {canAccessGestorTabs ? (
               <AppUnderlineTabButton
                 active={mainTab === 'dados'}
@@ -6242,6 +6256,29 @@ export default function ContractDetailPage() {
 
           {mainTab === 'pleitos' && canAccessPleitosModulo ? (
           <ContractHistoricoPleitosPanel contractId={contractId} />
+          ) : null}
+
+          {mainTab === 'fluig' && canAccessFluigModulo ? (
+          <FluigSolicitacoesPage
+            config={{
+              embedded: true,
+              datasets: [G5_RELATORIO_DATASET_ID],
+              datasetTabLabels: { [G5_RELATORIO_DATASET_ID]: 'G5' },
+              g5TitleDatasets: [G5_RELATORIO_DATASET_ID],
+              allowedFiliais: null,
+              excludedFiliais: ['FILIAL PB'],
+              hideFilialFilter: true,
+              showProcessCard: false,
+              useEmployeeListLayout: true,
+              leadTimeColumn: 'Início Data',
+              fixedCostCenter: {
+                code: contract?.costCenter?.code,
+                name: contract?.costCenter?.name,
+              },
+              hideSetorSolicitanteFilter: true,
+              excludedSetoresSolicitantes: ['Departamento Pessoal', 'Contratos', 'Assistência diretoria Gennesis', 'Jurídico', 'Logística', 'Administrativo'],
+            }}
+          />
           ) : null}
 
           {mainTab === 'faturamento' && canAccessFaturamentoModulo ? (

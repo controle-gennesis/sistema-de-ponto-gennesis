@@ -3054,6 +3054,8 @@ model UserContractPermission {
   accessFaturamento         Boolean  @default(true)
   /// Aba Resumo do contrato (separada de Gestor).
   accessResumo              Boolean  @default(true)
+  /// Aba Fluig do contrato (solicitações G5 do centro de custo).
+  accessFluig               Boolean  @default(false)
   updatedBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
