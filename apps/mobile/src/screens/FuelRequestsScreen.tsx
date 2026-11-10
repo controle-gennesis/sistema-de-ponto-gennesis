@@ -7,15 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Modal,
   FlatList,
   Image,
   ActivityIndicator,
   RefreshControl,
   Alert,
   Platform,
-  KeyboardAvoidingView,
-  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -34,7 +31,10 @@ import {
   MapPin,
   Trash2,
   Filter,
+  ClipboardList,
+  FileText,
 } from 'lucide-react-native';
+import SheetModal from '../components/SheetModal';
 import PickerSheetFrame from '../components/PickerSheetFrame';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
@@ -405,7 +405,6 @@ export default function FuelRequestsScreen() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
@@ -860,7 +859,7 @@ export default function FuelRequestsScreen() {
                 <TouchableOpacity
                   style={[
                     styles.pickerItem,
-                    { backgroundColor: isDark ? colors.surface : colors.background },
+                    { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#374151' : '#e5e7eb' },
                   ]}
                   onPress={() => {
                     picker.onSelect(item.value);
@@ -1147,98 +1146,64 @@ export default function FuelRequestsScreen() {
       </ScrollView>
 
       {/* Filtro de status */}
-      <Modal
+      <SheetModal
         visible={filterOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFilterOpen(false)}
+        onClose={() => setFilterOpen(false)}
+        title="Filtro de status"
+        subtitle="Mostre apenas as solicitações do status escolhido"
+        icon={Filter}
       >
-        <View style={styles.filterOverlay}>
-          <View style={[styles.filterSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.filterSheetTitle, { color: colors.text }]}>
-              Filtro de status
-            </Text>
-            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
-              <TouchableOpacity
-                style={styles.filterOptionRow}
-                onPress={() => {
-                  setStatusFilter('all');
-                  setFilterOpen(false);
-                }}
-              >
-                <Text style={[styles.filterOptionText, { color: colors.text }]}>Todos</Text>
-                {statusFilter === 'all' ? (
-                  <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
-                ) : null}
-              </TouchableOpacity>
-              {(Object.keys(STATUS_LABELS) as FuelRefuelStatus[]).map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={styles.filterOptionRow}
-                  onPress={() => {
-                    setStatusFilter(s);
-                    setFilterOpen(false);
-                  }}
-                >
-                  <Text style={[styles.filterOptionText, { color: colors.text }]}>
-                    {STATUS_LABELS[s]}
-                  </Text>
-                  {statusFilter === s ? (
-                    <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+        <View style={{ paddingBottom: 4 }}>
+          <TouchableOpacity
+            style={styles.filterOptionRow}
+            onPress={() => {
+              setStatusFilter('all');
+              setFilterOpen(false);
+            }}
+          >
+            <Text style={[styles.filterOptionText, { color: colors.text }]}>Todos</Text>
+            {statusFilter === 'all' ? (
+              <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
+            ) : null}
+          </TouchableOpacity>
+          {(Object.keys(STATUS_LABELS) as FuelRefuelStatus[]).map((s) => (
             <TouchableOpacity
-              onPress={() => setFilterOpen(false)}
-              style={{ marginTop: 8, paddingVertical: 8 }}
+              key={s}
+              style={styles.filterOptionRow}
+              onPress={() => {
+                setStatusFilter(s);
+                setFilterOpen(false);
+              }}
             >
-              <Text style={{ textAlign: 'center', color: colors.textSecondary, fontWeight: '600' }}>
-                Fechar
+              <Text style={[styles.filterOptionText, { color: colors.text }]}>
+                {STATUS_LABELS[s]}
               </Text>
+              {statusFilter === s ? (
+                <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
+              ) : null}
             </TouchableOpacity>
-          </View>
+          ))}
         </View>
-      </Modal>
+      </SheetModal>
 
       {/* Formulário */}
-      <Modal
+      <SheetModal
         visible={showForm}
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={closeForm}
+        onClose={closeForm}
+        title="Nova solicitação"
+        subtitle="Dados do abastecimento"
+        icon={ClipboardList}
+        size="tall"
+        scroll={false}
+        bottomPad={0}
+        overlay={
+          <>
+            {renderPickerOverlay()}
+            <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+          </>
+        }
       >
-        <View
-          style={[
-            styles.safeArea,
-            {
-              backgroundColor: colors.background,
-              paddingTop: insets.top,
-              width: windowWidth,
-              height: windowHeight,
-              position: 'relative',
-            },
-          ]}
-        >
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.formHeader}>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formTitle}>Nova solicitação</Text>
-                <Text style={styles.formSubtitle}>Dados do abastecimento</Text>
-              </View>
-              <TouchableOpacity
-                onPress={closeForm}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={20} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
+        <View style={{ flex: 1, marginHorizontal: -22 }}>
             {loadingOptions ? (
               <View style={styles.formLoading}>
                 <ActivityIndicator color={colors.primary} size="large" />
@@ -1425,7 +1390,7 @@ export default function FuelRequestsScreen() {
 
                 <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
                   <TouchableOpacity
-                    style={[styles.primaryBtn, styles.formSubmitBtn, submitting && { opacity: 0.7 }]}
+                    style={[styles.primaryBtn, styles.formSubmitBtn, styles.sheetSubmitBtn, submitting && { opacity: 0.7 }]}
                     onPress={submitForm}
                     disabled={submitting}
                     activeOpacity={0.85}
@@ -1439,51 +1404,19 @@ export default function FuelRequestsScreen() {
                 </View>
               </>
             )}
-          </KeyboardAvoidingView>
-          {renderPickerOverlay()}
-          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
-      </Modal>
+      </SheetModal>
 
       {/* Detalhes da solicitação */}
-      <Modal
+      <SheetModal
         visible={Boolean(detailTarget)}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setDetailTarget(null)}
+        onClose={() => setDetailTarget(null)}
+        title={`Solicitação #${detailTarget?.displayNumber ?? ''}`}
+        subtitle={detailTarget ? STATUS_LABELS[detailTarget.status] : ''}
+        icon={FileText}
       >
-        <View style={styles.infoOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setDetailTarget(null)}
-          />
-          <View style={[styles.infoSheet, { backgroundColor: colors.card }]}>
-            <View style={styles.infoSheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.infoSheetTitle, { color: colors.text }]}>
-                  Solicitação #{detailTarget?.displayNumber ?? ''}
-                </Text>
-                <Text style={[styles.infoSheetSubtitle, { color: colors.textSecondary }]}>
-                  {detailTarget ? STATUS_LABELS[detailTarget.status] : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setDetailTarget(null)}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
             {detailTarget ? (
-              <ScrollView
-                style={{ maxHeight: 420 }}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
+              <>
                 <View style={styles.detailGrid}>
                   <View style={styles.detailField}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
@@ -1603,7 +1536,7 @@ export default function FuelRequestsScreen() {
                     </Text>
                   </View>
                 ) : null}
-              </ScrollView>
+              </>
             ) : null}
 
             {detailTarget && canCancel(detailTarget) ? (
@@ -1637,51 +1570,28 @@ export default function FuelRequestsScreen() {
                 <Text style={styles.reportBtnText}>Informar abastecimento</Text>
               </TouchableOpacity>
             ) : null}
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Informar abastecimento */}
-      <Modal
+      <SheetModal
         visible={Boolean(reportTarget)}
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={closeReport}
+        onClose={() => {
+          if (!reportSubmitting) closeReport();
+        }}
+        title="Informar abastecimento"
+        subtitle={reportTarget ? `#${reportTarget.displayNumber}` : undefined}
+        icon={Fuel}
+        size="tall"
+        scroll={false}
+        bottomPad={0}
+        overlay={
+          <>
+            {renderPickerOverlay()}
+            <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+          </>
+        }
       >
-        <View
-          style={[
-            styles.safeArea,
-            {
-              backgroundColor: colors.background,
-              paddingTop: insets.top,
-              width: windowWidth,
-              height: windowHeight,
-              position: 'relative',
-            },
-          ]}
-        >
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.formHeader}>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formTitle}>Informar abastecimento</Text>
-                <Text style={styles.formSubtitle}>
-                  {reportTarget ? `#${reportTarget.displayNumber}` : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={closeReport}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-                disabled={reportSubmitting}
-              >
-                <X size={20} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
+        <View style={{ flex: 1, marginHorizontal: -22 }}>
             <ScrollView
               contentContainerStyle={styles.formScroll}
               keyboardShouldPersistTaps="handled"
@@ -1874,7 +1784,7 @@ export default function FuelRequestsScreen() {
                 style={[
                   styles.primaryBtn,
                   styles.formSubmitBtn,
-                  { backgroundColor: '#059669' },
+                  styles.sheetSubmitBtn,
                   reportSubmitting && { opacity: 0.7 },
                 ]}
                 onPress={submitReportForm}
@@ -1888,11 +1798,8 @@ export default function FuelRequestsScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-          {renderPickerOverlay()}
-          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }
@@ -2113,6 +2020,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 8,
     },
     primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+    sheetSubmitBtn: { height: 54, borderRadius: 999, paddingVertical: 0, backgroundColor: '#ce3736' },
     empty: { alignItems: 'center', paddingVertical: 56, gap: 8, paddingHorizontal: 24 },
     emptyIcon: {
       width: 56,

@@ -19,6 +19,7 @@ import {
   Settings,
   Star,
   Sun,
+  UserPlus,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -329,6 +330,17 @@ export function TopNavbar({
                                 size="sm"
                               />
                             </span>
+                          ) : null}
+                          {crumb.action ? (
+                            <button
+                              type="button"
+                              onClick={crumb.action.onClick}
+                              title={crumb.action.label}
+                              aria-label={crumb.action.label}
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                            >
+                              <UserPlus className="h-4 w-4" />
+                            </button>
                           ) : null}
                         </span>
                       ) : crumb.href ? (

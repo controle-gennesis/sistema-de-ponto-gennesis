@@ -19,8 +19,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Check } from 'lucide-react-native';
+import { Check, Package } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import SheetModal, { SheetPrimaryButton } from '../components/SheetModal';
 import { useAuth } from '../context/AuthContext';
 import AppHeader from '../components/AppHeader';
 import { resolveMediaUrl } from '../utils/resolveMediaUrl';
@@ -769,86 +770,65 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
         </ScrollView>
       )}
 
-      <Modal
+      <SheetModal
         visible={partsModalOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setPartsModalOpen(false)}
+        onClose={() => setPartsModalOpen(false)}
+        title="Peças / materiais"
+        subtitle="Informe o que está faltando para marcar o chamado como aguardando peça."
+        icon={Package}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setPartsModalOpen(false)}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalKeyboard}
+        {parts.length === 0 ? (
+          <Text style={styles.modalEmpty}>Nenhuma peça adicionada ainda.</Text>
+        ) : (
+          parts.map((part) => (
+            <View key={part.id} style={styles.partRow}>
+              <Text style={styles.partName}>{part.name}</Text>
+              <TouchableOpacity
+                onPress={() => setParts((prev) => prev.filter((p) => p.id !== part.id))}
+                hitSlop={8}
+              >
+                <Text style={styles.partRemove}>Remover</Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
+
+        <View style={styles.partAddRow}>
+          <TextInput
+            value={newPartName}
+            onChangeText={setNewPartName}
+            placeholder="Nome da peça"
+            placeholderTextColor={colors.textSecondary}
+            style={styles.partInput}
+            onSubmitEditing={addPart}
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.partAddBtn, { backgroundColor: colors.primary }]}
+            onPress={addPart}
+            activeOpacity={0.85}
           >
-            <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.modalTitle}>Peças / materiais</Text>
-              <Text style={styles.modalHint}>
-                Informe o que está faltando para marcar o chamado como aguardando peça.
-              </Text>
+            <Text style={styles.primaryBtnText}>Adicionar</Text>
+          </TouchableOpacity>
+        </View>
 
-              {parts.length === 0 ? (
-                <Text style={styles.modalEmpty}>Nenhuma peça adicionada ainda.</Text>
-              ) : (
-                parts.map((part) => (
-                  <View key={part.id} style={styles.partRow}>
-                    <Text style={styles.partName}>{part.name}</Text>
-                    <TouchableOpacity
-                      onPress={() => setParts((prev) => prev.filter((p) => p.id !== part.id))}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.partRemove}>Remover</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
+        <View style={{ marginTop: 16 }}>
+          <SheetPrimaryButton
+            label="Confirmar aguardando peça"
+            onPress={confirmWaitingParts}
+            loading={mutation.isPending}
+            disabled={parts.length === 0}
+          />
+        </View>
 
-              <View style={styles.partAddRow}>
-                <TextInput
-                  value={newPartName}
-                  onChangeText={setNewPartName}
-                  placeholder="Nome da peça"
-                  placeholderTextColor={colors.textSecondary}
-                  style={styles.partInput}
-                  onSubmitEditing={addPart}
-                  autoFocus
-                />
-                <TouchableOpacity
-                  style={[styles.partAddBtn, { backgroundColor: colors.primary }]}
-                  onPress={addPart}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.primaryBtnText}>Adicionar</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryBtn,
-                  styles.modalConfirmBtn,
-                  (mutation.isPending || parts.length === 0) && { opacity: 0.5 },
-                ]}
-                disabled={mutation.isPending || parts.length === 0}
-                onPress={confirmWaitingParts}
-                activeOpacity={0.85}
-              >
-                {mutation.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryBtnText}>Confirmar aguardando peça</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setPartsModalOpen(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
-      </Modal>
+        <TouchableOpacity
+          style={styles.modalCancel}
+          onPress={() => setPartsModalOpen(false)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.modalCancelText}>Cancelar</Text>
+        </TouchableOpacity>
+      </SheetModal>
 
       <Modal
         visible={closeScannerOpen}

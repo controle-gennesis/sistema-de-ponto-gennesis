@@ -15,8 +15,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown } from 'lucide-react-native';
+import { Check, ChevronDown, MapPin, Tag } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import SheetModal from '../components/SheetModal';
 import AppHeader from '../components/AppHeader';
 import FormFieldLabel from '../components/FormFieldLabel';
 import {
@@ -143,48 +144,42 @@ export default function GestaoOsUnplannedScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      <Modal visible={Boolean(picker)} transparent animationType="fade" onRequestClose={() => setPicker(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setPicker(null)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sheetTitle}>
-              {picker === 'place' ? 'Local' : 'Categoria'}
-            </Text>
-            <ScrollView style={{ maxHeight: 360 }}>
-              {picker === 'place' && places.length === 0 ? (
-                <Text style={styles.optionSub}>Nenhum local cadastrado.</Text>
-              ) : (
-                (picker === 'place' ? places : categoryOptions.map((name) => ({ id: name, name }))).map(
-                  (item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.option}
-                      onPress={() => {
-                        if (picker === 'place') setPlace(item as GestaoOsFieldPlace);
-                        else setCategory(item.name);
-                        setPicker(null);
-                      }}
-                    >
-                      <View style={{ flex: 1, paddingRight: 12 }}>
-                        <Text style={styles.optionText}>{item.name}</Text>
-                        {picker === 'place' && 'buildingName' in item && item.buildingName ? (
-                          <Text style={styles.optionSub}>
-                            {[item.buildingName, (item as GestaoOsFieldPlace).sectorName]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </Text>
-                        ) : null}
-                      </View>
-                      {(picker === 'place' ? place?.id === item.id : category === item.name) ? (
-                        <Check size={16} color={colors.primary} />
-                      ) : null}
-                    </TouchableOpacity>
-                  )
-                )
-              )}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <SheetModal
+        visible={Boolean(picker)}
+        onClose={() => setPicker(null)}
+        title={picker === 'place' ? 'Local' : 'Categoria'}
+        icon={picker === 'place' ? MapPin : Tag}
+      >
+        {picker === 'place' && places.length === 0 ? (
+          <Text style={styles.optionSub}>Nenhum local cadastrado.</Text>
+        ) : (
+          (picker === 'place' ? places : categoryOptions.map((name) => ({ id: name, name }))).map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.option}
+              onPress={() => {
+                if (picker === 'place') setPlace(item as GestaoOsFieldPlace);
+                else setCategory(item.name);
+                setPicker(null);
+              }}
+            >
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.optionText}>{item.name}</Text>
+                {picker === 'place' && 'buildingName' in item && item.buildingName ? (
+                  <Text style={styles.optionSub}>
+                    {[item.buildingName, (item as GestaoOsFieldPlace).sectorName]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
+              {(picker === 'place' ? place?.id === item.id : category === item.name) ? (
+                <Check size={16} color={colors.primary} />
+              ) : null}
+            </TouchableOpacity>
+          ))
+        )}
+      </SheetModal>
     </View>
   );
 }

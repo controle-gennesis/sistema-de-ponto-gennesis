@@ -258,7 +258,7 @@ export function OptionSheet({
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.pickerItem, { backgroundColor: isDark ? colors.surface : colors.background }]}
+              style={[styles.pickerItem, { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#374151' : '#e5e7eb' }]}
               onPress={() => onSelect(item.value)}
               activeOpacity={0.75}
             >

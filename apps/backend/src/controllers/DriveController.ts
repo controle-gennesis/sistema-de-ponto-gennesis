@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { DriveFolderSharePermission } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { DriveService } from '../services/DriveService';
+import { prisma } from '../lib/prisma';
+import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 const driveService = new DriveService();
 
@@ -65,6 +67,21 @@ export class DriveController {
     }
   }
 
+  /** Ícone e cor da pasta (só o dono). Enviar null/vazio nos dois volta ao padrão. */
+  static async updateFolderAppearance(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const rawIcon = req.body?.iconKey;
+      const rawColor = req.body?.iconColor;
+      const iconKey = typeof rawIcon === 'string' && rawIcon.trim() ? rawIcon.trim() : null;
+      const iconColor = typeof rawColor === 'string' && rawColor.trim() ? rawColor.trim() : null;
+      const folder = await driveService.updateFolderAppearance(id, req.user!.id, { iconKey, iconColor });
+      res.json({ success: true, data: folder });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
   static async deleteFolder(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -88,6 +105,25 @@ export class DriveController {
   }
 
   // ── Compartilhamento ─────────────────────────────────────────────────────
+
+  /**
+   * Pessoas que podem receber acesso a uma pasta: todos os usuários ativos (de qualquer perfil), menos você.
+   * Antes o modal usava a lista de Funcionários, que exige permissão desse módulo e só traz o perfil "EMPLOYEE";
+   * quem não tinha essa permissão (ou quem tinha outro perfil) ficava sem conseguir escolher a pessoa.
+   */
+  static async listShareCandidates(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const users = await prisma.user.findMany({
+        where: { isActive: true, id: { not: req.user!.id }, ...gennecyBotUserWhereExclude() },
+        select: { id: true, name: true, email: true, cpf: true, profilePhotoUrl: true },
+        orderBy: { name: 'asc' },
+        take: 5000,
+      });
+      res.json({ success: true, data: users });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  }
 
   static async listFolderShares(req: AuthRequest, res: Response): Promise<void> {
     try {

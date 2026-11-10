@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { File as FsFile } from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
 import {
   Plus,
@@ -31,6 +33,7 @@ import {
   Filter,
   Paperclip,
   Search,
+  FileText,
 } from 'lucide-react-native';
 import AppHeader from '../components/AppHeader';
 import { AppToastHost, formFooterBottomPad, showAppToast, showFormValidationToast, useDeferredToast } from '../components/AppToast';
@@ -39,6 +42,7 @@ import FormFieldLabel from '../components/FormFieldLabel';
 import { PersonPickerListRow, PersonSelectField } from '../components/PersonPickerUi';
 import { formatCpfDisplay } from '../lib/cpf';
 import PickerSheetFrame from '../components/PickerSheetFrame';
+import SheetModal from '../components/SheetModal';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import OfflineBanner from '../components/OfflineBanner';
@@ -56,6 +60,8 @@ import {
   createDpRequest,
   destinationLabel,
   DP_TYPE_LABELS,
+  dpRequestIsSentToAccounting,
+  dpStatusLabel,
   fetchEligibleCostCenters,
   fetchMyDpRequests,
   fetchPayrollEmployees,
@@ -95,6 +101,7 @@ const ADM_TYPES: DpRequestType[] = [
   'ADM_INFORMATICA',
   'ADM_TREINAMENTOS_NR',
   'ADM_ASOS',
+  'ADM_OUTROS',
 ];
 
 const COMPANIES_LIST = ['ABRASIL', 'GÊNNESIS', 'MÉTRICA'];
@@ -264,7 +271,9 @@ function SelectField({
   );
 }
 
-function statusColor(status: DpRequestStatus, colors: any) {
+function statusColor(status: DpRequestStatus, colors: any, requestType?: string | null) {
+  // "Na Contabilidade" (finalizada no DP e enviada à Contabilidade): mesmo tom índigo do web.
+  if (status === 'CONCLUDED' && dpRequestIsSentToAccounting(requestType)) return '#6366f1';
   if (status === 'CONCLUDED') return colors.success;
   if (status === 'CANCELLED') return colors.error;
   if (status === 'WAITING_RETURN') return colors.warning;
@@ -392,6 +401,50 @@ async function pickAttachment(): Promise<Attachment | null> {
   };
 }
 
+const MAX_OUTROS_ANEXOS = 10;
+const MAX_ANEXO_BYTES = 15 * 1024 * 1024;
+
+/** "Outros" (Administração): escolhe vários arquivos (PDF, imagem, Word, Excel...) e lê em Base64. */
+async function pickDocumentAttachments(): Promise<Attachment[]> {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: [
+      'application/pdf',
+      'image/*',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv',
+      'text/plain',
+    ],
+    multiple: true,
+    copyToCacheDirectory: true,
+  });
+  if (result.canceled) return [];
+  const out: Attachment[] = [];
+  for (const asset of result.assets ?? []) {
+    if (asset.size != null && asset.size > MAX_ANEXO_BYTES) {
+      showAppToast({ type: 'error', text1: `"${asset.name}" passa de 15 MB e não foi anexado` });
+      continue;
+    }
+    try {
+      const dataBase64 = await new FsFile(asset.uri).base64();
+      if (dataBase64.length > 22_000_000) {
+        showAppToast({ type: 'error', text1: `"${asset.name}" passa de 15 MB e não foi anexado` });
+        continue;
+      }
+      out.push({
+        fileName: asset.name || `anexo-${Date.now()}`,
+        mimeType: asset.mimeType || 'application/octet-stream',
+        dataBase64,
+      });
+    } catch {
+      showAppToast({ type: 'error', text1: `Não foi possível ler "${asset.name}"` });
+    }
+  }
+  return out;
+}
+
 export default function DpRequestsScreen() {
   const navigation = useNavigation();
   const navState = navigation.getState?.() as { type?: string } | undefined;
@@ -431,6 +484,11 @@ export default function DpRequestsScreen() {
   const [prazoFim, setPrazoFim] = useState('');
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<FormRow[]>(() => [emptyFormRow(myEmployeeId)]);
+  // "Outros" (Administração): assunto, colaborador opcional, descrição e anexos.
+  const [outrosAssunto, setOutrosAssunto] = useState('');
+  const [outrosColaboradorId, setOutrosColaboradorId] = useState('');
+  const [outrosDescricao, setOutrosDescricao] = useState('');
+  const [outrosAnexos, setOutrosAnexos] = useState<Attachment[]>([]);
 
   const [picker, setPicker] = useState<{
     title: string;
@@ -545,7 +603,7 @@ export default function DpRequestsScreen() {
       const typeLabel = (DP_TYPE_LABELS[r.requestType] || r.requestType).toLowerCase();
       if (typeLabel.includes(q)) return true;
       if ((r.costCenter?.name || r.contract?.name || '').toLowerCase().includes(q)) return true;
-      if ((STATUS_LABELS[r.status] || '').toLowerCase().includes(q)) return true;
+      if (dpStatusLabel(r.status, r.requestType).toLowerCase().includes(q)) return true;
       return false;
     });
   }, [list, destFilter, statusFilter, search]);
@@ -581,6 +639,10 @@ export default function DpRequestsScreen() {
     setPrazoInicio('');
     setPrazoFim('');
     setRows([emptyFormRow(myEmployeeId)]);
+    setOutrosAssunto('');
+    setOutrosColaboradorId('');
+    setOutrosDescricao('');
+    setOutrosAnexos([]);
   };
 
   const notifyCreateError = (message: string) => {
@@ -677,6 +739,18 @@ export default function DpRequestsScreen() {
 
   const buildDetails = (): Record<string, unknown> => {
     if (!requestType) throw new Error('Selecione o tipo');
+
+    if (requestType === 'ADM_OUTROS') {
+      if (!outrosAssunto.trim()) throw new Error('Informe o assunto');
+      if (!outrosDescricao.trim()) throw new Error('Descreva a solicitação');
+      return {
+        assunto: outrosAssunto.trim(),
+        ...(outrosColaboradorId ? { colaboradorEmployeeId: outrosColaboradorId } : {}),
+        descricao: outrosDescricao.trim(),
+        anexos: outrosAnexos,
+      };
+    }
+
     if (!rows.length) throw new Error('Adicione ao menos um item');
 
     if (requestType === 'ADMISSAO') {
@@ -1114,13 +1188,13 @@ export default function DpRequestsScreen() {
                     <View
                       style={[
                         styles.badge,
-                        { backgroundColor: `${statusColor(row.status, colors)}18` },
+                        { backgroundColor: `${statusColor(row.status, colors, row.requestType)}18` },
                       ]}
                     >
                       <Text
-                        style={[styles.badgeText, { color: statusColor(row.status, colors) }]}
+                        style={[styles.badgeText, { color: statusColor(row.status, colors, row.requestType) }]}
                       >
-                        {STATUS_LABELS[row.status] || row.status}
+                        {dpStatusLabel(row.status, row.requestType)}
                       </Text>
                     </View>
                   </View>
@@ -1152,296 +1226,268 @@ export default function DpRequestsScreen() {
       </ScrollView>
 
       {/* Detail */}
-      <Modal
+      <SheetModal
         visible={!!detail}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setDetail(null)}
+        onClose={() => setDetail(null)}
+        title={`Solicitação #${detail?.displayNumber ?? detail?.id.slice(0, 8) ?? ''}`}
+        subtitle={detail ? dpStatusLabel(detail.status, detail.requestType) : ''}
+        icon={FileText}
       >
-        <View style={styles.detailOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setDetail(null)}
-          />
-          <View style={[styles.detailSheet, { backgroundColor: colors.card }]}>
-            <View style={styles.detailSheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.detailSheetTitle, { color: colors.text }]}>
-                  Solicitação #{detail?.displayNumber ?? detail?.id.slice(0, 8) ?? ''}
-                </Text>
-                <Text style={[styles.detailSheetSubtitle, { color: colors.textSecondary }]}>
-                  {detail ? STATUS_LABELS[detail.status] : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setDetail(null)}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
-            {detail ? (
-              <ScrollView
-                style={{ maxHeight: 520 }}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-                keyboardShouldPersistTaps="handled"
-              >
-                <View style={styles.detailGrid}>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Status
-                    </Text>
-                    <Text
-                      style={[
-                        styles.detailValue,
-                        { color: statusColor(detail.status, colors) },
-                      ]}
-                    >
-                      {STATUS_LABELS[detail.status]}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Tipo
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {DP_TYPE_LABELS[detail.requestType] || detail.requestType}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Destino
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {destinationLabel(detail.requestType)}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Urgência
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {URGENCY_LABELS[detail.urgency] || detail.urgency}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Contrato
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {detail.costCenter?.name || detail.contract?.name || '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Empresa
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {detail.company || '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.detailField}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                      Polo
-                    </Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>
-                      {detail.polo || '—'}
-                    </Text>
-                  </View>
-                  {detail.dpFeedback ? (
-                    <View style={styles.detailField}>
-                      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                        Feedback
-                      </Text>
-                      <Text style={[styles.detailValue, { color: colors.text }]}>
-                        {detail.dpFeedback}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {detail.requesterReturnComment ? (
-                    <View style={styles.detailField}>
-                      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                        Sua resposta
-                      </Text>
-                      <Text style={[styles.detailValue, { color: colors.text }]}>
-                        {detail.requesterReturnComment}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {detailPreview && detailPreview.items.length > 0 ? (
-                  <View style={styles.detailsSection}>
-                    <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>
-                      {detailPreview.sectionTitle}
-                    </Text>
-                    {detailPreview.items.map((item, index) => (
-                      <View
-                        key={`${item.title}-${index}`}
-                        style={[
-                          styles.detailsItem,
-                          {
-                            borderLeftColor: isDark
-                              ? 'rgba(255,255,255,0.18)'
-                              : 'rgba(15,23,42,0.12)',
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.detailsItemTitle, { color: colors.text }]}>
-                          {item.title}
+        {detail ? (
+          <View>
+                    <View style={styles.detailGrid}>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Status
                         </Text>
                         <Text
-                          style={[styles.detailsItemSubtitle, { color: colors.textSecondary }]}
+                          style={[
+                            styles.detailValue,
+                            { color: statusColor(detail.status, colors, detail.requestType) },
+                          ]}
                         >
-                          {item.subtitle}
+                          {dpStatusLabel(detail.status, detail.requestType)}
                         </Text>
                       </View>
-                    ))}
-                  </View>
-                ) : null}
-
-                {detail.status === 'WAITING_RETURN' ? (
-                  <View style={styles.returnBox}>
-                    <Text style={styles.returnTitle}>Sua pendência — responda ao DP</Text>
-                    <TextInput
-                      value={returnComment}
-                      onChangeText={setReturnComment}
-                      placeholder="Escreva sua resposta..."
-                      placeholderTextColor={colors.textSecondary}
-                      style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
-                      multiline
-                    />
-                    <TouchableOpacity
-                      style={styles.primaryBtn}
-                      onPress={() => void sendReturn()}
-                      disabled={returning}
-                    >
-                      {returning ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.primaryBtnText}>Responder ao DP</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-              </ScrollView>
-            ) : null}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Tipo
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {DP_TYPE_LABELS[detail.requestType] || detail.requestType}
+                        </Text>
+                      </View>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Destino
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {destinationLabel(detail.requestType)}
+                        </Text>
+                      </View>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Urgência
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {URGENCY_LABELS[detail.urgency] || detail.urgency}
+                        </Text>
+                      </View>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Contrato
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {detail.costCenter?.name || detail.contract?.name || '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Empresa
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {detail.company || '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.detailField}>
+                        <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                          Polo
+                        </Text>
+                        <Text style={[styles.detailValue, { color: colors.text }]}>
+                          {detail.polo || '—'}
+                        </Text>
+                      </View>
+                      {detail.dpFeedback ? (
+                        <View style={styles.detailField}>
+                          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                            Feedback
+                          </Text>
+                          <Text style={[styles.detailValue, { color: colors.text }]}>
+                            {detail.dpFeedback}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {detail.requesterReturnComment ? (
+                        <View style={styles.detailField}>
+                          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                            Sua resposta
+                          </Text>
+                          <Text style={[styles.detailValue, { color: colors.text }]}>
+                            {detail.requesterReturnComment}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+    
+                    {detailPreview && detailPreview.items.length > 0 ? (
+                      <View style={styles.detailsSection}>
+                        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>
+                          {detailPreview.sectionTitle}
+                        </Text>
+                        {detailPreview.items.map((item, index) => (
+                          <View
+                            key={`${item.title}-${index}`}
+                            style={[
+                              styles.detailsItem,
+                              {
+                                borderLeftColor: isDark
+                                  ? 'rgba(255,255,255,0.18)'
+                                  : 'rgba(15,23,42,0.12)',
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.detailsItemTitle, { color: colors.text }]}>
+                              {item.title}
+                            </Text>
+                            <Text
+                              style={[styles.detailsItemSubtitle, { color: colors.textSecondary }]}
+                            >
+                              {item.subtitle}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+    
+                    {detail.status === 'WAITING_RETURN' ? (
+                      <View style={styles.returnBox}>
+                        <Text style={styles.returnTitle}>Sua pendência — responda ao DP</Text>
+                        <TextInput
+                          value={returnComment}
+                          onChangeText={setReturnComment}
+                          placeholder="Escreva sua resposta..."
+                          placeholderTextColor={colors.textSecondary}
+                          style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+                          multiline
+                        />
+                        <TouchableOpacity
+                          style={styles.primaryBtn}
+                          onPress={() => void sendReturn()}
+                          disabled={returning}
+                        >
+                          {returning ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.primaryBtnText}>Responder ao DP</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
           </View>
-        </View>
-      </Modal>
+        ) : null}
+      </SheetModal>
 
       {/* Filter */}
-      <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
-        <View style={styles.pickerOverlay}>
-          <TouchableOpacity
-            style={styles.pickerBackdrop}
-            activeOpacity={1}
-            onPress={dismissOverlay}
-          />
-          <View style={[styles.pickerSheet, { backgroundColor: colors.card }]}>
-            <View style={styles.pickerHandle} />
-            <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Filtro de status</Text>
+      <SheetModal
+        visible={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Filtro de status"
+        icon={Filter}
+      >
+        <View style={{ gap: 8, paddingBottom: 8 }}>
+          {(["all", ...(Object.keys(STATUS_LABELS) as DpRequestStatus[])] as Array<"all" | DpRequestStatus>).map((s) => {
+            const ativo = statusFilter === s;
+            return (
               <TouchableOpacity
-                onPress={() => setFilterOpen(false)}
-                style={[styles.formCloseBtn, { width: 36, height: 36 }]}
-                accessibilityLabel="Fechar"
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              style={{ maxHeight: 420 }}
-              contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
-              showsVerticalScrollIndicator={false}
-            >
-              <TouchableOpacity
+                key={s}
                 style={[
                   styles.pickerItem,
-                  { backgroundColor: isDark ? colors.card : colors.surface },
+                  { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#374151' : '#e5e7eb' },
+                  ativo && { borderWidth: 1.5, borderColor: colors.primary },
                 ]}
                 onPress={() => {
-                  setStatusFilter('all');
+                  setStatusFilter(s);
                   setFilterOpen(false);
                 }}
+                activeOpacity={0.75}
               >
-                <Text style={styles.pickerItemLabel}>Todos</Text>
+                <Text style={[styles.pickerItemLabel, ativo && { color: colors.primary }]}>
+                  {s === 'all' ? 'Todos' : STATUS_LABELS[s]}
+                </Text>
               </TouchableOpacity>
-              {(Object.keys(STATUS_LABELS) as DpRequestStatus[]).map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={[
-                    styles.pickerItem,
-                    { backgroundColor: isDark ? colors.card : colors.surface },
-                  ]}
-                  onPress={() => {
-                    setStatusFilter(s);
-                    setFilterOpen(false);
-                  }}
-                >
-                  <Text style={styles.pickerItemLabel}>{STATUS_LABELS[s]}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+            );
+          })}
         </View>
-      </Modal>
+      </SheetModal>
 
       {/* Create */}
-      <Modal
+      <SheetModal
         visible={createOpen}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setPicker(null);
+          setCreateOpen(false);
+        }}
+        title="Nova solicitação"
+        subtitle={
+          !createTarget
+            ? 'Selecione o destino da solicitação'
+            : createTarget === 'DP'
+              ? 'Departamento Pessoal'
+              : 'Administração'
+        }
+        icon={ClipboardList}
+        size={createTarget ? 'tall' : 'auto'}
+        scroll={false}
+        bottomPad={createTarget ? 0 : undefined}
+        overlay={
+          <>
+            {picker ? (
+                        <PickerSheetFrame title={picker!.title} onClose={dismissOverlay} search={pickerSearch} onSearchChange={setPickerSearch}>
+            <FlatList
+                              style={{ flex: 1 }}
+                              data={pickerFiltered}
+                              keyExtractor={(item) => item.value}
+                              keyboardShouldPersistTaps="handled"
+                              showsVerticalScrollIndicator={false}
+                              renderItem={({ item }) =>
+                                'avatarUri' in item ? (
+                                  <PersonPickerListRow
+                                    label={item.label}
+                                    subtitle={item.subtitle}
+                                    avatarUri={item.avatarUri}
+                                    colors={colors}
+                                    isDark={isDark}
+                                    onPress={() => {
+                                      picker!.onSelect(item.value);
+                                      setPicker(null);
+                                    }}
+                                  />
+                                ) : (
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.pickerItem,
+                                      { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#374151' : '#e5e7eb' },
+                                    ]}
+                                    onPress={() => {
+                                      picker!.onSelect(item.value);
+                                      setPicker(null);
+                                    }}
+                                    activeOpacity={0.75}
+                                  >
+                                    <Text style={styles.pickerItemLabel}>{item.label}</Text>
+                                    {item.subtitle ? (
+                                      <Text style={styles.pickerItemSub}>{item.subtitle}</Text>
+                                    ) : null}
+                                  </TouchableOpacity>
+                                )
+                              }
+                              ListEmptyComponent={
+                                <Text style={styles.pickerEmpty}>Nenhum resultado</Text>
+                              }
+                              contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
+                            />
+                          </PickerSheetFrame>
+                      ) : null}
+            <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+          </>
+        }
       >
-        <View
-          style={{
-            flex: 1,
-            width: windowWidth,
-            height: windowHeight,
-            backgroundColor: colors.background,
-            paddingTop: insets.top,
-            position: 'relative',
-          }}
-        >
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.formHeader}>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formTitle}>Nova solicitação</Text>
-                <Text style={styles.formSubtitle}>
-                  {!createTarget
-                    ? 'Selecione o destino da solicitação'
-                    : createTarget === 'DP'
-                      ? 'Departamento Pessoal'
-                      : 'Administração'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setPicker(null);
-                  setCreateOpen(false);
-                }}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={20} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
+        <View style={createTarget ? { flex: 1, marginHorizontal: -22 } : { marginHorizontal: -22 }}>
             {!createTarget ? (
               <ScrollView
-                contentContainerStyle={styles.formScroll}
+                contentContainerStyle={[styles.formScroll, { paddingBottom: 0 }]}
                 showsVerticalScrollIndicator={false}
+                scrollEnabled={false}
               >
                 <Text style={styles.sectionTitle}>Destino</Text>
                 <TouchableOpacity
@@ -1618,7 +1664,99 @@ export default function DpRequestsScreen() {
                     <Text style={styles.sectionTitle}>Detalhes da solicitação</Text>
                   ) : null}
 
-                  {requestType
+                  {requestType === 'ADM_OUTROS' ? (
+                    <View style={styles.itemCard}>
+                      <Field
+                        label="Assunto"
+                        required
+                        value={outrosAssunto}
+                        onChange={setOutrosAssunto}
+                        styles={styles}
+                        colors={colors}
+                        isDark={isDark}
+                      />
+                      <PersonSelectField
+                        label="Colaborador relacionado"
+                        valueLabel={employees.find((e) => e.id === outrosColaboradorId)?.name || ''}
+                        valueSubtitle={
+                          formatCpfDisplay(employees.find((e) => e.id === outrosColaboradorId)?.cpf) || undefined
+                        }
+                        valueAvatarUri={employees.find((e) => e.id === outrosColaboradorId)?.profilePhotoUrl}
+                        placeholder="Selecionar colaborador (opcional)"
+                        colors={colors}
+                        isDark={isDark}
+                        onPress={() =>
+                          openPicker(
+                            'Colaborador',
+                            [
+                              { value: '', label: 'Nenhum' },
+                              ...employees.map((e) => ({
+                                value: e.id,
+                                label: e.name,
+                                subtitle: formatCpfDisplay(e.cpf) || e.department || undefined,
+                                avatarUri: e.profilePhotoUrl ?? null,
+                              })),
+                            ],
+                            (id) => setOutrosColaboradorId(id)
+                          )
+                        }
+                      />
+                      <Field
+                        label="Descrição detalhada"
+                        required
+                        value={outrosDescricao}
+                        onChange={setOutrosDescricao}
+                        styles={styles}
+                        colors={colors}
+                        isDark={isDark}
+                        multiline
+                      />
+                      <AttachButton
+                        label={
+                          outrosAnexos.length > 0
+                            ? `Anexar mais arquivos (${outrosAnexos.length}/${MAX_OUTROS_ANEXOS})`
+                            : 'Anexar documento'
+                        }
+                        attached={outrosAnexos.length > 0}
+                        onPress={async () => {
+                          if (outrosAnexos.length >= MAX_OUTROS_ANEXOS) {
+                            showAppToast({ type: 'error', text1: `Máximo de ${MAX_OUTROS_ANEXOS} anexos` });
+                            return;
+                          }
+                          const novos = await pickDocumentAttachments();
+                          if (!novos.length) return;
+                          const vagas = MAX_OUTROS_ANEXOS - outrosAnexos.length;
+                          if (novos.length > vagas) {
+                            showAppToast({ type: 'error', text1: `Máximo de ${MAX_OUTROS_ANEXOS} anexos` });
+                          }
+                          setOutrosAnexos((prev) => [...prev, ...novos.slice(0, vagas)]);
+                        }}
+                        styles={styles}
+                        colors={colors}
+                        isDark={isDark}
+                      />
+                      {outrosAnexos.map((anexo, i) => (
+                        <View
+                          key={`${anexo.fileName}-${i}`}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}
+                        >
+                          <Paperclip size={14} color={colors.textSecondary} strokeWidth={2.2} />
+                          <Text style={{ flex: 1, fontSize: 13, color: colors.text }} numberOfLines={1}>
+                            {anexo.fileName}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => setOutrosAnexos((prev) => prev.filter((_, j) => j !== i))}
+                            hitSlop={8}
+                            accessibilityLabel={`Remover ${anexo.fileName}`}
+                          >
+                            <X size={16} color={colors.error || '#ef4444'} strokeWidth={2.2} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {requestType && requestType !== 'ADM_OUTROS'
                     ? rows.map((row, index) => {
                         const selectedEmployee = employees.find((e) => e.id === row.employeeId);
                         const empLabel =
@@ -2353,7 +2491,7 @@ export default function DpRequestsScreen() {
                       })
                     : null}
 
-                  {requestType && rows.length < maxRows ? (
+                  {requestType && requestType !== 'ADM_OUTROS' && rows.length < maxRows ? (
                     <TouchableOpacity
                       style={styles.addMoreBtn}
                       onPress={addRow}
@@ -2390,57 +2528,8 @@ export default function DpRequestsScreen() {
                 </View>
               </>
             )}
-          </KeyboardAvoidingView>
-          {picker ? (
-            <PickerSheetFrame title={picker.title} onClose={dismissOverlay} search={pickerSearch} onSearchChange={setPickerSearch}>
-<FlatList
-                  style={{ flex: 1 }}
-                  data={pickerFiltered}
-                  keyExtractor={(item) => item.value}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                  renderItem={({ item }) =>
-                    'avatarUri' in item ? (
-                      <PersonPickerListRow
-                        label={item.label}
-                        subtitle={item.subtitle}
-                        avatarUri={item.avatarUri}
-                        colors={colors}
-                        isDark={isDark}
-                        onPress={() => {
-                          picker.onSelect(item.value);
-                          setPicker(null);
-                        }}
-                      />
-                    ) : (
-                      <TouchableOpacity
-                        style={[
-                          styles.pickerItem,
-                          { backgroundColor: isDark ? colors.surface : colors.background },
-                        ]}
-                        onPress={() => {
-                          picker.onSelect(item.value);
-                          setPicker(null);
-                        }}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={styles.pickerItemLabel}>{item.label}</Text>
-                        {item.subtitle ? (
-                          <Text style={styles.pickerItemSub}>{item.subtitle}</Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    )
-                  }
-                  ListEmptyComponent={
-                    <Text style={styles.pickerEmpty}>Nenhum resultado</Text>
-                  }
-                  contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
-                />
-              </PickerSheetFrame>
-          ) : null}
-          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }

@@ -20,8 +20,9 @@ import { formatDpRequestDetails } from '../../lib/formatDpRequestDetails';
 import {
   destinationLabel,
   DP_TYPE_LABELS,
+  dpRequestIsSentToAccounting,
+  dpStatusLabel,
   fetchPayrollEmployees,
-  STATUS_LABELS,
   URGENCY_LABELS,
   type DpRequest,
   type DpRequestStatus,
@@ -59,7 +60,8 @@ type Props = {
   embedded?: boolean;
 };
 
-function statusColor(status: DpRequestStatus, colors: any) {
+function statusColor(status: DpRequestStatus, colors: any, requestType?: string | null) {
+  if (status === 'CONCLUDED' && dpRequestIsSentToAccounting(requestType)) return '#6366f1';
   if (status === 'CONCLUDED') return colors.success;
   if (status === 'CANCELLED') return colors.error;
   if (status === 'WAITING_RETURN') return colors.warning;
@@ -236,7 +238,7 @@ export default function ApprovalActionSheet({
     ? `Solicitação #${dpRaw.displayNumber ?? dpRaw.id.slice(0, 8)}`
     : item.title;
   const headerSubtitle = dpRaw
-    ? STATUS_LABELS[dpRaw.status] || dpRaw.status
+    ? dpStatusLabel(dpRaw.status, dpRaw.requestType)
     : item.subtitle;
 
   const sheet = (
@@ -267,8 +269,8 @@ export default function ApprovalActionSheet({
               <DetailField
                 styles={styles}
                 label="Status"
-                value={STATUS_LABELS[dpRaw.status] || dpRaw.status}
-                valueColor={statusColor(dpRaw.status, colors)}
+                value={dpStatusLabel(dpRaw.status, dpRaw.requestType)}
+                valueColor={statusColor(dpRaw.status, colors, dpRaw.requestType)}
               />
               <DetailField
                 styles={styles}

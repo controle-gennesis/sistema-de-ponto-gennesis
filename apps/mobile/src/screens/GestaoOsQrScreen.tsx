@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Check, QrCode, Wrench } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import SheetModal, { SheetPrimaryButton } from '../components/SheetModal';
 import AppHeader from '../components/AppHeader';
 import FormFieldLabel from '../components/FormFieldLabel';
 import { createWorkOrderFromQr, resolveAssetQr, saveCloseQrToken } from '../services/gestaoOs';
@@ -241,48 +242,30 @@ export default function GestaoOsQrScreen({ route, navigation }: Props) {
         </KeyboardAvoidingView>
       )}
 
-      <Modal
+      <SheetModal
         visible={Boolean(createdWo)}
-        transparent
-        animationType="fade"
-        onRequestClose={goToCreatedWorkOrder}
+        onClose={goToCreatedWorkOrder}
+        title="Chamado aberto"
+        subtitle="Sua solicitação foi registrada e seguirá para análise."
+        icon={Check}
       >
-        <Pressable style={styles.successBackdrop} onPress={goToCreatedWorkOrder}>
-          <Pressable style={styles.successCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.successIconRing}>
-              <View style={styles.successIcon}>
-                <Check size={28} color="#fff" strokeWidth={3} />
-              </View>
-            </View>
+        {createdWo ? (
+          <View style={[styles.successBadge, { alignSelf: 'center' }]}>
+            <Text style={styles.successBadgeLabel}>Número</Text>
+            <Text style={styles.successBadgeValue}>#{createdWo.displayNumber}</Text>
+          </View>
+        ) : null}
 
-            <Text style={styles.successTitle}>Chamado aberto</Text>
-            <Text style={styles.successSubtitle}>
-              Sua solicitação foi registrada e seguirá para análise.
-            </Text>
+        {resolved?.name ? (
+          <Text style={[styles.successMeta, { textAlign: 'center' }]} numberOfLines={2}>
+            {resolved.name}
+          </Text>
+        ) : null}
 
-            {createdWo ? (
-              <View style={styles.successBadge}>
-                <Text style={styles.successBadgeLabel}>Número</Text>
-                <Text style={styles.successBadgeValue}>#{createdWo.displayNumber}</Text>
-              </View>
-            ) : null}
-
-            {resolved?.name ? (
-              <Text style={styles.successMeta} numberOfLines={2}>
-                {resolved.name}
-              </Text>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.successBtn}
-              onPress={goToCreatedWorkOrder}
-              activeOpacity={0.88}
-            >
-              <Text style={styles.successBtnText}>Ir para chamados</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <View style={{ marginTop: 18 }}>
+          <SheetPrimaryButton label="Ir para chamados" onPress={goToCreatedWorkOrder} />
+        </View>
+      </SheetModal>
     </View>
   );
 }

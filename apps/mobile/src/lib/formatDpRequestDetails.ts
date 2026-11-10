@@ -123,6 +123,20 @@ export function formatDpRequestDetails(
   const d = details;
   const nameById = employeeNameById;
 
+  if (requestType === 'ADM_OUTROS') {
+    const colaboradorId = str(d.colaboradorEmployeeId);
+    const qtdAnexos = Array.isArray(d.anexos) ? d.anexos.length : 0;
+    const items: DpDetailItem[] = [
+      { title: 'Assunto', subtitle: dash(str(d.assunto)) },
+      ...(colaboradorId
+        ? [{ title: 'Colaborador relacionado', subtitle: nameById?.get(colaboradorId) ?? colaboradorId }]
+        : []),
+      { title: 'Descrição', subtitle: dash(str(d.descricao)) },
+      ...(qtdAnexos > 0 ? [{ title: 'Anexos', subtitle: `${qtdAnexos} arquivo(s) anexado(s)` }] : []),
+    ];
+    return { sectionTitle: 'Detalhes da solicitação (ADM/TST)', items };
+  }
+
   if (requestType === 'ADMISSAO') {
     const legacyMotivo = str(d.motivoContratacao);
     const legacySetor = str(d.setor);

@@ -142,6 +142,29 @@ export const STATUS_LABELS: Record<DpRequestStatus, string> = {
   CANCELLED: 'Cancelada',
 };
 
+/** Tipos que, ao finalizar, geram um pedido no Atendimento Contábil (igual ao web). */
+const DP_TYPES_SENT_TO_ACCOUNTING = new Set([
+  'ADMISSAO',
+  'FERIAS',
+  'RESCISAO',
+  'ALTERACAO_FUNCAO_SALARIO',
+  'RETIFICACAO_ALOCACAO',
+]);
+
+export const DP_SENT_TO_ACCOUNTING_LABEL = 'Na Contabilidade';
+
+export function dpRequestIsSentToAccounting(requestType: string | null | undefined): boolean {
+  return !!requestType && DP_TYPES_SENT_TO_ACCOUNTING.has(requestType);
+}
+
+/** Rótulo do status: nos tipos que vão para a Contabilidade, "Finalizada" aparece como "Na Contabilidade" (como no web). */
+export function dpStatusLabel(status: string, requestType?: string | null): string {
+  if (status === 'CONCLUDED' && dpRequestIsSentToAccounting(requestType)) {
+    return DP_SENT_TO_ACCOUNTING_LABEL;
+  }
+  return (STATUS_LABELS as Record<string, string>)[status] || status;
+}
+
 export function isAdmTstRequestType(requestType: string): boolean {
   return requestType.startsWith('ADM_');
 }
@@ -150,10 +173,28 @@ export function destinationLabel(requestType: string): string {
   return isAdmTstRequestType(requestType) ? 'Administração' : 'Departamento Pessoal';
 }
 
+/**
+ * Tipos criados direto para a Contabilidade (sem gestor/DP). Não são "solicitações internas":
+ * no web ficam na tela da Contabilidade e aqui não entram na lista nem nos avisos.
+ */
+const ACCOUNTING_DIRECT_TYPES = new Set([
+  'CONVENCAO_COLETIVA',
+  'FECHAMENTO_FOLHA',
+  'IMPOSTOS_ENCARGOS',
+  'REALOCACAO_COLABORADOR',
+  'RETIFICACAO_RECALCULO',
+  'SOLICITACAO_GERAL',
+]);
+
+export function isAccountingDirectRequestType(requestType: string): boolean {
+  return ACCOUNTING_DIRECT_TYPES.has(requestType);
+}
+
 export async function fetchMyDpRequests(status = 'all'): Promise<DpRequest[]> {
   const q = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
   const res = await api.get(`/api/solicitacoes-dp/minhas${q}`);
-  return (await readApiData<DpRequest[]>(res)) || [];
+  const lista = (await readApiData<DpRequest[]>(res)) || [];
+  return lista.filter((r) => !isAccountingDirectRequestType(r.requestType));
 }
 
 export async function fetchEligibleContracts(): Promise<DpEligibleContract[]> {
