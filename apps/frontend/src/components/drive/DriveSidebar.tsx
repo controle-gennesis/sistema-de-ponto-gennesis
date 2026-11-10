@@ -1,10 +1,13 @@
 'use client';
 
 import React from 'react';
+import { AppTabButton } from '@/components/ui/AppTabButton';
 import {
   Clock,
   Cloud,
   HardDrive,
+  Loader2,
+  Plus,
   Share2,
   Star,
   Trash2,
@@ -27,6 +30,9 @@ type Props = {
   onChangeView: (view: DriveSidebarView) => void;
   storage?: StorageInfo;
   storageLoading?: boolean;
+  /** Botão "Novo" no topo do menu: recebe a posição do botão para abrir o menu logo abaixo. Sem isso, o botão não aparece. */
+  onNew?: (anchor: DOMRect) => void;
+  newLoading?: boolean;
 };
 
 function formatUsed(bytes: number): string {
@@ -56,47 +62,56 @@ export function DriveSidebar({
   onChangeView,
   storage,
   storageLoading,
+  onNew,
+  newLoading,
 }: Props) {
   const used = storage?.usedBytes ?? 0;
 
   return (
-    <aside className="flex w-full shrink-0 flex-col lg:sticky lg:top-4 lg:w-52 lg:self-start">
+    <aside className="flex w-full shrink-0 flex-col">
+      {onNew ? (
+        <button
+          type="button"
+          onClick={(e) => onNew(e.currentTarget.getBoundingClientRect())}
+          className="mb-4 flex h-12 w-full items-center justify-start gap-2 rounded-xl bg-red-600 px-4 text-base font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800"
+          aria-label="Novo"
+          aria-haspopup="menu"
+        >
+          {newLoading ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <Plus className="h-5 w-5" strokeWidth={2.25} />
+          )}
+          <span>Novo</span>
+        </button>
+      ) : null}
       <nav
         className="-mx-1 flex gap-0.5 overflow-x-auto px-1 pb-1 lg:flex-col lg:overflow-visible lg:pb-0"
         aria-label="Navegação do Drive"
+        role="tablist"
+        aria-orientation="vertical"
       >
         {NAV.map(({ id, label, Icon }) => {
           const active = activeView === id;
           return (
-            <button
+            <AppTabButton
               key={id}
-              type="button"
+              active={active}
               onClick={() => onChangeView(id)}
               aria-current={active ? 'page' : undefined}
-              className={`inline-flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors lg:w-full ${
-                active
-                  ? 'bg-red-50 font-medium text-red-700 dark:bg-red-900/20 dark:text-red-500'
-                  : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
+              className="shrink-0 !justify-start gap-3 px-3 py-2.5 text-left text-sm font-medium lg:w-full"
             >
-              <Icon
-                strokeWidth={1.75}
-                className={`h-4 w-4 shrink-0 ${
-                  active
-                    ? 'text-red-600 dark:text-red-500'
-                    : 'text-gray-500 dark:text-gray-400'
-                }`}
-              />
+              <Icon strokeWidth={1.75} className="h-4 w-4 shrink-0" />
               <span className="whitespace-nowrap leading-none">{label}</span>
-            </button>
+            </AppTabButton>
           );
         })}
       </nav>
 
       <div className="mt-5 hidden border-t border-gray-200 pt-5 dark:border-gray-700 lg:block">
         <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
-            <Cloud className="h-4 w-4 text-red-600 dark:text-red-400" strokeWidth={1.75} />
+          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50 dark:bg-red-950/40">
+            <Cloud className="h-6 w-6 text-red-600 dark:text-red-400" strokeWidth={1.75} />
           </span>
           <div className="min-w-0">
             <p className="text-xs text-gray-500 dark:text-gray-400">Armazenamento</p>

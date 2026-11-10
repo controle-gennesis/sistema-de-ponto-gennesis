@@ -11,7 +11,7 @@ import React, {
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
-import { fetchMyDpRequests, STATUS_LABELS as DP_STATUS_LABELS } from '../services/dpRequests';
+import { dpStatusLabel, fetchMyDpRequests } from '../services/dpRequests';
 import { fetchMyWorkOrders } from '../services/gestaoOs';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
 import { hasRegisteredPushToken, registerPushTokenWithServer } from './pushRegistration';
@@ -120,6 +120,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         status: string;
         updatedAt: string;
         displayCode?: string;
+        /** Só nas solicitações internas: define se "Finalizada" aparece como "Na Contabilidade". */
+        requestType?: string;
       }>,
     ) => {
       const prev = snapshotRef.current;
@@ -145,8 +147,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           title = workOrderStatusTitle(row.status);
           body = workOrderStatusMessage(row.status, row.displayCode);
         } else if (row.kind === 'dp') {
-          const label =
-            (DP_STATUS_LABELS as Record<string, string>)[row.status] || row.status;
+          const label = dpStatusLabel(row.status, row.requestType);
           title = dpStatusTitle(label);
           body = dpStatusMessage(label, row.displayCode);
         } else {
@@ -240,6 +241,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           status: r.status,
           updatedAt: r.createdAt || new Date().toISOString(),
           displayCode: r.displayNumber != null ? String(r.displayNumber) : undefined,
+          requestType: r.requestType,
         })),
         ...workOrderRows.map((r) => ({
           kind: 'workorder' as const,

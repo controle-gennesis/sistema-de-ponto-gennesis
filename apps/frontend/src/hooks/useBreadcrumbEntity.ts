@@ -20,6 +20,15 @@ function normalizeEntities(
       ...(item.onClick
         ? { onClick: () => latestRef?.current[index]?.onClick?.() }
         : {}),
+      ...(item.action
+        ? {
+            action: {
+              label: item.action.label,
+              icon: item.action.icon,
+              onClick: () => latestRef?.current[index]?.action?.onClick(),
+            },
+          }
+        : {}),
       ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
       ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
         ? { badgeMenu: item.badgeMenu }
@@ -55,7 +64,7 @@ export function useBreadcrumbEntity(
   const key = normalized
     .map(
       (e) =>
-        `${e.label}|${e.href ?? ''}|${e.onClick ? 'fn' : ''}|${e.badge ?? ''}|${(e.badgeMenu ?? [])
+        `${e.label}|${e.href ?? ''}|${e.onClick ? 'fn' : ''}|${e.action?.label ?? ''}|${e.badge ?? ''}|${(e.badgeMenu ?? [])
           .map((m) => m.href)
           .join(',')}`
     )

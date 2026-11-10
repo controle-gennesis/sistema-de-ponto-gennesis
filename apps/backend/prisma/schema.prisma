@@ -3310,6 +3310,10 @@ model DriveFolder {
   parentId  String?
   ownerId   String
   starred   Boolean   @default(false)
+  /// Ícone escolhido pelo dono (chave da lista fixa do front); vazio = ícone padrão de pasta.
+  iconKey   String?
+  /// Cor do ícone em #RRGGBB; vazio = vermelho padrão.
+  iconColor String?
   trashedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

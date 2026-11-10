@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useDriveMenuDismiss } from './useDriveMenuDismiss';
 import {
   Download,
   Folder,
@@ -14,6 +16,7 @@ import {
 import { Card } from '@/components/ui/Card';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { FolderIconTile } from '@/components/drive/folderAppearance';
 
 type DriveFolder = {
   id: string;
@@ -23,6 +26,8 @@ type DriveFolder = {
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
   starred?: boolean;
+  iconKey?: string | null;
+  iconColor?: string | null;
   trashedAt?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -59,6 +64,8 @@ type Props = {
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
   onOpenShare?: (folder: DriveFolder) => void;
+  /** Abre a janela de ícone e cor da pasta. */
+  onCustomize?: (folder: DriveFolder) => void;
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   trashMode?: boolean;
@@ -160,6 +167,36 @@ function MenuItem({
   );
 }
 
+type AncoraMenu = { top: number; bottom: number; right: number };
+
+const MENU_LARGURA = 188;
+const MENU_ALTURA_ESTIMADA = 230;
+
+/**
+ * Painel do menu de três pontinhos. É desenhado direto no `body` (fora da tabela, que corta o que passa da borda)
+ * e posicionado ao lado do botão: abre para baixo, ou para cima quando não há espaço embaixo.
+ */
+function MenuFlutuante({ ancora, children }: { ancora: AncoraMenu; children: React.ReactNode }) {
+  if (typeof document === 'undefined') return null;
+  const paraCima = ancora.bottom + MENU_ALTURA_ESTIMADA > window.innerHeight && ancora.top > MENU_ALTURA_ESTIMADA;
+  const left = Math.max(8, Math.min(ancora.right - MENU_LARGURA, window.innerWidth - MENU_LARGURA - 8));
+  return createPortal(
+    <div
+      data-drive-menu
+      className="fixed z-[70] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+      style={{
+        left,
+        minWidth: MENU_LARGURA,
+        ...(paraCima ? { bottom: window.innerHeight - ancora.top + 4 } : { top: ancora.bottom + 4 }),
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 const rowClass = `group relative grid ${GRID_COLS} items-center gap-4 border-b border-gray-100 px-4 py-3 transition-colors last:border-0 hover:bg-gray-50 dark:border-gray-700/50 dark:hover:bg-gray-700/50 cursor-pointer`;
 
 export function DriveListView({
@@ -170,6 +207,7 @@ export function DriveListView({
   onRename,
   onDelete,
   onOpenShare,
+  onCustomize,
   onToggleStar,
   onRestore,
   trashMode,
@@ -179,6 +217,28 @@ export function DriveListView({
     f.canManageShares ?? (!!currentUserId && f.ownerId === currentUserId);
   const isOwnerFile = (f: DriveFile) => !!currentUserId && f.ownerId === currentUserId;
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuAncora, setMenuAncora] = useState<AncoraMenu | null>(null);
+  const fecharMenu = useCallback(() => setOpenMenuId(null), []);
+  useDriveMenuDismiss(openMenuId !== null, fecharMenu);
+  // O painel é fixo na tela: se a página rolar ou a janela mudar de tamanho, fecha em vez de ficar solto.
+  useEffect(() => {
+    if (openMenuId === null) return;
+    window.addEventListener('scroll', fecharMenu, true);
+    window.addEventListener('resize', fecharMenu);
+    return () => {
+      window.removeEventListener('scroll', fecharMenu, true);
+      window.removeEventListener('resize', fecharMenu);
+    };
+  }, [openMenuId, fecharMenu]);
+  const alternarMenu = (menuKey: string, aberto: boolean, botao: HTMLElement) => {
+    if (aberto) {
+      setOpenMenuId(null);
+      return;
+    }
+    const r = botao.getBoundingClientRect();
+    setMenuAncora({ top: r.top, bottom: r.bottom, right: r.right });
+    setOpenMenuId(menuKey);
+  };
 
   return (
     <div onClick={() => setOpenMenuId(null)}>
@@ -222,9 +282,7 @@ export function DriveListView({
               }}
               className={rowClass}
             >
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
-                <Folder className="h-4 w-4 text-red-500 dark:text-red-400" strokeWidth={1.75} />
-              </span>
+              <FolderIconTile iconKey={folder.iconKey} color={folder.iconColor} />
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
                   {folder.name}
@@ -245,9 +303,10 @@ export function DriveListView({
               <span className="text-right text-xs text-gray-400 dark:text-gray-500">—</span>
               <button
                 type="button"
+                data-drive-menu
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenMenuId(menuOpen ? null : menuKey);
+                  alternarMenu(menuKey, menuOpen, e.currentTarget);
                 }}
                 className={`mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200 ${
                   menuOpen ? 'bg-gray-200 text-gray-700 dark:bg-gray-600' : ''
@@ -257,11 +316,8 @@ export function DriveListView({
                 <MoreVertical className="h-4 w-4" />
               </button>
 
-              {menuOpen && (
-                <div
-                  className="absolute right-3 top-[calc(100%-8px)] z-30 min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
-                  onClick={(e) => e.stopPropagation()}
-                >
+              {menuOpen && menuAncora && (
+                <MenuFlutuante ancora={menuAncora}>
                   {trashMode ? (
                     <>
                       <MenuItem
@@ -315,16 +371,18 @@ export function DriveListView({
                           <Users className="h-4 w-4" /> Acesso
                         </MenuItem>
                       )}
+                      {folder.isOwner !== false && onCustomize && (
+                        <MenuItem
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            onCustomize(folder);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" /> Editar pasta
+                        </MenuItem>
+                      )}
                       {canManage(folder) && (
                         <>
-                          <MenuItem
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              onRename('folder', folder.id, folder.name);
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" /> Renomear
-                          </MenuItem>
                           <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
                           <MenuItem
                             danger
@@ -339,7 +397,7 @@ export function DriveListView({
                       )}
                     </>
                   )}
-                </div>
+                </MenuFlutuante>
               )}
             </div>
           );
@@ -390,9 +448,10 @@ export function DriveListView({
               </span>
               <button
                 type="button"
+                data-drive-menu
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenMenuId(menuOpen ? null : menuKey);
+                  alternarMenu(menuKey, menuOpen, e.currentTarget);
                 }}
                 className={`mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200 ${
                   menuOpen ? 'bg-gray-200 text-gray-700 dark:bg-gray-600' : ''
@@ -402,11 +461,8 @@ export function DriveListView({
                 <MoreVertical className="h-4 w-4" />
               </button>
 
-              {menuOpen && (
-                <div
-                  className="absolute right-3 top-[calc(100%-8px)] z-30 min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
-                  onClick={(e) => e.stopPropagation()}
-                >
+              {menuOpen && menuAncora && (
+                <MenuFlutuante ancora={menuAncora}>
                   {trashMode ? (
                     <>
                       <MenuItem
@@ -470,7 +526,7 @@ export function DriveListView({
                       </MenuItem>
                     </>
                   )}
-                </div>
+                </MenuFlutuante>
               )}
             </div>
           );

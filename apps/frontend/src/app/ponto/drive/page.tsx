@@ -1,7 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useCallback, useRef, useMemo, useEffect, useLayoutEffect, Suspense } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useCallback, useRef, useMemo, useEffect, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -21,12 +20,6 @@ import {
   Loader2,
   MoreVertical,
   Users,
-  UserPlus,
-  ListPlus,
-  ChevronDown,
-  ChevronUp,
-  ChevronRight,
-  Plus,
   Star,
   RotateCcw,
   Clock,
@@ -39,6 +32,9 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { formatPersonCpf, personInitials, toPersonSelectOptions } from '@/lib/personSelectOptions';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { DriveFileThumb } from '@/components/drive/DriveFileThumb';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
@@ -47,9 +43,10 @@ import {
   type DriveSidebarView,
 } from '@/components/drive/DriveSidebar';
 import { DriveListView } from '@/components/drive/DriveListView';
+import { FolderAppearanceModal } from '@/components/drive/FolderAppearanceModal';
+import { FolderIconTile } from '@/components/drive/folderAppearance';
+import { useDriveMenuDismiss } from '@/components/drive/useDriveMenuDismiss';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
-import { getDropdownPortalRoot } from '@/lib/zIndex';
-import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import {
   DriveUploadPanel,
   type DriveUploadItem,
@@ -64,8 +61,8 @@ import {
 } from '@/lib/driveUpload';
 
 const SHARE_PERMISSION_OPTIONS = labeledToSelectOptions([
-  { value: 'READ', label: 'Leitura (ver e baixar)' },
-  { value: 'READ_WRITE', label: 'Edição (enviar e criar subpastas)' },
+  { value: 'READ', label: 'Pode ver' },
+  { value: 'READ_WRITE', label: 'Pode editar' },
 ]);
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -78,6 +75,8 @@ interface DriveFolder {
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
   starred?: boolean;
+  iconKey?: string | null;
+  iconColor?: string | null;
   trashedAt?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -161,65 +160,6 @@ function DriveViewModeToggle({
   );
 }
 
-/** Checkbox do dropdown (mesmo padrão visual da página de orçamento — serviços). */
-function ShareUserDropdownCheckbox({
-  id,
-  checked,
-  indeterminate,
-  onChange,
-  children,
-  compact,
-}: {
-  id?: string;
-  checked: boolean;
-  indeterminate?: boolean;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  children?: React.ReactNode;
-  compact?: boolean;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
-  }, [indeterminate]);
-  const filled = checked || Boolean(indeterminate);
-  return (
-    <label
-      className={`group flex items-start gap-3 rounded-lg cursor-pointer transition-colors ${
-        compact ? 'py-1.5 min-h-10 px-2 -mx-2' : 'py-2.5 px-2 -mx-2'
-      } hover:bg-gray-100/95 dark:hover:bg-gray-600/50`}
-    >
-      <input
-        ref={ref}
-        id={id}
-        type="checkbox"
-        className="sr-only"
-        checked={checked}
-        onChange={onChange}
-      />
-      <span
-        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-all shadow-sm outline-none group-focus-within:ring-2 group-focus-within:ring-red-500/80 group-focus-within:ring-offset-2 ring-offset-white dark:ring-offset-gray-800 ${
-          filled
-            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
-            : 'border-gray-300 bg-white group-hover:border-red-400 dark:border-gray-500 dark:bg-gray-800 dark:group-hover:border-red-400/70'
-        }`}
-        aria-hidden
-      >
-        {checked && !indeterminate && (
-          <svg className="h-3 w-3 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-          </svg>
-        )}
-        {indeterminate && (
-          <svg className="h-3 w-3 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 12h14" />
-          </svg>
-        )}
-      </span>
-      {children}
-    </label>
-  );
-}
-
 // ── Componente principal ──────────────────────────────────────────────────────
 
 function DrivePageContent() {
@@ -251,6 +191,7 @@ function DrivePageContent() {
   /** null = menu ancorado no botão; coords = menu no clique direito */
   const [newMenuCoords, setNewMenuCoords] = useState<{ x: number; y: number } | null>(null);
   const newMenuRef = useRef<HTMLDivElement>(null);
+  const driveRootRef = useRef<HTMLDivElement>(null);
 
   // Modais
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -270,19 +211,8 @@ function DrivePageContent() {
   } | null>(null);
 
   const [shareFolder, setShareFolder] = useState<DriveFolder | null>(null);
-  /** Filtro dentro do dropdown (lista já carregada). */
-  const [shareListFilter, setShareListFilter] = useState('');
+  const [appearanceFolder, setAppearanceFolder] = useState<DriveFolder | null>(null);
   const [selectedShareUserIds, setSelectedShareUserIds] = useState<Set<string>>(() => new Set());
-  const [showShareUserDropdown, setShowShareUserDropdown] = useState(false);
-  const shareUsersDropdownRef = useRef<HTMLDivElement>(null);
-  const shareDropdownPanelRef = useRef<HTMLDivElement>(null);
-  const [shareDropdownPos, setShareDropdownPos] = useState<{
-    left: number;
-    width: number;
-    top?: number;
-    bottom?: number;
-    maxHeight: number;
-  } | null>(null);
 
   // ── Dados do usuário (padrão do sistema) ──────────────────────────────────
 
@@ -400,6 +330,8 @@ function DrivePageContent() {
       : (viewContents?.files ?? []);
   const breadcrumb = isMyDriveView ? (contents?.breadcrumb ?? []) : [];
   const currentFolderMeta = isMyDriveView ? (contents?.currentFolder ?? null) : null;
+  /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
+  const nomePastaAtual = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1]!.name : 'Meu Drive';
   const isLoading = loadingContents || loadingSearch || loadingView;
   const isEmpty = !isLoading && folders.length === 0 && files.length === 0;
   /** Raiz: sempre pode; dentro de pasta: `canWrite === false` = só leitura (não exibir upload/nova pasta). */
@@ -417,9 +349,32 @@ function DrivePageContent() {
       if (driveView === 'trash') return [{ label: 'Lixeira' }];
       return null;
     }
-    // Pastas ficam só no título da página — no topo para em Meu Drive
-    return null;
-  }, [isMyDriveView, driveView]);
+    // Raiz: o topo mostra só "Meu Drive". Dentro de pastas: Principal > Meu Drive > Pasta > Subpasta,
+    // com o botão de compartilhar na pasta atual (antes isso ficava no título da página).
+    if (breadcrumb.length === 0) return null;
+    const podeCompartilhar = !!currentFolderId && !!currentFolderMeta?.canManageShares;
+    return [
+      { label: 'Meu Drive', onClick: () => goToFolder(undefined) },
+      ...breadcrumb.map((crumb, i) => {
+        const ultima = i === breadcrumb.length - 1;
+        return {
+          label: crumb.name,
+          ...(ultima ? {} : { onClick: () => goToFolder(crumb.id) }),
+          ...(ultima && podeCompartilhar
+            ? {
+                action: {
+                  label: 'Gerenciar acesso a esta pasta',
+                  icon: 'share' as const,
+                  onClick: () => {
+                    if (currentFolderMeta) setShareFolder(currentFolderMeta as DriveFolder);
+                  },
+                },
+              }
+            : {}),
+        };
+      }),
+    ];
+  }, [isMyDriveView, driveView, breadcrumb, goToFolder, currentFolderId, currentFolderMeta]);
 
   useBreadcrumbEntity(topBreadcrumbTrail);
 
@@ -441,64 +396,43 @@ function DrivePageContent() {
         id: string;
         userId: string;
         permission: 'READ' | 'READ_WRITE';
-        user: { id: string; name: string; email: string };
+        user: { id: string; name: string; email: string; cpf?: string | null; profilePhotoUrl?: string | null };
       }>;
     },
     enabled: !!shareFolder?.id,
   });
 
   const { data: allUsersForShare = [], isLoading: loadingShareUserList } = useQuery({
-    queryKey: ['drive-share-user-list'],
+    queryKey: ['drive-share-candidates'],
     queryFn: async () => {
-      const res = await api.get('/users', { params: { limit: 1000, page: 1 } });
-      return (res.data.data ?? []) as Array<{ id: string; name: string; email: string }>;
+      const res = await api.get('/drive/share-candidates');
+      return (res.data.data ?? []) as Array<{
+        id: string;
+        name: string;
+        email: string;
+        cpf?: string | null;
+        profilePhotoUrl?: string | null;
+      }>;
     },
     enabled: !!shareFolder,
     staleTime: 60_000,
   });
 
-  const shareCandidateUsers = useMemo(() => {
+  const shareCandidateOptions = useMemo(() => {
     const sharedIds = new Set(shareRows.map((r) => r.userId));
-    const q = shareListFilter.trim();
-    return allUsersForShare
-      .filter((u) => u.id !== user?.id && !sharedIds.has(u.id))
-      .filter(
-        (u) =>
-          !q ||
-          textMatchesSearch(u.name, q) ||
-          textMatchesSearch(u.email, q),
-      )
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [allUsersForShare, shareRows, shareListFilter, user?.id]);
-
-  const shareSelectAllState = useMemo(() => {
-    const allIds = shareCandidateUsers.map((u) => u.id);
-    const allChecked = allIds.length > 0 && allIds.every((id) => selectedShareUserIds.has(id));
-    const someChecked = allIds.some((id) => selectedShareUserIds.has(id));
-    return { allIds, allChecked, partial: someChecked && !allChecked };
-  }, [shareCandidateUsers, selectedShareUserIds]);
-
-  const setShareSelectAllInView = useCallback(
-    (check: boolean) => {
-      setSelectedShareUserIds((prev) => {
-        const n = new Set(prev);
-        const ids = shareCandidateUsers.map((u) => u.id);
-        if (check) ids.forEach((id) => n.add(id));
-        else ids.forEach((id) => n.delete(id));
-        return n;
-      });
-    },
-    [shareCandidateUsers],
-  );
-
-  const toggleShareUserSelection = useCallback((id: string) => {
-    setSelectedShareUserIds((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  }, []);
+    return toPersonSelectOptions(
+      allUsersForShare
+        .filter((u) => u.id !== user?.id && !sharedIds.has(u.id))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+        .map((u) => ({
+          value: u.id,
+          name: u.name,
+          cpf: u.cpf,
+          profilePhotoUrl: u.profilePhotoUrl,
+          extraSearchText: u.email,
+        })),
+    );
+  }, [allUsersForShare, shareRows, user?.id]);
 
   const addShareMut = useMutation({
     mutationFn: async () => {
@@ -514,7 +448,11 @@ function DrivePageContent() {
       );
       const added = results.filter((r) => r.status === 'fulfilled').length;
       const failed = results.length - added;
-      return { added, failed };
+      // Motivo real devolvido pelo servidor (ex.: "Apenas o dono pode compartilhar"), em vez de uma mensagem genérica.
+      const motivo = results
+        .map((r) => (r.status === 'rejected' ? (r.reason as any)?.response?.data?.error : null))
+        .find((m) => typeof m === 'string' && m.trim()) as string | undefined;
+      return { added, failed, motivo };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['drive-shares', shareFolder?.id] });
@@ -527,65 +465,13 @@ function DrivePageContent() {
             : `${data.added} pessoas adicionadas. Ajuste a permissão de cada uma abaixo, se quiser.`,
         );
       } else if (data.added > 0 && data.failed > 0) {
-        toast.success(`${data.added} adicionado(s); ${data.failed} falhou(aram).`);
+        toast.success(`${data.added} adicionado(s); ${data.failed} falhou(aram).${data.motivo ? ` ${data.motivo}` : ''}`);
       } else if (data.failed > 0) {
-        toast.error('Não foi possível conceder acesso. Talvez alguns já tenham permissão.');
+        toast.error(data.motivo || 'Não foi possível conceder acesso. Talvez alguns já tenham permissão.');
       }
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || 'Erro ao compartilhar'),
   });
-
-  useLayoutEffect(() => {
-    if (!showShareUserDropdown) {
-      setShareDropdownPos(null);
-      return;
-    }
-    const update = () => {
-      const el = shareUsersDropdownRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const gap = 6;
-      const margin = 12;
-      const preferred = Math.min(28 * 16, window.innerHeight - margin * 2);
-      const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
-      const spaceAbove = rect.top - gap - margin;
-      const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
-      if (openUp) {
-        setShareDropdownPos({
-          left: rect.left,
-          width: rect.width,
-          bottom: window.innerHeight - rect.top + gap,
-          maxHeight: Math.max(160, Math.min(preferred, spaceAbove)),
-        });
-      } else {
-        setShareDropdownPos({
-          left: rect.left,
-          width: rect.width,
-          top: rect.bottom + gap,
-          maxHeight: Math.max(160, Math.min(preferred, spaceBelow)),
-        });
-      }
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [showShareUserDropdown, shareCandidateUsers.length, shareListFilter]);
-
-  useEffect(() => {
-    if (!showShareUserDropdown) return;
-    const handle = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (shareUsersDropdownRef.current?.contains(t)) return;
-      if (shareDropdownPanelRef.current?.contains(t)) return;
-      setShowShareUserDropdown(false);
-    };
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
-  }, [showShareUserDropdown]);
 
   useEffect(() => {
     if (!showNewMenu) return;
@@ -604,32 +490,46 @@ function DrivePageContent() {
     setNewMenuCoords(null);
   }, []);
 
-  const openNewMenuFromButton = useCallback(() => {
-    setNewMenuCoords(null);
-    setShowNewMenu((v) => !v);
+  const openNewMenuAt = useCallback((clientX: number, clientY: number) => {
+    const menuW = 190;
+    const menuH = 90;
+    const x = Math.min(clientX, window.innerWidth - menuW - 8);
+    const y = Math.min(clientY, window.innerHeight - menuH - 8);
+    setNewMenuCoords({ x: Math.max(8, x), y: Math.max(8, y) });
+    setShowNewMenu(true);
   }, []);
 
-  const openNewMenuFromContext = useCallback(
-    (e: React.MouseEvent) => {
+  // Botão direito em qualquer ponto da área da página, inclusive no vazio abaixo dos arquivos
+  // (antes só funcionava sobre o conteúdo, e no resto aparecia o menu do navegador).
+  useEffect(() => {
+    const raiz = driveRootRef.current;
+    const area = (raiz?.closest('main') as HTMLElement | null) ?? raiz;
+    if (!area) return;
+    const aoClicarComBotaoDireito = (e: MouseEvent) => {
       if (!canWriteInCurrentFolder) return;
+      const alvo = e.target as HTMLElement | null;
+      if (
+        alvo?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [data-drive-menu]',
+        )
+      ) {
+        return;
+      }
       e.preventDefault();
-      const menuW = 224;
-      const menuH = 120;
-      const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
-      const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
-      setNewMenuCoords({ x: Math.max(8, x), y: Math.max(8, y) });
-      setShowNewMenu(true);
-    },
-    [canWriteInCurrentFolder],
-  );
+      openNewMenuAt(e.clientX, e.clientY);
+    };
+    area.addEventListener('contextmenu', aoClicarComBotaoDireito);
+    return () => area.removeEventListener('contextmenu', aoClicarComBotaoDireito);
+  }, [canWriteInCurrentFolder, openNewMenuAt]);
 
   const newMenuPanel = (
     <div
       ref={newMenuRef}
+      role="menu"
       className={
         newMenuCoords
-          ? 'fixed z-[60] w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900'
-          : 'absolute right-0 z-30 mt-1.5 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900'
+          ? 'fixed z-[60] min-w-[180px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900'
+          : 'absolute right-0 z-30 mt-1.5 min-w-[180px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900'
       }
       style={
         newMenuCoords
@@ -639,31 +539,26 @@ function DrivePageContent() {
     >
       <button
         type="button"
+        role="menuitem"
         onClick={() => {
           closeNewMenu();
           setNewFolderName('');
           setShowNewFolder(true);
         }}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-800"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-          <FolderPlus className="h-4 w-4 text-gray-600 dark:text-gray-300" />
-        </span>
-        Nova pasta
+        <FolderPlus className="h-4 w-4" /> Nova pasta
       </button>
-      <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
       <button
         type="button"
+        role="menuitem"
         onClick={() => {
           closeNewMenu();
           fileInputRef.current?.click();
         }}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-800"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-          <Upload className="h-4 w-4 text-gray-600 dark:text-gray-300" />
-        </span>
-        Upload de arquivo
+        <Upload className="h-4 w-4" /> Upload de arquivo
       </button>
     </div>
   );
@@ -686,6 +581,33 @@ function DrivePageContent() {
       toast.success('Permissão atualizada');
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || 'Erro ao atualizar'),
+  });
+
+  const appearanceMut = useMutation({
+    mutationFn: async ({
+      id,
+      name,
+      iconKey,
+      iconColor,
+      renomear,
+      personalizar,
+    }: {
+      id: string;
+      name: string;
+      iconKey: string | null;
+      iconColor: string | null;
+      renomear: boolean;
+      personalizar: boolean;
+    }) => {
+      if (renomear) await api.patch(`/drive/folders/${id}`, { name });
+      if (personalizar) await api.patch(`/drive/folders/${id}/appearance`, { iconKey, iconColor });
+    },
+    onSuccess: () => {
+      invalidateDrive();
+      setAppearanceFolder(null);
+      toast.success('Pasta atualizada');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error || 'Erro ao editar a pasta'),
   });
 
   const createFolderMut = useMutation({
@@ -1161,7 +1083,7 @@ function DrivePageContent() {
           }
         }}
         onDrop={handleDrop}
-        onContextMenu={openNewMenuFromContext}
+        ref={driveRootRef}
       >
         {/* Overlay drag-and-drop */}
         {isDraggingOver && canWriteInCurrentFolder && (
@@ -1185,101 +1107,58 @@ function DrivePageContent() {
         />
 
         {/* ── Cabeçalho ─────────────────────────────────────────────────── */}
-        <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-              <HardDrive className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-            </div>
-            <div className="flex min-w-0 items-center gap-1.5">
-              {driveView === 'shared' ||
-              driveView === 'recent' ||
-              driveView === 'starred' ||
-              driveView === 'trash' ? (
-                <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                  {driveView === 'shared'
-                    ? 'Compartilhados comigo'
-                    : driveView === 'recent'
-                      ? 'Recentes'
-                      : driveView === 'starred'
-                        ? 'Com estrela'
-                        : 'Lixeira'}
-                </h1>
-              ) : (
-                <>
-                  <h1 className="flex min-w-0 items-center gap-1.5 text-lg font-semibold sm:text-xl">
-                    {breadcrumb.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => goToFolder(undefined)}
-                        className="shrink-0 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-                      >
-                        Meu Drive
-                      </button>
-                    ) : (
-                      <span className="text-gray-900 dark:text-gray-100">Meu Drive</span>
-                    )}
-                    {breadcrumb.map((crumb, i) => {
-                      const isLast = i === breadcrumb.length - 1;
-                      return (
-                        <React.Fragment key={crumb.id}>
-                          <ChevronRight
-                            className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500"
-                            aria-hidden
-                          />
-                          {isLast ? (
-                            <span
-                              className="min-w-0 truncate text-gray-900 dark:text-gray-100"
-                              title={crumb.name}
-                            >
-                              {crumb.name}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => goToFolder(crumb.id)}
-                              className="min-w-0 truncate text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-                              title={crumb.name}
-                            >
-                              {crumb.name}
-                            </button>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </h1>
-                  {currentFolderId && currentFolderMeta?.canManageShares && (
-                    <button
-                      type="button"
-                      onClick={() => setShareFolder(currentFolderMeta as DriveFolder)}
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                      title="Gerenciar acesso a esta pasta"
-                      aria-label="Gerenciar acesso a esta pasta"
-                    >
-                      <UserPlus className="h-4 w-4" />
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
+          {/* Coluna da esquerda: fica parada ao rolar a página (título + menu lateral). */}
+          <div className="flex w-full shrink-0 flex-col gap-5 lg:sticky lg:top-0 lg:w-52 lg:self-start">
+            <h1 className="sr-only">
+              {driveView === 'shared'
+                ? 'Compartilhados comigo'
+                : driveView === 'recent'
+                  ? 'Recentes'
+                  : driveView === 'starred'
+                    ? 'Com estrela'
+                    : driveView === 'trash'
+                      ? 'Lixeira'
+                      : nomePastaAtual}
+            </h1>
+            <DriveSidebar
+              activeView={driveView}
+              onChangeView={setDriveView}
+              storage={storageInfo}
+              storageLoading={loadingStorage}
+              onNew={
+                canWriteInCurrentFolder
+                  ? (anchor) => openNewMenuAt(anchor.left, anchor.bottom + 6)
+                  : undefined
+              }
+              newLoading={isUploading}
+            />
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+          <div className="min-w-0 flex-1">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+            <div className="group relative min-w-0 flex-1 sm:max-w-md">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
               <input
                 type="text"
                 placeholder="Buscar arquivos e pastas..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9 w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setSearchQuery('');
+                }}
+                aria-label="Buscar arquivos e pastas"
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-10 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-600"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery('')}
                   aria-label="Limpar busca"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                  title="Limpar busca (Esc)"
+                  className="absolute right-2.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
@@ -1288,41 +1167,9 @@ function DrivePageContent() {
               {!isLoading && !contentsError && !isEmpty && (
                 <DriveViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
               )}
-
-              {canWriteInCurrentFolder && (
-                <div className="relative h-9">
-                  <button
-                    type="button"
-                    onClick={openNewMenuFromButton}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
-                    aria-label="Novo"
-                    aria-expanded={showNewMenu && !newMenuCoords}
-                    title="Novo"
-                  >
-                    {isUploading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Plus className="h-4 w-4" strokeWidth={2.25} />
-                    )}
-                    <span>Novo</span>
-                  </button>
-
-                  {showNewMenu && !newMenuCoords ? newMenuPanel : null}
-                </div>
-              )}
             </div>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
-          <DriveSidebar
-            activeView={driveView}
-            onChangeView={setDriveView}
-            storage={storageInfo}
-            storageLoading={loadingStorage}
-          />
-
-          <div className="min-w-0 flex-1">
         {searchQuery && (
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
             Resultados para{' '}
@@ -1430,6 +1277,7 @@ function DrivePageContent() {
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
             onOpenShare={setShareFolder}
+            onCustomize={setAppearanceFolder}
             onToggleStar={(type, id, starred) => {
               if (type === 'folder') starFolderMut.mutate({ id, starred });
               else starFileMut.mutate({ id, starred });
@@ -1450,6 +1298,7 @@ function DrivePageContent() {
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
             onOpenShare={setShareFolder}
+            onCustomize={setAppearanceFolder}
             onToggleStar={(type, id, starred) => {
               if (type === 'folder') starFolderMut.mutate({ id, starred });
               else starFileMut.mutate({ id, starred });
@@ -1468,6 +1317,22 @@ function DrivePageContent() {
         {/* ── Modais ─────────────────────────────────────────────────────── */}
 
         {/* Nova Pasta */}
+        <FolderAppearanceModal
+          folder={appearanceFolder}
+          saving={appearanceMut.isPending}
+          onClose={() => setAppearanceFolder(null)}
+          onSave={(id, dados) =>
+            appearanceMut.mutate({
+              id,
+              ...dados,
+              renomear: dados.name !== (appearanceFolder?.name ?? ''),
+              personalizar:
+                (dados.iconKey ?? null) !== (appearanceFolder?.iconKey ?? null) ||
+                (dados.iconColor ?? null) !== (appearanceFolder?.iconColor ?? null),
+            })
+          }
+        />
+
         <Modal
           isOpen={showNewFolder}
           onClose={() => setShowNewFolder(false)}
@@ -1640,205 +1505,94 @@ function DrivePageContent() {
           isOpen={!!shareFolder}
           onClose={() => {
             setShareFolder(null);
-            setShareListFilter('');
             setSelectedShareUserIds(new Set());
-            setShowShareUserDropdown(false);
           }}
           title={shareFolder ? `Acesso: ${shareFolder.name}` : 'Acesso à pasta'}
-          size="lg"
+          size="md"
         >
           {shareFolder && (
             <div className="space-y-6">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Escolha quem pode ver esta pasta. Quem tiver acesso vê também tudo o que estiver
-                dentro dela. Apenas o dono pode excluir a pasta.
-              </p>
-
-              <div className="border border-gray-200 dark:border-gray-600 rounded-md p-3 space-y-3">
-                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
-                  Convidar pessoas
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Usuários ativos do sistema. Você e quem já tem acesso não aparecem. Marque quem deseja e clique em
-                  Adicionar. Em <span className="font-medium">Quem tem acesso</span>, defina leitura ou edição para cada
-                  pessoa.
-                </p>
-                {loadingShareUserList ? (
-                  <div className="flex items-center justify-center py-6 text-sm text-gray-500 gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Carregando usuários…
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div>
-                      <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Quem receberá acesso
-                      </span>
-                      <div className="flex items-stretch gap-2 min-w-0">
-                        <div
-                          ref={shareUsersDropdownRef}
-                          className="relative flex-1 min-w-0"
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowShareUserDropdown((v) => !v);
-                            }}
-                            className="w-full min-h-[3rem] h-12 pl-12 pr-12 text-left rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-base text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <ListPlus className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 pointer-events-none" />
-                            <span className="block pr-1 truncate">
-                              {selectedShareUserIds.size === 0
-                                ? 'Selecione pessoas…'
-                                : shareCandidateUsers.length === 0
-                                  ? 'Ninguém disponível'
-                                  : `${selectedShareUserIds.size} pessoa(s) selecionada(s)`}
-                            </span>
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none text-gray-400 dark:text-gray-500">
-                              {showShareUserDropdown ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                            </span>
-                          </button>
-                          {showShareUserDropdown &&
-                            shareDropdownPos &&
-                            createPortal(
-                              <div
-                                ref={shareDropdownPanelRef}
-                                className="fixed z-[2200] rounded-lg border border-gray-300 bg-white p-3 shadow-xl ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10"
-                                style={{
-                                  left: shareDropdownPos.left,
-                                  width: shareDropdownPos.width,
-                                  top: shareDropdownPos.top,
-                                  bottom: shareDropdownPos.bottom,
-                                  maxHeight: shareDropdownPos.maxHeight,
-                                  overflowY: 'auto',
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => e.stopPropagation()}
-                              >
-                                <input
-                                  type="text"
-                                  placeholder="Pesquisar…"
-                                  value={shareListFilter}
-                                  onChange={(e) => setShareListFilter(e.target.value)}
-                                  className="mb-3 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-400/80"
-                                />
-                                {shareCandidateUsers.length > 0 ? (
-                                  <>
-                                    <div className="mb-2">
-                                      <ShareUserDropdownCheckbox
-                                        id="drive-share-select-all"
-                                        checked={shareSelectAllState.allChecked}
-                                        indeterminate={shareSelectAllState.partial}
-                                        onChange={(e) => setShareSelectAllInView(e.target.checked)}
-                                      >
-                                        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 pt-0.5">
-                                          Selecionar tudo
-                                        </span>
-                                      </ShareUserDropdownCheckbox>
-                                    </div>
-                                    <ul className="space-y-0.5">
-                                      {shareCandidateUsers.map((u) => (
-                                        <li key={u.id}>
-                                          <ShareUserDropdownCheckbox
-                                            compact
-                                            checked={selectedShareUserIds.has(u.id)}
-                                            onChange={() => toggleShareUserSelection(u.id)}
-                                          >
-                                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug">
-                                              {u.name}
-                                            </span>
-                                          </ShareUserDropdownCheckbox>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </>
-                                ) : (
-                                  <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
-                                    {shareListFilter.trim()
-                                      ? 'Nenhum usuário corresponde à pesquisa.'
-                                      : 'Não há outras pessoas disponíveis.'}
-                                  </p>
-                                )}
-                              </div>,
-                              getDropdownPortalRoot(),
-                            )}
-                        </div>
-                        <button
-                          type="button"
-                          disabled={selectedShareUserIds.size === 0 || addShareMut.isPending}
-                          onClick={() => addShareMut.mutate()}
-                          title={
-                            selectedShareUserIds.size === 0
-                              ? 'Selecione pelo menos uma pessoa'
-                              : `Adicionar ${selectedShareUserIds.size} pessoa(s)`
-                          }
-                          aria-label="Adicionar pessoas selecionadas"
-                          className="h-12 w-12 shrink-0 inline-flex items-center justify-center rounded-lg border-2 border-red-600 dark:border-red-500 bg-red-600 text-white hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-40 disabled:border-gray-400 dark:disabled:border-gray-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 dark:disabled:text-gray-400 transition-colors"
-                        >
-                          {addShareMut.isPending ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                          ) : (
-                            <Plus className="h-6 w-6 stroke-[2.5]" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Adicionar pessoas
+                </label>
+                <div className="flex items-start gap-2">
+                  <MultiSelectSearchDropdown
+                    className="min-w-0 flex-1"
+                    options={shareCandidateOptions}
+                    selected={Array.from(selectedShareUserIds)}
+                    onChange={(ids) => setSelectedShareUserIds(new Set(ids))}
+                    placeholder={loadingShareUserList ? 'Carregando pessoas...' : 'Selecionar pessoas...'}
+                    searchPlaceholder="Pesquisar por nome ou CPF..."
+                    emptyOptionsMessage="Não há outras pessoas disponíveis."
+                    emptySearchMessage="Nenhuma pessoa encontrada."
+                    disabled={loadingShareUserList}
+                    noFocusRing
+                  />
+                  <button
+                    type="button"
+                    disabled={selectedShareUserIds.size === 0 || addShareMut.isPending}
+                    onClick={() => addShareMut.mutate()}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+                  >
+                    {addShareMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {selectedShareUserIds.size > 0 ? `Adicionar (${selectedShareUserIds.size})` : 'Adicionar'}
+                  </button>
+                </div>
               </div>
 
               <div>
-                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
-                  Quem tem acesso
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  Para cada pessoa, escolha se pode só ver ou também editar e enviar arquivos.
-                </p>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Pessoas com acesso</p>
+                  <span className="text-xs tabular-nums text-gray-500 dark:text-gray-400">{shareRows.length}</span>
+                </div>
                 {shareRows.length === 0 ? (
-                  <p className="text-sm text-gray-500">Ninguém além de você (dono) por enquanto.</p>
+                  <p className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                    Ninguém além de você.
+                  </p>
                 ) : (
-                  <ul className="space-y-2">
-                    {shareRows.map((row) => (
-                      <li
-                        key={row.id}
-                        className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-md border border-gray-200 dark:border-gray-600"
-                      >
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 min-w-0 flex-1">
-                          {row.user.name}
-                        </p>
-                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto sm:min-w-[16rem]">
-                          <label className="sr-only" htmlFor={`share-perm-${row.id}`}>
-                            Permissão de {row.user.name}
-                          </label>
+                  <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                    {shareRows.map((row) => {
+                      const foto = resolveApiMediaUrl(row.user.profilePhotoUrl ?? null);
+                      const cpf = formatPersonCpf(row.user.cpf);
+                      return (
+                        <li key={row.id} className="flex items-center gap-3 px-3 py-2.5">
+                          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+                            {foto ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={foto} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              personInitials(row.user.name)
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{row.user.name}</p>
+                            <p className="truncate text-xs text-gray-500 dark:text-gray-400">{cpf || row.user.email}</p>
+                          </div>
                           <StringSingleSelectDropdown
                             value={row.permission}
                             onChange={(perm) =>
-                              updateShareMut.mutate({
-                                uid: row.userId,
-                                perm: perm as 'READ' | 'READ_WRITE',
-                              })
+                              updateShareMut.mutate({ uid: row.userId, perm: perm as 'READ' | 'READ_WRITE' })
                             }
                             options={SHARE_PERMISSION_OPTIONS}
                             disabled={updateShareMut.isPending}
                             allowEmpty={false}
-                            className="w-full sm:w-auto min-w-0"
+                            className="w-36 shrink-0"
                           />
                           <button
                             type="button"
                             onClick={() => {
-                              if (confirm('Remover acesso desta pessoa?')) {
-                                removeShareMut.mutate(row.userId);
-                              }
+                              if (confirm('Remover acesso desta pessoa?')) removeShareMut.mutate(row.userId);
                             }}
-                            className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                            title="Remover"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                            title="Remover acesso"
+                            aria-label={`Remover acesso de ${row.user.name}`}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
-                        </div>
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -1879,6 +1633,7 @@ function GridView({
   onRename,
   onDelete,
   onOpenShare,
+  onCustomize,
   onToggleStar,
   onRestore,
   trashMode,
@@ -1891,6 +1646,7 @@ function GridView({
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
   onOpenShare?: (folder: DriveFolder) => void;
+  onCustomize?: (folder: DriveFolder) => void;
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   trashMode?: boolean;
@@ -1900,6 +1656,8 @@ function GridView({
     f.canManageShares ?? (!!currentUserId && f.ownerId === currentUserId);
   const isOwnerFile = (f: DriveFile) => !!currentUserId && f.ownerId === currentUserId;
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const fecharMenu = useCallback(() => setOpenMenuId(null), []);
+  useDriveMenuDismiss(openMenuId !== null, fecharMenu);
 
   return (
     <div
@@ -1930,17 +1688,15 @@ function GridView({
                         if (!trashMode) onOpenFolder(folder.id);
                       }
                     }}
-                    className={`group flex w-full select-none items-center gap-2.5 rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:border-red-300 hover:bg-red-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800 dark:hover:bg-red-950/20 ${
+                    className={`group flex w-full select-none items-center gap-2.5 rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800 dark:hover:bg-[#2b1518] ${
                       trashMode ? 'cursor-default' : 'cursor-pointer'
                     }`}
                   >
-                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
-                      {shared ? (
-                        <Users className="h-4 w-4 text-red-500 dark:text-red-400" strokeWidth={1.75} />
-                      ) : (
-                        <Folder className="h-4 w-4 text-red-500 dark:text-red-400" strokeWidth={1.75} />
-                      )}
-                    </span>
+                    <FolderIconTile
+                      iconKey={folder.iconKey}
+                      color={folder.iconColor}
+                      shared={shared}
+                    />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
                       {folder.name}
                     </span>
@@ -1949,6 +1705,7 @@ function GridView({
                     )}
                     <button
                       type="button"
+                      data-drive-menu
                       onClick={(e) => {
                         e.stopPropagation();
                         setOpenMenuId(openMenuId === folder.id ? null : folder.id);
@@ -1960,7 +1717,7 @@ function GridView({
                     </button>
                   </div>
                   {openMenuId === folder.id && (
-                    <div className="absolute right-0 top-12 z-20 min-w-[180px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div data-drive-menu className="absolute right-0 top-12 z-20 min-w-[180px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                       {trashMode ? (
                         <>
                           <button
@@ -2004,14 +1761,16 @@ function GridView({
                               <Users className="h-4 w-4" /> Acesso
                             </button>
                           )}
+                          {folder.isOwner !== false && onCustomize && (
+                            <button
+                              onClick={() => { setOpenMenuId(null); onCustomize(folder); }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <Pencil className="h-4 w-4" /> Editar pasta
+                            </button>
+                          )}
                           {canManage(folder) && (
                             <>
-                              <button
-                                onClick={() => { setOpenMenuId(null); onRename('folder', folder.id, folder.name); }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                              >
-                                <Pencil className="h-4 w-4" /> Renomear
-                              </button>
                               <button
                                 onClick={() => { setOpenMenuId(null); onDelete('folder', folder.id, folder.name); }}
                                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
@@ -2082,6 +1841,7 @@ function GridView({
                         {file.name}
                       </p>
                       <button
+                        data-drive-menu
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpenMenuId(openMenuId === file.id ? null : file.id);
@@ -2094,7 +1854,7 @@ function GridView({
                     </div>
                   </div>
                   {openMenuId === file.id && (
-                    <div className="absolute bottom-10 right-0 z-20 min-w-[170px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div data-drive-menu className="absolute bottom-10 right-0 z-20 min-w-[170px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                       {trashMode ? (
                         <>
                           <button

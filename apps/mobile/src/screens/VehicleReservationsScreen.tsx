@@ -35,8 +35,10 @@ import {
   Trash2,
   FileText,
   Filter,
+  CalendarPlus,
 } from 'lucide-react-native';
 import PickerSheetFrame from '../components/PickerSheetFrame';
+import SheetModal, { SheetPrimaryButton } from '../components/SheetModal';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import OfflineBanner from '../components/OfflineBanner';
@@ -677,7 +679,7 @@ export default function VehicleReservationsScreen() {
                 <TouchableOpacity
                   style={[
                     styles.pickerItem,
-                    { backgroundColor: isDark ? colors.surface : colors.background },
+                    { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#374151' : '#e5e7eb' },
                   ]}
                   onPress={() => {
                     picker.onSelect(item.value);
@@ -940,18 +942,13 @@ export default function VehicleReservationsScreen() {
       </ScrollView>
 
       {/* Filtro de status */}
-      <Modal
+      <SheetModal
         visible={filterOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFilterOpen(false)}
+        onClose={() => setFilterOpen(false)}
+        title="Filtro de status"
+        icon={Filter}
       >
-        <View style={styles.filterOverlay}>
-          <View style={[styles.filterSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.filterSheetTitle, { color: colors.text }]}>
-              Filtro de status
-            </Text>
-            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+            <View>
               <TouchableOpacity
                 style={styles.filterOptionRow}
                 onPress={() => {
@@ -981,58 +978,19 @@ export default function VehicleReservationsScreen() {
                   ) : null}
                 </TouchableOpacity>
               ))}
-            </ScrollView>
-            <TouchableOpacity
-              onPress={() => setFilterOpen(false)}
-              style={{ marginTop: 8, paddingVertical: 8 }}
-            >
-              <Text style={{ textAlign: 'center', color: colors.textSecondary, fontWeight: '600' }}>
-                Fechar
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+            </View>
+      </SheetModal>
 
       {/* Detalhes da reserva */}
-      <Modal
+      <SheetModal
         visible={Boolean(detailTarget)}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setDetailTarget(null)}
+        onClose={() => setDetailTarget(null)}
+        title={`Reserva #${detailTarget?.code ?? ''}`}
+        subtitle={detailTarget ? STATUS_LABELS[detailTarget.status] : undefined}
+        icon={Car}
       >
-        <View style={styles.detailOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setDetailTarget(null)}
-          />
-          <View style={[styles.detailSheet, { backgroundColor: colors.card }]}>
-            <View style={styles.detailSheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.detailSheetTitle, { color: colors.text }]}>
-                  Reserva #{detailTarget?.code ?? ''}
-                </Text>
-                <Text style={[styles.detailSheetSubtitle, { color: colors.textSecondary }]}>
-                  {detailTarget ? STATUS_LABELS[detailTarget.status] : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setDetailTarget(null)}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
             {detailTarget ? (
-              <ScrollView
-                style={{ maxHeight: 420 }}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
+              <View>
                 <View style={styles.detailGrid}>
                   <View style={styles.detailField}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
@@ -1270,7 +1228,7 @@ export default function VehicleReservationsScreen() {
                     ) : null}
                   </View>
                 ) : null}
-              </ScrollView>
+              </View>
             ) : null}
 
             {detailTarget && canDelete(detailTarget) ? (
@@ -1310,48 +1268,26 @@ export default function VehicleReservationsScreen() {
                 <Text style={styles.returnBtnText}>Dar baixa</Text>
               </TouchableOpacity>
             ) : null}
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Form criar */}
-      <Modal
+      <SheetModal
         visible={showForm}
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={closeForm}
+        onClose={closeForm}
+        title="Nova reserva"
+        subtitle="Agende o uso do veículo"
+        icon={CalendarPlus}
+        size="tall"
+        scroll={false}
+        bottomPad={0}
+        overlay={
+          <>
+            {renderPickerOverlay()}
+            <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+          </>
+        }
       >
-        <View
-          style={[
-            styles.safeArea,
-            {
-              backgroundColor: colors.background,
-              paddingTop: insets.top,
-              width: windowWidth,
-              height: windowHeight,
-              position: 'relative',
-            },
-          ]}
-        >
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.formHeader}>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formTitle}>Nova reserva</Text>
-                <Text style={styles.formSubtitle}>Agende o uso do veículo</Text>
-              </View>
-              <TouchableOpacity
-                onPress={closeForm}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={20} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-
+        <View style={{ flex: 1, marginHorizontal: -22 }}>
             {loadingOptions ? (
               <View style={styles.formLoading}>
                 <ActivityIndicator color={colors.primary} size="large" />
@@ -1502,71 +1438,22 @@ export default function VehicleReservationsScreen() {
                 </ScrollView>
 
                 <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
-                  <TouchableOpacity
-                    style={[styles.primaryBtn, styles.formSubmitBtn, submitting && { opacity: 0.7 }]}
-                    onPress={submitForm}
-                    disabled={submitting}
-                    activeOpacity={0.85}
-                  >
-                    {submitting ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.primaryBtnText}>Enviar reserva</Text>
-                    )}
-                  </TouchableOpacity>
+                  <SheetPrimaryButton label="Enviar reserva" onPress={submitForm} loading={submitting} />
                 </View>
               </>
             )}
-          </KeyboardAvoidingView>
-          {renderPickerOverlay()}
-          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
-      </Modal>
+      </SheetModal>
 
       {/* Modal baixa */}
-      <Modal
+      <SheetModal
         visible={!!returnTarget}
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={() => setReturnTarget(null)}
+        onClose={() => setReturnTarget(null)}
+        title="Dar baixa"
+        subtitle={`Reserva #${returnTarget?.code ?? ''} · ${formatVehicleLabel(returnTarget?.vehicle, 'Veículo')}`}
+        icon={ClipboardCheck}
+        overlay={<AppToastHost topOffset={Math.max(insets.top, 12) + 8} />}
       >
-        <View
-          style={[
-            styles.safeArea,
-            {
-              backgroundColor: colors.background,
-              paddingTop: insets.top,
-              width: windowWidth,
-              height: windowHeight,
-              position: 'relative',
-            },
-          ]}
-        >
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.formHeader}>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formTitle}>Dar baixa</Text>
-                <Text style={styles.formSubtitle}>
-                  Reserva #{returnTarget?.code} ·{' '}
-                  {formatVehicleLabel(returnTarget?.vehicle, 'Veículo')}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setReturnTarget(null)}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-              >
-                <X size={20} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              contentContainerStyle={styles.formScroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
               <DateField
                 label="Data/hora devolução"
                 required
@@ -1596,25 +1483,10 @@ export default function VehicleReservationsScreen() {
                 placeholderTextColor={colors.textSecondary}
                 multiline
               />
-            </ScrollView>
-            <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
-              <TouchableOpacity
-                style={[styles.primaryBtn, styles.formSubmitBtn, returning && { opacity: 0.7 }]}
-                onPress={submitReturn}
-                disabled={returning}
-                activeOpacity={0.85}
-              >
-                {returning ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryBtnText}>Confirmar baixa</Text>
-                )}
-              </TouchableOpacity>
+            <View style={{ marginTop: 8, marginBottom: 4 }}>
+              <SheetPrimaryButton label="Confirmar baixa" onPress={submitReturn} loading={returning} />
             </View>
-          </KeyboardAvoidingView>
-          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
-        </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }
