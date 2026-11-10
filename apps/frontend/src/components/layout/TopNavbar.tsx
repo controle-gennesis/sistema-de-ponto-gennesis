@@ -366,6 +366,8 @@ export function TopNavbar({
 
         {/* Busca + ações + perfil */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          {/* Espaço para a página colocar um item no topo (ex.: "Tudo salvo" do orçamento); some quando vazio. */}
+          <div id="app-topnav-extra" className="flex items-center empty:hidden" />
           {isLinkedEmpreiteiro ? null : <NavSearch inputRef={searchInputRef} />}
 
           <NotificationsDropdown chatUnreadCount={chatUnreadCount} />

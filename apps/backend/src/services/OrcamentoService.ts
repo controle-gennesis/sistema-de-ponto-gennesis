@@ -110,6 +110,13 @@ const EMPTY_DATA: OrcamentoData = {
 
 const gravacaoFilaCompartilhada = new Map<string, Promise<unknown>>();
 
+/**
+ * Fila do índice de cada centro de custo. O índice é um arquivo único com todos os orçamentos: ler, alterar
+ * e gravar sem esta fila faz duas gravações simultâneas (ex.: salvar um orçamento e criar uma revisão)
+ * sobrescreverem uma à outra, e a revisão nova ou a alteração some do índice.
+ */
+const indiceFilaCompartilhada = new Map<string, Promise<unknown>>();
+
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
@@ -606,6 +613,18 @@ export class OrcamentoService {
     return nextIndex;
   }
 
+  /** Executa `fn` com exclusividade sobre o índice deste centro de custo (leitura + gravação juntas). */
+  private async comTravaIndice<T>(centroCustoId: string, fn: () => Promise<T>): Promise<T> {
+    const anterior = indiceFilaCompartilhada.get(centroCustoId) ?? Promise.resolve();
+    const atual = anterior.catch(() => undefined).then(fn);
+    indiceFilaCompartilhada.set(centroCustoId, atual);
+    try {
+      return await atual;
+    } finally {
+      if (indiceFilaCompartilhada.get(centroCustoId) === atual) indiceFilaCompartilhada.delete(centroCustoId);
+    }
+  }
+
   private async writeIndex(centroCustoId: string, index: OrcamentoIndex): Promise<void> {
     const body = JSON.stringify(index);
     if (this.useLocal || !this.s3) {
@@ -1045,6 +1064,7 @@ export class OrcamentoService {
     extra?.aoGravarArquivo?.(revisao);
     const updatedAt = new Date().toISOString();
     const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
+    await this.comTravaIndice(centroCustoId, async () => {
     const latestIndex = (await this.readIndexRaw(centroCustoId)) ?? index;
     const statusFromMeta = (() => {
       const s = meta?.statusAprovacao;
@@ -1103,6 +1123,7 @@ export class OrcamentoService {
       )
     };
     await this.writeIndex(centroCustoId, next);
+    });
     this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
     return { revisao };
   }
@@ -1221,12 +1242,15 @@ export class OrcamentoService {
         },
       },
     });
-    await this.writeIndex(centroCustoId, {
-      ultimoOrcamentoId: id,
-      orcamentos: [entry, ...index.orcamentos.map(normalizeOrcamentoVersionFields)],
-      ...(typeof index.listaFinVersion === 'number'
-        ? { listaFinVersion: index.listaFinVersion }
-        : {}),
+    await this.comTravaIndice(centroCustoId, async () => {
+      const indiceAtual = (await this.readIndexRaw(centroCustoId)) ?? index;
+      await this.writeIndex(centroCustoId, {
+        ultimoOrcamentoId: id,
+        orcamentos: [entry, ...indiceAtual.orcamentos.map(normalizeOrcamentoVersionFields)],
+        ...(typeof indiceAtual.listaFinVersion === 'number'
+          ? { listaFinVersion: indiceAtual.listaFinVersion }
+          : {}),
+      });
     });
     return entry;
   }
@@ -1236,6 +1260,20 @@ export class OrcamentoService {
    */
   async createVersao(centroCustoId: string, orcamentoId: string): Promise<OrcamentoIndexEntry> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
+    // Mesma fila das gravações da tela: um salvamento em andamento termina antes de a revisão ser clonada
+    // (senão a revisão nova saía sem as últimas alterações) e nenhum salvamento entra no meio do congelamento.
+    const chave = `${centroCustoId}:${orcamentoId}`;
+    const anterior = this.gravacaoFila.get(chave) ?? Promise.resolve();
+    const atual = anterior.catch(() => undefined).then(() => this.criarVersaoSerializada(centroCustoId, orcamentoId));
+    this.gravacaoFila.set(chave, atual);
+    try {
+      return await atual;
+    } finally {
+      if (this.gravacaoFila.get(chave) === atual) this.gravacaoFila.delete(chave);
+    }
+  }
+
+  private async criarVersaoSerializada(centroCustoId: string, orcamentoId: string): Promise<OrcamentoIndexEntry> {
     const index = await this.getIndex(centroCustoId);
     const origem = index.orcamentos.find((o) => o.id === orcamentoId);
     if (!origem) throw new Error('Orçamento não encontrado');
@@ -1296,6 +1334,10 @@ export class OrcamentoService {
       composicoes: Array.isArray(sourceFile.composicoes) ? sourceFile.composicoes : [],
       imports: Array.isArray(sourceFile.imports) ? sourceFile.imports : [],
       sessaoOrcamento: origemSessaoCongelada,
+      // Antes a revisão e o autor eram apagados aqui. Agora a revisão avança, então quem ainda está editando
+      // esta versão recebe o aviso de "alterado por outra pessoa" em vez de gravar em silêncio num arquivo congelado.
+      revisao: (typeof sourceFile.revisao === 'number' ? sourceFile.revisao : 0) + 1,
+      ...(sourceFile.ultimaAlteracao ? { ultimaAlteracao: sourceFile.ultimaAlteracao } : {}),
     });
 
     const novaSessao = {
@@ -1349,29 +1391,35 @@ export class OrcamentoService {
       cronogramaAtrasado: origemNorm.cronogramaAtrasado,
     });
 
-    const nextOrcamentos = [
-      newEntry,
-      ...index.orcamentos.map((o) => {
-        const n = normalizeOrcamentoVersionFields(o);
-        if (n.id === orcamentoId) {
-          return {
-            ...n,
-            congelado: true,
-            familiaId,
-            versao: origemNorm.versao ?? 1,
-            updatedAt,
-          };
-        }
-        return n;
-      }),
-    ];
-
-    await this.writeIndex(centroCustoId, {
-      ultimoOrcamentoId: newId,
-      orcamentos: nextOrcamentos,
-      ...(typeof index.listaFinVersion === 'number'
-        ? { listaFinVersion: index.listaFinVersion }
-        : {}),
+    // Índice fresco dentro da trava: salvamentos de outros orçamentos do mesmo contrato, feitos enquanto a
+    // revisão era criada, não são desfeitos, e a revisão nova não se perde do índice.
+    await this.comTravaIndice(centroCustoId, async () => {
+      const indiceAtual = (await this.readIndexRaw(centroCustoId)) ?? index;
+      const nextOrcamentos = [
+        newEntry,
+        ...indiceAtual.orcamentos
+          .filter((o) => o.id !== newId)
+          .map((o) => {
+            const n = normalizeOrcamentoVersionFields(o);
+            if (n.id === orcamentoId) {
+              return {
+                ...n,
+                congelado: true,
+                familiaId,
+                versao: origemNorm.versao ?? 1,
+                updatedAt,
+              };
+            }
+            return n;
+          }),
+      ];
+      await this.writeIndex(centroCustoId, {
+        ultimoOrcamentoId: newId,
+        orcamentos: nextOrcamentos,
+        ...(typeof indiceAtual.listaFinVersion === 'number'
+          ? { listaFinVersion: indiceAtual.listaFinVersion }
+          : {}),
+      });
     });
     this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
     this.invalidateOrcamentoCache(centroCustoId, newId);
@@ -1380,16 +1428,18 @@ export class OrcamentoService {
 
   async renameOrcamento(centroCustoId: string, orcamentoId: string, nome: string): Promise<void> {
     if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
-    const index = await this.getIndex(centroCustoId);
-    const updatedAt = new Date().toISOString();
-    const next: OrcamentoIndex = {
-      ...index,
-      orcamentos: index.orcamentos.map(o =>
-        o.id === orcamentoId ? { ...o, nome: nome.trim() || o.nome, updatedAt } : o
-      )
-    };
-    if (!next.orcamentos.some(o => o.id === orcamentoId)) throw new Error('Orçamento não encontrado');
-    await this.writeIndex(centroCustoId, next);
+    await this.comTravaIndice(centroCustoId, async () => {
+      const index = (await this.readIndexRaw(centroCustoId)) ?? (await this.getIndex(centroCustoId));
+      const updatedAt = new Date().toISOString();
+      const next: OrcamentoIndex = {
+        ...index,
+        orcamentos: index.orcamentos.map(o =>
+          o.id === orcamentoId ? { ...o, nome: nome.trim() || o.nome, updatedAt } : o
+        )
+      };
+      if (!next.orcamentos.some(o => o.id === orcamentoId)) throw new Error('Orçamento não encontrado');
+      await this.writeIndex(centroCustoId, next);
+    });
   }
 
   async deleteOrcamento(centroCustoId: string, orcamentoId: string): Promise<void> {
@@ -1414,13 +1464,20 @@ export class OrcamentoService {
       }
     }
 
-    let ultimo = index.ultimoOrcamentoId;
-    if (ultimo === orcamentoId) {
-      ultimo = filtered[0]?.id;
-    }
-    await this.writeIndex(centroCustoId, {
-      ultimoOrcamentoId: ultimo,
-      orcamentos: filtered
+    await this.comTravaIndice(centroCustoId, async () => {
+      const indiceAtual = (await this.readIndexRaw(centroCustoId)) ?? index;
+      const restantes = indiceAtual.orcamentos.filter(o => o.id !== orcamentoId);
+      let ultimo = indiceAtual.ultimoOrcamentoId;
+      if (ultimo === orcamentoId) {
+        ultimo = restantes[0]?.id;
+      }
+      await this.writeIndex(centroCustoId, {
+        ultimoOrcamentoId: ultimo,
+        orcamentos: restantes,
+        ...(typeof indiceAtual.listaFinVersion === 'number'
+          ? { listaFinVersion: indiceAtual.listaFinVersion }
+          : {}),
+      });
     });
     this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
   }
