@@ -12,6 +12,7 @@ import {
   BadgeCheck,
   FilePlus2,
   FileSignature,
+  FileDown,
   Filter,
   Info,
   Loader2,
@@ -369,6 +370,8 @@ function ControleContratosPage() {
   const today = todayYmd();
 
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [ufFilter, setUfFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -638,6 +641,30 @@ function ControleContratosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingId]);
 
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const baixarPdf = async (ids: string[]) => {
+    if (!ids.length || pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const res = await api.post('/contract-registry/pdf', { ids }, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ids.length === 1 ? 'Contrato.pdf' : `Controle de Contratos (${ids.length}).pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error('Não foi possível gerar o PDF dos contratos.');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return registry.filter((r) => {
@@ -752,6 +779,31 @@ function ControleContratosPage() {
               </div>
               <div className={cadastroListClasses.cardToolbar}>
                 <DriveLinksMenu />
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={pdfLoading || (selectedIds.length === 0 && filtered.length === 0)}
+                    onClick={() => void baixarPdf(selectedIds.length ? selectedIds : filtered.map((r) => r.id))}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title={
+                      selectedIds.length
+                        ? 'Baixar PDF dos contratos selecionados'
+                        : 'Baixar PDF de todos os contratos da lista (use as caixinhas para escolher)'
+                    }
+                  >
+                    {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                    <span>{selectedIds.length ? `Baixar PDF (${selectedIds.length})` : 'Baixar PDF (todos)'}</span>
+                  </button>
+                  {selectedIds.length ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedIds([])}
+                      className="h-10 rounded-lg px-2 text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                    >
+                      Limpar
+                    </button>
+                  ) : null}
+                </div>
                 <div className="relative min-w-0 w-full flex-1 basis-full sm:basis-auto sm:min-w-[260px] sm:w-[340px] sm:flex-none">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
@@ -835,6 +887,15 @@ function ControleContratosPage() {
                           >
                             <div className="min-w-0 lg:w-[34%]">
                               <p className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.includes(r.id)}
+                                  onChange={() => toggleSelected(r.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label={`Selecionar contrato ${r.contractNumber}`}
+                                  title="Selecionar para o PDF"
+                                  className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                />
                                 <FileSignature className="h-4 w-4 shrink-0 text-gray-400" />
                                 <span className="truncate" title={r.contractNumber}>{r.contractNumber}</span>
                               </p>
@@ -862,6 +923,16 @@ function ControleContratosPage() {
                             </div>
 
                             <div className="flex shrink-0 gap-2" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => void baixarPdf([r.id])}
+                                disabled={pdfLoading}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                title="Baixar PDF deste contrato"
+                                aria-label="Baixar PDF deste contrato"
+                              >
+                                <FileDown className="h-4 w-4" />
+                              </button>
                               <button type="button" onClick={() => openEdit(r)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Editar" aria-label="Editar">
                                 <Pencil className="h-4 w-4" />
                               </button>

@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { parseBoletoDate, parseBoletoValue } from '../lib/boletoControlImport';
+import { gerarPdfControleContratos } from '../lib/contractRegistryPdf';
 
 type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true; cats: true; looseArts: true } }>;
 
@@ -238,6 +239,61 @@ function readBody(body: Record<string, unknown>, partial: boolean): Prisma.Contr
 }
 
 export class ContractRegistryController {
+  /** PDF com a ficha dos contratos escolhidos (body: { ids: string[] }). */
+  async pdf(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const ids = parseIds(req.body?.ids);
+      if (!ids.length) throw createError('Selecione ao menos um contrato', 400);
+      if (ids.length > 300) throw createError('Selecione no máximo 300 contratos por PDF', 400);
+      const rows = await prisma.contractRegistryEntry.findMany({
+        where: { id: { in: ids } },
+        include: withAddenda,
+        orderBy: [{ uf: 'asc' }, { contractorName: 'asc' }, { contractNumber: 'asc' }],
+      });
+      if (!rows.length) throw createError('Contratos não encontrados', 404);
+      const ccIds = Array.from(new Set(rows.flatMap((r) => r.costCenterIds ?? [])));
+      const ccs = ccIds.length
+        ? await prisma.costCenter.findMany({ where: { id: { in: ccIds } }, select: { id: true, code: true, name: true } })
+        : [];
+      const ccLabel = new Map(ccs.map((c) => [c.id, c.code ? c.code + ' - ' + c.name : c.name]));
+      const contratos = rows.map((r) => {
+        const s = serialize(r);
+        return {
+          contractorName: s.contractorName,
+          uf: s.uf,
+          contractNumber: s.contractNumber,
+          document: s.document,
+          signedAt: s.signedAt,
+          notes: s.notes,
+          value: s.value,
+          startDate: s.startDate,
+          endDate: s.endDate,
+          guarantee: s.guarantee,
+          arts: s.arts,
+          costCenters: s.costCenterIds.map((id) => ccLabel.get(id)).filter((x): x is string => !!x),
+          addendaTotal: s.addendaTotal,
+          addenda: s.addenda,
+          cats: s.cats,
+          looseArts: s.looseArts,
+        };
+      });
+      const buffer = await gerarPdfControleContratos(contratos);
+      const nome =
+        contratos.length === 1
+          ? 'Contrato ' + contratos[0].contractNumber + ' - ' + contratos[0].contractorName
+          : 'Controle de Contratos (' + contratos.length + ')';
+      const seguro = nome.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="contrato.pdf"; filename*=UTF-8\'\'' + encodeURIComponent(seguro + '.pdf')
+      );
+      res.send(buffer);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const search = str(req.query.search);
