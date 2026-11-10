@@ -127,7 +127,7 @@ export default function LoginPage() {
       if (error.message?.includes('Credenciais inválidas') || 
           error.message?.includes('incorreta') ||
           error.message?.includes('inválidas')) {
-        setError('E-mail, CPF ou senha incorretos. Verifique suas credenciais e tente novamente.');
+        setError('E-mail, CPF, CNPJ ou senha incorretos. Verifique suas credenciais e tente novamente.');
       } else {
         setError(error.message || 'Erro ao fazer login');
       }
@@ -233,7 +233,7 @@ export default function LoginPage() {
               Entrar na sua conta
             </h2>
             <p className="text-gray-600 dark:text-gray-400 mb-8 text-center">
-              Use seu e-mail ou CPF e a senha para acessar
+              Use seu e-mail, CPF ou CNPJ e a senha para acessar
             </p>
           </div>
 
@@ -249,7 +249,7 @@ export default function LoginPage() {
                 required
                 autoComplete="username"
                 inputMode="text"
-                placeholder="E-mail ou CPF"
+                placeholder="E-mail, CPF ou CNPJ"
                 className={`${loginInputClassName} pl-12 pr-4`}
               />
             </div>

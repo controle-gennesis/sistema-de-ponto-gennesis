@@ -466,10 +466,23 @@ function ControleBoletosPage() {
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
       <PageStack>
-        <ListPageHeader
-          title="Controle de Boletos"
-          description="Acompanhe os boletos por fornecedor, vencimento e confirmação de pagamento."
-        />
+        <div className="relative flex flex-col items-center gap-3 sm:block">
+          <ListPageHeader
+            title="Controle de Boletos"
+            description="Acompanhe os boletos por fornecedor, vencimento e confirmação de pagamento."
+          />
+          <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+            <button
+              type="button"
+              onClick={() => router.push('/ponto/financeiro/dashboard-boletos')}
+              aria-label="Dashboard"
+              title="Dashboard"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+            >
+              <BarChart3 className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
 
         <div className={pageStatCardsGridClass}>
           {stats.map((s) => (
@@ -526,15 +539,6 @@ function ControleBoletosPage() {
                   {hasActiveFilter ? (
                     <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                   ) : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.push('/ponto/financeiro/dashboard-boletos')}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                  aria-label="Abrir dashboard"
-                  title="Dashboard"
-                >
-                  <BarChart3 className="h-4 w-4" />
                 </button>
                 <div ref={actionsRef} className="relative shrink-0">
                   <button

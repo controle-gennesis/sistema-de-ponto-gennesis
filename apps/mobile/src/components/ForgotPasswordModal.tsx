@@ -215,7 +215,7 @@ export default function ForgotPasswordModal({
   const requestCode = async () => {
     const id = identifier.trim();
     if (!id) {
-      setError('Informe seu e-mail ou CPF.');
+      setError('Informe seu e-mail, CPF ou CNPJ.');
       return;
     }
     setError('');
@@ -311,7 +311,7 @@ export default function ForgotPasswordModal({
       ? {
           Icon: KeyRound,
           title: 'Recuperar senha',
-          subtitle: 'Informe seu e-mail ou CPF e enviaremos um código para o e-mail da sua conta.',
+          subtitle: 'Informe seu e-mail, CPF ou CNPJ e enviaremos um código para o e-mail da sua conta.',
         }
       : step === 'code'
         ? {
@@ -405,7 +405,7 @@ export default function ForgotPasswordModal({
                     }}
                     onFocus={() => setFocused('id')}
                     onBlur={() => setFocused(null)}
-                    placeholder="E-mail ou CPF"
+                    placeholder="E-mail, CPF ou CNPJ"
                     placeholderTextColor={C.placeholder}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -527,7 +527,7 @@ export default function ForgotPasswordModal({
                     <Text style={styles.primaryText}>Falar com o suporte</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => setStep('identify')} style={styles.secondaryLink}>
-                    <Text style={styles.link}>Tentar outro e-mail ou CPF</Text>
+                    <Text style={styles.link}>Tentar outro e-mail, CPF ou CNPJ</Text>
                   </TouchableOpacity>
                 </>
               ) : (

@@ -2251,8 +2251,8 @@ export default function EmpreiteirosPage() {
       toast.error('Especialidade é obrigatória');
       return;
     }
-    if (payload.cpf.length !== 11) {
-      toast.error('CPF é obrigatório e deve ter 11 dígitos');
+    if (payload.cpf && payload.cpf.length !== 11) {
+      toast.error('CPF deve ter 11 dígitos (ou deixe em branco)');
       return;
     }
     if (payload.cnpj.length !== 14) {
@@ -3444,13 +3444,12 @@ export default function EmpreiteirosPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>CPF *</label>
+                    <label className={labelClass}>CPF</label>
                     <input
                       type="text"
-                      required
                       value={form.cpf}
                       onChange={(e) => patchForm({ cpf: formatCpfInput(e.target.value) })}
-                      placeholder="000.000.000-00"
+                      placeholder="Opcional"
                       className={inputClass}
                     />
                   </div>
@@ -3521,7 +3520,7 @@ export default function EmpreiteirosPage() {
                         className={inputClass}
                       />
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        O empreiteiro entra no sistema com o CPF e esta senha.
+                        O empreiteiro entra no sistema com o CPF ou o CNPJ e esta senha.
                       </p>
                     </div>
                   ) : null}

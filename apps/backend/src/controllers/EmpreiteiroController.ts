@@ -814,11 +814,14 @@ function optionalStr(value: unknown): string | null {
 }
 
 function parseRequiredCpfCnpj(body: Record<string, unknown> | undefined) {
-  const cpf = digits(body?.cpf);
+  // CNPJ é obrigatório; CPF é opcional (se informado, precisa ter 11 dígitos).
+  const cpfDigitsValue = digits(body?.cpf);
   const cnpj = digits(body?.cnpj);
-  if (cpf.length !== 11) throw createError('CPF é obrigatório e deve ter 11 dígitos', 400);
+  if (cpfDigitsValue && cpfDigitsValue.length !== 11) {
+    throw createError('CPF deve ter 11 dígitos (ou deixe em branco)', 400);
+  }
   if (cnpj.length !== 14) throw createError('CNPJ é obrigatório e deve ter 14 dígitos', 400);
-  return { cpf, cnpj };
+  return { cpf: cpfDigitsValue || null, cnpj };
 }
 
 function parseDateField(value: unknown, label: string): Date | null {
@@ -2361,8 +2364,10 @@ export class EmpreiteiroController {
       const phone = digits(req.body?.phone);
       const specialty = str(req.body?.specialty);
       const email = optionalStr(req.body?.email)?.toLowerCase() ?? null;
-      // O login do empreiteiro é CPF + senha; o e-mail do usuário é interno quando não informado.
-      const emailLoginInterno = `${cpf}@empreiteiro.gennesis.local`;
+      // O login do empreiteiro é CPF ou CNPJ + senha. Sem CPF, a conta guarda o CNPJ como documento de login;
+      // o e-mail do usuário é interno quando não informado.
+      const documentoLogin = cpf ?? cnpj;
+      const emailLoginInterno = `${documentoLogin}@empreiteiro.gennesis.local`;
 
       if (!name) throw createError('Nome é obrigatório', 400);
       if (phone.length < 10) throw createError('Telefone é obrigatório', 400);
@@ -2376,7 +2381,7 @@ export class EmpreiteiroController {
       }
 
       const duplicate = await prisma.empreiteiro.findFirst({
-        where: { OR: [{ document: cnpj }, { cpf }] },
+        where: { OR: [{ document: cnpj }, ...(cpf ? [{ cpf }] : [])] },
       });
       if (duplicate) throw createError('Já existe uma empreita com este CPF ou CNPJ', 400);
 
@@ -2389,10 +2394,10 @@ export class EmpreiteiroController {
         const passwordBody = typeof req.body?.password === 'string' ? req.body.password : '';
         if (passwordBody.length < 6) throw createError('Senha deve ter pelo menos 6 caracteres', 400);
         const existingUser = await prisma.user.findFirst({
-          where: { OR: [...(email ? [{ email }] : []), { cpf }, { email: emailLoginInterno }] },
+          where: { OR: [...(email ? [{ email }] : []), { cpf: documentoLogin }, { email: emailLoginInterno }] },
           select: { id: true },
         });
-        if (existingUser) throw createError('Já existe um usuário com este CPF ou e-mail', 400);
+        if (existingUser) throw createError('Já existe um usuário com este CPF, CNPJ ou e-mail', 400);
         passwordHash = await hashPassword(passwordBody);
       }
 
@@ -2411,7 +2416,7 @@ export class EmpreiteiroController {
               email: email || emailLoginInterno,
               password: passwordHash as string,
               name: optionalStr(req.body?.contactName) || name,
-              cpf,
+              cpf: documentoLogin,
               role: 'EMPLOYEE',
             },
             select: { id: true },
@@ -2666,6 +2671,17 @@ export class EmpreiteiroController {
             });
             if (cpfEmUso) throw createError('Já existe um usuário com este CPF', 400);
             patch.cpf = cpfDigits;
+          }
+          // Sem CPF, a conta guarda o CNPJ como documento de login: acompanha a troca do CNPJ.
+          const loginDigitos = String(loginUser.cpf || '').replace(/\D/g, '');
+          const cnpjAtual = String(nextDocument || '').replace(/\D/g, '');
+          if (!cpfDigits && loginDigitos.length === 14 && cnpjAtual.length === 14 && loginDigitos !== cnpjAtual) {
+            const cnpjEmUso = await prisma.user.findFirst({
+              where: { id: { not: item.userId }, cpf: cnpjAtual },
+              select: { id: true },
+            });
+            if (cnpjEmUso) throw createError('Já existe um usuário com este CNPJ', 400);
+            patch.cpf = cnpjAtual;
           }
           const emailInformado = optionalStr(req.body?.email)?.toLowerCase();
           if (emailInformado && emailInformado.includes('@') && emailInformado !== loginUser.email) {
