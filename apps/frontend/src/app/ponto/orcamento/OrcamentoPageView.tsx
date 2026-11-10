@@ -5512,6 +5512,11 @@ function parseOrcamentoDetailRaw(d: {
           subtitulosNoOrcamento: Array.isArray(so.subtitulosNoOrcamento) ? so.subtitulosNoOrcamento : [],
           quantidadesPorItem:
             so.quantidadesPorItem && typeof so.quantidadesPorItem === 'object' ? so.quantidadesPorItem : {},
+          // Faltava aqui: as fórmulas de quantidade (=...) eram gravadas, mas não lidas de volta do servidor,
+          // então sumiam ao reabrir e o próximo salvamento apagava de vez.
+          formulasQuantidadePorItem: parseFormulasQuantidadePorItem(
+            (so as { formulasQuantidadePorItem?: unknown }).formulasQuantidadePorItem
+          ),
           dimensoesPorItem:
             so.dimensoesPorItem && typeof so.dimensoesPorItem === 'object' ? so.dimensoesPorItem : {},
           planilhaQuantidadeCompra:
@@ -5663,6 +5668,22 @@ const baseSincronizada = new Map<string, PayloadOrcamento>();
 /** Gravações do mesmo orçamento saem uma de cada vez (cada uma usa a revisão devolvida pela anterior). */
 const filaDeSalvamento = new Map<string, Promise<unknown>>();
 
+/** Estado do salvamento para o indicador da tela ("Tudo salvo" / "Salvando…" / erro). */
+const ouvintesSalvamento = new Set<() => void>();
+function avisarMudancaSalvamento(): void {
+  ouvintesSalvamento.forEach((f) => f());
+}
+/** Quando terminou o último envio de verdade ao servidor (não conta salvamento sem alteração): "Tudo salvo" aparece só um instante. */
+let ultimoSalvamentoRealEm = 0;
+const TUDO_SALVO_VISIVEL_MS = 3000;
+/** A última tentativa de gravar falhou (sem ser conflito): a alteração ainda NÃO está no servidor. */
+let falhaSalvamento = false;
+function definirFalhaSalvamento(valor: boolean): void {
+  if (falhaSalvamento === valor) return;
+  falhaSalvamento = valor;
+  avisarMudancaSalvamento();
+}
+
 type ConflitoRevisaoInfo = {
   orcamentoId: string;
   revisaoAtual: number;
@@ -5741,6 +5762,7 @@ async function enviarOrcamentoParaApi(
   const revisao = (resposta.data as { revisao?: unknown } | undefined)?.revisao;
   if (typeof revisao === 'number') revisaoDoEstado.set(orcamentoId, revisao);
   assinaturaSincronizada.set(orcamentoId, assinatura);
+  ultimoSalvamentoRealEm = Date.now();
   // Só um payload completo serve de base para a mescla; gravação parcial invalida a base.
   if (data.servicos && data.imports && data.sessaoOrcamento) baseSincronizada.set(orcamentoId, data);
   else baseSincronizada.delete(orcamentoId);
@@ -5769,10 +5791,13 @@ async function saveOrcamentoToApi(
       enviarOrcamentoParaApi(centroCustoId, orcamentoId, data, opts?.force === true, opts?.semDedupe === true)
     );
   filaDeSalvamento.set(orcamentoId, atual);
+  avisarMudancaSalvamento();
   try {
     await atual;
+    definirFalhaSalvamento(false);
   } finally {
     if (filaDeSalvamento.get(orcamentoId) === atual) filaDeSalvamento.delete(orcamentoId);
+    avisarMudancaSalvamento();
   }
 }
 
@@ -8002,6 +8027,79 @@ const ABA_ROTULO_PRESENCA: Record<string, string> = {
   cronograma: 'Cronograma',
 };
 
+/**
+ * Mostra se já dá para atualizar/fechar a página sem perder alteração.
+ * Verde = tudo no servidor. Âmbar/azul = ainda há algo para enviar (aguarde). Vermelho = falhou, não feche.
+ */
+function IndicadorSalvamento({
+  orcamentoId,
+  autosavePendente,
+  conflito,
+  oculto,
+}: {
+  orcamentoId: string | null;
+  autosavePendente: () => boolean;
+  conflito: boolean;
+  oculto?: boolean;
+}) {
+  const [, forcar] = useState(0);
+  useEffect(() => {
+    const atualizar = () => forcar((n) => n + 1);
+    ouvintesSalvamento.add(atualizar);
+    // A digitação num campo (rascunho) e o temporizador do autosave mudam sem aviso: confere de tempos em tempos.
+    const t = window.setInterval(atualizar, 400);
+    return () => {
+      ouvintesSalvamento.delete(atualizar);
+      window.clearInterval(t);
+    };
+  }, []);
+  if (oculto || !orcamentoId) return null;
+
+  const salvando = temSalvamentoEmAndamento(orcamentoId);
+  const pendente = autosavePendente();
+  const salvouAgora = Date.now() - ultimoSalvamentoRealEm < TUDO_SALVO_VISIVEL_MS;
+
+  let cor = 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300';
+  let texto = 'Tudo salvo';
+  let dica = 'Todas as alterações já estão no servidor. Pode atualizar ou fechar a página.';
+  let icone: React.ReactNode = <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />;
+  if (conflito) {
+    cor = 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300';
+    texto = 'Conflito';
+    dica = 'Outra pessoa alterou este orçamento. Resolva o aviso antes de sair, senão suas alterações podem se perder.';
+    icone = <AlertTriangle className="h-3.5 w-3.5" aria-hidden />;
+  } else if (falhaSalvamento) {
+    cor = 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300';
+    texto = 'Não salvou';
+    dica = 'Não foi possível salvar no servidor. NÃO atualize a página: o sistema está tentando de novo.';
+    icone = <AlertTriangle className="h-3.5 w-3.5" aria-hidden />;
+  } else if (salvando) {
+    cor = 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300';
+    texto = 'Salvando…';
+    dica = 'Enviando ao servidor. Aguarde terminar antes de atualizar a página.';
+    icone = <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />;
+  } else if (pendente) {
+    cor = 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300';
+    texto = 'Alterações por salvar';
+    dica = 'Há alterações que ainda não foram enviadas. Aguarde alguns segundos antes de atualizar a página.';
+    icone = <Loader2 className="h-3.5 w-3.5" aria-hidden />;
+  } else if (!salvouAgora) {
+    // Nada a avisar: "Tudo salvo" só aparece por alguns segundos depois de um salvamento.
+    return null;
+  }
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      title={dica}
+      className={`inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-sm font-semibold transition-colors sm:px-3.5 [&>svg]:h-4 [&>svg]:w-4 ${cor}`}
+    >
+      {icone}
+      <span className="hidden sm:inline">{texto}</span>
+    </span>
+  );
+}
+
 /** Pessoas que estão neste orçamento agora (foto com a cor delas e a aba em que estão). */
 function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
   if (usuarios.length === 0) return null;
@@ -8529,9 +8627,32 @@ export function OrcamentoPageView({
       });
     }
 
-    saveOrcamentoToApi(cc, oid, montarPayloadSalvarOrcamento(s, i, sessaoAtual)).catch((err) =>
-      console.warn('Erro ao salvar orçamento no servidor:', err)
-    );
+    saveOrcamentoToApi(cc, oid, montarPayloadSalvarOrcamento(s, i, sessaoAtual)).catch((err) => {
+      console.warn('Erro ao salvar orçamento no servidor:', err);
+      // Conflito com outra pessoa: o diálogo de decisão já foi aberto.
+      if (err instanceof OrcamentoConflitoRevisaoError) return;
+      definirFalhaSalvamento(true);
+      // Antes a falha era só registrada no console: a pessoa seguia editando sem saber que nada estava sendo gravado.
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      if (apiMsg && /congelado/i.test(apiMsg)) {
+        toast.error(`${apiMsg} O que você alterou nesta tela NÃO foi gravado; abra a revisão mais recente.`, {
+          id: 'orc-autosave-erro',
+          duration: 10000,
+        });
+        return;
+      }
+      toast.error(
+        'Não foi possível salvar o orçamento. Suas alterações continuam na tela e vou tentar de novo em instantes.',
+        { id: 'orc-autosave-erro' }
+      );
+      // Nova tentativa: sem isso, se a pessoa parasse de editar, a alteração nunca mais era enviada.
+      if (!orcamentoAutosaveTimerRef.current) {
+        orcamentoAutosaveTimerRef.current = setTimeout(() => {
+          orcamentoAutosaveTimerRef.current = null;
+          flushOrcamentoPersistencia();
+        }, 8000);
+      }
+    });
   }, []);
 
   // ── Colaboração em tempo real: quem está no orçamento, onde, e atualização ao vivo ──
@@ -9521,9 +9642,14 @@ export function OrcamentoPageView({
         typeof apiData.revisao === 'number' &&
         typeof revisaoConhecida === 'number' &&
         apiData.revisao > revisaoConhecida;
+      // Sem revisão conhecida da tela não dá para saber se o servidor tem algo mais novo que o que foi pintado
+      // (cache/disco): nesse caso o do servidor vale, senão a tela ficava desatualizada e o próximo salvamento
+      // gravava o conteúdo antigo por cima do trabalho de outra pessoa.
+      const revisaoDesconhecida = typeof apiData.revisao === 'number' && revisaoConhecida === undefined;
       const jaPintado =
         !forcarAplicacaoRef.current &&
         !servidorMaisNovo &&
+        !revisaoDesconhecida &&
         servicosRef.current.length > 0 &&
         sessaoRef.current.subtitulosNoOrcamento.length > 0 &&
         assinaturaArvoreOrcamento(servicosRef.current, sessaoRef.current.subtitulosNoOrcamento) ===
@@ -9909,9 +10035,25 @@ export function OrcamentoPageView({
       }
       flushOrcamentoPersistencia();
     };
+    // Fechar/recarregar a aba com gravação pendente: o navegador pode cancelar o envio, então avisa antes de sair.
+    // Precisa vir ANTES do onLeave (que dispara o envio e esvazia o temporizador).
+    const avisarSePendente = (e: BeforeUnloadEvent) => {
+      const oid = orcamentoPersistIdsRef.current.orcamentoId;
+      const pendente =
+        !!orcamentoAutosaveTimerRef.current ||
+        (oid ? temSalvamentoEmAndamento(oid) : false) ||
+        // Campo ainda em edição (a quantidade só é confirmada com Enter ou ao sair do campo).
+        fdCampoDrafts.size > 0 ||
+        falhaSalvamento;
+      if (!pendente) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', avisarSePendente);
     window.addEventListener('pagehide', onLeave);
     window.addEventListener('beforeunload', onLeave);
     return () => {
+      window.removeEventListener('beforeunload', avisarSePendente);
       window.removeEventListener('pagehide', onLeave);
       window.removeEventListener('beforeunload', onLeave);
       onLeave();
@@ -9963,6 +10105,7 @@ export function OrcamentoPageView({
     saveOrcamentoToApi(centroCustoId, orcamentoAtivoId, montarPayloadSalvarOrcamento(s, i, sessao)).catch(err => {
       // Conflito de edição: a janela de decisão já foi aberta, sem toast de erro genérico.
       if (err instanceof OrcamentoConflitoRevisaoError) return;
+      definirFalhaSalvamento(true);
       console.warn('Erro ao salvar orçamento no servidor:', err);
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       if (apiMsg && /congelado/i.test(apiMsg)) {
@@ -10376,8 +10519,21 @@ export function OrcamentoPageView({
           orcamentoAtivoId,
           montarPayloadSalvarOrcamento(servicos, imports, sessao)
         );
-      } catch {
-        /* segue mesmo assim — o servidor lê o arquivo atual */
+      } catch (errSalvar) {
+        // Antes o erro era ignorado e a revisão era criada a partir do arquivo antigo do servidor,
+        // então as alterações que não chegaram a ser salvas se perdiam (na revisão nova e na congelada).
+        if (errSalvar instanceof OrcamentoConflitoRevisaoError) {
+          toast.error(
+            'Outra pessoa alterou este orçamento. Atualize com as alterações dela antes de criar a nova revisão. Nada foi criado.'
+          );
+        } else {
+          const apiMsg = (errSalvar as { response?: { data?: { message?: string } } })?.response?.data?.message;
+          toast.error(
+            apiMsg ||
+              'Não foi possível salvar suas alterações antes de criar a revisão. Nada foi criado; tente de novo.'
+          );
+        }
+        return;
       }
       const entry = await criarVersaoOrcamentoApi(centroCustoId, orcamentoAtivoId);
       setListaOrcamentos((prev) => {
@@ -22835,6 +22991,24 @@ export function OrcamentoPageView({
 
         {orcamentoAtivoId && !cronogramaOnly && footerPortalReady && createPortal(
           <>
+            {/* Etiqueta de salvamento: no topo, à direita (junto da busca/sino), no espaço da barra do sistema. */}
+            {(() => {
+              const indicador = (
+                <IndicadorSalvamento
+                  orcamentoId={orcamentoAtivoId ?? null}
+                  autosavePendente={() => !!orcamentoAutosaveTimerRef.current}
+                  conflito={!!conflitoRevisao}
+                  oculto={versaoCongelada || meta.congelado === true}
+                />
+              );
+              const slotTopo =
+                typeof document !== 'undefined' ? document.getElementById('app-topnav-extra') : null;
+              return slotTopo ? (
+                createPortal(indicador, slotTopo)
+              ) : (
+                <div className="fixed right-4 top-[4.5rem] z-40">{indicador}</div>
+              );
+            })()}
             <div
               className="fixed bottom-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 left-0 lg:left-[var(--orc-footer-left,5rem)]"
               role="navigation"
