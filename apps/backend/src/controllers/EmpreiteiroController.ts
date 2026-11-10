@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { gerarContratoDoServico } from '../lib/empreiteiroContractDocument';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 import { PhotoService } from '../services/PhotoService';
 import { buscarStatusFluigPorNumeros, listarSolicitacoesFluigDaEmpreita } from '../lib/empreiteiroFluigSolicitacoes';
@@ -988,6 +989,8 @@ type ContractLinkRow = {
   name?: string | null;
   description?: string | null;
   plannedValue?: Prisma.Decimal | null;
+  weightPercent?: Prisma.Decimal | null;
+  accumulatedPercent?: Prisma.Decimal | null;
   location?: string | null;
   iconName?: string | null;
   iconColor?: string | null;
@@ -1184,6 +1187,8 @@ function serializeContractLink(
     name: serviceName,
     description: row.description ?? null,
     plannedValue: row.plannedValue != null ? Number(row.plannedValue) : null,
+    weightPercent: row.weightPercent != null ? Number(row.weightPercent) : null,
+    accumulatedPercent: row.accumulatedPercent != null ? Number(row.accumulatedPercent) : null,
     /** Soma dos aditivos. */
     addendaTotal,
     /** Valor vigente = planejado + aditivos. */
@@ -1237,6 +1242,15 @@ function serializeContractLink(
   };
 }
 
+function parsePercentField(value: unknown, label: string): Prisma.Decimal | null {
+  if (value === undefined || value === null || value === '') return null;
+  const num = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(num) || num < 0 || num > 100) {
+    throw createError(label + ' deve ser um percentual entre 0 e 100', 400);
+  }
+  return new Prisma.Decimal(num.toFixed(2));
+}
+
 function parsePlannedValue(value: unknown): Prisma.Decimal | null {
   const num = parseMoneyInput(value);
   if (num == null) return null;
@@ -1263,6 +1277,8 @@ function serializeEmpreiteiro(
     bank: string | null;
     agency: string | null;
     account: string | null;
+    accountType?: string | null;
+    address?: string | null;
     startDate: Date | null;
     endDate: Date | null;
     photoUrl: string | null;
@@ -1335,6 +1351,8 @@ function serializeEmpreiteiro(
     bank: row.bank,
     agency: row.agency,
     account: row.account,
+    accountType: row.accountType ?? null,
+    address: row.address ?? null,
     startDate: row.startDate ? formatWorkDate(row.startDate) : null,
     endDate: row.endDate ? formatWorkDate(row.endDate) : null,
     photoUrl: row.photoUrl || row.user?.profilePhotoUrl || null,
@@ -2456,6 +2474,8 @@ export class EmpreiteiroController {
             bank: optionalStr(req.body?.bank),
             agency: optionalStr(req.body?.agency),
             account: optionalStr(req.body?.account),
+            accountType: optionalStr(req.body?.accountType),
+            address: optionalStr(req.body?.address),
             photoUrl: fotoFinal.photoUrl,
             photoKey: fotoFinal.photoKey,
             files: files as Prisma.InputJsonValue,
@@ -2510,6 +2530,8 @@ export class EmpreiteiroController {
       if (req.body?.bank !== undefined) data.bank = optionalStr(req.body.bank);
       if (req.body?.agency !== undefined) data.agency = optionalStr(req.body.agency);
       if (req.body?.account !== undefined) data.account = optionalStr(req.body.account);
+      if (req.body?.accountType !== undefined) data.accountType = optionalStr(req.body.accountType);
+      if (req.body?.address !== undefined) data.address = optionalStr(req.body.address);
       // Foto da empreita: só sincroniza do perfil do login (não há upload neste formulário).
       if (req.body?.startDate !== undefined) data.startDate = parseDateField(req.body.startDate, 'Data de início');
       if (req.body?.endDate !== undefined) data.endDate = parseDateField(req.body.endDate, 'Data de fim');
@@ -2817,6 +2839,8 @@ export class EmpreiteiroController {
       if (!name) throw createError('Nome do contrato de serviço é obrigatório', 400);
       const description = optionalStr(req.body?.description);
       const plannedValue = parsePlannedValue(req.body?.plannedValue);
+      const weightPercent = parsePercentField(req.body?.weightPercent, 'Peso');
+      const accumulatedPercent = parsePercentField(req.body?.accumulatedPercent, 'Acumulado');
       const location = optionalStr(req.body?.location);
       const iconName = optionalStr(req.body?.iconName);
       const iconColor = sanitizeHexColor(req.body?.iconColor);
@@ -2853,13 +2877,16 @@ export class EmpreiteiroController {
         startDate
       );
 
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.empreiteiroContract.create({
+      let createdLinkId = '';
+      let updated = await prisma.$transaction(async (tx) => {
+        const createdLink = await tx.empreiteiroContract.create({
           data: {
             empreiteiroId: id,
             name,
             description,
             plannedValue: plannedValue ?? undefined,
+            weightPercent: weightPercent ?? undefined,
+            accumulatedPercent: accumulatedPercent ?? undefined,
             location,
             iconName,
             iconColor,
@@ -2884,6 +2911,7 @@ export class EmpreiteiroController {
               : undefined,
           },
         });
+        createdLinkId = createdLink.id;
         if (systemContractId) {
           await tx.empreiteiro.update({
             where: { id },
@@ -2899,11 +2927,52 @@ export class EmpreiteiroController {
           include: empreiteiroInclude,
         });
       });
+      // Gera o contrato (Word + PDF) preenchido e anexa ao serviço. Falha aqui não impede o cadastro.
+      let contratoGerado: Awaited<ReturnType<typeof gerarContratoDoServico>> | null = null;
+      try {
+        contratoGerado = await gerarContratoDoServico(createdLinkId);
+        updated = await prisma.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
+      } catch (docErr) {
+        console.error('[empreiteiros] falha ao gerar contrato do serviço', docErr);
+      }
       const counts = await measurementCountsForEmpreiteiro(id);
       res.json({
         success: true,
         data: serializeEmpreiteiro(updated, counts),
-        message: 'Contrato de serviço criado',
+        message: contratoGerado
+          ? 'Contrato de serviço criado e contrato gerado nos anexos'
+          : 'Contrato de serviço criado (não foi possível gerar o documento)',
+        contractDocument: contratoGerado,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** (Re)gera o contrato em Word/PDF do serviço e anexa em "Anexos". */
+  async generateContractDocument(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const { id, linkId } = req.params;
+      const link = await prisma.empreiteiroContract.findFirst({
+        where: { id: linkId, empreiteiroId: id },
+        select: { id: true },
+      });
+      if (!link) throw createError('Contrato de serviço não encontrado', 404);
+      const result = await gerarContratoDoServico(linkId);
+      const updated = await prisma.empreiteiro.findUniqueOrThrow({
+        where: { id },
+        include: empreiteiroInclude,
+      });
+      const counts = await measurementCountsForEmpreiteiro(id);
+      res.json({
+        success: true,
+        data: serializeEmpreiteiro(updated, counts),
+        message: 'Contrato gerado',
+        contractDocument: result,
       });
     } catch (error) {
       next(error);
@@ -2949,6 +3018,14 @@ export class EmpreiteiroController {
         req.body?.plannedValue !== undefined
           ? parsePlannedValue(req.body.plannedValue)
           : link.plannedValue;
+      const weightPercent =
+        req.body?.weightPercent !== undefined
+          ? parsePercentField(req.body.weightPercent, 'Peso')
+          : link.weightPercent;
+      const accumulatedPercent =
+        req.body?.accumulatedPercent !== undefined
+          ? parsePercentField(req.body.accumulatedPercent, 'Acumulado')
+          : link.accumulatedPercent;
       const location =
         req.body?.location !== undefined ? optionalStr(req.body.location) : link.location;
       const iconName =
@@ -3035,6 +3112,8 @@ export class EmpreiteiroController {
             name,
             description,
             plannedValue: plannedValue ?? null,
+            weightPercent: weightPercent ?? null,
+            accumulatedPercent: accumulatedPercent ?? null,
             location,
             iconName,
             iconColor,
@@ -3295,6 +3374,26 @@ export class EmpreiteiroController {
    * Fila de aprovação. Sem phase (ou PENDING) devolve só o que aguarda aprovação.
    * O gestor vê só as medições dos centros de custo dele; o administrador vê tudo.
    */
+  /** Quantas medições foram aprovadas pelo gestor depois de `since` (selo do menu Empreitas). */
+  async approvedDailyMeasurementsCount(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const approvalScope = await resolveEmpreiteiroApprovalScope(req);
+      const sinceRaw = str(req.query.since);
+      const since = sinceRaw ? new Date(sinceRaw) : null;
+      if (!since || Number.isNaN(since.getTime())) {
+        res.json({ success: true, data: { count: 0 } });
+        return;
+      }
+      const base = { status: 'APPROVED' as const, approvedAt: { gt: since } };
+      const count = await prisma.empreiteiroDailyMeasurement.count({
+        where: approvalScope === null ? base : { AND: [base, measurementScopeWhere(approvalScope)] },
+      });
+      res.json({ success: true, data: { count } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listPendingDailyMeasurements(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const approvalScope = await resolveEmpreiteiroApprovalScope(req);

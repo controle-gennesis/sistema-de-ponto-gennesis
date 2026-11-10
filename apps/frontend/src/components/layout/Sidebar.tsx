@@ -90,6 +90,7 @@ import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
+import { useEmpreitaApprovedMeasurements } from '@/hooks/useEmpreitaApprovedMeasurements';
 import { useOrcamentoNotificationCounts } from '@/hooks/useOrcamentoNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
@@ -611,6 +612,16 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   useEffect(() => {
     if (pathname?.startsWith('/ponto/orcamentos')) marcarAvisosOrcamentoVistos();
   }, [pathname, marcarAvisosOrcamentoVistos]);
+  const canSeeEmpreitasPage = isAdministrator || can(pk('/ponto/empreiteiros'));
+  const { count: empreitaMedicoesAprovadasCount, marcarComoVistas: marcarEmpreitaMedicoesVistas } =
+    useEmpreitaApprovedMeasurements(
+      String(authService.getUser()?.id || user?.id || ''),
+      !isLoading && canSeeEmpreitasPage
+    );
+  // Entrou em Empreitas: o selo zera e só volta com novas aprovações.
+  useEffect(() => {
+    if (pathname?.startsWith('/ponto/empreiteiros')) marcarEmpreitaMedicoesVistas();
+  }, [pathname, marcarEmpreitaMedicoesVistas]);
   const { count: mensalReportPendingCount } = useMensalReportPendingCount(
     !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
   );
@@ -641,6 +652,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
     if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount;
     if (href === '/ponto/contratos') return mensalReportPendingCount;
+    if (href === '/ponto/empreiteiros') {
+      return pathname?.startsWith('/ponto/empreiteiros') ? 0 : empreitaMedicoesAprovadasCount;
+    }
     if (href === '/ponto/cronogramas') return cronogramasNovosCount;
     return 0;
   };
