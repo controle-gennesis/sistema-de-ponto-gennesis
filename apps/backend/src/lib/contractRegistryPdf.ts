@@ -245,13 +245,13 @@ function fichaDoContrato(doc: Doc, c: RegistryPdfContract, today: string) {
     table(
       doc,
       [
-        { label: 'Nº', width: 26 },
-        { label: 'Assinatura', width: 56 },
-        { label: 'Vigência', width: 92 },
-        { label: 'Valor', width: 66, align: 'right' },
-        { label: 'Garantia', width: 44 },
-        { label: 'ARTs', width: 118 },
-        { label: 'Observação', width: 90 },
+        { label: 'Nº', width: 24 },
+        { label: 'Assinatura', width: 60 },
+        { label: 'Vigência', width: 108 },
+        { label: 'Valor', width: 70, align: 'right' },
+        { label: 'Garantia', width: 54 },
+        { label: 'ARTs', width: 100 },
+        { label: 'Observação', width: 84 },
       ],
       c.addenda.map((a) => [
         a.addendumNumber || '—',
