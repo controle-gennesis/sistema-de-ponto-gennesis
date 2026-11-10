@@ -446,11 +446,20 @@ function CartaoComposicao({
           {composicao.item || '—'}
         </span>
         {[
-          { rotulo: 'Código', valor: composicao.codigo, largura: 'w-36' },
+          {
+            rotulo: 'Código',
+            valor:
+              String(composicao.codigo ?? '')
+                .replace(/^\s*COMP\.?\s*COTA[ÇC][ÃA]O\s*[-–—:]?\s*/i, '')
+                .trim() || composicao.codigo,
+            largura: 'w-36',
+            titulo: composicao.codigo,
+          },
           { rotulo: 'Banco', valor: composicao.banco || '—', largura: 'w-28' },
         ].map((c) => (
           <span
             key={c.rotulo}
+            title={'titulo' in c ? c.titulo : undefined}
             className={`flex ${c.largura} shrink-0 flex-col items-center justify-center border-r border-gray-200 px-2 leading-tight dark:border-gray-700`}
           >
             <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">

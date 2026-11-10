@@ -60,14 +60,14 @@ type AccountingAttachmentInput = {
   fileName: string;
   mimeType: string;
   dataBase64: string;
-  tipoArquivo: string;
+  tipoArquivo?: string;
   dataValidade?: string;
 };
 
 export type StoredAccountingAttachment = {
   fileName: string;
   mimeType: string;
-  tipoArquivo: string;
+  tipoArquivo?: string;
   dataValidade?: string;
   url: string;
   key: string;
@@ -78,7 +78,8 @@ export type StoredAccountingAttachment = {
  * Devolve também as chaves gravadas, para o chamador remover se a criação falhar depois.
  */
 export async function storeAccountingAttachments(
-  details: Record<string, unknown>
+  details: Record<string, unknown>,
+  opts?: { folder?: string; fileNamePrefix?: string }
 ): Promise<{ details: Record<string, unknown>; storedKeys: string[] }> {
   const raw = details.anexos;
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -91,18 +92,18 @@ export async function storeAccountingAttachments(
   try {
     for (const item of raw as AccountingAttachmentInput[]) {
       const saved = await savePersistentUpload({
-        folder: 'dp-contabilidade',
+        folder: opts?.folder ?? 'dp-contabilidade',
         buffer: Buffer.from(item.dataBase64, 'base64'),
         originalName: item.fileName,
         mimeType: item.mimeType,
-        fileNamePrefix: 'contab-',
+        fileNamePrefix: opts?.fileNamePrefix ?? 'contab-',
         includeSafeOriginalName: true,
       });
       storedKeys.push(saved.key);
       stored.push({
         fileName: item.fileName,
         mimeType: item.mimeType,
-        tipoArquivo: item.tipoArquivo,
+        ...(item.tipoArquivo ? { tipoArquivo: item.tipoArquivo } : {}),
         ...(item.dataValidade ? { dataValidade: item.dataValidade } : {}),
         url: saved.url,
         key: saved.key,

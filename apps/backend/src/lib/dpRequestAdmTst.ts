@@ -9,6 +9,7 @@ const ADM_TST_TYPE_VALUES = [
   'ADM_INFORMATICA',
   'ADM_TREINAMENTOS_NR',
   'ADM_ASOS',
+  'ADM_OUTROS',
 ] as const;
 
 export function isAdmTstDpRequestType(requestType: string): boolean {

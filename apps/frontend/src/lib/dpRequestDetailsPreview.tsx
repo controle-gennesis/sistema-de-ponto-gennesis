@@ -4,6 +4,7 @@
 import React from 'react';
 import { Download, Eye, X } from 'lucide-react';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
+import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { ASO_TIPO_LABELS } from '@/app/ponto/solicitacoes-dp/dpSolicitacaoRepeatableFields';
 
 function formatYmdToBr(ymd: unknown): string {
@@ -276,6 +277,61 @@ type Props = {
   details?: Record<string, unknown> | null;
   employeeNameById?: Map<string, string>;
 };
+
+/** "Outros" (ADM): assunto, colaborador, descrição e anexos gravados no S3 (`url`) ou, nos antigos, em Base64. */
+function AdmOutrosPreview({
+  details,
+  employeeNameById,
+  sectionBaseCls,
+  titleCls,
+}: {
+  details: Record<string, unknown>;
+  employeeNameById?: Map<string, string>;
+  sectionBaseCls: string;
+  titleCls: string;
+}) {
+  const [preview, setPreview] = React.useState<DpPreviewAttachment | null>(null);
+  const colaboradorId = toTrimmedString(details.colaboradorEmployeeId);
+  const colaborador = colaboradorId ? (employeeNameById?.get(colaboradorId) ?? colaboradorId) : '';
+  const anexos = (Array.isArray(details.anexos) ? details.anexos : [])
+    .map((raw) => {
+      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+      if (!o) return null;
+      const url = toTrimmedString(o.url);
+      return parseDpAttachment(url ? { ...o, fileUrl: absoluteUploadUrl(url) } : o);
+    })
+    .filter((a): a is DpPreviewAttachment => !!a);
+  const labelCls = 'text-xs font-medium text-gray-500 dark:text-gray-400';
+  const valueCls = 'whitespace-pre-wrap text-sm text-gray-900 dark:text-gray-100';
+  return (
+    <div className={sectionBaseCls}>
+      <h3 className={titleCls}>Detalhes da solicitação (ADM/TST)</h3>
+      <div className="space-y-0.5">
+        <p className={labelCls}>Assunto</p>
+        <p className={valueCls}>{renderValueOrDash(toTrimmedString(details.assunto))}</p>
+      </div>
+      {colaborador ? (
+        <div className="space-y-0.5">
+          <p className={labelCls}>Colaborador relacionado</p>
+          <p className={valueCls}>{colaborador}</p>
+        </div>
+      ) : null}
+      <div className="space-y-0.5">
+        <p className={labelCls}>Descrição</p>
+        <p className={valueCls}>{renderValueOrDash(toTrimmedString(details.descricao))}</p>
+      </div>
+      {anexos.length > 0 ? (
+        <div className="space-y-0.5">
+          <p className={labelCls}>Anexos ({anexos.length})</p>
+          {anexos.map((a, i) => (
+            <DpAttachmentRow key={`${a.fileName}-${i}`} attachment={a} onPreview={setPreview} />
+          ))}
+        </div>
+      ) : null}
+      {preview ? <DpAttachmentLightbox attachment={preview} onClose={() => setPreview(null)} /> : null}
+    </div>
+  );
+}
 
 export function DpRequestDetailsPreview({ requestType, details, employeeNameById }: Props) {
   const d = details ?? null;
@@ -620,6 +676,17 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           }}
         />
       </div>
+    );
+  }
+
+  if (requestType === 'ADM_OUTROS') {
+    return (
+      <AdmOutrosPreview
+        details={d}
+        employeeNameById={employeeNameById}
+        sectionBaseCls={sectionBaseCls}
+        titleCls={titleCls}
+      />
     );
   }
 

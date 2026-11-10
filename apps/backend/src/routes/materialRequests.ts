@@ -324,7 +324,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
         : 'Status atualizado';
     res.json({ success: true, data: request, message });
   } catch (error) {
-    if (error instanceof Error && /Apenas |Aprove apenas|Não é possível|Sem permissão|Informe o que|Observação muito/.test(error.message)) {
+    if (error instanceof Error && /Apenas |Aprove apenas|Não é possível|Sem permissão|Informe o que|Observação muito|Esta RM já tem OC/.test(error.message)) {
       const status = /Sem permissão/.test(error.message) ? 403 : 400;
       res.status(status).json({ success: false, message: error.message });
       return;

@@ -443,6 +443,28 @@ function tokensBuscaMaterial(texto: string, tamanhoMin: number): string[] {
   return out;
 }
 
+/**
+ * RM com OC gerada não pode ser cancelada (vale para todos, inclusive o administrador).
+ * Conta toda OC da RM que não esteja cancelada nem reprovada, ligada pela RM ou pelos itens.
+ */
+async function assertRmSemOcAtiva(materialRequestId: string): Promise<void> {
+  const ocs = await prisma.purchaseOrder.findMany({
+    where: {
+      status: { notIn: ['CANCELLED', 'REJECTED'] },
+      OR: [
+        { materialRequestId },
+        { items: { some: { materialRequestItem: { materialRequestId } } } },
+      ],
+    },
+    select: { orderNumber: true },
+  });
+  if (ocs.length === 0) return;
+  const numeros = ocs.map((o) => o.orderNumber).filter(Boolean).join(', ');
+  throw new Error(
+    `Esta RM já tem OC gerada${numeros ? ` (${numeros})` : ''}. Cancele ou reprove a OC antes de cancelar a RM.`
+  );
+}
+
 export class MaterialRequestService {
   /** FD obrigatória exceto quando o centro de custo é UNB. */
   private async assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
@@ -1270,6 +1292,7 @@ export class MaterialRequestService {
     }
 
     if (nextStatus === 'CANCELLED') {
+      if (existing.status !== 'CANCELLED') await assertRmSemOcAtiva(existing.id);
       const canCancelAsOwnerOrAdmin = existing.requestedBy === userId || isAdmin;
       if (canCancelAsOwnerOrAdmin) {
         if (existing.status === 'CANCELLED') {
@@ -1639,6 +1662,7 @@ export class MaterialRequestService {
     if (request.status === 'FULFILLED' && !isAdmin) {
       throw new Error('Não é possível cancelar uma requisição já atendida ou cancelada');
     }
+    await assertRmSemOcAtiva(request.id);
 
     return await prisma.materialRequest.update({
       where: { id, status: request.status },

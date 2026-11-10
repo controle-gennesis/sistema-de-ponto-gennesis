@@ -1,5 +1,5 @@
 'use client';
-import { RmCancelOcsAviso } from '@/components/material-requests/RmCancelOcsAviso';
+import { RmCancelOcsAviso, rmTemOcAtiva } from '@/components/material-requests/RmCancelOcsAviso';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -749,7 +749,13 @@ export function MaterialRequestsRmList({
             <button
               type="button"
               onClick={() => cancelMutation.mutate(cancelTarget.id)}
-              disabled={cancelMutation.isPending}
+              disabled={
+                cancelMutation.isPending ||
+                rmTemOcAtiva(
+                  (cancelTarget as { purchaseOrders?: { status?: string | null; orderNumber?: string | null }[] })
+                    .purchaseOrders
+                )
+              }
               className="rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
             >
               {cancelMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}

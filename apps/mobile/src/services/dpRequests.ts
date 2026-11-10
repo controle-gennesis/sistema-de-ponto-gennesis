@@ -33,7 +33,8 @@ export type DpRequestType =
   | 'ADM_MATERIAL_ESCRITORIO'
   | 'ADM_INFORMATICA'
   | 'ADM_TREINAMENTOS_NR'
-  | 'ADM_ASOS';
+  | 'ADM_ASOS'
+  | 'ADM_OUTROS';
 
 export type DpEligibleContract = {
   id: string;
@@ -109,6 +110,7 @@ export const DP_TYPE_LABELS: Record<string, string> = {
   ADM_INFORMATICA: 'Informática',
   ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
   ADM_ASOS: "ASO's",
+  ADM_OUTROS: 'Outros',
 };
 
 export const ADM_SIMPLE_TYPES = [

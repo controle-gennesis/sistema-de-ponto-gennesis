@@ -57,6 +57,57 @@ function isOrcamentoRefAnexo(a: unknown): boolean {
   return row.kind === ORCAMENTO_REF_KIND || row.name === ORCAMENTO_REF_NAME;
 }
 
+/** Normaliza código de OS/pasta para comparar ("48/2026 " ≡ "48/2026"). */
+function normCodigoOs(v: unknown): string {
+  return String(v ?? '').replace(/\s+/g, '').toUpperCase();
+}
+
+/**
+ * OS (ordem de serviço) do orçamento que gerou a FD:
+ * 1) OS do contrato vinculada ao orçamento (ou a outra revisão dele, ou com ele como aditivo);
+ * 2) senão, OS do contrato com o mesmo código (Div SE) e nº da pasta informados no orçamento.
+ * Sem correspondência → undefined (a RM sai sem OS em vez de receber a OS errada).
+ */
+async function osDoOrcamentoDaFd(anexos: unknown, costCenterId: string | null | undefined): Promise<string | undefined> {
+  const ref = extractOrcamentoRefFromAnexos(anexos);
+  if (!ref || !costCenterId) return undefined;
+  let idsFamilia = new Set<string>([ref.orcamentoId]);
+  let osCodigo = '';
+  let numeroPasta = '';
+  try {
+    const index = await orcamentoService.getIndex(ref.centroCustoId);
+    const atual = index.orcamentos.find((o) => o.id === ref.orcamentoId);
+    if (atual) {
+      const familia = String(atual.familiaId || atual.id);
+      idsFamilia = new Set(
+        index.orcamentos.filter((o) => String(o.familiaId || o.id) === familia).map((o) => o.id).concat(ref.orcamentoId, familia)
+      );
+      osCodigo = normCodigoOs(atual.osCodigo);
+      numeroPasta = normCodigoOs(atual.numeroPasta);
+    }
+  } catch {
+    /* sem índice: tenta só pelo vínculo com o próprio orçamento */
+  }
+  const pleitos = await prisma.pleito.findMany({
+    where: { service_orders: { costCenterId } },
+    orderBy: { createdAt: 'desc' },
+    select: { serviceOrderId: true, linkedOrcamentoId: true, budgetAdditives: true, divSe: true, folderNumber: true },
+  });
+  const vinculado = pleitos.find((p) => {
+    if (p.linkedOrcamentoId && idsFamilia.has(p.linkedOrcamentoId.trim())) return true;
+    const aditivos = Array.isArray(p.budgetAdditives) ? (p.budgetAdditives as Array<{ orcamentoId?: unknown }>) : [];
+    return aditivos.some((a) => idsFamilia.has(String(a?.orcamentoId ?? '').trim()));
+  });
+  if (vinculado) return vinculado.serviceOrderId;
+  if (!osCodigo) return undefined;
+  const mesmoCodigo = pleitos.filter((p) => normCodigoOs(p.divSe) === osCodigo);
+  const comPasta = numeroPasta ? mesmoCodigo.find((p) => normCodigoOs(p.folderNumber) === numeroPasta) : undefined;
+  if (comPasta) return comPasta.serviceOrderId;
+  // Código sem pasta no orçamento: só aceita se houver uma única OS com esse código.
+  const unicas = [...new Set(mesmoCodigo.map((p) => p.serviceOrderId))];
+  return !numeroPasta && unicas.length === 1 ? unicas[0] : undefined;
+}
+
 function clampFichaDemandaPct(value: unknown): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -415,6 +466,42 @@ async function calcularCustosReaisFd(
 }
 
 /** RM preenchida à mão no formulário da FD (import usa "-" como vazio). */
+/**
+ * RM cancelada (ou reprovada, que vira cancelada) libera os itens da FD: tira da FD os itens pedidos
+ * nessa RM e o número dela do "Nº Mov.", gravando a limpeza. Não mexe na RM nem no TOTVS.
+ * Retorna os campos novos, ou null se não havia nada a liberar.
+ */
+async function liberarItensDeRmsCanceladas(fd: {
+  id: string;
+  itensPedidos: unknown;
+  numMovRm: string | null;
+}): Promise<{ itensPedidos: Prisma.JsonValue; numMovRm: string } | null> {
+  if (!Array.isArray(fd.itensPedidos) || fd.itensPedidos.length === 0) return null;
+  const brutos = fd.itensPedidos as unknown[];
+  const idRm = (r: unknown) =>
+    r && typeof r === 'object' ? String((r as { materialRequestId?: unknown }).materialRequestId ?? '').trim() : '';
+  const ids = [...new Set(brutos.map(idRm).filter(Boolean))];
+  if (ids.length === 0) return null;
+  const canceladas = await prisma.materialRequest.findMany({
+    where: { id: { in: ids }, status: 'CANCELLED' },
+    select: { id: true, requestNumber: true },
+  });
+  if (canceladas.length === 0) return null;
+  const idsCanceladas = new Set(canceladas.map((r) => r.id));
+  const numerosCancelados = new Set(canceladas.map((r) => r.requestNumber.trim()));
+  const restantes = brutos.filter((r) => !idsCanceladas.has(idRm(r)));
+  const numMovRm = String(fd.numMovRm || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x && x !== '-' && !numerosCancelados.has(x))
+    .join(', ');
+  await prisma.demandSheetApproval.update({
+    where: { id: fd.id },
+    data: { itensPedidos: restantes as Prisma.InputJsonValue, numMovRm },
+  });
+  return { itensPedidos: restantes as Prisma.JsonValue, numMovRm };
+}
+
 function hasManualRm(numMovRm: string | null | undefined): boolean {
   const v = String(numMovRm || '').trim();
   return v !== '' && v !== '-';
@@ -1482,6 +1569,13 @@ export class DemandSheetApprovalController {
         include: includeDefault,
       });
       if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      // Itens de RM cancelada voltam a ficar disponíveis para pedido.
+      try {
+        const liberado = await liberarItensDeRmsCanceladas(row);
+        if (liberado) Object.assign(row, liberado);
+      } catch {
+        /* falha na limpeza não impede abrir a FD */
+      }
 
       const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
       if (canFdsAprovadas && row.status === 'APPROVED') {
@@ -2220,6 +2314,9 @@ export class DemandSheetApprovalController {
       }
       if (fd.pedidosEncerrados) throw createError('Os pedidos desta FD foram encerrados. Não é possível criar novos pedidos.', 400);
 
+      // Itens de RM cancelada voltam a ficar disponíveis antes de checar repetição.
+      const liberado = await liberarItensDeRmsCanceladas(fd);
+      if (liberado) Object.assign(fd, liberado);
       const itensPedidos = parseItensPedidos(fd.itensPedidos);
       // RM informada manualmente (fluxo antigo, sem controle por item): FD inteira já pedida.
       if (itensPedidos.length === 0 && hasManualRm(fd.numMovRm)) {
@@ -2317,18 +2414,9 @@ export class DemandSheetApprovalController {
       }
 
 
-      let resolvedServiceOrderId = body.serviceOrderId || undefined;
-      if (!resolvedServiceOrderId && fd.obra) {
-        const pleito = await prisma.pleito.findFirst({
-          where: {
-            service_orders: { costCenterId: fd.contrato.costCenterId },
-            updatedContractId: { not: null },
-          },
-          orderBy: { createdAt: 'desc' },
-          select: { serviceOrderId: true },
-        });
-        if (pleito) resolvedServiceOrderId = pleito.serviceOrderId;
-      }
+      // A RM sai com a OS do orçamento/FD — nunca com "a OS mais recente do contrato".
+      const resolvedServiceOrderId =
+        body.serviceOrderId || (await osDoOrcamentoDaFd(fd.anexos, fd.contrato.costCenterId)) || undefined;
 
       const demandSheetAttachments = (Array.isArray(fd.anexos) ? fd.anexos : [])
         .filter((a: any) => !isOrcamentoRefAnexo(a) && a?.url)

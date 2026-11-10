@@ -77,6 +77,8 @@ export type OrcamentoExcelRow = {
   formats?: Record<number, OrcamentoExcelColFormat>;
   /** Mescla colunas 0-based inclusive, ex.: [0, 7] junta A até H. */
   merge?: [number, number];
+  /** Várias mesclagens na mesma linha (colunas 0-based, inclusive), além de `merge`. */
+  merges?: Array<[number, number]>;
   /** Mescla para baixo: coluna 0-based → quantas linhas a célula ocupa (inclui a atual). */
   rowSpan?: Record<number, number>;
   /** Rodapé: rótulo e valor na cor do título dos serviços (ex.: TOTAL GERAL). */
@@ -86,7 +88,7 @@ export type OrcamentoExcelRow = {
   /** Altura da linha em pontos (padrão 30). */
   altura?: number;
   /** Cor da letra/fundo (hex) e negrito por célula, por cima de tudo. */
-  cores?: Record<number, { fg?: string; bg?: string; bold?: boolean }>;
+  cores?: Record<number, { fg?: string; bg?: string; bold?: boolean; tamanho?: number }>;
   /** Célula vira link: coluna 0-based → URL (o texto continua sendo o valor da célula). */
   links?: Record<number, string>;
 };
@@ -98,6 +100,8 @@ export type OrcamentoExcelImagem = {
   row: number;
   /** Coluna 0-based. */
   col: number;
+  /** Última coluna 0-based quando a célula é mesclada na horizontal (padrão: só `col`). */
+  colAte?: number;
 };
 
 /** Célula do quadro de identificação no topo da aba; `de`/`ate` são colunas 0-based (inclusive). */
@@ -611,7 +615,7 @@ async function fillWorkbook(
           cell.font = {
             ...f,
             name: f.name ?? fontName,
-            size: f.size ?? tamItem,
+            size: cor.tamanho ?? f.size ?? tamItem,
             bold: cor.bold ?? f.bold,
             color: cor.fg ? { argb: hexToArgb(cor.fg, TITLE_TEXT) } : f.color,
           };
@@ -656,6 +660,9 @@ async function fillWorkbook(
         const [from, to] = rowSpec.merge;
         sheet.mergeCells(excelRow, from + 1, excelRow, to + 1);
       }
+      for (const [from, to] of rowSpec.merges ?? []) {
+        sheet.mergeCells(excelRow, from + 1, excelRow, to + 1);
+      }
     });
 
     for (const [de, col, ate] of mesclasVerticais) sheet.mergeCells(de, col, ate, col);
@@ -686,10 +693,14 @@ async function fillWorkbook(
         }
         const imageId = workbook.addImage({ base64: btoa(bin), extension: ext as 'png' | 'jpeg' | 'gif' });
         const excelRow = offsetCabecalho + (showHeader ? 2 : 1) + img.row;
-        const larguraCel = Math.round((sheet.getColumn(img.col + 1).width ?? 8.43) * 7 + 5);
+        let larguraCel = 0;
+        for (let k = img.col; k <= Math.max(img.col, img.colAte ?? img.col); k++) {
+          // Sem a "folga" de 5 px: o Excel desenha as colunas um pouco mais estreitas e a imagem cobriria a borda.
+          larguraCel += Math.round((sheet.getColumn(k + 1).width ?? 8.43) * 7);
+        }
         const alturaCel = Math.round((((sheet.getRow(excelRow).height ?? 30) as number) * 96) / 72);
-        const margem = 8;
-        const escala = Math.min((larguraCel - 2 * margem) / bmp.width, (alturaCel - 2 * margem) / bmp.height, 1);
+        const margem = 14;
+        const escala = Math.min((larguraCel - 2 * margem) / bmp.width, (alturaCel - 2 * margem) / bmp.height, 2);
         const w = Math.max(10, Math.round(bmp.width * escala));
         const h = Math.max(10, Math.round(bmp.height * escala));
         sheet.addImage(imageId, {

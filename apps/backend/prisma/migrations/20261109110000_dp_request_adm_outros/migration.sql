@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "DpRequestType" ADD VALUE IF NOT EXISTS 'ADM_OUTROS';

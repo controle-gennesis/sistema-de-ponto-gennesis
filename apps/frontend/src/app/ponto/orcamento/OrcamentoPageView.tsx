@@ -3449,7 +3449,17 @@ function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
   return '';
 }
 
-type OrcamentoMovimentoTipo = 'importacao' | 'fechamento' | 'reabertura' | 'trancamento' | 'destrancamento';
+type OrcamentoMovimentoTipo =
+  | 'importacao'
+  | 'fechamento'
+  | 'reabertura'
+  | 'trancamento'
+  | 'destrancamento'
+  | 'cotacaoEmpreitaFinalizada'
+  | 'cotacaoEmpreitaReaberta'
+  | 'descontoFinalizado'
+  | 'descontoReaberto'
+  | 'pedidoMaterial';
 
 type OrcamentoMovimento = {
   tipo: OrcamentoMovimentoTipo;
@@ -3463,6 +3473,28 @@ const ROTULO_MOVIMENTO_ORCAMENTO: Record<OrcamentoMovimentoTipo, string> = {
   reabertura: 'Reabertura',
   trancamento: 'Trancamento (FD lançada)',
   destrancamento: 'Destrancamento',
+  cotacaoEmpreitaFinalizada: 'Cotação Empreita finalizada',
+  cotacaoEmpreitaReaberta: 'Cotação Empreita reaberta',
+  descontoFinalizado: 'Configuração do desconto finalizada (Orçamento detalhado)',
+  descontoReaberto: 'Configuração do desconto reaberta (Orçamento detalhado)',
+  pedidoMaterial: 'Pedido de material enviado (RM)',
+};
+
+/** Ícone e cor de cada movimento na linha do tempo da aba Dados. */
+const ESTILO_MOVIMENTO_ORCAMENTO: Record<
+  OrcamentoMovimentoTipo,
+  { Icon: React.ComponentType<{ className?: string }>; cor: string }
+> = {
+  importacao: { Icon: Upload, cor: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' },
+  fechamento: { Icon: CheckCircle2, cor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+  reabertura: { Icon: RefreshCw, cor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+  trancamento: { Icon: Lock, cor: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
+  destrancamento: { Icon: Unlock, cor: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' },
+  cotacaoEmpreitaFinalizada: { Icon: ClipboardList, cor: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' },
+  cotacaoEmpreitaReaberta: { Icon: Undo2, cor: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300' },
+  descontoFinalizado: { Icon: Calculator, cor: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300' },
+  descontoReaberto: { Icon: Undo2, cor: 'bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-300' },
+  pedidoMaterial: { Icon: ListPlus, cor: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' },
 };
 
 function parseHistoricoMovimentos(raw: unknown): OrcamentoMovimento[] | undefined {
@@ -3472,20 +3504,12 @@ function parseHistoricoMovimentos(raw: unknown): OrcamentoMovimento[] | undefine
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
     const tipo = row.tipo;
-    if (
-      tipo !== 'importacao' &&
-      tipo !== 'fechamento' &&
-      tipo !== 'reabertura' &&
-      tipo !== 'trancamento' &&
-      tipo !== 'destrancamento'
-    ) {
-      continue;
-    }
+    if (typeof tipo !== 'string' || !(tipo in ROTULO_MOVIMENTO_ORCAMENTO)) continue;
     const em = typeof row.em === 'string' ? row.em.trim() : '';
     if (!em) continue;
     const usuario =
       typeof row.usuario === 'string' && row.usuario.trim() ? row.usuario.trim() : 'Usuário';
-    out.push({ tipo, em, usuario });
+    out.push({ tipo: tipo as OrcamentoMovimentoTipo, em, usuario });
   }
   return out.length ? out : undefined;
 }
@@ -7989,8 +8013,8 @@ function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
         <div
           key={u.userId}
           title={`${u.name} · ${ABA_ROTULO_PRESENCA[u.aba ?? ''] ?? 'Orçamento'}${u.editing ? ' (editando)' : ''}`}
-          className="rounded-full"
-          style={{ boxShadow: `0 0 0 2px ${u.color}` }}
+          className="rounded-full p-[2px]"
+          style={{ backgroundColor: u.color }}
         >
           <KanbanUserAvatar
             name={u.name}
@@ -7998,7 +8022,6 @@ function PresencaOrcamento({ usuarios }: { usuarios: OrcamentoPresenca[] }) {
             colorKey={u.userId}
             size="sm"
             showNativeTitle={false}
-            className="ring-2 ring-white dark:ring-gray-900"
           />
         </div>
       ))}
@@ -10344,18 +10367,6 @@ export function OrcamentoPageView({
   const confirmarNovaVersao = async () => {
     if (!centroCustoId || !orcamentoAtivoId || criandoVersao || versaoCongelada) return;
     setCriandoVersao(true);
-    const linkedContractId = meta.linkedContractId?.trim() || '';
-    const linkedPleitoId = meta.linkedPleitoId?.trim() || '';
-    const osCodigoSnap = (meta.osCodigo || '').trim();
-    const numeroPastaSnap = (meta.numeroPasta || '').trim();
-    const descricaoOsSnap =
-      (meta.descricao || '').trim() || (nomeOrcamentoRascunho || '').trim() || 'Orçamento';
-    const valorSnap =
-      resumoFinanceiroTotalRef.current > 0
-        ? resumoFinanceiroTotalRef.current
-        : typeof meta.totalComBdi === 'number' && meta.totalComBdi > 0
-          ? meta.totalComBdi
-          : 0;
     try {
       // Salva o estado atual antes de congelar/clonar.
       const sessao = sessaoRef.current ?? sessaoVazia();
@@ -10382,18 +10393,7 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(entry.nome);
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
-      if (linkedPleitoId && linkedContractId && osCodigoSnap && numeroPastaSnap) {
-        setReajusteOsConfirmValor(false);
-        setReajusteOsModal({
-          contractId: linkedContractId,
-          osCodigo: osCodigoSnap,
-          numeroPasta: numeroPastaSnap,
-          valor: Number.isFinite(valorSnap) ? valorSnap : 0,
-          orcamentoId: entry.id,
-          descricaoServicoOs: descricaoOsSnap,
-          isAditivo: meta.isAditivo === true,
-        });
-      }
+      // O valor na OS é gravado quando o orçamentista finaliza o orçamento (sem pergunta aqui).
     } catch (err) {
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(apiMsg || 'Não foi possível criar a nova revisão.');
@@ -12276,32 +12276,7 @@ export function OrcamentoPageView({
         ...snapshotNomesServicosOrcamento(servicosParaApi)
       };
 
-      const linkedContractId = meta.linkedContractId?.trim() || '';
-      const linkedPleitoId = meta.linkedPleitoId?.trim() || '';
-      const osCodigoSnap = (meta.osCodigo || '').trim();
-      const numeroPastaSnap = (meta.numeroPasta || '').trim();
-      if (linkedPleitoId && linkedContractId && osCodigoSnap && numeroPastaSnap) {
-        const descricaoOsSnap =
-          (meta.descricao || '').trim() || (nomeOrcamentoRascunho || '').trim() || 'Orçamento';
-        const valorSnap =
-          finApi.totalComBdi > 0
-            ? finApi.totalComBdi
-            : resumoFinanceiroTotalRef.current > 0
-              ? resumoFinanceiroTotalRef.current
-              : typeof meta.totalComBdi === 'number' && meta.totalComBdi > 0
-                ? meta.totalComBdi
-                : 0;
-        setReajusteOsConfirmValor(false);
-        setReajusteOsModal({
-          contractId: linkedContractId,
-          osCodigo: osCodigoSnap,
-          numeroPasta: numeroPastaSnap,
-          valor: Number.isFinite(valorSnap) ? valorSnap : 0,
-          orcamentoId: orcamentoAtivoId,
-          descricaoServicoOs: descricaoOsSnap,
-          isAditivo: meta.isAditivo === true,
-        });
-      }
+      // O valor na OS é gravado quando o orçamentista finaliza o orçamento (sem pergunta aqui).
     } catch (err) {
       if (isOrcamentoRequestTimeout(err)) {
         toast.error('A atualização demorou demais. Tente novamente.');
@@ -17083,7 +17058,8 @@ export function OrcamentoPageView({
       }
       porChave.set(chave, {
         item: rotuloItemComposicaoPorKey.get(row.key) ?? '',
-        banco: (row.item.banco || '').trim(),
+        // "EMP/DF" (base Emp do Orçafascio) aparece como PROPRIO, igual nas outras telas do orçamento.
+        banco: nomeBancoParaExibicao(row.item.banco),
         codigo: row.item.codigo.trim(),
         descricao: row.item.descricao || '',
         unidade: unidadeComposicaoParaExibicao(row.unidadeComposicao, row.tipoUnidade),
@@ -17879,45 +17855,95 @@ export function OrcamentoPageView({
   /** Mapa de Cotação das composições próprias com "COMP. COTAÇÃO": 1 bloco por composição, com as 3 propostas e os prints. */
   const montarSheetMapaCotacao = (): OrcamentoExcelSheetSpec | null => {
     if (composicoesCotacao.length === 0) return null;
-    const NCOL = 9;
-    const COL_PROPOSTAS = [6, 7, 8];
+    // Grade de 7 colunas: rótulo + 3 propostas de 2 colunas cada (células largas para links e prints).
+    const NCOL = 7;
+    const PROPOSTAS_COLS: Array<[number, number]> = [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ];
+    const COL_PROPOSTAS = PROPOSTAS_COLS.map(([c]) => c);
+    const MERGES_PROPOSTAS = PROPOSTAS_COLS.map(([c, d]) => [c, d] as [number, number]);
     const empty = () => Array.from({ length: NCOL }, () => '') as OrcamentoExcelRow['values'];
     const VERDE = '#166534';
     const VERMELHO = '#991B1B';
+    const VERDE_FUNDO = '#C4D79B';
+    const VERMELHO_FUNDO = '#E6B8B7';
+    const CINZA_CABECALHO = '#D9D9D9';
     const rows: OrcamentoExcelRow[] = [];
     const imagens: NonNullable<OrcamentoExcelSheetSpec['imagens']> = [];
     const dataBr = (ymd: string) => {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
       return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
     };
+    const tonesPlain = (): Record<number, 'item' | 'plain' | 'label'> => ({
+      0: 'label',
+      1: 'plain',
+      2: 'plain',
+      3: 'plain',
+      4: 'plain',
+      5: 'plain',
+      6: 'plain',
+    });
 
     composicoesCotacao.forEach((comp, idx) => {
       if (idx > 0) rows.push({ kind: 'blank', values: empty() });
       const mapa: MapaCotacao = mapasCotacao[chaveMapaCotacao(comp.codigo)] ?? { propostas: [] };
       const propostas = COL_PROPOSTAS.map((_, i) => mapa.propostas[i]);
       const menor = propostaMenorValor({ propostas: mapa.propostas });
-      const linhaItem = rows.length;
-      const linhaValor = linhaItem + 1;
 
-      // Faixa da composição (padrão da memória): item, código, banco, descrição, unidade, valor adotado e fornecedores.
+      // 1) Identificação da composição, em cima e na largura toda: rótulos e depois os dados.
+      const rotulosItem = empty();
+      rotulosItem[0] = 'ITEM';
+      rotulosItem[1] = 'CÓDIGO';
+      rotulosItem[2] = 'BANCO';
+      rotulosItem[3] = 'DESCRIÇÃO';
+      rotulosItem[5] = 'UND';
+      rotulosItem[6] = 'VALOR ADOTADO';
+      const coresCabecalho = (cols: number[]) =>
+        Object.fromEntries(
+          cols.map((c) => [c, { fg: '#000000', bg: CINZA_CABECALHO, bold: true, tamanho: 10 }])
+        );
+      rows.push({
+        kind: 'cabecalho',
+        values: rotulosItem,
+        merges: [[3, 4]],
+        altura: 24,
+        cores: coresCabecalho([0, 1, 2, 3, 4, 5, 6]),
+      });
+
+      const linhaItem = rows.length;
+      // Depois do item: cabeçalho das propostas, fornecedor e valor.
+      const linhaValor = linhaItem + 3;
       const itemValues = empty();
       itemValues[0] = comp.item || '';
       itemValues[1] = comp.codigo;
       itemValues[2] = comp.banco;
       itemValues[3] = (comp.descricao || '').toUpperCase();
-      itemValues[4] = comp.unidade;
-      itemValues[5] = menor?.valor ?? '';
-      COL_PROPOSTAS.forEach((col, i) => {
-        itemValues[col] = (propostas[i]?.fornecedor || '').trim().toUpperCase();
-      });
+      itemValues[5] = comp.unidade;
+      itemValues[6] = menor?.valor ?? '';
       rows.push({
         kind: 'item',
         values: itemValues,
-        altura: 36,
-        formulas: { 5: `MIN(G{R${linhaValor}}:I{R${linhaValor}})` },
-        formats: { 5: 'currency' },
-        tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'label', 4: 'plain', 5: 'plain', 6: 'plain', 7: 'plain', 8: 'plain' },
-        cores: { 5: { fg: VERDE, bold: true } },
+        altura: 46,
+        merges: [[3, 4]],
+        formulas: { 6: `MIN(B{R${linhaValor}},D{R${linhaValor}},F{R${linhaValor}})` },
+        formats: { 6: 'currency' },
+        tones: { 0: 'item', 1: 'plain', 2: 'plain', 3: 'plain', 4: 'plain', 5: 'plain', 6: 'plain' },
+        cores: { 6: { fg: VERDE, bg: VERDE_FUNDO, bold: true, tamanho: 11 } },
+      });
+
+      // 2) Propostas: cada uma ocupa duas colunas.
+      const rotulosProp = empty();
+      COL_PROPOSTAS.forEach((col, i) => {
+        rotulosProp[col] = `${i + 1}ª PROPOSTA`;
+      });
+      rows.push({
+        kind: 'cabecalho',
+        values: rotulosProp,
+        merges: MERGES_PROPOSTAS,
+        altura: 24,
+        cores: coresCabecalho([1, 2, 3, 4, 5, 6]),
       });
 
       const linhaCampo = (
@@ -17926,26 +17952,44 @@ export function OrcamentoPageView({
         extra?: Partial<OrcamentoExcelRow>
       ) => {
         const values = empty();
-        values[5] = rotulo;
+        values[0] = rotulo;
         COL_PROPOSTAS.forEach((col, i) => {
           values[col] = valor(i);
         });
         rows.push({
           kind: 'item',
           values,
-          tones: { 5: 'label', 6: 'plain', 7: 'plain', 8: 'plain' },
+          merges: MERGES_PROPOSTAS,
+          tones: tonesPlain(),
+          altura: 30,
           ...extra,
+          // Rótulo da linha (FORNECEDOR, VALOR, SITE...) com o mesmo cinza dos cabeçalhos.
+          cores: {
+            0: { fg: '#000000', bg: CINZA_CABECALHO, bold: true, tamanho: 10 },
+            ...(extra?.cores ?? {}),
+          },
         });
       };
 
+      linhaCampo('FORNECEDOR', (i) => (propostas[i]?.fornecedor || '').trim().toUpperCase(), { altura: 34 });
       // VALOR: menor proposta em verde, as demais em vermelho (como na planilha de referência).
       linhaCampo('VALOR', (i) => propostas[i]?.valor ?? '', {
-        formats: { 6: 'currency', 7: 'currency', 8: 'currency' },
+        formats: Object.fromEntries(COL_PROPOSTAS.map((col) => [col, 'currency'])),
+        // Menor valor em verde, demais em vermelho: letra e fundo (nas duas colunas da célula mesclada).
         cores: Object.fromEntries(
-          COL_PROPOSTAS.map((col, i) => [
-            col,
-            { fg: menor && propostas[i]?.id === menor.id ? VERDE : VERMELHO, bold: true },
-          ])
+          PROPOSTAS_COLS.flatMap(([col, colAte], i) => {
+            const menorValor = !!menor && propostas[i]?.id === menor.id;
+            const estilo = {
+              fg: menorValor ? VERDE : VERMELHO,
+              bg: menorValor ? VERDE_FUNDO : VERMELHO_FUNDO,
+              bold: true,
+              tamanho: 11,
+            };
+            return [
+              [col, estilo],
+              [colAte, estilo],
+            ];
+          })
         ),
       });
       linhaCampo('CNPJ / CPF', (i) => propostas[i]?.cnpj || '');
@@ -17954,17 +17998,17 @@ export function OrcamentoPageView({
         const site = (propostas[i]?.site || '').trim();
         if (site) links[col] = /^https?:\/\//i.test(site) ? site : `https://${site}`;
       });
-      linhaCampo('SITE', (i) => (propostas[i]?.site || '').trim(), { altura: 54, links });
+      linhaCampo('SITE', (i) => (propostas[i]?.site || '').trim(), { altura: 58, links });
       linhaCampo('TELEFONE', (i) => propostas[i]?.telefone || '');
       linhaCampo('DATA', (i) => (propostas[i]?.data ? dataBr(propostas[i]!.data) : ''));
 
-      // Prints das propostas (quadro de anexos).
+      // Prints das propostas: células grandes, para dar para ler o conteúdo.
       if (propostas.some((p) => p?.anexo)) {
-        linhaCampo('PRINT', () => '', { altura: 190 });
+        linhaCampo('PRINT', () => '', { altura: 390 });
         const linhaPrint = rows.length - 1;
-        COL_PROPOSTAS.forEach((col, i) => {
+        PROPOSTAS_COLS.forEach(([col, colAte], i) => {
           const anexo = propostas[i]?.anexo;
-          if (anexo) imagens.push({ url: absoluteUploadUrl(anexo.url), row: linhaPrint, col });
+          if (anexo) imagens.push({ url: absoluteUploadUrl(anexo.url), row: linhaPrint, col, colAte });
         });
       }
     });
@@ -17999,19 +18043,17 @@ export function OrcamentoPageView({
       },
       subtitle: 'Propostas de fornecedores das composições próprias, com o menor valor adotado',
       autoFilter: false,
-      showHeader: true,
+      showHeader: false,
       semZebra: true,
       aparencia: aparenciaMemorial,
       columns: [
-        { header: 'ITEM', width: 10, align: 'center' },
-        { header: 'CÓDIGO', width: 16, align: 'center' },
-        { header: 'BANCO', width: 12, align: 'center' },
-        { header: 'DESCRIÇÃO', width: 46, larguraFixa: true },
-        { header: 'UND', width: 8, align: 'center' },
-        { header: 'VALOR ADOTADO', width: 20, align: 'center', format: 'currency' },
-        { header: '1ª PROPOSTA', width: 30, align: 'center' },
-        { header: '2ª PROPOSTA', width: 30, align: 'center' },
-        { header: '3ª PROPOSTA', width: 30, align: 'center' },
+        { header: ' ', width: 20, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
+        { header: ' ', width: 50, align: 'center' },
       ],
       rows,
       imagens,
@@ -19463,34 +19505,137 @@ export function OrcamentoPageView({
 
                 {!loadingFromApi && orcamentoViewTab === 'dados' && !fichaDemandaOnly && (
                   <section
-                    className={`min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`}
+                    className={`min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200 bg-gray-50/60 dark:border-gray-700 dark:bg-gray-900 ${gradeHideVerticalScrollbarCls}`}
                   >
-                    <div className="px-4 sm:px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 break-words">
-                            {nomeOrcamentoSemCodigo || 'Orçamento sem nome'}
-                          </h3>
+                    {(() => {
+                      const movimentos = [...movimentosHistoricoOrcamento(meta)].reverse();
+                      const statusDados = versaoCongelada
+                        ? { rotulo: `Revisão ${formatOrcamentoRevisao(versaoNumero)} congelada`, cor: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200' }
+                        : orcamentoTrancado
+                          ? { rotulo: 'Trancado · FD lançada', cor: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' }
+                          : orcamentoFechado
+                            ? { rotulo: 'Finalizado', cor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' }
+                            : { rotulo: 'Em edição', cor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
+                      const chip = 'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold';
+                      const dataFim =
+                        meta.dataEnvio || calcularDataFimOrcamento(meta.dataAbertura, meta.dataEnvio, meta.prazoExecucaoDias);
+                      const pctTxt = (n: number) =>
+                        `${(n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+                      const Secao = ({
+                        titulo,
+                        Icon,
+                        children,
+                        className,
+                      }: {
+                        titulo: string;
+                        Icon: React.ComponentType<{ className?: string }>;
+                        children: React.ReactNode;
+                        className?: string;
+                      }) => (
+                        <div
+                          className={`rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800/60 ${className ?? ''}`}
+                        >
+                          <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-gray-700/70">
+                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300">
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-700 dark:text-gray-200">{titulo}</h4>
+                          </div>
+                          <div className="px-4 py-4">{children}</div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={abrirEdicaoDados}
-                            disabled={versaoCongelada || orcamentoFechado}
-                            className="inline-flex items-center p-1.5 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:pointer-events-none disabled:opacity-40"
-                            aria-label="Editar dados"
-                            title={
-                              versaoCongelada
-                                ? 'Versão congelada — somente leitura'
-                                : orcamentoFechado
-                                  ? 'Orçamento finalizado. Reabra para editar.'
-                                  : 'Editar dados'
-                            }
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
+                      );
+                      const valoresCards: { titulo: string; valor: string; cor: string; detalhe?: string }[] = [
+                        {
+                          titulo: resumoFinanceiro.descontoPct > 0 ? 'Orçamento sem desconto' : 'Total sem BDI',
+                          valor: formatarBRLExport(resumoFinanceiro.totalBase),
+                          cor: 'text-gray-900 dark:text-gray-100',
+                        },
+                        ...(resumoFinanceiro.descontoPct > 0
+                          ? [
+                              {
+                                titulo: `Desconto (${pctTxt(resumoFinanceiro.descontoPct)}${meta.requerConfigDesconto === true ? ' efetivo' : ''})`,
+                                valor: `− ${formatarBRLExport(resumoFinanceiro.valorDesconto)}`,
+                                cor: 'text-red-600 dark:text-red-400',
+                              },
+                              {
+                                titulo: 'Total com desconto',
+                                valor: formatarBRLExport(resumoFinanceiro.totalComDesconto),
+                                cor: 'text-gray-900 dark:text-gray-100',
+                              },
+                            ]
+                          : []),
+                        {
+                          titulo: `BDI (${pctTxt(resumoFinanceiro.bdiPct)})`,
+                          valor: formatarBRLExport(resumoFinanceiro.valorBdi),
+                          cor: 'text-gray-900 dark:text-gray-100',
+                        },
+                        {
+                          titulo: 'Total geral',
+                          valor: formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi),
+                          cor: 'text-green-600 dark:text-green-400',
+                          detalhe: 'Com desconto e BDI',
+                        },
+                      ];
+                      return (
+                        <>
+                          <div className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6 dark:border-gray-700 dark:bg-gray-800/40">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="break-words text-xl font-bold text-gray-900 dark:text-gray-100">
+                                  {nomeOrcamentoSemCodigo || 'Orçamento sem nome'}
+                                </h3>
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                  <span className={`${chip} ${statusDados.cor}`}>{statusDados.rotulo}</span>
+                                  {orcamentoVeioOrcafascio ? (
+                                    <span className={`${chip} bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200`}>
+                                      {rotuloEncargosOrcafascio(orcafascioDadosExibicao?.exempt)}
+                                    </span>
+                                  ) : null}
+                                  {meta.isAditivo === true ? (
+                                    <span className={`${chip} bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300`}>Aditivo</span>
+                                  ) : null}
+                                  {meta.requerConfigDesconto === true ? (
+                                    <span
+                                      className={`${chip} ${
+                                        meta.descontoConfigFinalizada
+                                          ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
+                                          : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                                      }`}
+                                    >
+                                      Orçamento detalhado · {meta.descontoConfigFinalizada ? 'desconto configurado' : 'desconto em configuração'}
+                                    </span>
+                                  ) : null}
+                                  {cotacaoEmpreita.empreitas.length > 0 ? (
+                                    <span
+                                      className={`${chip} ${
+                                        cotacaoEmpreita.finalizada
+                                          ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'
+                                          : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                                      }`}
+                                    >
+                                      Cotação Empreita · {cotacaoEmpreita.finalizada ? 'finalizada' : 'em andamento'}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={abrirEdicaoDados}
+                                disabled={versaoCongelada || orcamentoFechado}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Editar dados"
+                                title={
+                                  versaoCongelada
+                                    ? 'Versão congelada — somente leitura'
+                                    : orcamentoFechado
+                                      ? 'Orçamento finalizado. Reabra para editar.'
+                                      : 'Editar dados'
+                                }
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Editar dados
+                              </button>
+                            </div>
                       {versaoCongelada ? (
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
                           <span>
@@ -19517,155 +19662,158 @@ export function OrcamentoPageView({
                           })()}
                         </div>
                       ) : null}
-                    {orcamentoFechado && !versaoCongelada ? (
-                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
-                        Orçamento finalizado. Reabra para editar. Ao finalizar de novo, o valor da OS é atualizado.
-                      </div>
-                    ) : null}
-                    </div>
-
-                    <div className="px-4 sm:px-5 py-5 space-y-8">
-                      <div>
-                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                          Identificação
-                        </p>
-                        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-                          {meta.osCodigo || meta.numeroPasta ? (
-                            <>
-                              <DadosCampo label="OS">{meta.osCodigo || '—'}</DadosCampo>
-                              <DadosCampo label="Nº da pasta">{meta.numeroPasta || '—'}</DadosCampo>
-                            </>
-                          ) : (
-                            <DadosCampo label="OS">{meta.osNumeroPasta || '—'}</DadosCampo>
-                          )}
-                          <DadosCampo label="Obra">{meta.obra?.trim() || '—'}</DadosCampo>
-                          {typeof meta.isAditivo === 'boolean' ? (
-                            <DadosCampo label="Orçamento aditivo">
-                              {meta.isAditivo ? 'Sim' : 'Não'}
-                            </DadosCampo>
-                          ) : null}
-                          {orcamentoVeioOrcafascio ? (
-                            <>
-                              <DadosCampo label="Encargos">
-                                {rotuloEncargosOrcafascio(orcafascioDadosExibicao?.exempt)}
-                              </DadosCampo>
-                              <DadosCampo label="UF">{orcafascioDadosExibicao?.state || '—'}</DadosCampo>
-                            </>
-                          ) : null}
-                          <DadosCampo label="Orçamento realizado por">
-                            {meta.orcamentoRealizadoPor || '—'}
-                          </DadosCampo>
-                          <DadosCampo label="Responsável pelo orçamento">
-                            {meta.responsavelOrcamento || '—'}
-                          </DadosCampo>
-                          <DadosCampo label="Unidade">{meta.unidade || '—'}</DadosCampo>
-                          <DadosCampo label="Local">{meta.localObra || '—'}</DadosCampo>
-                          <DadosCampo label="Setor">{meta.setor || '—'}</DadosCampo>
-                          <DadosCampo label="Solicitante">{meta.solicitante || '—'}</DadosCampo>
-                          {meta.descricaoDetalhada ? (
-                            <DadosCampo label="Descrição detalhada" wide>
-                              {meta.descricaoDetalhada}
-                            </DadosCampo>
-                          ) : null}
-                          {orcafascioDadosExibicao?.description ? (
-                            <DadosCampo label="Descrição" wide>
-                              {orcafascioDadosExibicao.description}
-                            </DadosCampo>
-                          ) : null}
-                        </dl>
-                      </div>
-
-                      <div className="border-t border-gray-200 pt-6 dark:border-gray-700">
-                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                          Prazos
-                        </p>
-                        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-                          <DadosCampo label="Prazo estimado">
-                            {meta.prazoExecucaoDias?.trim() ? `${meta.prazoExecucaoDias.trim()} dias` : '—'}
-                          </DadosCampo>
-                          <DadosCampo label="Data de início">{formatDataBr(meta.dataAbertura)}</DadosCampo>
-                          <DadosCampo label="Data de fim">
-                            {formatDataBr(
-                              meta.dataEnvio ||
-                                calcularDataFimOrcamento(
-                                  meta.dataAbertura,
-                                  meta.dataEnvio,
-                                  meta.prazoExecucaoDias
-                                )
-                            )}
-                          </DadosCampo>
-                          {orcamentoVeioOrcafascio ? (
-                            <DadosCampo label="Criado em">
-                              {formatarDataHoraOrcafascio(orcafascioDadosExibicao?.createdAt)}
-                            </DadosCampo>
-                          ) : null}
-                        </dl>
-                      </div>
-
-                      <div className="border-t border-gray-200 pt-6 dark:border-gray-700">
-                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                          Valores
-                        </p>
-                        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-                          <DadosCampo label="Desconto (%)">{meta.descontoPercentual || '0'}</DadosCampo>
-                          <DadosCampo label="BDI (%)">{meta.bdiPercentual || '0'}</DadosCampo>
-                          {(meta.reajustes ?? []).length > 0 ? (
-                            <DadosCampo label="Reajustes (%)">
-                              {(meta.reajustes ?? [])
-                                .map((r, idx) => `${r.nome || `Reajuste ${idx + 1}`}: ${r.percentual || '0'}%`)
-                                .join(' · ')}
-                            </DadosCampo>
-                          ) : null}
-                          <DadosCampo label="Total sem BDI">
-                            {formatarBRLExport(resumoFinanceiro.totalBase)}
-                          </DadosCampo>
-                          <DadosCampo label="BDI">
-                            {formatarBRLExport(resumoFinanceiro.valorBdi)}
-                          </DadosCampo>
-                          <DadosCampo label="Total com BDI">
-                            {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
-                          </DadosCampo>
-                        </dl>
-                      </div>
-
-                      <div className="border-t border-gray-200 pt-6 dark:border-gray-700">
-                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                          Histórico
-                        </p>
-                        {movimentosHistoricoOrcamento(meta).length === 0 ? (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Nenhum movimento registrado ainda.
-                          </p>
-                        ) : (
-                          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-                            <table className="w-full text-sm">
-                              <thead className="bg-gray-50 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
-                                <tr>
-                                  <th className="px-3 py-2 font-medium">Movimento</th>
-                                  <th className="px-3 py-2 font-medium">Data e hora</th>
-                                  <th className="px-3 py-2 font-medium">Usuário</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                {movimentosHistoricoOrcamento(meta).map((movimento, index) => (
-                                  <tr key={`${movimento.tipo}-${movimento.em}-${index}`}>
-                                    <td className="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100">
-                                      {ROTULO_MOVIMENTO_ORCAMENTO[movimento.tipo]}
-                                    </td>
-                                    <td className="px-3 py-2.5 tabular-nums text-gray-700 dark:text-gray-300">
-                                      {formatarDataHoraOrcafascio(movimento.em)}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-gray-700 dark:text-gray-300">
-                                      {movimento.usuario || '—'}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            {orcamentoFechado && !versaoCongelada ? (
+                              <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                Orçamento finalizado. Reabra para editar. Ao finalizar de novo, o valor da OS é atualizado.
+                              </p>
+                            ) : null}
                           </div>
-                        )}
-                      </div>
-                    </div>
+
+                          <div className="mx-auto w-full max-w-[110rem] space-y-4 px-4 py-5 sm:px-6">
+                            <Secao titulo="Identificação" Icon={Building2}>
+                              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                                {meta.osCodigo || meta.numeroPasta ? (
+                                  <>
+                                    <DadosCampo label="OS">{meta.osCodigo || '—'}</DadosCampo>
+                                    <DadosCampo label="Nº da pasta">{meta.numeroPasta || '—'}</DadosCampo>
+                                  </>
+                                ) : (
+                                  <DadosCampo label="OS">{meta.osNumeroPasta || '—'}</DadosCampo>
+                                )}
+                                <DadosCampo label="Obra">{meta.obra?.trim() || '—'}</DadosCampo>
+                                {typeof meta.isAditivo === 'boolean' ? (
+                                  <DadosCampo label="Orçamento aditivo">{meta.isAditivo ? 'Sim' : 'Não'}</DadosCampo>
+                                ) : null}
+                                {orcamentoVeioOrcafascio ? (
+                                  <>
+                                    <DadosCampo label="Encargos">
+                                      {rotuloEncargosOrcafascio(orcafascioDadosExibicao?.exempt)}
+                                    </DadosCampo>
+                                    <DadosCampo label="UF">{orcafascioDadosExibicao?.state || '—'}</DadosCampo>
+                                  </>
+                                ) : null}
+                                <DadosCampo label="Orçamento realizado por">{meta.orcamentoRealizadoPor || '—'}</DadosCampo>
+                                <DadosCampo label="Responsável pelo orçamento">{meta.responsavelOrcamento || '—'}</DadosCampo>
+                                <DadosCampo label="Unidade">{meta.unidade || '—'}</DadosCampo>
+                                <DadosCampo label="Local">{meta.localObra || '—'}</DadosCampo>
+                                <DadosCampo label="Setor">{meta.setor || '—'}</DadosCampo>
+                                <DadosCampo label="Solicitante">{meta.solicitante || '—'}</DadosCampo>
+                              </dl>
+                              {meta.descricaoDetalhada || orcafascioDadosExibicao?.description ? (
+                                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                  {orcafascioDadosExibicao?.description ? (
+                                    <div className="rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-900/50">
+                                      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Descrição</p>
+                                      <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                                        {orcafascioDadosExibicao.description}
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                  {meta.descricaoDetalhada ? (
+                                    <div className="rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-900/50">
+                                      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+                                        Descrição detalhada
+                                      </p>
+                                      <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                                        {meta.descricaoDetalhada}
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </Secao>
+
+                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                              <Secao titulo="Prazos" Icon={Calendar}>
+                                <div className="flex items-center gap-3">
+                                  <div className="min-w-0 flex-1 rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-900/50">
+                                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Início</p>
+                                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                      {formatDataBr(meta.dataAbertura)}
+                                    </p>
+                                  </div>
+                                  <div className="flex shrink-0 flex-col items-center text-gray-400">
+                                    <span className="whitespace-nowrap text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                                      {meta.prazoExecucaoDias?.trim() ? `${meta.prazoExecucaoDias.trim()} dias` : '—'}
+                                    </span>
+                                    <ArrowRight className="h-4 w-4" aria-hidden />
+                                  </div>
+                                  <div className="min-w-0 flex-1 rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-900/50">
+                                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Fim</p>
+                                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                      {formatDataBr(dataFim)}
+                                    </p>
+                                  </div>
+                                </div>
+                                {orcamentoVeioOrcafascio ? (
+                                  <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                                    Criado em{' '}
+                                    <span className="font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                                      {formatarDataHoraOrcafascio(orcafascioDadosExibicao?.createdAt)}
+                                    </span>
+                                  </p>
+                                ) : null}
+                              </Secao>
+
+                              <Secao titulo="Valores" Icon={Calculator} className="xl:col-span-2">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+                                  {valoresCards.map((c) => (
+                                    <div key={c.titulo} className="rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-900/50">
+                                      <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500 dark:text-gray-400">{c.titulo}</p>
+                                      <p className={`mt-0.5 text-base font-bold tabular-nums ${c.cor}`}>{c.valor}</p>
+                                      {c.detalhe ? <p className="text-[11px] text-gray-500 dark:text-gray-400">{c.detalhe}</p> : null}
+                                    </div>
+                                  ))}
+                                </div>
+                                {(meta.reajustes ?? []).length > 0 ? (
+                                  <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+                                    <span className="font-semibold">Reajustes:</span>{' '}
+                                    {(meta.reajustes ?? [])
+                                      .map((r, idx) => `${r.nome || `Reajuste ${idx + 1}`}: ${r.percentual || '0'}%`)
+                                      .join(' · ')}
+                                  </p>
+                                ) : null}
+                              </Secao>
+                            </div>
+
+                            <Secao titulo={`Histórico${movimentos.length ? ` · ${movimentos.length} movimento(s)` : ''}`} Icon={ClipboardList}>
+                              {movimentos.length === 0 ? (
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum movimento registrado ainda.</p>
+                              ) : (
+                                <ol className="relative">
+                                  {movimentos.map((movimento, index) => {
+                                    const estilo = ESTILO_MOVIMENTO_ORCAMENTO[movimento.tipo];
+                                    const Icone = estilo.Icon;
+                                    const ultimo = index === movimentos.length - 1;
+                                    return (
+                                      <li key={`${movimento.tipo}-${movimento.em}-${index}`} className="relative flex gap-3 pb-4 last:pb-0">
+                                        {!ultimo ? (
+                                          <span className="absolute left-4 top-8 -ml-px h-[calc(100%-2rem)] w-0.5 bg-gray-200 dark:bg-gray-700" aria-hidden />
+                                        ) : null}
+                                        <span className={`relative z-[1] inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${estilo.cor}`}>
+                                          <Icone className="h-4 w-4" />
+                                        </span>
+                                        <div className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 pt-1">
+                                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                            {ROTULO_MOVIMENTO_ORCAMENTO[movimento.tipo]}
+                                          </p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            <span className="tabular-nums">{formatarDataHoraOrcafascio(movimento.em)}</span>
+                                            {' · '}
+                                            <span className="font-medium text-gray-700 dark:text-gray-300">{movimento.usuario || '—'}</span>
+                                          </p>
+                                        </div>
+                                      </li>
+                                    );
+                                  })}
+                                </ol>
+                              )}
+                            </Secao>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </section>
                 )}
 
@@ -19701,7 +19849,9 @@ export function OrcamentoPageView({
                       podeFinalizarConfig={!gradeTravada && !versaoCongelada && meta.congelado !== true}
                       onFinalizarConfig={() => setConfirmFinalizarConfigDesconto(true)}
                       onReabrirConfig={() => {
-                        setMeta((prev) => ({ ...prev, descontoConfigFinalizada: undefined }));
+                        setMeta((prev) =>
+                          anexarMovimentoOrcamento({ ...prev, descontoConfigFinalizada: undefined }, 'descontoReaberto', currentUserName)
+                        );
                         toast.success('Configuração do desconto reaberta: as marcações podem ser alteradas.');
                       }}
                       motivoBloqueio={
@@ -19876,7 +20026,20 @@ export function OrcamentoPageView({
                 {!loadingFromApi && orcamentoViewTab === 'cotacaoEmpreita' && (
                   <CotacaoEmpreitaPainel
                     valor={cotacaoEmpreita}
-                    onChange={setCotacaoEmpreita}
+                    onChange={(next) => {
+                      const antesFinalizada = !!cotacaoEmpreita.finalizada;
+                      const depoisFinalizada = !!next.finalizada;
+                      setCotacaoEmpreita(next);
+                      if (antesFinalizada !== depoisFinalizada) {
+                        setMeta((prev) =>
+                          anexarMovimentoOrcamento(
+                            prev,
+                            depoisFinalizada ? 'cotacaoEmpreitaFinalizada' : 'cotacaoEmpreitaReaberta',
+                            currentUserName
+                          )
+                        );
+                      }
+                    }}
                     podeEditarFinalizada={podeEditarCotacaoFinalizada}
                     somenteLeitura={versaoCongelada || meta.congelado === true}
                     usuarioNome={currentUserName}
@@ -23150,6 +23313,7 @@ export function OrcamentoPageView({
         onSuccess={(itensPedidos) => {
           setPedidoMaterialModalOpen(false);
           setFdAprovadaRecord((prev) => (prev ? { ...prev, itensPedidos } : prev));
+          setMeta((prev) => anexarMovimentoOrcamento(prev, 'pedidoMaterial', currentUserName));
         }}
       />
 
@@ -23319,10 +23483,16 @@ export function OrcamentoPageView({
               <button
                 type="button"
                 onClick={() => {
-                  setMeta((prev) => ({
-                    ...prev,
-                    descontoConfigFinalizada: { por: currentUserName || '', em: new Date().toISOString() },
-                  }));
+                  setMeta((prev) =>
+                    anexarMovimentoOrcamento(
+                      {
+                        ...prev,
+                        descontoConfigFinalizada: { por: currentUserName || '', em: new Date().toISOString() },
+                      },
+                      'descontoFinalizado',
+                      currentUserName
+                    )
+                  );
                   setConfirmFinalizarConfigDesconto(false);
                   toast.success('Configuração do desconto finalizada.');
                 }}
