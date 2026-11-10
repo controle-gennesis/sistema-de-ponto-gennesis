@@ -66,6 +66,7 @@ import {
 } from '@/lib/maskCurrencyBr';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { formatDateBr as formatDateBrLib, parseDateSafe } from '@/lib/dateTimeBr';
+import { maskPercentInput, parsePercentInput, formatPercentInput } from './percentField';
 import {
   DEFAULT_SERVICE_COLOR,
   DEFAULT_SERVICE_ICON,
@@ -167,6 +168,8 @@ interface EmpreiteiroContractLink {
   name?: string | null;
   description?: string | null;
   plannedValue?: number | null;
+  weightPercent?: number | null;
+  accumulatedPercent?: number | null;
   addendaTotal?: number | null;
   /** Aditivos aguardando aprovação (ainda não valem no contrato). */
   addendaPendingCount?: number;
@@ -305,6 +308,8 @@ interface EmpreiteiroRow {
   bank?: string | null;
   agency?: string | null;
   account?: string | null;
+  accountType?: string | null;
+  address?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   photoUrl?: string | null;
@@ -478,6 +483,8 @@ const emptyForm = {
   bank: '',
   agency: '',
   account: '',
+  accountType: '',
+  address: '',
   startDate: '',
   endDate: '',
   photo: '',
@@ -620,6 +627,8 @@ export default function EmpreiteirosPage() {
   const [newServiceName, setNewServiceName] = useState('');
   const [newServiceDescription, setNewServiceDescription] = useState('');
   const [newServicePlannedValue, setNewServicePlannedValue] = useState('');
+  const [newServiceWeight, setNewServiceWeight] = useState('');
+  const [newServiceAccumulated, setNewServiceAccumulated] = useState('');
   const [newServiceLocation, setNewServiceLocation] = useState('');
   const [newServiceIcon, setNewServiceIcon] = useState({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
   /** avista = 1 parcela · parcelado = N parcelas · null = não informar agora */
@@ -651,6 +660,8 @@ export default function EmpreiteirosPage() {
   const [editServiceName, setEditServiceName] = useState('');
   const [editServiceDescription, setEditServiceDescription] = useState('');
   const [editServicePlannedValue, setEditServicePlannedValue] = useState('');
+  const [editServiceWeight, setEditServiceWeight] = useState('');
+  const [editServiceAccumulated, setEditServiceAccumulated] = useState('');
   const [editServiceLocation, setEditServiceLocation] = useState('');
   const [editServiceIcon, setEditServiceIcon] = useState({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
   const [editServiceContractId, setEditServiceContractId] = useState('');
@@ -844,6 +855,14 @@ export default function EmpreiteirosPage() {
     []
   );
 
+  const contaTipoOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: 'corrente', label: 'Corrente' },
+        { value: 'poupança', label: 'Poupança' },
+      ]),
+    []
+  );
   const ufSelectOptions = useMemo(
     () => labeledToSelectOptions(UF_OPTIONS.map((value) => ({ value, label: value }))),
     []
@@ -977,6 +996,8 @@ export default function EmpreiteirosPage() {
     setNewServiceName('');
     setNewServiceDescription('');
     setNewServicePlannedValue('');
+    setNewServiceWeight('');
+    setNewServiceAccumulated('');
     setNewServiceLocation('');
     setNewServiceIcon({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
     setNewServicePayMode(null);
@@ -1081,6 +1102,8 @@ export default function EmpreiteirosPage() {
         name,
         description: newServiceDescription.trim() || null,
         plannedValue,
+        weightPercent: parsePercentInput(newServiceWeight),
+        accumulatedPercent: parsePercentInput(newServiceAccumulated),
         location: newServiceLocation.trim() || null,
         iconName: newServiceIcon.iconName,
         iconColor: newServiceIcon.iconColor,
@@ -1105,6 +1128,8 @@ export default function EmpreiteirosPage() {
       setNewServiceName('');
       setNewServiceDescription('');
       setNewServicePlannedValue('');
+      setNewServiceWeight('');
+      setNewServiceAccumulated('');
       setNewServiceLocation('');
       setNewServiceIcon({ iconName: DEFAULT_SERVICE_ICON, iconColor: DEFAULT_SERVICE_COLOR });
       setNewServiceContractId('');
@@ -1117,6 +1142,7 @@ export default function EmpreiteirosPage() {
       setNewContractEnd('');
       setNewContractStatus('IN_PROGRESS');
       toast.success(res.data?.message || 'Contrato de serviço criado');
+      avisarCamposEmBrancoDoContrato(res.data?.contractDocument);
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível criar o contrato de serviço');
     } finally {
@@ -1466,6 +1492,37 @@ export default function EmpreiteirosPage() {
     }
   };
 
+  const avisarCamposEmBrancoDoContrato = (doc?: {
+    camposEmBranco?: string[];
+  } | null) => {
+    if (!doc) return;
+    if (doc.camposEmBranco?.length) {
+      toast(
+        `Contrato gerado com campos em branco: ${doc.camposEmBranco.join(', ')}. Complete o cadastro e gere de novo.`,
+        { icon: '⚠️', duration: 9000 }
+      );
+    }
+  };
+
+  const handleGenerateContractDocument = async (link: EmpreiteiroContractLink) => {
+    if (!viewingItem?.id) return;
+    setSavingContractLink(true);
+    try {
+      const res = await api.post(`/empreiteiros/${viewingItem.id}/contracts/${link.id}/generate-document`);
+      const data = res.data?.data as EmpreiteiroRow | undefined;
+      if (data?.id) {
+        setViewingItem(data);
+        queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      }
+      toast.success('Contrato gerado e anexado ao serviço (Anexos)');
+      avisarCamposEmBrancoDoContrato(res.data?.contractDocument);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível gerar o contrato');
+    } finally {
+      setSavingContractLink(false);
+    }
+  };
+
   const handleDeleteContractLink = async (link: EmpreiteiroContractLink) => {
     if (!viewingItem?.id) return;
     const label = link.contratoNome || link.name || 'este contrato de serviço';
@@ -1540,6 +1597,28 @@ export default function EmpreiteirosPage() {
                                     )
                                   }
                                   placeholder="R$ 0,00"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Peso no contrato (%)</label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={editServiceWeight}
+                                  onChange={(e) => setEditServiceWeight(maskPercentInput(e.target.value))}
+                                  placeholder="Ex.: 100"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Acumulado (%)</label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={editServiceAccumulated}
+                                  onChange={(e) => setEditServiceAccumulated(maskPercentInput(e.target.value))}
+                                  placeholder="Ex.: 100"
                                   className={inputClass}
                                 />
                               </div>
@@ -1802,6 +1881,8 @@ export default function EmpreiteirosPage() {
         ? formatCurrencyInputBrFromNumber(link.plannedValue)
         : ''
     );
+    setEditServiceWeight(formatPercentInput(link.weightPercent));
+    setEditServiceAccumulated(formatPercentInput(link.accumulatedPercent));
     setEditServiceLocation(link.location || '');
     setEditServiceIcon({
       iconName: link.iconName || DEFAULT_SERVICE_ICON,
@@ -1925,6 +2006,8 @@ export default function EmpreiteirosPage() {
           name,
           description: editServiceDescription.trim() || null,
           plannedValue,
+          weightPercent: parsePercentInput(editServiceWeight),
+          accumulatedPercent: parsePercentInput(editServiceAccumulated),
           location: editServiceLocation.trim() || null,
           iconName: editServiceIcon.iconName,
           iconColor: editServiceIcon.iconColor,
@@ -2206,6 +2289,8 @@ export default function EmpreiteirosPage() {
       bank: item.bank || '',
       agency: item.agency || '',
       account: item.account || '',
+      accountType: item.accountType || '',
+      address: item.address || '',
       startDate: toDateInputValue(item.startDate),
       endDate: toDateInputValue(item.endDate),
       photo: resolveApiMediaUrl(item.photoUrl) || item.photoUrl || '',
@@ -2239,6 +2324,8 @@ export default function EmpreiteirosPage() {
     bank: form.bank.trim() || null,
     agency: form.agency.trim() || null,
     account: form.account.trim() || null,
+    accountType: form.accountType.trim() || null,
+    address: form.address.trim() || null,
     files: form.files,
   });
 
@@ -3526,6 +3613,16 @@ export default function EmpreiteirosPage() {
                       </p>
                     </div>
                   ) : null}
+                  <div className="sm:col-span-2">
+                    <label className={labelClass}>Endereço completo (rua, nº, bairro, CEP)</label>
+                    <input
+                      type="text"
+                      value={form.address}
+                      onChange={(e) => patchForm({ address: e.target.value })}
+                      placeholder="Usado no contrato de prestação de serviços"
+                      className={inputClass}
+                    />
+                  </div>
                   <div>
                     <label className={labelClass}>Cidade</label>
                     <input
@@ -3585,6 +3682,17 @@ export default function EmpreiteirosPage() {
                       onChange={(e) => patchForm({ account: e.target.value })}
                       placeholder="Conta com dígito"
                       className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Tipo de conta</label>
+                    <StringSingleSelectDropdown
+                      value={form.accountType}
+                      onChange={(value) => patchForm({ accountType: value })}
+                      options={contaTipoOptions}
+                      placeholder="Selecione"
+                      emptyOptionLabel="Selecione"
+                      matchTriggerWidth
                     />
                   </div>
                   <div className="flex items-center pt-6">
@@ -5209,6 +5317,28 @@ export default function EmpreiteirosPage() {
                         />
                       </div>
                       <div>
+                        <label className={labelClass}>Peso no contrato (%)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={newServiceWeight}
+                          onChange={(e) => setNewServiceWeight(maskPercentInput(e.target.value))}
+                          placeholder="Ex.: 100"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Acumulado (%)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={newServiceAccumulated}
+                          onChange={(e) => setNewServiceAccumulated(maskPercentInput(e.target.value))}
+                          placeholder="Ex.: 100"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
                         <label className={labelClass}>Status</label>
                         <StringSingleSelectDropdown
                           value={newContractStatus}
@@ -5542,8 +5672,15 @@ export default function EmpreiteirosPage() {
                           onDelete={() => {
                             void handleDeleteContractLink(contractRowForActionMenu);
                           }}
-                          extraItems={
-                            ['COMPLETED', 'PENDING_REVIEW'].includes(
+                          extraItems={[
+                            {
+                              label: 'Gerar contrato (Word)',
+                              icon: <FileText className="h-4 w-4 shrink-0 text-blue-500" />,
+                              onClick: () => {
+                                void handleGenerateContractDocument(contractRowForActionMenu);
+                              },
+                            },
+                            ...(['COMPLETED', 'PENDING_REVIEW'].includes(
                               String(contractRowForActionMenu.status || '').toUpperCase()
                             )
                               ? [
@@ -5562,8 +5699,8 @@ export default function EmpreiteirosPage() {
                                       }),
                                   },
                                 ]
-                              : []
-                          }
+                              : []),
+                          ]}
                         />
                       ) : null}
                     </>
