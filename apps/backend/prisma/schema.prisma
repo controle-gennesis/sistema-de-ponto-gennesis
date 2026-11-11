@@ -802,6 +802,8 @@ enum DpRequestType {
 // Modelo de SolicitaÃ§Ã£o DP (especÃ­fico do AppSheet âSolicitaÃ§Ãµes Departamento Pessoalâ)
 model DpRequest {
   id            String @id @default(cuid())
+  messages      DpRequestComment[]
+  messageReads  DpRequestCommentRead[]
   /// NÃºmero legÃ­vel sequencial (1, 2, 3â¦) para exibiÃ§Ã£o e busca.
   displayNumber Int    @unique
 
@@ -925,6 +927,33 @@ model DpContabilidadeRequest {
   @@index([createdByUserId])
   @@index([createdAt])
   @@map("dp_contabilidade_requests")
+}
+
+/// Conversa entre DP, Administração e Contabilidade sobre uma solicitação (não muda o status).
+model DpRequestComment {
+  id        String   @id @default(cuid())
+  requestId String
+  request   DpRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  userName  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("dp_request_comments")
+}
+
+/// Até quando cada pessoa já leu a conversa de uma solicitação (base do aviso de mensagem nova).
+model DpRequestCommentRead {
+  id        String   @id @default(cuid())
+  requestId String
+  request   DpRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  readAt    DateTime @default(now())
+
+  @@unique([requestId, userId])
+  @@index([userId])
+  @@map("dp_request_comment_reads")
 }
 
 model DpContabilidadeComment {

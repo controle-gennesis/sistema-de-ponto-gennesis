@@ -30,6 +30,7 @@ import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } 
 import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
+import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
 import {
@@ -1173,6 +1174,8 @@ export function GerenciarSolicitacoesGeraisPage({
                     details={fullDetails ?? historyRequest.details}
                     employeeNameById={employeeNameByIdForDetail}
                   />
+
+                  <DpRequestMessages requestId={historyRequest.id} />
 
                   {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (
                     <DpRequestHistorySectionCard

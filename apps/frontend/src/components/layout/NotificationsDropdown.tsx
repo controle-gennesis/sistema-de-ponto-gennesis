@@ -25,6 +25,7 @@ import {
   Truck,
   Wrench,
   type LucideIcon,
+  MessageSquare,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
@@ -168,6 +169,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     staleTime: 20_000,
   });
 
+  // Mensagens novas nas conversas das solicitações (DP, Administração e Contabilidade).
+  const { data: dpMessagesUnread } = useQuery({
+    queryKey: ['dp-request-unread-messages'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/mensagens/nao-lidas');
+      return (res.data?.data ?? { count: 0, items: [] }) as {
+        count: number;
+        items: Array<{ requestId: string; displayNumber: number; title: string; unread: number; area: 'dp' | 'adm' | 'contabilidade' }>;
+      };
+    },
+    enabled: !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
   // Solicitações do próprio usuário devolvidas para correção (status "Sua pendência"/"Correção").
   const canSeeMyDpRequests = isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-dp'));
   const { data: dpReturnPendingCount = 0 } = useQuery({
@@ -408,6 +424,22 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: Truck,
       });
     }
+    if (dpMessagesUnread && dpMessagesUnread.count > 0) {
+      const first = dpMessagesUnread.items[0];
+      const areaHref = (a: 'dp' | 'adm' | 'contabilidade') =>
+        a === 'adm' ? '/ponto/gerenciar-solicitacoes-adm-tst' : a === 'dp' ? '/ponto/gerenciar-solicitacoes-gerais' : '/ponto/dp-contabilidade';
+      list.push({
+        id: 'dp-mensagens',
+        title: 'Mensagens nas solicitações',
+        description:
+          dpMessagesUnread.items.length === 1 && first
+            ? `Solicitação nº ${first.displayNumber}`
+            : `${dpMessagesUnread.items.length} solicitações com mensagem nova`,
+        count: dpMessagesUnread.count,
+        href: first ? areaHref(first.area) : '/ponto/gerenciar-solicitacoes-gerais',
+        Icon: MessageSquare,
+      });
+    }
     if (canSeeAtendimentoContabil && atendimentoContabilPendingCount > 0) {
       list.push({
         id: 'atendimento-contabil',
@@ -548,6 +580,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     atendimentoContabilPendingCount,
     canSeeMyDpRequests,
     dpReturnPendingCount,
+    dpMessagesUnread,
     chatUnreadCount,
     gestaoOsInbox,
   ]);

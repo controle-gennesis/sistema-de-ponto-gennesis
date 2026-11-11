@@ -26,6 +26,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
 import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -829,6 +830,13 @@ export default function DpContabilidadePage() {
                   </div>
                 )}
               </div>
+
+              {selected.sourceDpRequestId ? (
+                <DpRequestMessages
+                  requestId={selected.sourceDpRequestId}
+                  title={`Conversa com o DP${selected.source?.displayNumber ? ` (solicitação nº ${selected.source.displayNumber})` : ''}`}
+                />
+              ) : null}
 
               {canActOnSelected ? (
                 <div className="space-y-3">

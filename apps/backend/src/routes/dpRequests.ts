@@ -1,4 +1,9 @@
 import { Router } from 'express';
+import {
+  getDpRequestMessages,
+  getDpRequestUnreadMessages,
+  postDpRequestMessage,
+} from '../lib/dpRequestMessages';
 import { authenticate, requireAdministrator } from '../middleware/auth';
 import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -14,6 +19,10 @@ const admTstManageModule = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-ts
 
 router.use(authenticate);
 
+// Conversa entre DP, Administração e Contabilidade (permissão checada dentro de cada rota)
+router.get('/mensagens/nao-lidas', getDpRequestUnreadMessages);
+router.get('/:id/mensagens', getDpRequestMessages);
+router.post('/:id/mensagens', postDpRequestMessage);
 router.get('/contratos-elegiveis', requireModuleAccess(myModule), controller.getEligibleContracts.bind(controller));
 router.get(
   '/centros-custo-elegiveis',
