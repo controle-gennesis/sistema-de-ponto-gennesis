@@ -45,6 +45,7 @@ import {
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
+import { ContratoObrasTab } from './ContratoObrasTab';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Button } from '@/components/ui/Button';
@@ -1080,6 +1081,7 @@ export default function ContractDetailPage() {
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
     canAccessContractFluigTab,
+    canAccessContractObrasTab,
     canAccessContractResumoTab,
     isContractGestor,
     canAccessContractOrdemServicoTab,
@@ -1091,6 +1093,7 @@ export default function ContractDetailPage() {
   const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
   const canAccessCronogramasModulo = isAdministrator || can(pathToModuleKey('/ponto/cronogramas'));
+  const canAccessObrasModulo = canAccessContractObrasTab(contractId);
   const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
   const { pendingByContractId } = useMensalReportPendingCount(Boolean(contractId));
   const mensalReportPendingForContract = pendingByContractId.has(contractId) ? 1 : 0;
@@ -1134,7 +1137,7 @@ export default function ContractDetailPage() {
     setPeriodTo(to);
   }, []);
   const [mainTab, setMainTab] = useState<
-    'resumo' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
+    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
   >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
@@ -2041,6 +2044,7 @@ export default function ContractDetailPage() {
   const allowedMainTabs = useMemo(() => {
     const tabs: Array<typeof mainTab> = [];
     if (canAccessResumoModulo) tabs.push('resumo');
+    if (canAccessObrasModulo) tabs.push('obras');
     if (canAccessGestorTabs) tabs.push('controle');
     if (canAccessProducaoSemanalModulo) tabs.push('producao');
     if (canAccessOrdemServicoModulo) tabs.push('os');
@@ -2051,6 +2055,7 @@ export default function ContractDetailPage() {
     return tabs;
   }, [
     canAccessResumoModulo,
+    canAccessObrasModulo,
     canAccessGestorTabs,
     canAccessProducaoSemanalModulo,
     canAccessOrdemServicoModulo,
@@ -4899,6 +4904,15 @@ export default function ContractDetailPage() {
                 Resumo
               </AppUnderlineTabButton>
             ) : null}
+            {canAccessObrasModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'obras'}
+                onClick={() => setMainTab('obras')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Obras
+              </AppUnderlineTabButton>
+            ) : null}
             {canAccessGestorTabs ? (
               <AppUnderlineTabButton
                 active={mainTab === 'controle'}
@@ -4963,6 +4977,8 @@ export default function ContractDetailPage() {
               </AppUnderlineTabButton>
             ) : null}
           </AppUnderlineTabList>
+
+          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} /> : null}
 
           {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">

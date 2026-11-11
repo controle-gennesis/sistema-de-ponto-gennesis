@@ -48,6 +48,12 @@ router.get('/boards/:boardId/archived-columns', (req, res, next) =>
   controller.listArchivedColumns(req, res, next),
 );
 
+router.get('/assigned-notifications', (req, res, next) =>
+  controller.getAssignedNotifications(req, res, next),
+);
+router.post('/assigned-notifications/read', (req, res, next) =>
+  controller.markAssignedNotificationsRead(req, res, next),
+);
 router.post('/cards', (req, res, next) => controller.createCard(req, res, next));
 router.post('/cards/:cardId/members', (req, res, next) => controller.addCardMember(req, res, next));
 router.delete('/cards/:cardId/members/:userId', (req, res, next) =>

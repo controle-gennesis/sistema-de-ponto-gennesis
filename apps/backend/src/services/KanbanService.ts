@@ -694,6 +694,10 @@ function notifyCardAssigned(actorId: string, cardId: string, userIds: Array<stri
   if (targets.length === 0) return;
   void (async () => {
     try {
+      // Marca como não vista para aparecer no sino; o push abaixo é à parte.
+      await prisma.kanbanCardMember
+        .updateMany({ where: { cardId, userId: { in: targets } }, data: { unread: true } })
+        .catch(() => undefined);
       const [card, actor] = await Promise.all([
         prisma.kanbanCard.findUnique({
           where: { id: cardId },
@@ -2583,8 +2587,44 @@ export class KanbanService {
     return this.getCardById(requesterId, cardId);
   }
 
+  /** Cards atribuídos à pessoa que ela ainda não abriu (sino de notificações). */
+  async listUnreadAssignments(userId: string) {
+    const rows = await prisma.kanbanCardMember.findMany({
+      where: { userId, unread: true, card: { archivedAt: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        createdAt: true,
+        card: {
+          select: {
+            id: true,
+            title: true,
+            column: { select: { board: { select: { name: true, departmentKey: true } } } },
+          },
+        },
+      },
+    });
+    const items = rows.map((r) => ({
+      cardId: r.card.id,
+      title: r.card.title,
+      boardName: r.card.column?.board?.name ?? '',
+      departmentKey: r.card.column?.board?.departmentKey ?? '',
+      assignedAt: r.createdAt,
+    }));
+    return { count: items.length, items };
+  }
+
+  /** Marca as atribuições como vistas: de um card, ou de todos quando não informado. */
+  async markAssignmentsRead(userId: string, cardId?: string) {
+    await prisma.kanbanCardMember.updateMany({
+      where: { userId, unread: true, ...(cardId ? { cardId } : {}) },
+      data: { unread: false },
+    });
+  }
+
   async getCardById(userId: string, id: string) {
     await this.assertCardAccess(userId, id, 'read');
+    void this.markAssignmentsRead(userId, id).catch(() => undefined);
     const card = await prisma.kanbanCard.findUnique({
       where: { id },
       include: {

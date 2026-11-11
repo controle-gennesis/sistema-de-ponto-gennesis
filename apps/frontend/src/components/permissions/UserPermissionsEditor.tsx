@@ -68,6 +68,7 @@ type ContractModuleFlags = {
   faturamento: boolean;
   resumo: boolean;
   fluig: boolean;
+  obras: boolean;
 };
 
 const emptyContractModuleFlags = (): ContractModuleFlags => ({
@@ -78,6 +79,7 @@ const emptyContractModuleFlags = (): ContractModuleFlags => ({
   faturamento: false,
   resumo: false,
   fluig: false,
+  obras: false,
 });
 
 /** Quem tinha a coluna Orçamento antiga passa a ter Ver em Orçamentos na matriz Acesso. */
@@ -195,7 +197,7 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .sort()
     .map((id) => {
       const f = flags[id];
-      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}`;
+      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}${f.obras ? 1 : 0}`;
     })
     .join(',');
 }
@@ -449,6 +451,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/pleitos-gerados',
       '/ponto/aprovacao-fds',
       '/ponto/cronogramas',
+      '/ponto/diario-obra',
       '/ponto/caixinha',
       '/ponto/recebimento-entregas',
       '/ponto/solicitar-materiais',
@@ -1666,7 +1669,8 @@ export function UserPermissionsEditor({
         !nextFlags.pleitos &&
         !nextFlags.faturamento &&
         !nextFlags.resumo &&
-        !nextFlags.fluig
+        !nextFlags.fluig &&
+        !nextFlags.obras
       ) {
         const next = { ...prev };
         delete next[contractId];
@@ -2589,7 +2593,7 @@ export function UserPermissionsEditor({
                           </div>
                           <div>
                             <dt className="font-semibold text-gray-900 dark:text-gray-100">
-                              Resumo, Prod. Sem., O.S., Pleitos, Faturamento e Fluig
+                              Resumo, Obras, Prod. Sem., O.S., Pleitos, Faturamento e Fluig
                             </dt>
                             <dd className="text-gray-600 dark:text-gray-300">
                               Cada uma libera a aba correspondente dentro do contrato.
@@ -2674,6 +2678,13 @@ export function UserPermissionsEditor({
                           title="Acesso à aba Fluig neste contrato"
                         >
                           Fluig
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Obras neste contrato"
+                        >
+                          Obras
                         </th>
                       </tr>
                     </thead>
@@ -2813,6 +2824,15 @@ export function UserPermissionsEditor({
                                   checked={flags.fluig}
                                   onCheckedChange={(next) => setContractModuleFlag(c.id, 'fluig', next)}
                                   aria-label={`Fluig — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.obras}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'obras', next)}
+                                  aria-label={`Obras — ${c.name}`}
                                 />
                               </div>
                             </td>
