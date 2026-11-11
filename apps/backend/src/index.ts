@@ -38,6 +38,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 
 import { initSentry, Sentry } from './lib/sentry';
 initSentry();
@@ -97,6 +98,7 @@ import paymentConditionRoutes from './routes/paymentConditions';
 import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
 import obraRoutes from './routes/obras';
+import diarioObraRoutes from './routes/diarioObra';
 import empreiteiroRoutes from './routes/empreiteiros';
 import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
@@ -320,6 +322,31 @@ const rateLimit429Handler = (
 const skipRateLimit = (req: import('express').Request) =>
   req.method === 'OPTIONS' || !enableRateLimit;
 
+/**
+ * IP real do cliente. No Railway o `req.ip` é o do proxy interno (o mesmo para todos os usuários),
+ * o que fazia o sistema inteiro dividir um único limite. O Railway informa o IP real em X-Real-IP.
+ */
+const ipRealDoCliente = (req: import('express').Request): string => {
+  const h = req.headers['x-real-ip'];
+  const v = (Array.isArray(h) ? h[0] : h)?.trim();
+  return v || req.ip || 'sem-ip';
+};
+
+/** Limite geral por usuário logado (token válido); sem token, pelo IP real. */
+const chaveUsuarioOuIp = (req: import('express').Request): string => {
+  const auth = req.headers.authorization;
+  const secret = process.env.JWT_SECRET;
+  if (secret && auth && auth.startsWith('Bearer ')) {
+    try {
+      const decoded = jwt.verify(auth.slice(7), secret) as { id?: unknown };
+      if (decoded && typeof decoded.id === 'string' && decoded.id) return `u:${decoded.id}`;
+    } catch {
+      /* token inválido/expirado: conta pelo IP */
+    }
+  }
+  return `ip:${ipRealDoCliente(req)}`;
+};
+
 // Rate limiting geral (uma única instância — antes havia duas contando em dobro)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -327,6 +354,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,
+  keyGenerator: chaveUsuarioOuIp,
   handler: (req, res) =>
     rateLimit429Handler(
       req,
@@ -343,6 +371,7 @@ const authMeLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   skip: skipRateLimit,
+  keyGenerator: chaveUsuarioOuIp,
   handler: (req, res) =>
     rateLimit429Handler(
       req,
@@ -354,11 +383,12 @@ const authMeLimiter = rateLimit({
 // Limite dedicado contra brute-force em login (só conta falhas)
 const authLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: enableRateLimit ? 20 : 10_000,
+  max: enableRateLimit ? 100 : 10_000,
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   skip: skipRateLimit,
+  keyGenerator: (req) => `login:${ipRealDoCliente(req)}`,
   handler: (req, res) =>
     rateLimit429Handler(
       req,
@@ -374,6 +404,7 @@ const passwordResetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,
+  keyGenerator: (req) => `senha:${ipRealDoCliente(req)}`,
   handler: (req, res) =>
     rateLimit429Handler(
       req,
@@ -490,6 +521,7 @@ app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/quote-maps', quoteMapRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
 app.use('/api/obras', obraRoutes);
+app.use('/api/diario-obra', diarioObraRoutes);
 app.use('/api/empreiteiros', empreiteiroRoutes);
 app.use('/api/orcamento', orcamentoRoutes);
 app.use('/api/pleitos', pleitoRoutes);

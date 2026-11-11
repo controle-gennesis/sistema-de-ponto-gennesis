@@ -69,6 +69,7 @@ import {
   Fuel,
   Car,
   CalendarRange,
+  BookOpen,
   MapPin,
   Wrench,
   Boxes,
@@ -1325,6 +1326,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
+            name: 'Diários de Obra',
+            href: '/ponto/diario-obra',
+            icon: BookOpen,
+            description: 'RDO: registro diário de atividades, equipe e ocorrências',
+            permission: isAdministrator || can(pk('/ponto/diario-obra')),
+            section: 'Obras'
+          },
+          {
             name: 'Caixinha',
             href: '/ponto/caixinha',
             icon: Wallet,
@@ -1333,7 +1342,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
-            name: 'Recebimento de Entregas',
+            name: 'Entregas',
             href: '/ponto/recebimento-entregas',
             icon: PackageCheck,
             description: 'Confirmar recebimento de material na obra',
@@ -1626,14 +1635,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Condições para ordens de compra',
             permission: isAdministrator || canAccessModule(pk('/ponto/condicoes-pagamento')),
             section: 'Compras'
-          },
-          {
-            name: 'Obras',
-            href: '/ponto/obras',
-            icon: DraftingCompass,
-            description: 'Cadastro de obras para Fichas de Demanda',
-            permission: isAdministrator || canAccessModule(pk('/ponto/obras')),
-            section: 'Engenharia'
           },
           {
             name: 'Veículos',

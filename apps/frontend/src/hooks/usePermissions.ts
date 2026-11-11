@@ -179,6 +179,7 @@ export function usePermissions() {
     faturamento: boolean;
     resumo: boolean;
     fluig?: boolean;
+    obras?: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
@@ -592,6 +593,11 @@ export function usePermissions() {
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.fluig === true;
   };
 
+  const canAccessContractObrasTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.obras === true;
+  };
+
   const canAccessContractResumoTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.resumo === true;
@@ -704,6 +710,7 @@ export function usePermissions() {
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
     canAccessContractFluigTab,
+    canAccessContractObrasTab,
     canAccessContractResumoTab,
     isContractGestor,
     canAccessContractOrdemServicoTab,
@@ -897,6 +904,7 @@ export function useRoutePermission(route: string) {
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
     '/ponto/cronogramas': isAdministrator || can(pk('/ponto/cronogramas')),
+    '/ponto/diario-obra': isAdministrator || can(pk('/ponto/diario-obra')),
     '/ponto/caixinha': isAdministrator || can(pk('/ponto/caixinha')),
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
@@ -941,7 +949,8 @@ export function useRoutePermission(route: string) {
     '/ponto/reserva-veiculos': isAdministrator || can(pk('/ponto/reserva-veiculos')),
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
     '/ponto/condicoes-pagamento': isAdministrator || canAccessModule(pk('/ponto/condicoes-pagamento')),
-    '/ponto/obras': isAdministrator || canAccessModule(pk('/ponto/obras')),
+    // Obras deixou de ser módulo da matriz de Acesso: o cadastro fica na aba Obras do contrato (permissão por contrato).
+    '/ponto/obras': isAdministrator,
     '/ponto/empreiteiros': isAdministrator || can(pk('/ponto/empreiteiros')),
     '/ponto/natureza-orcamentaria': isAdministrator || canAccessModule(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || canAccessModule(pk('/ponto/formularios')),

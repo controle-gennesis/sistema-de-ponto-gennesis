@@ -119,6 +119,15 @@ const gravacaoFilaCompartilhada = new Map<string, Promise<unknown>>();
  */
 const indiceFilaCompartilhada = new Map<string, Promise<unknown>>();
 
+/** Falha de rede passageira (DNS fora do ar, conexão caída, timeout): vale tentar de novo. */
+export function isTransientNetworkError(err: unknown): boolean {
+  const e = err as { code?: string; name?: string; message?: string; cause?: { code?: string } } | null;
+  const text = `${e?.code ?? ''} ${e?.cause?.code ?? ''} ${e?.name ?? ''} ${e?.message ?? ''}`;
+  return /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENETUNREACH|socket hang up|TimeoutError|NetworkingError/i.test(
+    text
+  );
+}
+
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
@@ -257,6 +266,19 @@ export class OrcamentoService {
     this.localBasePath = path.join(process.cwd(), 'uploads', 'orcamentos');
   }
 
+  /** Chamada ao S3 com nova tentativa quando a rede falha por um instante (ex.: queda de DNS). */
+  private async sendS3(command: any): Promise<any> {
+    const esperas = [400, 1200, 2500];
+    for (let tentativa = 0; ; tentativa++) {
+      try {
+        return await this.s3!.send(command);
+      } catch (err) {
+        if (!isTransientNetworkError(err) || tentativa >= esperas.length) throw err;
+        await new Promise((resolve) => setTimeout(resolve, esperas[tentativa]));
+      }
+    }
+  }
+
   private getLegacyDataKey(centroCustoId: string): string {
     return 'orcamentos/' + centroCustoId + '/data.json';
   }
@@ -372,7 +394,7 @@ export class OrcamentoService {
 
     // S3: migra só se não houver índice com orçamentos
     try {
-      const idxObj = await this.s3!.send(
+      const idxObj = await this.sendS3(
         new GetObjectCommand({ Bucket: this.bucketName, Key: this.getIndexKey(centroCustoId) })
       );
       const rawIdx = idxObj.Body ? await s3BodyToString(idxObj.Body) : '';
@@ -389,7 +411,7 @@ export class OrcamentoService {
 
     let legacyBody: string | undefined;
     try {
-      const r = await this.s3!.send(
+      const r = await this.sendS3(
         new GetObjectCommand({ Bucket: this.bucketName, Key: this.getLegacyDataKey(centroCustoId) })
       );
       legacyBody = r.Body ? await s3BodyToString(r.Body) : undefined;
@@ -418,7 +440,7 @@ export class OrcamentoService {
       servicos: legacy.servicos || [],
       imports: legacy.imports || []
     });
-    await this.s3!.send(
+    await this.sendS3(
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: this.getOrcamentoDataKey(centroCustoId, id),
@@ -430,7 +452,7 @@ export class OrcamentoService {
       ultimoOrcamentoId: id,
       orcamentos: [{ id, nome, updatedAt }]
     };
-    await this.s3!.send(
+    await this.sendS3(
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: this.getIndexKey(centroCustoId),
@@ -457,7 +479,7 @@ export class OrcamentoService {
           ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
         };
       }
-      const result = await this.s3!.send(
+      const result = await this.sendS3(
         new GetObjectCommand({
           Bucket: this.bucketName,
           Key: this.getIndexKey(centroCustoId)
@@ -637,7 +659,7 @@ export class OrcamentoService {
       fs.writeFileSync(this.localIndexPath(centroCustoId), body, 'utf-8');
       return;
     }
-    await this.s3!.send(
+    await this.sendS3(
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: this.getIndexKey(centroCustoId),
@@ -659,7 +681,7 @@ export class OrcamentoService {
       fs.writeFileSync(this.localOrcamentoPath(centroCustoId, orcamentoId), body, 'utf-8');
       return;
     }
-    await this.s3!.send(
+    await this.sendS3(
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId),
@@ -688,7 +710,7 @@ export class OrcamentoService {
         if (!fs.existsSync(p)) return null;
         return JSON.parse(fs.readFileSync(p, 'utf-8')) as OrcamentoData;
       }
-      const result = await this.s3!.send(
+      const result = await this.sendS3(
         new GetObjectCommand({
           Bucket: this.bucketName,
           Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
@@ -711,7 +733,7 @@ export class OrcamentoService {
         if (!fs.existsSync(p)) return null;
         return JSON.parse(fs.readFileSync(p, 'utf-8')) as ServicosPadraoData;
       }
-      const result = await this.s3!.send(
+      const result = await this.sendS3(
         new GetObjectCommand({
           Bucket: this.bucketName,
           Key: this.getServicosPadraoKey(centroCustoId)
@@ -763,7 +785,7 @@ export class OrcamentoService {
         const p = this.localServicosPadraoPath(centroCustoId);
         if (fs.existsSync(p)) fs.unlinkSync(p);
       } else {
-        await this.s3!.send(
+        await this.sendS3(
           new DeleteObjectCommand({
             Bucket: this.bucketName,
             Key: this.getServicosPadraoKey(centroCustoId)
@@ -784,7 +806,7 @@ export class OrcamentoService {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.localServicosPadraoPath(centroCustoId), body, 'utf-8');
     } else {
-      await this.s3!.send(
+      await this.sendS3(
         new PutObjectCommand({
           Bucket: this.bucketName,
           Key: this.getServicosPadraoKey(centroCustoId),
@@ -880,7 +902,16 @@ export class OrcamentoService {
       }
     }
 
-    const data = await this.fetchServicosPadraoDirect(centroCustoId);
+    let data: ServicosPadraoData;
+    try {
+      data = await this.fetchServicosPadraoDirect(centroCustoId);
+    } catch (err) {
+      if (cached && isTransientNetworkError(err)) {
+        console.warn('[orcamento] S3 indisponível; servindo serviços padrão em cache de', centroCustoId);
+        return cached.data;
+      }
+      throw err;
+    }
     this.padraoCache.set(centroCustoId, {
       data,
       fetchedAt: Date.now(),
@@ -923,7 +954,17 @@ export class OrcamentoService {
       }
     }
 
-    const data = await this.fetchOrcamentoDirect(centroCustoId, orcamentoId);
+    let data: OrcamentoData | null;
+    try {
+      data = await this.fetchOrcamentoDirect(centroCustoId, orcamentoId);
+    } catch (err) {
+      // Rede fora do ar por instantes: devolve a última cópia conhecida em vez de erro 500.
+      if (cached && isTransientNetworkError(err)) {
+        console.warn('[orcamento] S3 indisponível; servindo cópia em cache de', orcamentoId);
+        return cached.data;
+      }
+      throw err;
+    }
     if (data) {
       this.orcamentoDetailCache.set(cacheKey, {
         data,
@@ -1461,7 +1502,7 @@ export class OrcamentoService {
       if (fs.existsSync(p)) fs.unlinkSync(p);
     } else {
       try {
-        await this.s3!.send(
+        await this.sendS3(
           new DeleteObjectCommand({
             Bucket: this.bucketName,
             Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
@@ -1529,7 +1570,7 @@ export class OrcamentoService {
         const raw = fs.readFileSync(filePath, 'utf-8');
         return JSON.parse(raw) as unknown[];
       }
-      const result = await this.s3!.send(
+      const result = await this.sendS3(
         new GetObjectCommand({
           Bucket: this.bucketName,
           Key: this.getComposicoesGeralKey()
@@ -1553,7 +1594,7 @@ export class OrcamentoService {
       fs.writeFileSync(path.join(dir, 'data.json'), body, 'utf-8');
       return;
     }
-    await this.s3!.send(
+    await this.sendS3(
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: this.getComposicoesGeralKey(),

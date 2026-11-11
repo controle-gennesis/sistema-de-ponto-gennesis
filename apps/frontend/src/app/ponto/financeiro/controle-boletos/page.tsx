@@ -46,6 +46,7 @@ import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -187,6 +188,8 @@ function ControleBoletosPage() {
   const router = useRouter();
   const handleLogout = useLogout();
   const user = authService.getUser();
+  // Importar e exportar planilha: só administrador (o servidor também bloqueia).
+  const { isAdministrator } = usePermissions();
 
   const [search, setSearch] = useState('');
   const [polo, setPolo] = useState('');
@@ -261,6 +264,7 @@ function ControleBoletosPage() {
       return res.data?.data as {
         polos: string[];
         costCenters: string[];
+        costCentersByPolo?: Record<string, string[]>;
         managers: string[];
         officialCostCenters: string[];
       };
@@ -436,6 +440,12 @@ function ControleBoletosPage() {
   ];
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
+  // Formulário: com o polo escolhido, a lista de centros de custo mostra só os desse polo.
+  const centrosDoPolo = (() => {
+    const map = options?.costCentersByPolo ?? {};
+    const key = Object.keys(map).find((k) => k.trim().toUpperCase() === form.polo.trim().toUpperCase());
+    return key ? map[key] : null;
+  })();
   const hasActiveFilter = !!(polo || costCenter || manager || technical || dueFrom || dueTo);
   const clearModalFilters = () =>
     resetPageAnd(() => {
@@ -489,8 +499,8 @@ function ControleBoletosPage() {
             <FilterStatCard
               key={s.key}
               label={s.label}
-              count={s.count}
-              subtitle={brl(s.value)}
+              count={brl(s.value)}
+              subtitle={`${s.count.toLocaleString('pt-BR')} ${s.count === 1 ? 'boleto' : 'boletos'}`}
               icon={s.Icon}
               iconBg={s.iconBg}
               iconColor={s.iconColor}
@@ -557,6 +567,8 @@ function ControleBoletosPage() {
                       role="menu"
                       className="absolute right-0 top-full z-40 mt-1.5 min-w-[240px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
                     >
+                      {isAdministrator ? (
+                        <>
                       <button
                         type="button"
                         role="menuitem"
@@ -582,6 +594,8 @@ function ControleBoletosPage() {
                         <Upload className="h-4 w-4 shrink-0 text-gray-500" />
                         Importar planilha
                       </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         role="menuitem"
@@ -861,7 +875,7 @@ function ControleBoletosPage() {
             <Field label="Centro de custo" className="sm:col-span-2">
               <input list="boleto-cc" value={form.costCenterName} onChange={(e) => set('costCenterName', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
               <datalist id="boleto-cc">
-                {(options?.officialCostCenters ?? options?.costCenters ?? []).map((c, i) => (
+                {(centrosDoPolo ?? options?.officialCostCenters ?? options?.costCenters ?? []).map((c, i) => (
                   <option key={`${c}-${i}`} value={c} />
                 ))}
               </datalist>
@@ -892,17 +906,8 @@ function ControleBoletosPage() {
             </Field>
           </div>
 
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
-            <input
-              type="checkbox"
-              checked={form.technicalConfirmed}
-              onChange={(e) => set('technicalConfirmed', e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            Pagamento confirmado pelo técnico
-          </label>
-          <p className="-mt-2 text-xs text-gray-500 dark:text-gray-400">
-            O status é automático: confirmado = Pago; senão, Vencido se a data já passou, ou À vencer. O gestor vem do centro de custo.
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            O status é automático: confirmado = Pago; senão, Vencido se a data já passou, ou À vencer. Para confirmar o pagamento, use o check da coluna &quot;Pgto. confirmado&quot; na lista. O gestor vem do centro de custo.
           </p>
 
           <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">

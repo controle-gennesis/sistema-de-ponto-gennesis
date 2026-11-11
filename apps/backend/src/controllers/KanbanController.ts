@@ -441,6 +441,29 @@ export class KanbanController {
     }
   }
 
+  async getAssignedNotifications(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const data = await kanbanService.listUnreadAssignments(userId);
+      res.json({ success: true, data });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
+  async markAssignedNotificationsRead(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const cardId = typeof req.body?.cardId === 'string' ? req.body.cardId : undefined;
+      await kanbanService.markAssignmentsRead(userId, cardId);
+      res.json({ success: true });
+    } catch (error) {
+      handleKanbanError(error, next);
+    }
+  }
+
   async createCard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

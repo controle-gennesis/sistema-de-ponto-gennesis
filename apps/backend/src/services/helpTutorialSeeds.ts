@@ -611,15 +611,15 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
   },
   {
     slug: 'usar-recebimento-de-entregas',
-    title: 'Usar Recebimento de Entregas',
+    title: 'Usar Entregas',
     summary: 'Como confirmar recebimento de materiais na engenharia.',
     setor: 'Engenharia',
     keywords: ['recebimento', 'entrega', 'materiais', 'conferência'],
     href: '/ponto/recebimento-entregas',
     steps: [
       {
-        title: 'Abra Recebimento de Entregas',
-        body: 'No menu Engenharia, acesse Recebimento de Entregas.',
+        title: 'Abra Entregas',
+        body: 'No menu Engenharia, acesse Entregas.',
       },
       {
         title: 'Localize a entrega',

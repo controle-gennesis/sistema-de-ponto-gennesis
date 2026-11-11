@@ -497,7 +497,7 @@ export default function RecebimentoEntregasPageClient() {
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Recebimento de Entregas"
+            title="Entregas"
             description="Confirme o recebimento de material na obra."
           />
 

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { X, Bell, CalendarClock, Fuel, FileText, Wrench, Trash2 } from 'lucide-react-native';
+import { X, Bell, CalendarClock, Fuel, FileText, Wrench, Trash2, SquareKanban } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import {
@@ -103,6 +103,10 @@ export default function NotificationsSheet() {
     markAsRead(item.id);
     closeSheet();
     setTimeout(() => {
+      if (item.kind === 'kanban') {
+        navigation.navigate('KanbanCard', { cardId: item.entityId });
+        return;
+      }
       const screen = activityTabRoute(item.kind);
       navigation.navigate('Main', { screen });
     }, 220);
@@ -194,6 +198,8 @@ export default function NotificationsSheet() {
                           <Fuel size={19} color={C.accent} strokeWidth={2.1} />
                         ) : item.kind === 'workorder' ? (
                           <Wrench size={19} color={C.accent} strokeWidth={2.1} />
+                        ) : item.kind === 'kanban' ? (
+                          <SquareKanban size={19} color={C.accent} strokeWidth={2.1} />
                         ) : item.kind === 'dp' ? (
                           <FileText size={19} color={C.accent} strokeWidth={2.1} />
                         ) : (

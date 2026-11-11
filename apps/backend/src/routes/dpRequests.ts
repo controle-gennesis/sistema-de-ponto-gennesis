@@ -1,11 +1,18 @@
 import { Router } from 'express';
+import {
+  getDpRequestMessages,
+  getDpRequestUnreadMessages,
+  postDpRequestMessage,
+} from '../lib/dpRequestMessages';
 import { authenticate, requireAdministrator } from '../middleware/auth';
 import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DpRequestController } from '../controllers/DpRequestController';
+import { DpContabilidadeController } from '../controllers/DpContabilidadeController';
 
 const router = Router();
 const controller = new DpRequestController();
+const contabilidadeController = new DpContabilidadeController();
 
 const myModule = pathToModuleKey('/ponto/solicitacoes-dp');
 const accountingModule = pathToModuleKey('/ponto/solicitacoes-contabilidade');
@@ -14,6 +21,10 @@ const admTstManageModule = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-ts
 
 router.use(authenticate);
 
+// Conversa entre DP, Administração e Contabilidade (permissão checada dentro de cada rota)
+router.get('/mensagens/nao-lidas', getDpRequestUnreadMessages);
+router.get('/:id/mensagens', getDpRequestMessages);
+router.post('/:id/mensagens', postDpRequestMessage);
 router.get('/contratos-elegiveis', requireModuleAccess(myModule), controller.getEligibleContracts.bind(controller));
 router.get(
   '/centros-custo-elegiveis',
@@ -54,7 +65,23 @@ router.get(
   requireModuleAccess(admTstManageModule),
   controller.getForAdmTstManagement.bind(controller)
 );
+router.get(
+  '/gerenciar/:id/detalhes',
+  requireModuleAccess(manageModule),
+  controller.getManageDetailsDp.bind(controller)
+);
+router.get(
+  '/gerenciar-adm-tst/:id/detalhes',
+  requireModuleAccess(admTstManageModule),
+  controller.getManageDetailsAdmTst.bind(controller)
+);
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
+// O DP encerra o pedido ligado na Contabilidade (permissão de Gerenciar Solicitações do DP)
+router.post(
+  '/:id/concluir-contabilidade',
+  requireModuleAccess(manageModule),
+  contabilidadeController.concludeFromDp.bind(contabilidadeController)
+);
 router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
 
 export default router;

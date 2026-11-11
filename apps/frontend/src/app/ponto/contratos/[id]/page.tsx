@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
 import {
@@ -45,6 +45,7 @@ import {
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
+import { ContratoObrasTab } from './ContratoObrasTab';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Button } from '@/components/ui/Button';
@@ -1080,6 +1081,7 @@ export default function ContractDetailPage() {
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
     canAccessContractFluigTab,
+    canAccessContractObrasTab,
     canAccessContractResumoTab,
     isContractGestor,
     canAccessContractOrdemServicoTab,
@@ -1091,6 +1093,7 @@ export default function ContractDetailPage() {
   const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
   const canAccessCronogramasModulo = isAdministrator || can(pathToModuleKey('/ponto/cronogramas'));
+  const canAccessObrasModulo = canAccessContractObrasTab(contractId);
   const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
   const { pendingByContractId } = useMensalReportPendingCount(Boolean(contractId));
   const mensalReportPendingForContract = pendingByContractId.has(contractId) ? 1 : 0;
@@ -1134,7 +1137,7 @@ export default function ContractDetailPage() {
     setPeriodTo(to);
   }, []);
   const [mainTab, setMainTab] = useState<
-    'resumo' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
+    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
   >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
@@ -2041,6 +2044,7 @@ export default function ContractDetailPage() {
   const allowedMainTabs = useMemo(() => {
     const tabs: Array<typeof mainTab> = [];
     if (canAccessResumoModulo) tabs.push('resumo');
+    if (canAccessObrasModulo) tabs.push('obras');
     if (canAccessGestorTabs) tabs.push('controle');
     if (canAccessProducaoSemanalModulo) tabs.push('producao');
     if (canAccessOrdemServicoModulo) tabs.push('os');
@@ -2051,6 +2055,7 @@ export default function ContractDetailPage() {
     return tabs;
   }, [
     canAccessResumoModulo,
+    canAccessObrasModulo,
     canAccessGestorTabs,
     canAccessProducaoSemanalModulo,
     canAccessOrdemServicoModulo,
@@ -2064,6 +2069,16 @@ export default function ContractDetailPage() {
       setMainTab(allowedMainTabs[0]);
     }
   }, [mainTab, allowedMainTabs]);
+
+  // Links como /ponto/contratos/<id>?tab=obras (ex.: breadcrumb) abrem direto a aba pedida — só uma vez.
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams?.get('tab') ?? '';
+  const tabFromUrlApplied = useRef(false);
+  useEffect(() => {
+    if (tabFromUrlApplied.current || !tabFromUrl || allowedMainTabs.length === 0) return;
+    tabFromUrlApplied.current = true;
+    if ((allowedMainTabs as string[]).includes(tabFromUrl)) setMainTab(tabFromUrl as typeof mainTab);
+  }, [tabFromUrl, allowedMainTabs]);
 
   const adjYearSelectOptions = useMemo(
     () =>
@@ -4899,6 +4914,15 @@ export default function ContractDetailPage() {
                 Resumo
               </AppUnderlineTabButton>
             ) : null}
+            {canAccessObrasModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'obras'}
+                onClick={() => setMainTab('obras')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Obras
+              </AppUnderlineTabButton>
+            ) : null}
             {canAccessGestorTabs ? (
               <AppUnderlineTabButton
                 active={mainTab === 'controle'}
@@ -4963,6 +4987,8 @@ export default function ContractDetailPage() {
               </AppUnderlineTabButton>
             ) : null}
           </AppUnderlineTabList>
+
+          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} canManage={canAccessObrasModulo} /> : null}
 
           {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">

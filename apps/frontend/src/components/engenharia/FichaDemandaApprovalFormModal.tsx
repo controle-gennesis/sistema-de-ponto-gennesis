@@ -409,6 +409,7 @@ export function FichaDemandaApprovalFormModal({
       const res = await api.post('/obras', {
         name,
         contratoId: form.contratoId,
+        quick: true,
       });
       return res.data?.data as ObraOption | undefined;
     },

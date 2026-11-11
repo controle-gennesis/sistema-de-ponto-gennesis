@@ -15,7 +15,7 @@ const storage = {
   },
 };
 
-export type ActivityKind = 'fuel' | 'reservation' | 'dp' | 'workorder';
+export type ActivityKind = 'fuel' | 'reservation' | 'dp' | 'workorder' | 'kanban';
 
 export type ActivityNotification = {
   id: string;
@@ -73,6 +73,8 @@ export function activityPageTitle(kind: ActivityKind): string {
       return 'Solicitações';
     case 'workorder':
       return 'Chamados';
+    case 'kanban':
+      return 'Kanban';
     default:
       return 'Frota';
   }
@@ -81,6 +83,9 @@ export function activityPageTitle(kind: ActivityKind): string {
 /** Nome da aba (rota) que mostra cada tipo de notificação. */
 export function activityTabRoute(kind: ActivityKind): 'Combustivel' | 'Reservas' | 'DpRequests' | 'GestaoOs' {
   switch (kind) {
+    // Kanban abre o card direto (ver NotificationsSheet); a aba aqui é só o padrão.
+    case 'kanban':
+      return 'GestaoOs';
     case 'fuel':
       return 'Combustivel';
     case 'dp':
@@ -236,7 +241,7 @@ export function activitySubtitle(item: ActivityNotification): string {
   const code = item.displayCode?.trim() || null;
   if (item.kind === 'fuel') return fuelStatusMessage(item.status, code);
   if (item.kind === 'workorder') return workOrderStatusMessage(item.status, code);
-  if (item.kind === 'dp') return item.body;
+  if (item.kind === 'dp' || item.kind === 'kanban') return item.body;
   return reservationStatusMessage(item.status, code);
 }
 

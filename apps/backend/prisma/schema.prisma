@@ -802,6 +802,8 @@ enum DpRequestType {
 // Modelo de SolicitaÃ§Ã£o DP (especÃ­fico do AppSheet âSolicitaÃ§Ãµes Departamento Pessoalâ)
 model DpRequest {
   id            String @id @default(cuid())
+  messages      DpRequestComment[]
+  messageReads  DpRequestCommentRead[]
   /// NÃºmero legÃ­vel sequencial (1, 2, 3â¦) para exibiÃ§Ã£o e busca.
   displayNumber Int    @unique
 
@@ -925,6 +927,33 @@ model DpContabilidadeRequest {
   @@index([createdByUserId])
   @@index([createdAt])
   @@map("dp_contabilidade_requests")
+}
+
+/// Conversa entre DP, Administração e Contabilidade sobre uma solicitação (não muda o status).
+model DpRequestComment {
+  id        String   @id @default(cuid())
+  requestId String
+  request   DpRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  userName  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("dp_request_comments")
+}
+
+/// Até quando cada pessoa já leu a conversa de uma solicitação (base do aviso de mensagem nova).
+model DpRequestCommentRead {
+  id        String   @id @default(cuid())
+  requestId String
+  request   DpRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  readAt    DateTime @default(now())
+
+  @@unique([requestId, userId])
+  @@index([userId])
+  @@map("dp_request_comment_reads")
 }
 
 model DpContabilidadeComment {
@@ -2484,11 +2513,38 @@ model Obra {
   updatedAt  DateTime @updatedAt
 
   contrato Contract @relation(fields: [contratoId], references: [id], onDelete: Restrict)
+  diarios  DiarioObra[]
 
   @@index([name])
   @@index([isActive])
   @@index([contratoId])
   @@map("obras")
+}
+
+/// Diário de Obra (RDO): um registro por obra por dia.
+model DiarioObra {
+  id               String   @id @default(cuid())
+  obraId           String
+  /// Dia do RDO, formato AAAA-MM-DD.
+  date             String
+  /// Sem atividade no dia (com o motivo em `noActivityReason`).
+  noActivity       Boolean  @default(false)
+  noActivityReason String?
+  /// Clima, atividades, mão de obra, equipamentos, materiais, ocorrências e observações.
+  content          Json     @default("{}")
+  createdById      String?
+  updatedById      String?
+  /// RDO finalizado: não pode mais ser editado até ser reaberto.
+  finalizedAt      DateTime?
+  finalizedById    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@unique([obraId, date])
+  @@index([obraId, date])
+  @@map("diarios_obra")
 }
 
 /// Cadastro de empreiteiros da Engenharia (mão de obra da obra).
@@ -3093,6 +3149,8 @@ model UserContractPermission {
   accessResumo              Boolean  @default(true)
   /// Aba Fluig do contrato (solicitações G5 do centro de custo).
   accessFluig               Boolean  @default(false)
+  /// Aba Obras do contrato (lista de obras e Diários de Obra).
+  accessObras               Boolean  @default(false)
   updatedBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
@@ -3825,6 +3883,8 @@ model KanbanCardMember {
   cardId    String
   userId    String
   createdAt DateTime @default(now())
+  /// Atribuição nova que a pessoa ainda não viu: alimenta o sino de notificações.
+  unread    Boolean  @default(false)
 
   card KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
   user User       @relation("KanbanCardMemberUser", fields: [userId], references: [id], onDelete: Cascade)
@@ -3832,6 +3892,7 @@ model KanbanCardMember {
   @@unique([cardId, userId])
   @@index([cardId])
   @@index([userId])
+  @@index([userId, unread])
   @@map("kanban_card_members")
 }
 

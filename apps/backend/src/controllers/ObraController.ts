@@ -5,6 +5,26 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 
+/**
+ * Criar, editar e excluir obras: administrador ou a aba Obras liberada para o usuário neste contrato
+ * (coluna Obras da matriz de contratos).
+ */
+async function assertCanManageObras(req: AuthRequest, contratoId: string, quickCreate = false) {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  if (req.user.isAdmin) return;
+  // Criação rápida (orçamento, pleito, caixinha...) só exige ter o contrato liberado, sem a permissão da aba Obras.
+  const flag = await prisma.userContractPermission.findFirst({
+    where: {
+      userId: req.user.id,
+      contractId: contratoId,
+      accessLiberado: true,
+      ...(quickCreate ? {} : { accessObras: true }),
+    },
+    select: { contractId: true },
+  });
+  if (!flag) throw createError('Sem permissão para gerenciar obras deste contrato', 403);
+}
+
 const obraInclude = {
   contrato: { select: { id: true, name: true, number: true } },
 } as const;
@@ -121,6 +141,7 @@ export class ObraController {
         typeof req.body?.contratoId === 'string' ? req.body.contratoId.trim() : '';
       if (!name) throw createError('Nome é obrigatório', 400);
       if (!contratoId) throw createError('Contrato é obrigatório', 400);
+      await assertCanManageObras(req, contratoId, req.body?.quick === true);
 
       const contrato = await prisma.contract.findUnique({ where: { id: contratoId } });
       if (!contrato) throw createError('Contrato não encontrado', 404);
@@ -148,6 +169,7 @@ export class ObraController {
       const { id } = req.params;
       const item = await prisma.obra.findUnique({ where: { id } });
       if (!item) throw createError('Obra não encontrada', 404);
+      await assertCanManageObras(req, item.contratoId);
 
       const data: Prisma.ObraUpdateInput = {};
       let nextContratoId = item.contratoId;
@@ -157,6 +179,7 @@ export class ObraController {
         const contratoId =
           typeof req.body.contratoId === 'string' ? req.body.contratoId.trim() : '';
         if (!contratoId) throw createError('Contrato é obrigatório', 400);
+        if (contratoId !== item.contratoId) await assertCanManageObras(req, contratoId);
         const contrato = await prisma.contract.findUnique({ where: { id: contratoId } });
         if (!contrato) throw createError('Contrato não encontrado', 404);
         nextContratoId = contratoId;
@@ -201,6 +224,7 @@ export class ObraController {
       const { id } = req.params;
       const item = await prisma.obra.findUnique({ where: { id } });
       if (!item) throw createError('Obra não encontrada', 404);
+      await assertCanManageObras(req, item.contratoId);
       await prisma.obra.delete({ where: { id } });
       res.json({ success: true, message: 'Registro excluído' });
     } catch (error) {
@@ -210,6 +234,9 @@ export class ObraController {
 
   async importMany(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      // Importação em massa (vários contratos): só administrador.
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      if (!req.user.isAdmin) throw createError('Sem permissão para importar obras', 403);
       const { obras } = req.body as { obras?: unknown };
       if (!Array.isArray(obras) || obras.length === 0) {
         throw createError('Envie um array "obras" com ao menos um item', 400);
