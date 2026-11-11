@@ -339,6 +339,15 @@ export default function ObraDoContratoPage() {
                           : status === 'none'
                             ? 'text-red-600 dark:text-red-400'
                             : null;
+                      // Hoje: sem fundo colorido, só o círculo — verde (teve atividade), vermelho (sem atividade) ou cinza (não começou)
+                      const isToday = iso === today;
+                      const ringHoje = !isToday
+                        ? ''
+                        : status === 'work'
+                          ? 'ring-1 ring-green-600 dark:ring-green-400'
+                          : status === 'none'
+                            ? 'ring-1 ring-red-600 dark:ring-red-400'
+                            : 'ring-1 ring-gray-400 dark:ring-gray-500';
                       return (
                         <button
                           key={iso}
@@ -349,7 +358,11 @@ export default function ObraDoContratoPage() {
                           className={`flex min-w-9 flex-1 flex-col items-center gap-1 rounded-lg py-2 text-xs transition-colors ${
                             future ? 'cursor-not-allowed opacity-40' : ''
                           } ${
-                            status === 'work'
+                            isToday
+                              ? future
+                                ? ''
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                              : status === 'work'
                               ? `bg-green-100 dark:bg-green-900/30 ${future ? '' : 'hover:bg-green-200 dark:hover:bg-green-900/50'}`
                               : status === 'none'
                                 ? `bg-red-100 dark:bg-red-900/30 ${future ? '' : 'hover:bg-red-200 dark:hover:bg-red-900/50'}`
@@ -366,9 +379,9 @@ export default function ObraDoContratoPage() {
                               tone
                                 ? `font-semibold ${tone}`
                                 : iso === today
-                                  ? 'font-bold text-gray-900 ring-1 ring-gray-400 dark:text-gray-100 dark:ring-gray-500'
+                                  ? 'font-bold text-gray-900 dark:text-gray-100'
                                   : 'text-gray-800 dark:text-gray-200'
-                            }`}
+                            } ${ringHoje}`}
                           >
                             {d}
                           </span>
