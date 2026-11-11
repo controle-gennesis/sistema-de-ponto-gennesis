@@ -982,7 +982,11 @@ export function DiarioObraEditor({
   useBreadcrumbEntity(
     obra?.name
       ? [
+          // Dentro do contrato, a obra vem depois de «Obras» (aba do contrato).
+          ...(contractId ? [{ label: 'Obras', href: `/ponto/contratos/${contractId}?tab=obras` }] : []),
           { label: obra.name, href: obraHref },
+          // Dentro do contrato, «Diários de Obra» é a aba da obra; na rota geral o módulo já aparece no início.
+          ...(contractId ? [{ label: 'Diários de Obra', href: obraHref }] : []),
           { label: `RDO - ${brDate(selected)}`, href: `${diarioBase}/${selected}` },
         ]
       : null,
