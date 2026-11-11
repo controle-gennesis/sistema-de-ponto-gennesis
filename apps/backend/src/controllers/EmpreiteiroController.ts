@@ -4,6 +4,7 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { gerarContratoDoServico } from '../lib/empreiteiroContractDocument';
+import { gerarTermoAditivo } from '../lib/empreiteiroAditivoDocument';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 import { PhotoService } from '../services/PhotoService';
 import { buscarStatusFluigPorNumeros, listarSolicitacoesFluigDaEmpreita } from '../lib/empreiteiroFluigSolicitacoes';
@@ -4119,8 +4120,9 @@ export class EmpreiteiroController {
       const nextNumber = (link.addenda[0]?.number || 0) + 1;
 
       // O aditivo nasce PENDENTE: não altera valor do contrato nem parcelas até ser aprovado.
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.empreiteiroContractAddendum.create({
+      let createdAddendumId = '';
+      let updated = await prisma.$transaction(async (tx) => {
+        const createdAddendum = await tx.empreiteiroContractAddendum.create({
           data: {
             empreiteiroContractId: linkId,
             number: nextNumber,
@@ -4135,11 +4137,23 @@ export class EmpreiteiroController {
             createdBy: req.user?.id || null,
           },
         });
+        createdAddendumId = createdAddendum.id;
         return tx.empreiteiro.findUniqueOrThrow({
           where: { id },
           include: empreiteiroInclude,
         });
       });
+
+      // Termo aditivo preenchido, anexado ao aditivo. Falha aqui não impede o envio.
+      try {
+        await gerarTermoAditivo(createdAddendumId);
+        updated = await prisma.empreiteiro.findUniqueOrThrow({
+          where: { id },
+          include: empreiteiroInclude,
+        });
+      } catch (docErr) {
+        console.error('[empreiteiros] falha ao gerar termo aditivo', docErr);
+      }
 
       const counts = await measurementCountsForEmpreiteiro(id);
       res.json({
@@ -4190,6 +4204,11 @@ export class EmpreiteiroController {
           correctionNote: null,
         },
       });
+      try {
+        await gerarTermoAditivo(addendumId);
+      } catch (docErr) {
+        console.error('[empreiteiros] falha ao gerar termo aditivo', docErr);
+      }
       const updated = await prisma.empreiteiro.findUniqueOrThrow({
         where: { id },
         include: empreiteiroInclude,
