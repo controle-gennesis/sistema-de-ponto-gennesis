@@ -450,7 +450,8 @@ export default function CaixinhaPageClient() {
     mutationFn: async (name: string) => {
       const res = await api.post('/obras', {
         name,
-        contratoId: form.contractId
+        contratoId: form.contractId,
+        quick: true,
       });
       return res.data?.data as ObraOption | undefined;
     },
