@@ -54,6 +54,16 @@ router.get(
   requireModuleAccess(admTstManageModule),
   controller.getForAdmTstManagement.bind(controller)
 );
+router.get(
+  '/gerenciar/:id/detalhes',
+  requireModuleAccess(manageModule),
+  controller.getManageDetailsDp.bind(controller)
+);
+router.get(
+  '/gerenciar-adm-tst/:id/detalhes',
+  requireModuleAccess(admTstManageModule),
+  controller.getManageDetailsAdmTst.bind(controller)
+);
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
 router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
 

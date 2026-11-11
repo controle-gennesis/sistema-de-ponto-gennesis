@@ -270,6 +270,28 @@ function approverNameFromStatusHistory(history: unknown): string | null {
   return null;
 }
 
+/**
+ * Anexos antigos ficam em Base64 dentro de `details` (até ~22 MB cada). Na lista da fila isso gerava
+ * respostas gigantes e o timeout de 30 s do navegador. Aqui o Base64 sai da lista; o conteúdo completo
+ * vem do detalhe da solicitação aberta (rota /:id/detalhes).
+ */
+function stripInlineAttachmentData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripInlineAttachmentData);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === 'dataBase64' && typeof v === 'string' && v.length > 2000) {
+        out[k] = '';
+        out.inlineDataOmitted = true;
+      } else {
+        out[k] = stripInlineAttachmentData(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
 async function attachDpContractSummaries<
   T extends {
     contractId: string | null;
@@ -841,7 +863,9 @@ export class DpRequestController {
       orderBy: { createdAt: 'desc' },
     });
 
-    const summarized = await attachDpContractSummaries(requests);
+    const summarized = await attachDpContractSummaries(
+      requests.map((r) => ({ ...r, details: stripInlineAttachmentData(r.details) as typeof r.details }))
+    );
 
     // Finalizadas que deveriam ter ido à Contabilidade e não têm pedido lá (envio falhou).
     let data: Array<(typeof summarized)[number] & { contabilidadePendente?: boolean }> = summarized;
@@ -854,6 +878,39 @@ export class DpRequestController {
       data = summarized.map((r) => ({ ...r, contabilidadePendente: pending.has(r.id) }));
     }
     return res.json({ success: true, data });
+  }
+
+  /** Detalhes completos (com anexos em Base64) de uma solicitação da fila de gerenciamento. */
+  private async manageRequestDetails(req: AuthRequest, res: Response, scope: 'DP' | 'ADM_TST') {
+    if (!req.user) throw createError('Usuário não autenticado', 401);
+    const id = String(req.params.id || '').trim();
+    if (!id) throw createError('ID inválido', 400);
+    const row = await prisma.dpRequest.findFirst({
+      where: {
+        AND: [{ id }, scope === 'ADM_TST' ? admTstOnlyWhere() : admTstManagerApprovalExclusionWhere()],
+      },
+      select: { id: true, details: true },
+    });
+    if (!row) throw createError('Solicitação não encontrada', 404);
+    return res.json({ success: true, data: { id: row.id, details: row.details } });
+  }
+
+  async getManageDetailsDp(req: AuthRequest, res: Response) {
+    try {
+      return await this.manageRequestDetails(req, res, 'DP');
+    } catch (e) {
+      const err = e as { statusCode?: number; message?: string };
+      return res.status(err?.statusCode || 500).json({ error: err?.message || 'Erro ao buscar detalhes' });
+    }
+  }
+
+  async getManageDetailsAdmTst(req: AuthRequest, res: Response) {
+    try {
+      return await this.manageRequestDetails(req, res, 'ADM_TST');
+    } catch (e) {
+      const err = e as { statusCode?: number; message?: string };
+      return res.status(err?.statusCode || 500).json({ error: err?.message || 'Erro ao buscar detalhes' });
+    }
   }
 
   /** Fila de gerenciamento do Departamento Pessoal (sem solicitações ADM/TST). */

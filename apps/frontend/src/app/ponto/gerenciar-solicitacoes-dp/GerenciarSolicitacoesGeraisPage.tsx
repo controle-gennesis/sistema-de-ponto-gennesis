@@ -501,6 +501,19 @@ export function GerenciarSolicitacoesGeraisPage({
     retry: 2,
   });
 
+  // A lista vem sem o conteúdo (Base64) dos anexos antigos; ao abrir a solicitação, busca os detalhes completos.
+  const needsFullDetails =
+    !!historyRequest && JSON.stringify(historyRequest.details ?? {}).includes('"inlineDataOmitted":true');
+  const { data: fullDetails } = useQuery({
+    queryKey: [scopeConfig.queryKeyPrefix, 'detalhes', historyRequest?.id],
+    queryFn: async () => {
+      const res = await api.get(`${scopeConfig.apiPath}/${historyRequest!.id}/detalhes`);
+      return (res.data?.data?.details ?? null) as DpRequest['details'] | null;
+    },
+    enabled: needsFullDetails,
+    staleTime: 5 * 60_000,
+  });
+
   const loadingStats = loadingList;
   const statsResp = allRequestsResp;
 
@@ -1157,7 +1170,7 @@ export function GerenciarSolicitacoesGeraisPage({
 
                   <DpRequestDetailsPreview
                     requestType={historyRequest.requestType}
-                    details={historyRequest.details}
+                    details={fullDetails ?? historyRequest.details}
                     employeeNameById={employeeNameByIdForDetail}
                   />
 
