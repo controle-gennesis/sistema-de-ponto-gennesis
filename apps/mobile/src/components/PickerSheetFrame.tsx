@@ -9,7 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Search } from 'lucide-react-native';
+import { Search, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
@@ -38,8 +38,8 @@ export default function PickerSheetFrame({ title, onClose, search, onSearchChang
     () => ({
       sheet: isDark ? '#111827' : '#ffffff',
       title: isDark ? '#f9fafb' : '#111827',
-      inputBg: isDark ? '#1f2937' : '#ffffff',
-      inputBorder: isDark ? '#374151' : '#e5e7eb',
+      inputBg: isDark ? '#1f2937' : '#f3f4f6',
+      inputBorder: 'transparent',
       inputText: isDark ? '#f9fafb' : '#111827',
       icon: '#9ca3af',
     }),
@@ -73,7 +73,19 @@ export default function PickerSheetFrame({ title, onClose, search, onSearchChang
             },
           ]}
         >
-          <Text style={[styles.title, { color: C.title }]}>{title}</Text>
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: C.title }]} numberOfLines={1}>
+              {title}
+            </Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={[styles.closeBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}
+              hitSlop={8}
+              accessibilityLabel="Fechar"
+            >
+              <X size={18} color={isDark ? '#d1d5db' : '#52525b'} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
           <View style={[styles.searchBox, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
             <Search size={18} color={C.icon} />
             <TextInput
@@ -105,19 +117,21 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    paddingTop: 24,
+    paddingTop: 18,
     paddingHorizontal: 22,
   },
-  title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.3, textAlign: 'center', marginBottom: 18 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  title: { flex: 1, fontSize: 22, fontWeight: '700', letterSpacing: -0.3 },
+  closeBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    height: 50,
-    marginBottom: 12,
+    height: 48,
+    marginBottom: 14,
   },
   searchInput: { flex: 1, paddingVertical: 0, fontSize: 16 },
 });

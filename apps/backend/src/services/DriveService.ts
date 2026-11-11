@@ -32,6 +32,13 @@ export const DRIVE_QUOTA_BYTES = parseInt(
 
 const NOT_TRASHED = { trashedAt: null } as const;
 
+/** Ícones que o dono pode escolher para a pasta (a mesma lista do front: components/drive/folderAppearance). */
+const DRIVE_FOLDER_ICON_KEYS = new Set([
+  'folder', 'folder-open', 'briefcase', 'building', 'hammer', 'wrench', 'hard-hat', 'file-text',
+  'clipboard-list', 'calculator', 'users', 'shield', 'star', 'heart', 'home', 'camera',
+  'image', 'book', 'truck', 'package', 'map-pin', 'landmark', 'wallet', 'archive',
+]);
+
 export interface DriveUploadResult {
   id: string;
   name: string;
@@ -418,6 +425,21 @@ export class DriveService {
     return prisma.driveFolder.update({ where: { id }, data: { parentId } });
   }
 
+  /** Ícone e cor da pasta (só o dono). Vazio (null) volta ao padrão. */
+  async updateFolderAppearance(
+    id: string,
+    userId: string,
+    appearance: { iconKey: string | null; iconColor: string | null },
+  ) {
+    const folder = await prisma.driveFolder.findFirst({ where: { id, ...NOT_TRASHED } });
+    if (!folder) throw new Error('Pasta não encontrada');
+    if (folder.ownerId !== userId) throw new Error('Apenas o dono da pasta pode personalizá-la');
+    const { iconKey, iconColor } = appearance;
+    if (iconKey !== null && !DRIVE_FOLDER_ICON_KEYS.has(iconKey)) throw new Error('Ícone inválido');
+    if (iconColor !== null && !/^#[0-9a-fA-F]{6}$/.test(iconColor)) throw new Error('Cor inválida');
+    return prisma.driveFolder.update({ where: { id }, data: { iconKey, iconColor } });
+  }
+
   async deleteFolder(id: string, userId: string): Promise<void> {
     const folder = await prisma.driveFolder.findFirst({ where: { id } });
     if (!folder) throw new Error('Pasta não encontrada');
@@ -742,7 +764,7 @@ export class DriveService {
 
     return prisma.driveFolderShare.findMany({
       where: { folderId },
-      include: { user: { select: { id: true, name: true, email: true, cpf: true } } },
+      include: { user: { select: { id: true, name: true, email: true, cpf: true, profilePhotoUrl: true } } },
       orderBy: { user: { name: 'asc' } },
     });
   }

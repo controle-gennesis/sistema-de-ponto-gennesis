@@ -1923,6 +1923,16 @@ async function ensureUserActivityTracking(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+/** Ícone e cor personalizados da pasta do Drive. */
+async function ensureDriveFolderAppearanceColumns(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "drive_folders" ADD COLUMN IF NOT EXISTS "iconKey" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "drive_folders" ADD COLUMN IF NOT EXISTS "iconColor" TEXT;
+  `);
+}
+
 async function ensureDriveStarTrashColumns(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "drive_folders" ADD COLUMN IF NOT EXISTS "starred" BOOLEAN NOT NULL DEFAULT false;
@@ -3485,6 +3495,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDpContabilidadeTables(prisma);
     await ensureControleGeralTetoOrcamentarioTable(prisma);
     await ensureDriveStarTrashColumns(prisma);
+    await ensureDriveFolderAppearanceColumns(prisma);
     await ensureUserActivityTracking(prisma);
     await ensureUserContractReunioesColumn(prisma);
     await ensureUserContractPleitosFaturamentoColumns(prisma);

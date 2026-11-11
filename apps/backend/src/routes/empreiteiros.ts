@@ -77,6 +77,9 @@ router.get('/', (req, res, next) => controller.getAll(req as any, res as any, ne
 router.get('/linkable-users', (req, res, next) =>
   controller.listLinkableUsers(req as any, res as any, next)
 );
+router.get('/daily-measurements/approved-count', (req, res, next) =>
+  controller.approvedDailyMeasurementsCount(req as any, res as any, next)
+);
 router.get('/daily-measurements/pending', (req, res, next) =>
   controller.listPendingDailyMeasurements(req as any, res as any, next)
 );
@@ -100,6 +103,9 @@ router.delete('/:id/contracts/:linkId/invoices/:invoiceId', (req, res, next) =>
 );
 router.post('/:id/contracts', (req, res, next) =>
   controller.addContract(req as any, res as any, next)
+);
+router.post('/:id/contracts/:linkId/generate-document', (req, res, next) =>
+  controller.generateContractDocument(req as any, res as any, next)
 );
 router.patch('/:id/contracts/:linkId', (req, res, next) =>
   controller.updateContract(req as any, res as any, next)

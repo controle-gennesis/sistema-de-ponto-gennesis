@@ -331,7 +331,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   const handleLogin = async () => {
     const trimmedIdentifier = identifier.trim();
     if (!trimmedIdentifier || !password) {
-      setError('Preencha e-mail/CPF e senha.');
+      setError('Preencha e-mail, CPF ou CNPJ e a senha.');
       return;
     }
 
@@ -440,7 +440,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
                     setIdentifier(normalizeLoginIdentifierInput(v));
                     if (error) setError('');
                   }}
-                  placeholder="E-mail ou CPF"
+                  placeholder="E-mail, CPF ou CNPJ"
                   keyboardType="default"
                   autoCapitalize="none"
                   autoCorrect={false}

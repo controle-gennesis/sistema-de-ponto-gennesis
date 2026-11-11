@@ -69,10 +69,12 @@ router.get('/folders', DriveController.listFolders);
 router.patch('/folders/:id', DriveController.renameFolder);
 router.patch('/folders/:id/star', DriveController.starFolder);
 router.patch('/folders/:id/move', DriveController.moveFolder);
+router.patch('/folders/:id/appearance', DriveController.updateFolderAppearance);
 router.post('/folders/:id/restore', DriveController.restoreFolder);
 router.delete('/folders/:id/permanent', DriveController.permanentDeleteFolder);
 router.delete('/folders/:id', DriveController.deleteFolder);
 // Compartilhamento (rotas mais específicas antes de :id/path)
+router.get('/share-candidates', DriveController.listShareCandidates);
 router.get('/folders/:id/shares', DriveController.listFolderShares);
 router.post('/folders/:id/shares', DriveController.addFolderShare);
 router.patch('/folders/:id/shares/:userId', DriveController.updateFolderShare);

@@ -2508,6 +2508,10 @@ model Empreiteiro {
   bank         String?
   agency       String?
   account      String?
+  /// corrente | poupança (usado no contrato gerado).
+  accountType  String?
+  /// Endereço completo (rua, nº, bairro, CEP) — usado no contrato gerado.
+  address      String?
   startDate    DateTime?
   endDate      DateTime?
   photoUrl     String?
@@ -2542,6 +2546,9 @@ model EmpreiteiroContract {
   description   String?
   /// Valor planejado do serviço.
   plannedValue  Decimal?  @db.Decimal(15, 2)
+  /// Peso (%) e acumulado (%) do serviço no quadro do contrato gerado.
+  weightPercent      Decimal? @db.Decimal(6, 2)
+  accumulatedPercent Decimal? @db.Decimal(6, 2)
   /// Local de execução (endereço / obra física).
   location      String?
   /// Ícone (nome do ícone lucide) e cor (#RRGGBB) escolhidos para identificar o serviço.
@@ -3303,6 +3310,10 @@ model DriveFolder {
   parentId  String?
   ownerId   String
   starred   Boolean   @default(false)
+  /// Ícone escolhido pelo dono (chave da lista fixa do front); vazio = ícone padrão de pasta.
+  iconKey   String?
+  /// Cor do ícone em #RRGGBB; vazio = vermelho padrão.
+  iconColor String?
   trashedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

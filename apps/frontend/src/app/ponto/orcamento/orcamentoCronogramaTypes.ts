@@ -10,6 +10,10 @@ export interface CronogramaItemData {
   quantidadeExecutada?: number;
   /** Quantidade usada em cada dia do prazo (`aaaa-mm-dd`). */
   quantidadesPorDia?: Record<string, number>;
+  /** Quantidade planejada para cada dia (`aaaa-mm-dd`), digitada na aba Planejado. */
+  quantidadesPlanejadasPorDia?: Record<string, number>;
+  /** Fórmula digitada na quantidade planejada do dia (`=2*7.5`). Depois de `||` vão as origens (`7.5@L,2@C`) usadas para colorir os números. */
+  formulasPlanejadasPorDia?: Record<string, string>;
   /** Fórmula digitada na quantidade do dia (`=10+5`); o valor calculado fica em `quantidadesPorDia`. */
   formulasQuantidadePorDia?: Record<string, string>;
   observacao?: string;
@@ -298,8 +302,14 @@ function normalizarMapaCronograma(map: Record<string, unknown>): Record<string, 
       quantidadesPorDia: normalizarQuantidadesPorDia(
         (v as { quantidadesPorDia?: unknown }).quantidadesPorDia
       ),
+      quantidadesPlanejadasPorDia: normalizarQuantidadesPorDia(
+        (v as { quantidadesPlanejadasPorDia?: unknown }).quantidadesPlanejadasPorDia
+      ),
       formulasQuantidadePorDia: normalizarFormulasQuantidadePorDia(
         (v as { formulasQuantidadePorDia?: unknown }).formulasQuantidadePorDia
+      ),
+      formulasPlanejadasPorDia: normalizarFormulasQuantidadePorDia(
+        (v as { formulasPlanejadasPorDia?: unknown }).formulasPlanejadasPorDia
       ),
       observacao: typeof d.observacao === 'string' ? d.observacao : ''
     };
@@ -1079,7 +1089,9 @@ export function resolverDadosCronogramaComposicao(
     percentualExecutado: item.percentualExecutado ?? bloco.percentualExecutado ?? undefined,
     quantidadeExecutada: item.quantidadeExecutada,
     quantidadesPorDia: item.quantidadesPorDia,
+    quantidadesPlanejadasPorDia: item.quantidadesPlanejadasPorDia,
     formulasQuantidadePorDia: item.formulasQuantidadePorDia,
+    formulasPlanejadasPorDia: item.formulasPlanejadasPorDia,
     observacao: item.observacao || bloco.observacao || ''
   };
 }

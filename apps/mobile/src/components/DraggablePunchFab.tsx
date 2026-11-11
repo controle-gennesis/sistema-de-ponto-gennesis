@@ -51,7 +51,7 @@ function FabPulse({ color }: { color: string }) {
         top: 0,
         right: 0,
         bottom: 0,
-        borderRadius: 20,
+        borderRadius: SIZE / 2,
         borderWidth: 2,
         borderColor: color,
         opacity: pulse.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.5, 0] }),
@@ -427,7 +427,7 @@ export default function DraggablePunchFab() {
           },
         ]}
       >
-        <FabPulse color={colors.primary} />
+        {null}
         {/* anel do toque: maior e mais forte que o pulso de espera */}
         <Animated.View
           pointerEvents="none"
@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
   face: {
     width: SIZE,
     height: SIZE,
-    borderRadius: 20,
+    borderRadius: SIZE / 2,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
     top: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 20,
+    borderRadius: SIZE / 2,
     borderWidth: 3,
   },
   inner: {

@@ -143,6 +143,8 @@ export type BreadcrumbItem = {
   badge?: string;
   /** Menu do badge (trocar entre revisões). */
   badgeMenu?: BreadcrumbBadgeMenuItem[];
+  /** Botão de ação ao lado do crumb (ex.: gerenciar acesso à pasta no Drive). */
+  action?: { label: string; icon: 'share'; onClick: () => void };
 };
 
 /** Resolve o nome da página a partir da rota (ex.: `/ponto/kanban` → `Tasks`). */
@@ -277,6 +279,7 @@ export function appendBreadcrumbEntity(
       label: item.label?.trim() ?? '',
       href: item.href,
       ...(item.onClick ? { onClick: item.onClick } : {}),
+      ...(item.action ? { action: item.action } : {}),
       ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
       ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
         ? { badgeMenu: item.badgeMenu }

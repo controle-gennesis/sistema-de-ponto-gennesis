@@ -33,6 +33,7 @@ import {
 } from 'lucide-react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useTheme } from '../context/ThemeContext';
+import SheetModal, { SheetPrimaryButton } from '../components/SheetModal';
 import { useAuth } from '../context/AuthContext';
 import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import { onFabBarLongPress, onFabBarPress } from '../navigation/fabBarEvents';
@@ -454,88 +455,40 @@ export default function GestaoOsListScreen() {
         }}
       />
 
-      <Modal
+      <SheetModal
         visible={filterOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFilterOpen(false)}
+        onClose={() => setFilterOpen(false)}
+        title="Filtro de status"
+        subtitle="Escolha qual status deseja ver"
+        icon={Filter}
       >
-        <View style={styles.filterOverlay}>
-          <View style={styles.filterSheet}>
-            <Text style={styles.filterSheetTitle}>Filtro de status</Text>
-            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
-              {['all', ...Object.keys(STATUS_LABEL)].map((key) => (
-                <TouchableOpacity
-                  key={key}
-                  style={styles.filterOptionRow}
-                  onPress={() => {
-                    setStatusFilter(key);
-                    setFilterOpen(false);
-                  }}
-                >
-                  <Text style={styles.filterOptionText}>
-                    {key === 'all' ? 'Todos' : STATUS_LABEL[key]}
-                  </Text>
-                  {statusFilter === key ? (
-                    <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} />
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity
-              onPress={() => setFilterOpen(false)}
-              style={{ marginTop: 8, paddingVertical: 8 }}
-            >
-              <Text style={{ textAlign: 'center', color: colors.textSecondary, fontWeight: '600' }}>
-                Fechar
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={Boolean(followTarget)}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setFollowTarget(null)}
-      >
-        <View style={styles.detailOverlay}>
+        {['all', ...Object.keys(STATUS_LABEL)].map((key) => (
           <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setFollowTarget(null)}
-          />
-          <View style={styles.detailSheet}>
-            <View style={styles.detailSheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.detailSheetTitle}>
-                  {followTarget?.osNumber != null
-                    ? `OS #${followTarget.osNumber}`
-                    : `Chamado #${followTarget?.displayNumber ?? ''}`}
-                </Text>
-                <Text style={styles.detailSheetSubtitle}>
-                  {followTarget
-                    ? STATUS_LABEL[followTarget.status] || followTarget.status
-                    : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setFollowTarget(null)}
-                style={styles.formCloseBtn}
-                hitSlop={6}
-                accessibilityLabel="Fechar"
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
+            key={key}
+            style={styles.filterOptionRow}
+            onPress={() => {
+              setStatusFilter(key);
+              setFilterOpen(false);
+            }}
+          >
+            <Text style={styles.filterOptionText}>{key === 'all' ? 'Todos' : STATUS_LABEL[key]}</Text>
+            {statusFilter === key ? <CheckCircle size={16} color={colors.primary} strokeWidth={2.4} /> : null}
           </TouchableOpacity>
-        </View>
+        ))}
+      </SheetModal>
 
-            {followTarget ? (
-              <ScrollView
-                style={{ maxHeight: 420 }}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
+      <SheetModal
+        visible={Boolean(followTarget)}
+        onClose={() => setFollowTarget(null)}
+        title={
+          followTarget?.osNumber != null
+            ? `OS #${followTarget.osNumber}`
+            : `Chamado #${followTarget?.displayNumber ?? ''}`
+        }
+        subtitle={followTarget ? STATUS_LABEL[followTarget.status] || followTarget.status : ''}
+        icon={Wrench}
+      >
+        {followTarget ? (
                 <View style={styles.detailGrid}>
                   <View style={styles.detailField}>
                     <Text style={styles.detailLabel}>Status</Text>
@@ -587,60 +540,52 @@ export default function GestaoOsListScreen() {
                     </View>
                   ) : null}
                 </View>
-              </ScrollView>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
+        ) : null}
+      </SheetModal>
 
-      <Modal
+      <SheetModal
         visible={actionOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setActionOpen(false)}
+        onClose={() => setActionOpen(false)}
+        title="O que deseja fazer?"
+        subtitle="Escolha como abrir o chamado"
+        icon={Wrench}
       >
-        <Pressable style={styles.tokenBackdrop} onPress={() => setActionOpen(false)}>
-          <Pressable style={styles.tokenSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.tokenTitle}>O que deseja fazer?</Text>
-            <Text style={styles.actionHint}>Escolha como abrir o chamado</Text>
-            <TouchableOpacity
-              style={styles.actionOption}
-              onPress={() => {
-                setActionOpen(false);
-                void openScanner();
-              }}
-              activeOpacity={0.85}
-            >
-              <View style={styles.actionIconWrap}>
-                <QrCode size={20} color={colors.primary} strokeWidth={2.2} />
-              </View>
-              <View style={styles.actionCopy}>
-                <Text style={styles.actionOptionTitle}>Escanear QR do ativo</Text>
-                <Text style={styles.actionOptionSub}>Ler o código colado no equipamento</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionOption}
-              onPress={() => {
-                setActionOpen(false);
-                navigation.navigate('GestaoOsUnplanned');
-              }}
-              activeOpacity={0.85}
-            >
-              <View style={styles.actionIconWrap}>
-                <AlertTriangle size={20} color={colors.primary} strokeWidth={2.2} />
-              </View>
-              <View style={styles.actionCopy}>
-                <Text style={styles.actionOptionTitle}>Ocorrência não prevista</Text>
-                <Text style={styles.actionOptionSub}>Registrar sem o QR do ativo</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionCancel} onPress={() => setActionOpen(false)}>
-              <Text style={styles.actionCancelText}>Cancelar</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <TouchableOpacity
+          style={[styles.actionOption, { marginBottom: 10 }]}
+          onPress={() => {
+            setActionOpen(false);
+            void openScanner();
+          }}
+          activeOpacity={0.85}
+        >
+          <View style={styles.actionIconWrap}>
+            <QrCode size={20} color={colors.primary} strokeWidth={2.2} />
+          </View>
+          <View style={styles.actionCopy}>
+            <Text style={styles.actionOptionTitle}>Escanear QR do ativo</Text>
+            <Text style={styles.actionOptionSub}>Ler o código colado no equipamento</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionOption}
+          onPress={() => {
+            setActionOpen(false);
+            navigation.navigate('GestaoOsUnplanned');
+          }}
+          activeOpacity={0.85}
+        >
+          <View style={styles.actionIconWrap}>
+            <AlertTriangle size={20} color={colors.primary} strokeWidth={2.2} />
+          </View>
+          <View style={styles.actionCopy}>
+            <Text style={styles.actionOptionTitle}>Ocorrência não prevista</Text>
+            <Text style={styles.actionOptionSub}>Registrar sem o QR do ativo</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionCancel} onPress={() => setActionOpen(false)}>
+          <Text style={styles.actionCancelText}>Cancelar</Text>
+        </TouchableOpacity>
+      </SheetModal>
 
       <Modal
         visible={scannerOpen}
@@ -677,32 +622,28 @@ export default function GestaoOsListScreen() {
           </View>
         </Modal>
 
-      <Modal
+      <SheetModal
         visible={tokenOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setTokenOpen(false)}
+        onClose={() => setTokenOpen(false)}
+        title="Colar token do QR"
+        subtitle="Cole o token ou o link lido do ativo"
+        icon={QrCode}
       >
-        <Pressable style={styles.tokenBackdrop} onPress={() => setTokenOpen(false)}>
-          <Pressable style={styles.tokenSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.tokenTitle}>Colar token do QR</Text>
-            <TextInput
-              value={qrToken}
-              onChangeText={setQrToken}
-              placeholder="Token ou link do QR"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.tokenInput}
-              autoFocus
-            />
-            <TouchableOpacity style={styles.tokenPrimary} onPress={resolveToken} activeOpacity={0.85}>
-              <Text style={styles.tokenPrimaryText}>Abrir chamado</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setTokenOpen(false)} style={styles.tokenCancel}>
-              <Text style={styles.tokenCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <TextInput
+          value={qrToken}
+          onChangeText={setQrToken}
+          placeholder="Token ou link do QR"
+          placeholderTextColor={colors.textSecondary}
+          style={styles.tokenInput}
+          autoFocus
+        />
+        <View style={{ marginTop: 14 }}>
+          <SheetPrimaryButton label="Abrir chamado" onPress={resolveToken} />
+        </View>
+        <TouchableOpacity onPress={() => setTokenOpen(false)} style={styles.tokenCancel}>
+          <Text style={styles.tokenCancelText}>Cancelar</Text>
+        </TouchableOpacity>
+      </SheetModal>
     </View>
   );
 }

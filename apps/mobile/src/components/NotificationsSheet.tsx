@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Bell, CalendarClock, Fuel, FileText, Wrench, Trash2 } from 'lucide-react-native';
+import { X, Bell, CalendarClock, Fuel, FileText, Wrench, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import {
@@ -129,19 +129,26 @@ export default function NotificationsSheet() {
             style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, SHEET_BOTTOM_PAD) }]}
           >
             <View style={styles.hero}>
-              <View style={styles.heroIcon}>
-                <Bell size={26} color={C.accent} strokeWidth={2.1} />
+              <View style={styles.heroText}>
+                <Text style={styles.title}>Notificações</Text>
+                {notifications.length === 0 ? null : (
+                  <Text style={styles.subtitle}>
+                    {unread > 0
+                      ? unread === 1
+                        ? '1 notificação nova'
+                        : `${unread} notificações novas`
+                      : 'Acompanhe as atualizações das suas solicitações.'}
+                  </Text>
+                )}
               </View>
-              <Text style={styles.title}>Notificações</Text>
-              <Text style={styles.subtitle}>
-                {notifications.length === 0
-                  ? 'Tudo em dia! Quando o status de uma solicitação mudar, aparece aqui.'
-                  : unread > 0
-                    ? unread === 1
-                      ? '1 notificação nova'
-                      : `${unread} notificações novas`
-                    : 'Acompanhe as atualizações das suas solicitações.'}
-              </Text>
+              <TouchableOpacity
+                onPress={requestClose}
+                style={[styles.closeBtn, { backgroundColor: C.closeBg }]}
+                hitSlop={8}
+                accessibilityLabel="Fechar"
+              >
+                <X size={18} color={C.iconStrong} strokeWidth={2.2} />
+              </TouchableOpacity>
             </View>
 
           <FlatList
@@ -152,6 +159,17 @@ export default function NotificationsSheet() {
               notifications.length === 0 ? styles.emptyWrap : styles.listContent
             }
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <View style={[styles.emptyIcon, { backgroundColor: C.accentSoft }]}>
+                  <Bell size={26} color={C.accent} strokeWidth={2} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: C.title }]}>Tudo em dia!</Text>
+                <Text style={[styles.emptyText, { color: C.body }]}>
+                  Quando o status de uma solicitação mudar, aparece aqui.
+                </Text>
+              </View>
+            }
             renderItem={({ item }) => {
               const isNew = !item.read;
               const subtitle = activitySubtitle(item);
@@ -245,7 +263,9 @@ const getStyles = (C: {
       paddingHorizontal: 22,
       maxHeight: Dimensions.get('window').height * 0.82,
     },
-    hero: { alignItems: 'center', marginBottom: 18 },
+    hero: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 18 },
+    heroText: { flex: 1 },
+    closeBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
     heroIcon: {
       width: 58,
       height: 58,
@@ -261,17 +281,17 @@ const getStyles = (C: {
       fontSize: 14,
       lineHeight: 20,
       color: C.body,
-      textAlign: 'center',
-      paddingHorizontal: 6,
+      paddingRight: 6,
     },
     list: { flexGrow: 0 },
     listContent: { gap: 10, paddingBottom: 6 },
     emptyWrap: { paddingBottom: 4 },
+    emptyState: { alignItems: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 20 },
     empty: { alignItems: 'center', paddingHorizontal: 28 },
     emptyIcon: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
+      width: 56,
+      height: 56,
+      borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 12,

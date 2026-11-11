@@ -19,6 +19,7 @@ import {
   Settings,
   Star,
   Sun,
+  UserPlus,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -330,6 +331,17 @@ export function TopNavbar({
                               />
                             </span>
                           ) : null}
+                          {crumb.action ? (
+                            <button
+                              type="button"
+                              onClick={crumb.action.onClick}
+                              title={crumb.action.label}
+                              aria-label={crumb.action.label}
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                            >
+                              <UserPlus className="h-4 w-4" />
+                            </button>
+                          ) : null}
                         </span>
                       ) : crumb.href ? (
                         <Link
@@ -366,6 +378,8 @@ export function TopNavbar({
 
         {/* Busca + ações + perfil */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          {/* Espaço para a página colocar um item no topo (ex.: "Tudo salvo" do orçamento); some quando vazio. */}
+          <div id="app-topnav-extra" className="flex items-center empty:hidden" />
           {isLinkedEmpreiteiro ? null : <NavSearch inputRef={searchInputRef} />}
 
           <NotificationsDropdown chatUnreadCount={chatUnreadCount} />

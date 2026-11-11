@@ -744,26 +744,6 @@ export function EmpreiteiroDailyMeasurements({
           ) : null}
         </div>
       ) : null}
-      <span className="group/info relative inline-flex">
-        <button
-          type="button"
-          aria-label="Pagamento condicionado à entrega"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-        >
-          <Info className="h-4 w-4" aria-hidden />
-        </button>
-        <span
-          role="tooltip"
-          className="pointer-events-none invisible absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-left opacity-0 shadow-xl transition-opacity duration-150 group-hover/info:visible group-hover/info:opacity-100 group-focus-within/info:visible group-focus-within/info:opacity-100 dark:border-gray-600 dark:bg-gray-800"
-        >
-          <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">
-            Pagamento condicionado à entrega
-          </span>
-          <span className="mt-1 block text-xs leading-relaxed text-gray-600 dark:text-gray-400">
-            A entrega só é computada após a baixa realizada pelo responsável direto.
-          </span>
-        </span>
-      </span>
       {canAddDay ? (
         <button
           type="button"
@@ -1059,6 +1039,19 @@ export function EmpreiteiroDailyMeasurements({
           </div>
         </div>
       </Modal>
+
+      <div
+        role="note"
+        className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-100"
+      >
+        <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden />
+        <div>
+          <p className="text-sm font-semibold">Pagamento condicionado à entrega</p>
+          <p className="mt-0.5 text-sm text-amber-800 dark:text-amber-200">
+            A entrega só é computada após a baixa realizada pelo responsável direto.
+          </p>
+        </div>
+      </div>
 
       {isLoading ? (
         <CadastroListLoading message="Carregando medições..." />

@@ -17,7 +17,7 @@ export default function EsqueciSenhaPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim()) {
-      setError('Informe o e-mail ou CPF cadastrado.');
+      setError('Informe o e-mail, CPF ou CNPJ cadastrado.');
       return;
     }
     setLoading(true);
@@ -83,7 +83,7 @@ export default function EsqueciSenhaPage() {
             }}
             className="text-sm font-medium text-red-600 transition-colors hover:text-red-700 dark:text-red-400 dark:hover:text-red-500"
           >
-            Usar outro e-mail ou CPF
+            Usar outro e-mail, CPF ou CNPJ
           </button>
         </div>
       </AuthPageShell>
@@ -93,7 +93,7 @@ export default function EsqueciSenhaPage() {
   return (
     <AuthPageShell
       title="Recuperar senha"
-      subtitle="Informe seu e-mail ou CPF e enviaremos um link para criar uma nova senha"
+      subtitle="Informe seu e-mail, CPF ou CNPJ e enviaremos um link para criar uma nova senha"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="relative">
@@ -108,7 +108,7 @@ export default function EsqueciSenhaPage() {
             }}
             required
             autoComplete="username"
-            placeholder="E-mail ou CPF"
+            placeholder="E-mail, CPF ou CNPJ"
             className={`${AUTH_INPUT_CLS} pl-12 pr-4`}
           />
         </div>
