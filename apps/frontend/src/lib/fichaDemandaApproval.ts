@@ -213,6 +213,10 @@ export interface FichaDemandaApprovalRecord {
   centroCustoNome?: string | null;
   /** OS e nº da pasta da importação do orçamento de origem ("OS - Nº123"). */
   osNumeroPasta?: string | null;
+  /** OS temporária no orçamento de origem (código genérico): a FD nunca se junta a outra OS. */
+  osTemporaria?: boolean;
+  /** Chave do grupo de OS vinda do servidor (definitiva = código + pasta; temporária = o próprio orçamento). */
+  osGrupoChave?: string | null;
   /** Soma das OCs pagas (validadas pelo compras no G4), cada OC uma vez, pelo total da OC. */
   totalPagoOcs?: number;
   /** Empreitas cotadas: gasto com empreita (fornecedores escolhidos na aba Cotação Empreita do orçamento). */

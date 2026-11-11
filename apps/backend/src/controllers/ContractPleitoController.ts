@@ -7,13 +7,75 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { parseDateInput } from '../utils/dateInput';
 import { assertContractModulePermission, assertLiberadoContractAccess } from '../lib/contractAccess';
 import { resolvePleitoCreateCore } from '../utils/pleitoCreateHelpers';
+import { OrcamentoService } from '../services/OrcamentoService';
 const toDec = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return isNaN(n) ? null : n;
 };
 
-type BudgetAdditive = { orcamentoId: string; descricao: string; valor: number };
+/**
+ * Parcela somada ao orçamento base da OS. `tipo: 'orcamento'` = outro orçamento (não aditivo) com a mesma
+ * OS definitiva do contrato; `orcamentoId` então é a família do orçamento (as revisões substituem o valor).
+ */
+type BudgetAdditive = { orcamentoId: string; descricao: string; valor: number; tipo?: 'orcamento' };
+
+const flagBody = (v: unknown): boolean => v === true || v === 'true' || v === 1;
+
+const orcamentoServicePleito = new OrcamentoService();
+
+/** Ids da família (revisões) do orçamento, lidos do índice do centro de custo; inclui os enviados pelo cliente. */
+async function idsFamiliaOrcamento(
+  costCenterId: string,
+  orcamentoId: string,
+  enviados: unknown
+): Promise<{ ids: Set<string>; familiaId: string; resolvida: boolean }> {
+  const ids = new Set<string>(
+    [orcamentoId, ...(Array.isArray(enviados) ? enviados : [])].map((x) => String(x ?? '').trim()).filter(Boolean)
+  );
+  let familiaId = orcamentoId;
+  let resolvida = false;
+  if (!orcamentoId || !costCenterId) return { ids, familiaId, resolvida };
+  try {
+    const index = await orcamentoServicePleito.getIndex(costCenterId);
+    const atual = index.orcamentos.find((o) => o.id === orcamentoId);
+    if (atual) {
+      familiaId = String(atual.familiaId || atual.id);
+      ids.add(familiaId);
+      for (const o of index.orcamentos) {
+        if (String(o.familiaId || o.id) === familiaId) ids.add(o.id);
+      }
+      resolvida = true;
+    }
+  } catch {
+    /* índice indisponível: fica só com os ids recebidos */
+  }
+  return { ids, familiaId, resolvida };
+}
+
+type OsTemporariaAnterior = {
+  codigo: string;
+  divSe: string;
+  folderNumber: string;
+  pleitoId: string;
+  orcamentoId: string | null;
+  em: string;
+};
+
+function parseOsTemporariasAnteriores(raw: unknown): OsTemporariaAnterior[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map((r) => ({
+      codigo: String(r.codigo ?? '').trim(),
+      divSe: String(r.divSe ?? '').trim(),
+      folderNumber: String(r.folderNumber ?? '').trim(),
+      pleitoId: String(r.pleitoId ?? '').trim(),
+      orcamentoId: r.orcamentoId ? String(r.orcamentoId) : null,
+      em: String(r.em ?? ''),
+    }))
+    .filter((r) => r.codigo || r.pleitoId);
+}
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -29,7 +91,12 @@ function parseBudgetAdditives(raw: unknown): BudgetAdditive[] {
     const descricao = String(row.descricao ?? '').trim() || 'Aditivo';
     const valor = Number(row.valor);
     if (!orcamentoId || !Number.isFinite(valor)) continue;
-    out.push({ orcamentoId, descricao, valor: roundMoney(valor) });
+    out.push({
+      orcamentoId,
+      descricao,
+      valor: roundMoney(valor),
+      ...(row.tipo === 'orcamento' ? { tipo: 'orcamento' as const } : {}),
+    });
   }
   return out;
 }
@@ -278,22 +345,107 @@ export class ContractPleitoController {
         throw createError('Confirme a soma do valor aditivo ao total da OS.', 400);
       }
 
+      // OS temporária: código genérico (ex.: XX/2026) até a OS verdadeira existir — nunca se junta a outra OS.
+      // Aditivo entra numa OS existente, então é sempre definitiva.
+      const osTemporaria = flagBody(b.osTemporaria) && !isAditivo && mode !== 'aditivo' && mode !== 'sync-aditivo';
+      const linkedPleitoId = String(b.linkedPleitoId ?? '').trim();
+      const orcamentoIdBody = String(b.orcamentoId ?? '').trim();
+      const familia = await idsFamiliaOrcamento(contract.costCenterId, orcamentoIdBody, b.orcamentoFamiliaIds);
+
       const norm = (s: string) => s.trim().toLowerCase();
+      // Só OSs deste contrato: o mesmo código em outro contrato é outra OS.
       const existingList = await prisma.pleito.findMany({
         where: { updatedContractId: contractId },
         orderBy: { createdAt: 'desc' },
       });
-      const existing = existingList.find(
-        (row) =>
-          norm(row.divSe || '') === norm(divSe) &&
-          norm(row.folderNumber || '') === norm(folderNumber)
-      );
+      const existing = osTemporaria
+        ? // A OS temporária do próprio orçamento (criada na importação dele).
+          existingList.find(
+            (row) =>
+              row.osTemporaria &&
+              (row.id === linkedPleitoId ||
+                (!!row.linkedOrcamentoId && familia.ids.has(row.linkedOrcamentoId.trim())))
+          )
+        : // A OS definitiva do contrato com este código e esta pasta (temporárias com o mesmo código ficam de fora).
+          existingList.find(
+            (row) =>
+              !row.osTemporaria &&
+              norm(row.divSe || '') === norm(divSe) &&
+              norm(row.folderNumber || '') === norm(folderNumber)
+          );
 
-      if (existing && mode === 'create' && !isAditivo) {
-        throw createError(
-          'Esta OS e este número da pasta já existem neste contrato. Altere a OS ou o número da pasta.',
-          409
-        );
+      // Virando definitiva: a OS temporária do próprio orçamento (fica registrada na definitiva).
+      const tempAnterior =
+        !osTemporaria && mode === 'create' && !isAditivo
+          ? existingList.find(
+              (row) =>
+                row.osTemporaria &&
+                (row.id === linkedPleitoId ||
+                  (!!row.linkedOrcamentoId && familia.ids.has(row.linkedOrcamentoId.trim())))
+            )
+          : undefined;
+      const registrarTempAnterior = (atual: unknown): OsTemporariaAnterior[] | null => {
+        if (!tempAnterior) return null;
+        const lista = parseOsTemporariasAnteriores(atual);
+        if (lista.some((r) => r.pleitoId === tempAnterior.id)) return null;
+        const div = String(tempAnterior.divSe || '').trim();
+        const pasta = String(tempAnterior.folderNumber || '').trim();
+        lista.push({
+          codigo: div && pasta ? `${div} - ${pasta}` : div || pasta,
+          divSe: div,
+          folderNumber: pasta,
+          pleitoId: tempAnterior.id,
+          orcamentoId: orcamentoIdBody || null,
+          em: new Date().toISOString(),
+        });
+        return lista;
+      };
+
+      // A OS temporária do orçamento já existe (voltou para temporária na aba Dados): reaproveita a mesma.
+      if (existing && mode === 'create' && osTemporaria) {
+        return res.status(200).json({
+          success: true,
+          data: { ...serializePleito(existing), action: 'linked' as const },
+          message: 'OS temporária do orçamento mantida.',
+        });
+      }
+
+      // OS definitiva que já existe no contrato: o orçamento passa a fazer parte dela (soma ao finalizar).
+      if (existing && mode === 'create' && !isAditivo && !osTemporaria) {
+        const additives = parseBudgetAdditives(existing.budgetAdditives);
+        const doOrcamento = (id: string | null | undefined) => !!id && familia.ids.has(id.trim());
+        if (!existing.linkedOrcamentoId) {
+          if (orcamentoIdBody) {
+            await prisma.pleito.update({ where: { id: existing.id }, data: { linkedOrcamentoId: orcamentoIdBody } });
+          }
+        } else if (
+          !doOrcamento(existing.linkedOrcamentoId) &&
+          !additives.some((a) => a.tipo === 'orcamento' && doOrcamento(a.orcamentoId))
+        ) {
+          additives.push({
+            orcamentoId: familia.familiaId,
+            descricao: serviceDescription,
+            valor: 0,
+            tipo: 'orcamento',
+          });
+          await prisma.pleito.update({
+            where: { id: existing.id },
+            data: { budgetAdditives: additives as unknown as Prisma.InputJsonValue },
+          });
+        }
+        const anteriores = registrarTempAnterior(existing.osTemporariasAnteriores);
+        if (anteriores) {
+          await prisma.pleito.update({
+            where: { id: existing.id },
+            data: { osTemporariasAnteriores: anteriores as unknown as Prisma.InputJsonValue },
+          });
+        }
+        const row = await prisma.pleito.findUnique({ where: { id: existing.id } });
+        return res.status(200).json({
+          success: true,
+          data: { ...serializePleito(row ?? existing), action: 'linked' as const },
+          message: 'Orçamento vinculado à OS existente do contrato. O valor soma na OS ao finalizar o orçamento.',
+        });
       }
 
       if (!existing && (isAditivo || mode === 'aditivo' || mode === 'sync-aditivo' || mode === 'sync-base' || mode === 'revisao')) {
@@ -342,6 +494,41 @@ export class ContractPleitoController {
       if (existing && (mode === 'sync-base' || mode === 'revisao')) {
         const orcIdLink = String(b.orcamentoId ?? '').trim() || null;
         const additives = parseBudgetAdditives(existing.budgetAdditives);
+        const doOrcamento = (id: string | null | undefined) => !!id && familia.ids.has(id.trim());
+        const idxParcela = additives.findIndex((a) => a.tipo === 'orcamento' && doOrcamento(a.orcamentoId));
+        // Sem conseguir ler as revisões do orçamento, não arrisca somar duas vezes: grava como antes (base).
+        const ehBase =
+          osTemporaria ||
+          (idxParcela < 0 &&
+            (!familia.resolvida || !existing.linkedOrcamentoId || doOrcamento(existing.linkedOrcamentoId)));
+        if (!ehBase) {
+          // Outro orçamento da mesma OS definitiva: grava o valor na parcela dele (as revisões substituem).
+          const entry: BudgetAdditive = {
+            orcamentoId: idxParcela >= 0 ? additives[idxParcela].orcamentoId : familia.familiaId,
+            descricao: serviceDescription,
+            valor,
+            tipo: 'orcamento',
+          };
+          if (idxParcela >= 0) additives[idxParcela] = entry;
+          else additives.push(entry);
+          const baseAtual = toDec(existing.budgetAmount1) ?? 0;
+          const totalParcelas = roundMoney(baseAtual + sumAdditives(additives));
+          const row = await prisma.pleito.update({
+            where: { id: existing.id },
+            data: { budgetAdditives: additives as unknown as Prisma.InputJsonValue, budget: totalParcelas.toFixed(2) },
+          });
+          if (existing.serviceOrderId) {
+            await prisma.service_orders.update({
+              where: { id: existing.serviceOrderId },
+              data: { valor: totalParcelas },
+            });
+          }
+          return res.status(200).json({
+            success: true,
+            data: { ...serializePleito(row), action: 'revised' as const },
+            message: 'Valor do orçamento somado na OS.',
+          });
+        }
         const base = valor;
         const total = roundMoney(base + sumAdditives(additives));
         const row = await persistTotal(existing.id, existing.serviceOrderId, total, {
@@ -418,6 +605,11 @@ export class ContractPleitoController {
         budget: '0.00',
         budgetAmount1: 0,
         budgetAdditives: [],
+        osTemporaria,
+        ...(() => {
+          const anteriores = registrarTempAnterior(null);
+          return anteriores ? { osTemporariasAnteriores: anteriores as unknown as Prisma.InputJsonValue } : {};
+        })(),
         updatedContract: { connect: { id: contractId } },
         ...(orcIdForLink ? { linkedOrcamentoId: orcIdForLink } : {}),
       };

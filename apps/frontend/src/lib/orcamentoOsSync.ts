@@ -18,6 +18,10 @@ export type OrcamentoOsSyncInput = {
   endDate?: string | null;
   orcamentoId?: string | null;
   aditivoDescricao?: string | null;
+  /** OS temporária (código genérico até a OS verdadeira existir): fica sempre separada das outras OSs. */
+  osTemporaria?: boolean;
+  /** OS criada para este orçamento (meta.linkedPleitoId): acha a OS temporária dele. */
+  linkedPleitoId?: string | null;
 };
 
 export type OrcamentoOsSyncResult = {
@@ -29,7 +33,7 @@ export type OrcamentoOsSyncResult = {
   budgetAmount2: number | null;
   budgetAmount3: number | null;
   budgetAmount4: number | null;
-  action: 'created' | 'revised' | 'additive';
+  action: 'created' | 'revised' | 'additive' | 'linked';
 };
 
 /** Mantém compatibilidade com o campo antigo `osNumeroPasta`. */
@@ -79,6 +83,8 @@ export async function syncOrcamentoOsToContract(
     endDate: input.endDate || null,
     orcamentoId: input.orcamentoId || null,
     aditivoDescricao: input.aditivoDescricao || null,
+    osTemporaria: input.osTemporaria === true,
+    linkedPleitoId: input.linkedPleitoId || null,
   });
   return res.data?.data as OrcamentoOsSyncResult;
 }

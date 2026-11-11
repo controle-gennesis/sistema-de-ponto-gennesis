@@ -209,6 +209,19 @@ export function FichaDemandaDetailModal({
     setOcId(record?.ocId || '');
   }, [record?.id, record?.scNumero, record?.scId, record?.ocId]);
 
+  /** Cancelar FD: só administrador ou gestor do contrato (coluna «Gestor» da aba Contratos). */
+  const podeCancelarQuery = useQuery({
+    queryKey: ['fd-pode-cancelar', record?.id],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${record!.id}/pode-cancelar`);
+      return res.data?.data?.podeCancelar === true;
+    },
+    enabled: isOpen && !!record?.id && allowAddOrdemCompra && !isAdministrator,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const podeCancelarFd = isAdministrator || podeCancelarQuery.data === true;
+
   /** Orçamento que gerou a FD (nome vem do índice de orçamentos do contrato). */
   const orcamentoQuery = useQuery({
     queryKey: ['fd-orcamento-origem', record?.id],
@@ -217,6 +230,7 @@ export function FichaDemandaDetailModal({
       return (res.data?.data ?? null) as {
         nome: string | null;
         osNumeroPasta?: string | null;
+        osTemporaria?: boolean;
         orcamentoId: string;
         centroCustoId: string;
       } | null;
@@ -506,14 +520,15 @@ export function FichaDemandaDetailModal({
     <div className="w-full">{footer}</div>
   ) : (
     <div className="flex w-full items-center justify-end gap-2">
-      {allowAddOrdemCompra && canCancel ? (
+      {allowAddOrdemCompra && canCancel && podeCancelarFd ? (
         <Button
           type="button"
-          variant="outline"
+          variant="error"
+          className="mr-auto"
           onClick={() => setCancelOpen(true)}
           disabled={refsMutation.isPending || statusMutation.isPending}
         >
-          Cancelar
+          Cancelar FD
         </Button>
       ) : (
         <Button type="button" variant="outline" onClick={onClose}>
@@ -653,7 +668,14 @@ export function FichaDemandaDetailModal({
           )}
           {orcamentoDaFd !== undefined && (
             <div className="sm:col-span-2">
-              <Field label="OS / Nº da pasta">{orcamentoDaFd?.osNumeroPasta || '—'}</Field>
+              <Field label="OS / Nº da pasta">
+                {orcamentoDaFd?.osNumeroPasta || '—'}
+                {orcamentoDaFd?.osNumeroPasta && orcamentoDaFd.osTemporaria ? (
+                  <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                    temporária
+                  </span>
+                ) : null}
+              </Field>
             </div>
           )}
           {orcamentoDaFd !== undefined && (

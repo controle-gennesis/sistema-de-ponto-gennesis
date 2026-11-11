@@ -63,17 +63,24 @@ function normCodigoOs(v: unknown): string {
 }
 
 /**
- * OS (ordem de serviço) do orçamento que gerou a FD:
- * 1) OS do contrato vinculada ao orçamento (ou a outra revisão dele, ou com ele como aditivo);
- * 2) senão, OS do contrato com o mesmo código (Div SE) e nº da pasta informados no orçamento.
+ * OS (ordem de serviço) do orçamento que gerou a FD. Só OSs do contrato da FD entram na busca pelo código:
+ * o mesmo código em outro contrato é outra OS.
+ * - OS temporária: a OS temporária criada para o próprio orçamento (vínculo com ele ou com outra revisão).
+ * - OS definitiva: a OS definitiva do contrato com o mesmo código (Div SE) e nº da pasta; senão, a OS
+ *   vinculada ao orçamento (ou a outra revisão dele, ou com ele como aditivo/parcela).
  * Sem correspondência → undefined (a RM sai sem OS em vez de receber a OS errada).
  */
-async function osDoOrcamentoDaFd(anexos: unknown, costCenterId: string | null | undefined): Promise<string | undefined> {
+async function osDoOrcamentoDaFd(
+  anexos: unknown,
+  costCenterId: string | null | undefined,
+  contratoId: string | null | undefined
+): Promise<string | undefined> {
   const ref = extractOrcamentoRefFromAnexos(anexos);
   if (!ref || !costCenterId) return undefined;
   let idsFamilia = new Set<string>([ref.orcamentoId]);
   let osCodigo = '';
   let numeroPasta = '';
+  let osTemporaria = false;
   try {
     const index = await orcamentoService.getIndex(ref.centroCustoId);
     const atual = index.orcamentos.find((o) => o.id === ref.orcamentoId);
@@ -84,6 +91,7 @@ async function osDoOrcamentoDaFd(anexos: unknown, costCenterId: string | null | 
       );
       osCodigo = normCodigoOs(atual.osCodigo);
       numeroPasta = normCodigoOs(atual.numeroPasta);
+      osTemporaria = atual.osTemporaria === true;
     }
   } catch {
     /* sem índice: tenta só pelo vínculo com o próprio orçamento */
@@ -91,21 +99,49 @@ async function osDoOrcamentoDaFd(anexos: unknown, costCenterId: string | null | 
   const pleitos = await prisma.pleito.findMany({
     where: { service_orders: { costCenterId } },
     orderBy: { createdAt: 'desc' },
-    select: { serviceOrderId: true, linkedOrcamentoId: true, budgetAdditives: true, divSe: true, folderNumber: true },
+    select: {
+      serviceOrderId: true,
+      linkedOrcamentoId: true,
+      budgetAdditives: true,
+      divSe: true,
+      folderNumber: true,
+      updatedContractId: true,
+      osTemporaria: true,
+    },
   });
-  const vinculado = pleitos.find((p) => {
+  // Vínculo direto com o orçamento: o id do orçamento é único, então não mistura contratos.
+  const vinculados = pleitos.filter((p) => {
     if (p.linkedOrcamentoId && idsFamilia.has(p.linkedOrcamentoId.trim())) return true;
     const aditivos = Array.isArray(p.budgetAdditives) ? (p.budgetAdditives as Array<{ orcamentoId?: unknown }>) : [];
     return aditivos.some((a) => idsFamilia.has(String(a?.orcamentoId ?? '').trim()));
   });
-  if (vinculado) return vinculado.serviceOrderId;
-  if (!osCodigo) return undefined;
-  const mesmoCodigo = pleitos.filter((p) => normCodigoOs(p.divSe) === osCodigo);
+  if (osTemporaria) {
+    const temp = vinculados.find((p) => p.osTemporaria) ?? vinculados[0];
+    return temp?.serviceOrderId;
+  }
+  // Busca pelo código: só OSs definitivas do contrato da FD.
+  const doContrato = contratoId
+    ? pleitos.filter((p) => p.updatedContractId === contratoId && !p.osTemporaria)
+    : [];
+  const mesmoCodigo = osCodigo ? doContrato.filter((p) => normCodigoOs(p.divSe) === osCodigo) : [];
   const comPasta = numeroPasta ? mesmoCodigo.find((p) => normCodigoOs(p.folderNumber) === numeroPasta) : undefined;
   if (comPasta) return comPasta.serviceOrderId;
-  // Código sem pasta no orçamento: só aceita se houver uma única OS com esse código.
+  const vinculado = vinculados.find((p) => !p.osTemporaria) ?? vinculados[0];
+  if (vinculado) return vinculado.serviceOrderId;
+  // Código sem pasta no orçamento: só aceita se houver uma única OS com esse código no contrato.
   const unicas = [...new Set(mesmoCodigo.map((p) => p.serviceOrderId))];
   return !numeroPasta && unicas.length === 1 ? unicas[0] : undefined;
+}
+
+/** Cancelar a FD: só o administrador ou o gestor do contrato (coluna «Gestor» da aba Contratos). */
+async function podeCancelarFd(userId: string, isAdmin: boolean, contratoId: string): Promise<boolean> {
+  if (isAdmin) return true;
+  if (!contratoId) return false;
+  const gestor = await prisma.userDpApprovalContract.findFirst({
+    where: { userId, contractId: contratoId },
+    select: { id: true },
+  });
+  return !!gestor;
 }
 
 function clampFichaDemandaPct(value: unknown): number | null {
@@ -819,7 +855,14 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
  */
 async function osNumeroPastaPorFd(
   rows: Array<{ id: string; anexos: unknown }>
-): Promise<{ os: Map<string, string>; orcamentoExiste: Map<string, boolean>; gastoEmpreita: Map<string, number> }> {
+): Promise<{
+  os: Map<string, string>;
+  /** Chave do grupo de OS: definitiva = código + pasta; temporária = o próprio orçamento (nunca se junta). */
+  grupo: Map<string, string>;
+  osTemporaria: Map<string, boolean>;
+  orcamentoExiste: Map<string, boolean>;
+  gastoEmpreita: Map<string, number>;
+}> {
   const refPorFd = new Map<string, { centroCustoId: string; orcamentoId: string }>();
   for (const r of rows) {
     const ref = extractOrcamentoRefFromAnexos(r.anexos);
@@ -827,6 +870,8 @@ async function osNumeroPastaPorFd(
   }
   const ccs = [...new Set([...refPorFd.values()].map((r) => r.centroCustoId))];
   const osPorOrcamento = new Map<string, string>();
+  const grupoPorOrcamento = new Map<string, string>();
+  const tempPorOrcamento = new Map<string, boolean>();
   const orcamentosExistentes = new Set<string>();
   const gastoPorOrcamento = new Map<string, number>();
   const ccsLidos = new Set<string>();
@@ -841,7 +886,15 @@ async function osNumeroPastaPorFd(
           const os = String(o.osCodigo || '').trim();
           const pasta = String(o.numeroPasta || '').trim();
           const label = os && pasta ? `${os} - Nº${pasta}` : os || pasta;
-          if (label) osPorOrcamento.set(`${cc}|${o.id}`, label);
+          if (label) {
+            const temp = o.osTemporaria === true;
+            osPorOrcamento.set(`${cc}|${o.id}`, label);
+            tempPorOrcamento.set(`${cc}|${o.id}`, temp);
+            grupoPorOrcamento.set(
+              `${cc}|${o.id}`,
+              temp ? `temp:${cc}|${o.familiaId || o.id}` : `os:${normCodigoOs(os)}|${normCodigoOs(pasta)}`
+            );
+          }
         }
       } catch {
         /* índice indisponível: a FD fica em "Sem OS" */
@@ -849,6 +902,8 @@ async function osNumeroPastaPorFd(
     })
   );
   const out = new Map<string, string>();
+  const grupo = new Map<string, string>();
+  const osTemporaria = new Map<string, boolean>();
   // Orçamento de origem excluído: a FD não entra nos resultados (índice lido e orçamento ausente).
   const orcamentoExiste = new Map<string, boolean>();
   const gastoEmpreita = new Map<string, number>();
@@ -857,10 +912,14 @@ async function osNumeroPastaPorFd(
     const gasto = gastoPorOrcamento.get(chave);
     if (gasto != null) gastoEmpreita.set(fdId, gasto);
     const label = osPorOrcamento.get(chave);
-    if (label) out.set(fdId, label);
+    if (label) {
+      out.set(fdId, label);
+      grupo.set(fdId, grupoPorOrcamento.get(chave) ?? label);
+      osTemporaria.set(fdId, tempPorOrcamento.get(chave) === true);
+    }
     if (ccsLidos.has(ref.centroCustoId)) orcamentoExiste.set(fdId, orcamentosExistentes.has(chave));
   }
-  return { os: out, orcamentoExiste, gastoEmpreita };
+  return { os: out, grupo, osTemporaria, orcamentoExiste, gastoEmpreita };
 }
 
 /**
@@ -973,6 +1032,8 @@ export class DemandSheetApprovalController {
           ...serializeRow(r),
           custoReal: custoRealPorFd.get(r.id) ?? null,
           osNumeroPasta: osInfo.os.get(r.id) ?? null,
+          osTemporaria: osInfo.osTemporaria.get(r.id) === true,
+          osGrupoChave: osInfo.grupo.get(r.id) ?? null,
           /** false = o orçamento de origem foi excluído (FD sem dado real para o resultado). */
           orcamentoExiste: osInfo.orcamentoExiste.get(r.id) ?? null,
           totalPagoOcs: pagoPorFd.get(r.id) ?? 0,
@@ -1695,6 +1756,9 @@ export class DemandSheetApprovalController {
         }
       }
       const cancellationNote = String(body.purchaseCancellationNote ?? '').trim();
+      if (body.purchaseStatus === 'CANCELLED' && !(await podeCancelarFd(req.user.id, req.user.isAdmin, row.contratoId))) {
+        throw createError('Apenas o administrador ou o gestor do contrato pode cancelar a FD.', 403);
+      }
       if (body.purchaseStatus === 'CANCELLED' && !cancellationNote) {
         throw createError('Informe a observação do cancelamento.', 400);
       }
@@ -2417,7 +2481,7 @@ export class DemandSheetApprovalController {
 
       // A RM sai com a OS do orçamento/FD — nunca com "a OS mais recente do contrato".
       const resolvedServiceOrderId =
-        body.serviceOrderId || (await osDoOrcamentoDaFd(fd.anexos, fd.contrato.costCenterId)) || undefined;
+        body.serviceOrderId || (await osDoOrcamentoDaFd(fd.anexos, fd.contrato.costCenterId, fd.contrato.id)) || undefined;
 
       const demandSheetAttachments = (Array.isArray(fd.anexos) ? fd.anexos : [])
         .filter((a: any) => !isOrcamentoRefAnexo(a) && a?.url)
@@ -2844,6 +2908,24 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Se o usuário pode cancelar esta FD (administrador ou gestor do contrato). Só leitura. */
+  async getPodeCancelar(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const fd = await prisma.demandSheetApproval.findUnique({
+        where: { id: String(req.params.id || '').trim() },
+        select: { contratoId: true },
+      });
+      if (!fd) throw createError('Ficha de demanda não encontrada', 404);
+      const podeCancelar = await podeCancelarFd(req.user.id, req.user.isAdmin, fd.contratoId);
+      return res.json({ success: true, data: { podeCancelar } });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao verificar permissão de cancelamento' });
+    }
+  }
+
   /** Nome do orçamento que gerou a FD (detalhes da FD). Só leitura. */
   async getOrcamentoDaFd(req: AuthRequest, res: Response) {
     try {
@@ -2859,6 +2941,7 @@ export class DemandSheetApprovalController {
 
       let nome: string | null = null;
       let osNumeroPasta: string | null = null;
+      let osTemporaria = false;
       try {
         const index = await orcamentoService.getIndex(ref.centroCustoId);
         const entry = index.orcamentos.find((o) => o.id === ref.orcamentoId);
@@ -2867,12 +2950,13 @@ export class DemandSheetApprovalController {
         const os = String(entry?.osCodigo || '').trim();
         const pasta = String(entry?.numeroPasta || '').trim();
         osNumeroPasta = os && pasta ? `${os} - Nº${pasta}` : os || pasta || null;
+        osTemporaria = entry?.osTemporaria === true;
       } catch {
         nome = null;
       }
       return res.json({
         success: true,
-        data: { nome, osNumeroPasta, orcamentoId: ref.orcamentoId, centroCustoId: ref.centroCustoId },
+        data: { nome, osNumeroPasta, osTemporaria, orcamentoId: ref.orcamentoId, centroCustoId: ref.centroCustoId },
       });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };

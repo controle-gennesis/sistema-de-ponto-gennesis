@@ -147,7 +147,9 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
     const row: Record<string, string> = {
       item: String(idx + 1),
       codigo: it.codigo || '—',
-      material: it.detalhamento ? `${it.material}\nDetalhamento: ${it.detalhamento}` : it.material,
+      material: it.material,
+      // Detalhamento em negrito, abaixo do nome do material.
+      ...(it.detalhamento ? { materialBold: `Detalhamento: ${it.detalhamento}` } : {}),
       und: it.unidade || '—',
       qtdRm: qtd(it.qtdRm),
       qtdOc: qtd(it.qtdOc),

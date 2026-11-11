@@ -1739,6 +1739,10 @@ model Pleito {
   budgetValueConfirmed Boolean @default(false)
   /// ID do orçamento vinculado a esta OS (UUID do índice de orçamentos do centro de custo).
   linkedOrcamentoId    String?
+  /// OS temporária (código genérico informado no orçamento antes de a OS verdadeira existir): nunca se junta a outra OS.
+  osTemporaria         Boolean @default(false)
+  /// OS temporárias que viraram esta OS definitiva: [{ codigo, divSe, folderNumber, pleitoId, orcamentoId, em }].
+  osTemporariasAnteriores Json?
   pv                 String? // RVI â FEITO ou PENDENTE
   ipi                String? // RVF â FEITO ou PENDENTE
   reportsBilling     String? // CobranÃ§a laudos

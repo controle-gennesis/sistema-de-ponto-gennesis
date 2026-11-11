@@ -6,6 +6,7 @@ import { savePersistentUpload } from '../lib/persistentUpload';
 import { OrcamentoController } from '../controllers/OrcamentoController';
 import { userCanAccessOrcamentoCostCenter } from '../lib/orcamentoAcesso';
 import { podeEditarCotacaoEmpreitaFinalizada } from '../lib/cotacaoEmpreita';
+import { podeEditarOsDefinitivaOrcamento } from '../lib/orcamentoTrava';
 
 const router = Router();
 const controller = new OrcamentoController();
@@ -71,6 +72,21 @@ router.get('/:centroCustoId/cotacao-empreita/permissao', async (req: AuthRequest
       String(req.params.centroCustoId || '')
     );
     res.json({ success: true, data: { podeEditarFinalizada: pode } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** OS definitiva do orçamento: só administrador / gestor do contrato altera. */
+router.get('/:centroCustoId/os/permissao', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw createError('Usuário não autenticado', 401);
+    const pode = await podeEditarOsDefinitivaOrcamento(
+      req.user.id,
+      !!req.user.isAdmin,
+      String(req.params.centroCustoId || '')
+    );
+    res.json({ success: true, data: { podeEditarOsDefinitiva: pode } });
   } catch (error) {
     next(error);
   }

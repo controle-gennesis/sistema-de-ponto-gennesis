@@ -1716,7 +1716,7 @@ export default function MapaCotacaoPage() {
                                         {materialItemLabel(item)}
                                       </p>
                                       {detalhamentoSolicitante(item) ? (
-                                        <p className="mt-0.5 text-xs italic text-gray-500 dark:text-gray-400">
+                                        <p className="mt-0.5 text-xs font-bold text-gray-700 dark:text-gray-200">
                                           Detalhamento do solicitante: {detalhamentoSolicitante(item)}
                                         </p>
                                       ) : null}
@@ -2128,7 +2128,7 @@ export default function MapaCotacaoPage() {
                                   {materialItemLabel(item)}
                                 </p>
                                 {detalhamentoSolicitante(item) ? (
-                                  <p className="mt-0.5 text-xs italic text-gray-500 dark:text-gray-400">
+                                  <p className="mt-0.5 text-xs font-bold text-gray-700 dark:text-gray-200">
                                     Detalhamento do solicitante: {detalhamentoSolicitante(item)}
                                   </p>
                                 ) : null}
