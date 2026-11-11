@@ -67,6 +67,17 @@ export class DriveController {
     }
   }
 
+  static async moveFolder(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { parentId } = req.body;
+      const folder = await driveService.moveFolder(id, parseParentId(parentId) ?? null, req.user!.id);
+      res.json({ success: true, data: folder });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
   /** Ícone e cor da pasta (só o dono). Enviar null/vazio nos dois volta ao padrão. */
   static async updateFolderAppearance(req: AuthRequest, res: Response): Promise<void> {
     try {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar,
@@ -35,9 +35,18 @@ import {
   type CronogramaTimelineZoom
 } from './orcamentoCronogramaCalc';
 import { CronogramaGraficosPainel } from './orcamentoCronogramaGraficos';
+import type { DimensoesItem } from './orcamentoMedicaoTypes';
+import {
+  areaExibidaLinha,
+  calcularQuantidadeLinha,
+  linhasMedicaoEfetivas,
+  volumeExibidoLinha
+} from './orcamentoMedicaoCalc';
 import {
   TimelineEtapaEditor,
   TimelineZoomControls,
+  parseQuantidadeUsada,
+  formatQtdEditor,
   type TimelineEtapaEditorTarget
 } from './orcamentoCronogramaTimelineUi';
 import {
@@ -59,6 +68,7 @@ import {
   novoSubServicoId,
   ordenarSubServicosSequenciaObra,
   parseDataIso,
+  itemKeyComposicaoCronograma,
   resolverDadosCronogramaBloco,
   resolverDadosCronogramaComposicao,
   resolverDadosCronogramaServicoParaLinha,
@@ -113,7 +123,229 @@ type Props = {
     ocultarServicos?: boolean;
   };
   onEditarAparencia?: () => void;
+  /** Memorial de cálculo de cada composição (chave `bloco|composição`), só para consulta. */
+  dimensoesPorItem?: Record<string, DimensoesItem>;
 };
+
+/** Devolve o memorial da composição de uma linha do cronograma (ou nada, se ela não tem). */
+const MemorialCronogramaCtx = createContext<((linha: CronogramaTimelineLinha) => DimensoesItem | undefined) | null>(
+  null
+);
+
+type OrigemMemorial = 'C' | 'L' | 'H' | 'N' | 'A' | 'V' | 'Q';
+
+/** Cor de cada coluna do memorial: o número inserido na fórmula leva a cor de onde veio. */
+/** Mesma tipografia no campo e no espelho colorido, para o texto não deslocar. */
+const FONTE_FORMULA: React.CSSProperties = {
+  fontFamily: 'inherit',
+  fontSize: 11,
+  fontWeight: 400,
+  lineHeight: '14px',
+  letterSpacing: 'normal',
+  fontVariantNumeric: 'tabular-nums'
+};
+
+const COR_ORIGEM: Record<OrigemMemorial, { chip: string; hover: string; anel: string; fundo: string }> = {
+  C: {
+    chip: 'text-blue-700 dark:text-blue-300',
+    fundo: 'bg-blue-100 dark:bg-blue-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#2563eb] dark:shadow-[inset_0_0_0_2px_#60a5fa]',
+    hover: 'hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-500/15 dark:hover:text-blue-300'
+  },
+  L: {
+    chip: 'text-emerald-700 dark:text-emerald-300',
+    fundo: 'bg-emerald-100 dark:bg-emerald-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#059669] dark:shadow-[inset_0_0_0_2px_#34d399]',
+    hover: 'hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-300'
+  },
+  H: {
+    chip: 'text-amber-700 dark:text-amber-300',
+    fundo: 'bg-amber-100 dark:bg-amber-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#d97706] dark:shadow-[inset_0_0_0_2px_#fbbf24]',
+    hover: 'hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-500/15 dark:hover:text-amber-300'
+  },
+  N: {
+    chip: 'text-violet-700 dark:text-violet-300',
+    fundo: 'bg-violet-100 dark:bg-violet-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#7c3aed] dark:shadow-[inset_0_0_0_2px_#a78bfa]',
+    hover: 'hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-500/15 dark:hover:text-violet-300'
+  },
+  A: {
+    chip: 'text-cyan-700 dark:text-cyan-300',
+    fundo: 'bg-cyan-100 dark:bg-cyan-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#0891b2] dark:shadow-[inset_0_0_0_2px_#22d3ee]',
+    hover: 'hover:bg-cyan-50 hover:text-cyan-700 dark:hover:bg-cyan-500/15 dark:hover:text-cyan-300'
+  },
+  V: {
+    chip: 'text-pink-700 dark:text-pink-300',
+    fundo: 'bg-pink-100 dark:bg-pink-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#db2777] dark:shadow-[inset_0_0_0_2px_#f472b6]',
+    hover: 'hover:bg-pink-50 hover:text-pink-700 dark:hover:bg-pink-500/15 dark:hover:text-pink-300'
+  },
+  Q: {
+    chip: 'text-red-700 dark:text-red-300',
+    fundo: 'bg-red-100 dark:bg-red-500/20',
+    anel: 'shadow-[inset_0_0_0_2px_#dc2626] dark:shadow-[inset_0_0_0_2px_#f87171]',
+    hover: 'hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400'
+  }
+};
+
+/** Separa a fórmula salva das origens (`=2*7.5||7.5@L`). */
+function lerFormulaPlanejada(salvo: string | undefined): { formula: string; origens: string[] } {
+  if (!salvo) return { formula: '', origens: [] };
+  const [formula, resto] = salvo.split('||');
+  return { formula: formula ?? '', origens: resto ? resto.split(';').filter(Boolean) : [] };
+}
+
+/** Quebra a fórmula em pedaços; cada número que veio do memorial recebe a coluna de origem. */
+function pedacosFormula(texto: string, origens: string[]): Array<{ t: string; col?: OrigemMemorial }> {
+  const pool = [...origens];
+  return texto
+    .split(/(\d+(?:\.\d{3})*,\d+|\d+(?:\.\d+)?)/)
+    .filter((t) => t !== '')
+    .map((t) => {
+      if (/^\d/.test(t)) {
+        const i = pool.findIndex((o) => o.split('@')[0] === t);
+        if (i >= 0) {
+          const col = pool[i]!.split('@')[1] as OrigemMemorial;
+          pool.splice(i, 1);
+          return { t, col };
+        }
+      }
+      return { t };
+    });
+}
+
+const fmtMemorial = (n: number) =>
+  Number.isFinite(n) ? n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) : '—';
+
+/** Balão de consulta (somente leitura) com as linhas do memorial: C, L, H, N, A, V e subtotal. */
+function MemorialConsultaPopover({
+  dim,
+  ancora,
+  titulo,
+  onPick,
+  marcados
+}: {
+  dim: DimensoesItem;
+  ancora: DOMRect;
+  titulo: string;
+  /** Clique num valor: leva o número para a fórmula da célula (com a coluna de onde veio). */
+  onPick: (n: number, col: OrigemMemorial) => void;
+  /** Valores já usados na fórmula (`número@coluna`): a célula correspondente ganha borda na cor da coluna. */
+  marcados: Set<string>;
+}) {
+  const linhas = linhasMedicaoEfetivas(dim);
+  const rot = dim.rotulosColunas ?? {};
+  const LARG = 720;
+  const esquerda = Math.max(8, Math.min(ancora.left, window.innerWidth - LARG - 8));
+  const abaixo = ancora.bottom + 6;
+  const altMax = 380;
+  const cabeEmbaixo = abaixo + Math.min(altMax, 110 + linhas.length * 40) < window.innerHeight;
+  const estilo: React.CSSProperties = {
+    left: esquerda,
+    width: LARG,
+    maxHeight: altMax,
+    ...(cabeEmbaixo ? { top: abaixo } : { bottom: window.innerHeight - ancora.top + 6 })
+  };
+  const th = 'border-r last:border-r-0 border-gray-200 dark:border-gray-700 px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  const td = 'border-r last:border-r-0 border-gray-200 dark:border-gray-700 p-0 text-center text-xs tabular-nums';
+  const valorBtn = (n: number, col: OrigemMemorial, forte = false) => (
+    <button
+      type="button"
+      onClick={() => onPick(n, col)}
+      title="Clique para usar este valor na fórmula"
+      className={`block h-full w-full rounded-none px-1.5 py-3 tabular-nums text-gray-800 transition-colors dark:text-gray-100 ${COR_ORIGEM[col].hover} ${forte ? 'font-semibold' : ''} ${
+        marcados.has(`${fmtMemorial(n)}@${col}`) ? `${COR_ORIGEM[col].anel} ${COR_ORIGEM[col].fundo} ${COR_ORIGEM[col].chip} font-semibold` : ''
+      }`}
+    >
+      {fmtMemorial(n)}
+    </button>
+  );
+  const total = linhas.reduce((t, ln) => t + calcularQuantidadeLinha(ln, dim.tipoUnidade), 0);
+  return createPortal(
+    <div
+      className="fixed z-[300] flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+      style={estilo}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <div className="shrink-0 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Memorial de cálculo
+        </p>
+        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{titulo}</p>
+      </div>
+      {linhas.length === 0 ? (
+        <p className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+          Esta composição não tem memorial de cálculo.
+        </p>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <table className="w-full table-fixed border-collapse">
+            <colgroup>
+              <col style={{ width: '25%' }} />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+                <th className={`${th} !pl-4 !text-left`}>{(rot.descricao ?? '').replace(/:\s*$/, '') || 'Descrição'}</th>
+                <th className={th}>{rot.C || 'C'}</th>
+                <th className={th}>{rot.L || 'L'}</th>
+                <th className={th}>{rot.H || 'H'}</th>
+                <th className={th}>{rot.N || 'N'}</th>
+                <th className={th}>A</th>
+                <th className={th}>V</th>
+                <th className={th}>Qtd</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linhas.map((ln, i) =>
+                ln.cabecalhoSecao ? (
+                  <tr key={i} className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+                    <td colSpan={8} className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {ln.descricao}
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={i} className="border-b border-gray-200 dark:border-gray-700">
+                    <td className="truncate border-r border-gray-200 dark:border-gray-700 py-2 pl-4 pr-2 text-left text-xs text-gray-800 dark:text-gray-100">
+                      {ln.descricao || '—'}
+                    </td>
+                    <td className={td}>{valorBtn(ln.C, 'C')}</td>
+                    <td className={td}>{valorBtn(ln.L, 'L')}</td>
+                    <td className={td}>{valorBtn(ln.H, 'H')}</td>
+                    <td className={td}>{valorBtn(ln.N, 'N')}</td>
+                    <td className={td}>{valorBtn(areaExibidaLinha(ln), 'A')}</td>
+                    <td className={td}>{valorBtn(volumeExibidoLinha(ln, dim.tipoUnidade), 'V')}</td>
+                    <td className={td}>{valorBtn(calcularQuantidadeLinha(ln, dim.tipoUnidade), 'Q', true)}</td>
+                  </tr>
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="flex shrink-0 items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+        <span>Total</span>
+        <button
+          type="button"
+          onClick={() => onPick(total, 'Q')}
+          title="Clique para usar este valor na fórmula"
+          className="rounded-md px-2 py-1 tabular-nums transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+        >
+          {fmtMemorial(total)}
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 const thCls =
   '!h-auto !min-h-0 px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600 first:border-l-0';
@@ -368,6 +600,233 @@ function gradeDiasTimeline(totalDias: number, diaPx: number): string {
   return `repeat(${totalDias}, ${diaPx}px)`;
 }
 
+function CelulaQtdPlanejadaDia({
+  linha,
+  iso,
+  qtd,
+  formulaSalva,
+  orcada,
+  custo,
+  onQtdDia
+}: {
+  linha: CronogramaTimelineLinha;
+  iso: string;
+  qtd: number | undefined;
+  formulaSalva?: string;
+  orcada: number;
+  custo: number;
+  onQtdDia: (row: CronogramaTimelineLinha, iso: string, qtd: number | null, formula?: string | null) => void;
+}) {
+  const tem = qtd != null && qtd > 0;
+  const memorialDe = useContext(MemorialCronogramaCtx);
+  const dimMemorial = memorialDe?.(linha);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const espelhoRef = useRef<HTMLDivElement>(null);
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState('');
+  const [origens, setOrigens] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [ancora, setAncora] = useState<DOMRect | null>(null);
+  const salva = useMemo(() => lerFormulaPlanejada(formulaSalva), [formulaSalva]);
+
+  // Na edição aparece a fórmula (se houver); fora dela, só o valor.
+  const iniciarEdicao = (inicial?: string) => {
+    if (inicial != null) {
+      setTexto(inicial);
+      setOrigens([]);
+    } else if (salva.formula) {
+      setTexto(salva.formula);
+      setOrigens(salva.origens);
+    } else {
+      setTexto(tem ? formatQtdEditor(qtd as number) : '');
+      setOrigens([]);
+    }
+    setEditando(true);
+  };
+  useEffect(() => {
+    if (!editando) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const fim = el.value.length;
+    el.setSelectionRange(fim, fim);
+    setCursor(fim);
+    setAncora(el.getBoundingClientRect());
+  }, [editando]);
+
+  // Grava ao apertar Enter ou sair da célula; enquanto digita, % e valor não mudam.
+  const confirmar = () => {
+    setEditando(false);
+    setAncora(null);
+    const bruto = texto.trim();
+    if (bruto === '') {
+      if (tem) onQtdDia(linha, iso, null, null);
+      return;
+    }
+    const n = parseQuantidadeUsada(bruto);
+    if (n == null) return;
+    const ehFormula = bruto.startsWith('=');
+    const usadas = ehFormula
+      ? origens.filter((o) => pedacosFormula(bruto, [o]).some((p) => p.col))
+      : [];
+    const novaFormula = ehFormula ? bruto + (usadas.length ? '||' + usadas.join(';') : '') : null;
+    if (n !== (qtd ?? 0) || (novaFormula ?? '') !== (formulaSalva ?? '')) {
+      onQtdDia(linha, iso, n, novaFormula);
+    }
+  };
+  // Valor clicado no memorial entra na fórmula (vira "=" + número se ainda não era fórmula).
+  const inserirDoMemorial = (n: number, col: OrigemMemorial) => {
+    const num = fmtMemorial(n);
+    // Se a fórmula já termina num número, o valor clicado troca esse número em vez de grudar nele.
+    const fim = /(\d+(?:\.\d{3})*,\d+|\d+(?:\.\d+)?)\s*$/.exec(texto);
+    const semFim = fim ? texto.slice(0, fim.index) : texto;
+    const base = semFim.trim().startsWith('=') ? semFim : '=' + semFim.trim();
+    setTexto(base + num);
+    setCursor((base + num).length);
+    setOrigens((o) => {
+      const restantes = fim ? o.filter((x, i, arr) => !(x.split('@')[0] === fim[1] && arr.indexOf(x) === i)) : o;
+      return [...restantes, `${num}@${col}`];
+    });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+  const pedacosAtuais = pedacosFormula(texto, origens);
+  const temOrigem = pedacosAtuais.some((pc) => pc.col);
+  const marcados = new Set(pedacosAtuais.filter((pc) => pc.col).map((pc) => `${pc.t}@${pc.col}`));
+  const qtdVal = qtd ?? 0;
+  const temVal = qtdVal > 0;
+  const razao = orcada > 0 ? qtdVal / orcada : 0;
+  return (
+    <div className="grid h-full min-w-0 grid-rows-3 border-l border-gray-300 first:border-l-0 dark:border-gray-600">
+      <div
+        className={`flex min-h-6 items-center justify-center border-b border-gray-200 px-0.5 text-[10px] dark:border-gray-700 font-semibold tabular-nums ${
+          temVal ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'
+        }`}
+      >
+        {`${Math.min(100, razao * 100).toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })}%`}
+      </div>
+      {editando ? (
+        <div className="relative z-[3] min-h-6 min-w-0 overflow-hidden bg-gray-50 shadow-[inset_0_0_0_2px_#dc2626] dark:bg-gray-800 dark:shadow-[inset_0_0_0_2px_#f87171]">
+          {/* Espelho colorido: só existe quando há números vindos do memorial; senão o próprio campo mostra o texto. */}
+          <input
+            ref={inputRef}
+            type="text"
+            value={texto}
+            onChange={(e) => {
+              setTexto(e.target.value);
+              setCursor(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onSelect={(e) => setCursor(e.currentTarget.selectionStart ?? 0)}
+            onScroll={(e) => {
+              if (espelhoRef.current) espelhoRef.current.style.transform = `translateX(${-e.currentTarget.scrollLeft}px)`;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') {
+                setTexto(salva.formula || (tem ? formatQtdEditor(qtd as number) : ''));
+                setEditando(false);
+                setAncora(null);
+              }
+            }}
+            onBlur={confirmar}
+            style={{
+              ...FONTE_FORMULA,
+              outline: 'none',
+              boxShadow: 'none',
+              ...(temOrigem ? { color: 'transparent', WebkitTextFillColor: 'transparent', caretColor: 'transparent' } : {})
+            }}
+            aria-label={`Quantidade planejada — ${linha.label} — ${formatDataBr(iso)}`}
+            className="absolute inset-0 box-border h-full w-full min-w-0 rounded-none border-0 border-transparent bg-transparent px-1 py-0 text-left text-gray-900 caret-gray-900 dark:text-gray-100 !outline-none !shadow-none !ring-0 focus-visible:!outline-none dark:caret-gray-100"
+          />
+          {temOrigem ? (
+          <div
+            ref={espelhoRef}
+            aria-hidden
+            style={FONTE_FORMULA}
+            className="pointer-events-none absolute inset-0 z-10 flex min-w-full items-center overflow-hidden whitespace-pre bg-gray-50 px-1 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+          >
+            {(() => {
+              const nos: React.ReactNode[] = [];
+              let pos = 0;
+              let caretPosto = false;
+              const caret = (k: string) => (
+                <span key={k} className="inline-block h-3 w-px animate-pulse bg-gray-900 align-middle dark:bg-gray-100" />
+              );
+              pedacosAtuais.forEach((pc, i) => {
+                const cls = pc.col ? COR_ORIGEM[pc.col].chip : undefined;
+                const fim = pos + pc.t.length;
+                if (!caretPosto && cursor >= pos && cursor <= fim) {
+                  const corte = cursor - pos;
+                  nos.push(
+                    <span key={`a${i}`} className={cls}>
+                      {pc.t.slice(0, corte)}
+                    </span>,
+                    caret(`c${i}`),
+                    <span key={`b${i}`} className={cls}>
+                      {pc.t.slice(corte)}
+                    </span>
+                  );
+                  caretPosto = true;
+                } else {
+                  nos.push(
+                    <span key={i} className={cls}>
+                      {pc.t}
+                    </span>
+                  );
+                }
+                pos = fim;
+              });
+              if (!caretPosto) nos.push(caret('cfim'));
+              return nos;
+            })()}
+          </div>
+          ) : null}
+        </div>
+      ) : (
+        <div
+          tabIndex={0}
+          role="button"
+          title={salva.formula ? `${salva.formula} — dê dois cliques para editar` : 'Dê dois cliques para editar'}
+          aria-label={`Quantidade planejada — ${linha.label} — ${formatDataBr(iso)}`}
+          onDoubleClick={() => iniciarEdicao()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'F2') {
+              e.preventDefault();
+              iniciarEdicao();
+            } else if (e.key === 'Delete' || e.key === 'Backspace') {
+              if (tem) onQtdDia(linha, iso, null, null);
+            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+              e.preventDefault();
+              iniciarEdicao(e.key);
+            }
+          }}
+          className="relative flex min-h-6 cursor-default select-none items-center justify-center bg-white px-0.5 text-[11px] leading-none tabular-nums text-gray-900 outline-none focus:z-[3] focus:bg-gray-50 focus:shadow-[inset_0_0_0_2px_#dc2626] dark:focus:shadow-[inset_0_0_0_2px_#f87171] dark:bg-gray-900 dark:text-gray-100 dark:focus:bg-gray-800"
+        >
+          {tem ? formatQtdEditor(qtd as number) : ''}
+        </div>
+      )}
+      <div
+        className={`flex min-h-6 items-center justify-center border-t border-gray-200 px-0.5 text-[10px] font-semibold tabular-nums dark:border-gray-700 ${
+          temVal ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
+        }`}
+      >
+        {(razao * custo).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+      </div>
+      {editando && ancora && dimMemorial ? (
+        <MemorialConsultaPopover
+          dim={dimMemorial}
+          ancora={ancora}
+          titulo={`${linha.item ?? ''} ${linha.label}`.trim()}
+          onPick={inserirDoMemorial}
+          marcados={marcados}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function CelulaLinhaTimeline({
   row,
   timelineRange,
@@ -376,7 +835,8 @@ function CelulaLinhaTimeline({
   modo,
   onEdit,
   bgCls = '',
-  bgStyle
+  bgStyle,
+  onQtdDia
 }: {
   bgCls?: string;
   bgStyle?: React.CSSProperties;
@@ -386,6 +846,8 @@ function CelulaLinhaTimeline({
   diaPx: number;
   modo: 'plan' | 'real';
   onEdit: (row: CronogramaTimelineLinha, e: React.MouseEvent) => void;
+  /** Grava a quantidade planejada de um dia (aba Planejado); `null` apaga. */
+  onQtdDia?: (row: CronogramaTimelineLinha, iso: string, qtd: number | null, formula?: string | null) => void;
 }) {
   const tdClsTimeline = 'relative h-px border-l border-gray-200 p-0 align-middle dark:border-gray-600';
   const tdStyle = {
@@ -412,6 +874,57 @@ function CelulaLinhaTimeline({
     linha?.showBar && iniReal && fimReal
       ? posicaoBarraTimelinePx(timelineRange.inicio, timelineRange.fim, iniReal, fimReal, diaPx)
       : null;
+  if (modo === 'plan' && linha && linha.editavel && onQtdDia) {
+    const orcada = linha.quantidade ?? 0;
+    const custo = linha.valorTotal ?? 0;
+    const planejadas = linha.dados.quantidadesPlanejadasPorDia ?? {};
+    // Quando a soma planejada fecha 100% da quantidade orçada, os dias seguintes ficam vazios.
+    let fechouEm = -1;
+    if (orcada > 0) {
+      let acumulado = 0;
+      for (let i = 0; i < timelineRange.colunas.length; i += 1) {
+        acumulado += planejadas[isoDiaCronograma(timelineRange.colunas[i].data)] ?? 0;
+        if (acumulado >= orcada - 1e-9) {
+          fechouEm = i;
+          break;
+        }
+      }
+    }
+    return (
+      <td className={`${tdClsTimeline} ${bgCls}`} style={tdStyle}>
+        <div style={{ height: 72 }} aria-hidden />
+        <div
+          className="absolute inset-0 grid"
+          style={{ width: largura, gridTemplateColumns: gradeDiasTimeline(timelineRange.colunas.length, diaPx) }}
+        >
+          {timelineRange.colunas.map((col, indiceCol) => {
+            const iso = isoDiaCronograma(col.data);
+            if (fechouEm >= 0 && indiceCol > fechouEm && !(planejadas[iso] > 0)) {
+              return (
+                <div
+                  key={`${linha.key}-${col.key}`}
+                  className="h-full min-w-0 border-l border-gray-300 first:border-l-0 dark:border-gray-600"
+                />
+              );
+            }
+            return (
+              <CelulaQtdPlanejadaDia
+                key={`${linha.key}-${col.key}`}
+                linha={linha}
+                iso={iso}
+                qtd={planejadas[iso]}
+                formulaSalva={linha.dados.formulasPlanejadasPorDia?.[iso]}
+                orcada={orcada}
+                custo={custo}
+                onQtdDia={onQtdDia}
+              />
+            );
+          })}
+        </div>
+      </td>
+    );
+  }
+
   const pct = Math.min(100, Math.max(0, Math.round(linha?.dados.percentualExecutado ?? 0)));
   const desvio = linha ? calcularDesvioTimeline(linha.dados) : null;
   const mostrarBarraPlan = modo === 'plan' && Boolean(barPlan && barPlan.widthPx > 0);
@@ -594,7 +1107,8 @@ export function OrcamentoCronogramaPainel({
   onExportPdf,
   telaFixa = false,
   estilosAparencia,
-  onEditarAparencia
+  onEditarAparencia,
+  dimensoesPorItem
 }: Props) {
   const [timelineZoom, setTimelineZoom] = useState<CronogramaTimelineZoom>('obra');
   const [timelinePanOffset, setTimelinePanOffset] = useState(0);
@@ -862,6 +1376,28 @@ export function OrcamentoCronogramaPainel({
     patchServico(row.servicoKey, patch);
   };
 
+  const patchQtdPlanejadaDia = (
+    row: CronogramaTimelineLinha,
+    iso: string,
+    qtd: number | null,
+    formula?: string | null
+  ) => {
+    const mapa: Record<string, number> = { ...(row.dados.quantidadesPlanejadasPorDia ?? {}) };
+    const formulas: Record<string, string> = { ...(row.dados.formulasPlanejadasPorDia ?? {}) };
+    if (qtd == null || qtd === 0) {
+      delete mapa[iso];
+      delete formulas[iso];
+    } else {
+      mapa[iso] = qtd;
+      if (formula) formulas[iso] = formula;
+      else delete formulas[iso];
+    }
+    patchEtapaDados(row, {
+      quantidadesPlanejadasPorDia: Object.keys(mapa).length > 0 ? mapa : undefined,
+      formulasPlanejadasPorDia: Object.keys(formulas).length > 0 ? formulas : undefined
+    });
+  };
+
   const abrirEditorEtapa = (row: CronogramaTimelineLinha, e: React.MouseEvent) => {
     if (!row.editavel || row.isCabecalhoServico || row.isCabecalhoSubtitulo) return;
     e.stopPropagation();
@@ -971,6 +1507,7 @@ export function OrcamentoCronogramaPainel({
       diaPx={timelineLayout?.diaPx ?? 0}
       modo={modoFolha}
       onEdit={abrirEditorEtapa}
+      onQtdDia={patchQtdPlanejadaDia}
       bgCls={bgCls}
       bgStyle={bgStyle}
     />
@@ -1057,8 +1594,16 @@ export function OrcamentoCronogramaPainel({
     />
   );
 
+  const memorialDaLinha = useMemo(
+    () => (linha: CronogramaTimelineLinha) =>
+      linha.blocoKey && linha.composicaoChave
+        ? dimensoesPorItem?.[itemKeyComposicaoCronograma(linha.blocoKey, linha.composicaoChave)]
+        : undefined,
+    [dimensoesPorItem]
+  );
+
   return (
-    <>
+    <MemorialCronogramaCtx.Provider value={memorialDaLinha}>
     <div className={telaFixa ? 'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3' : 'w-full min-w-0 space-y-4'}>
       {!telaFixa ? (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1557,6 +2102,6 @@ export function OrcamentoCronogramaPainel({
           </div>
         </div>
       </Modal>
-    </>
+    </MemorialCronogramaCtx.Provider>
   );
 }

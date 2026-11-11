@@ -29,6 +29,12 @@ import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonCla
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import {
+  EspelhoNfPeriodoCampos,
+  EspelhoNfResumoCards,
+  espelhoNoPeriodo,
+  federalRatesForTaxCode,
+} from '@/components/espelho-nf/EspelhoNfResumo';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   buildEspelhoDetailRows,
@@ -619,8 +625,9 @@ export default function EspelhoNfPage() {
   );
   const [espelhoSavedFilterCostCenter, setEspelhoSavedFilterCostCenter] = useState('');
   const [espelhoSavedFilterTaker, setEspelhoSavedFilterTaker] = useState('');
-  const [espelhoSavedFilterMonth, setEspelhoSavedFilterMonth] = useState('');
-  const [espelhoSavedFilterYear, setEspelhoSavedFilterYear] = useState('');
+  /** Período (de / até): emissão da NF para as finalizadas, criação para as demais. */
+  const [espelhoSavedFilterDe, setEspelhoSavedFilterDe] = useState('');
+  const [espelhoSavedFilterAte, setEspelhoSavedFilterAte] = useState('');
   const [espelhoSavedFiltersModalOpen, setEspelhoSavedFiltersModalOpen] = useState(false);
   const [nfConstarMenuOpen, setNfConstarMenuOpen] = useState(false);
   const [openEspelhoPicker, setOpenEspelhoPicker] = useState<null | 'prestador' | 'tomador'>(null);
@@ -766,16 +773,14 @@ export default function EspelhoNfPage() {
       if (espelhoSavedFilterTaker && item.takerId !== espelhoSavedFilterTaker) {
         return false;
       }
-      const needDate = espelhoSavedFilterMonth !== '' || espelhoSavedFilterYear !== '';
-      if (needDate) {
-        const parts = espelhoSavedCreatedParts(item);
-        if (!parts) return false;
-        if (espelhoSavedFilterMonth !== '' && parts.m !== Number(espelhoSavedFilterMonth)) {
-          return false;
-        }
-        if (espelhoSavedFilterYear !== '' && parts.y !== Number(espelhoSavedFilterYear)) {
-          return false;
-        }
+      if (
+        !espelhoNoPeriodo(
+          { ...item, status: item.approvalStatus ?? 'PENDING_APPROVAL' } as never,
+          espelhoSavedFilterDe,
+          espelhoSavedFilterAte
+        )
+      ) {
+        return false;
       }
       return true;
     });
@@ -783,8 +788,8 @@ export default function EspelhoNfPage() {
     savedDrafts,
     espelhoSavedFilterCostCenter,
     espelhoSavedFilterTaker,
-    espelhoSavedFilterMonth,
-    espelhoSavedFilterYear
+    espelhoSavedFilterDe,
+    espelhoSavedFilterAte
   ]);
 
   const hasActiveEspelhoSavedFilters = useMemo(
@@ -792,14 +797,14 @@ export default function EspelhoNfPage() {
       Boolean(
         espelhoSavedFilterCostCenter ||
           espelhoSavedFilterTaker ||
-          espelhoSavedFilterMonth ||
-          espelhoSavedFilterYear
+          espelhoSavedFilterDe ||
+          espelhoSavedFilterAte
       ),
     [
       espelhoSavedFilterCostCenter,
       espelhoSavedFilterTaker,
-      espelhoSavedFilterMonth,
-      espelhoSavedFilterYear
+      espelhoSavedFilterDe,
+      espelhoSavedFilterAte
     ]
   );
 
@@ -867,9 +872,11 @@ export default function EspelhoNfPage() {
       ...costCentersForEspelho
         .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
         .map((cc) => {
-          const label = [cc.code, cc.name].filter(Boolean).join(' — ') || cc.name || '—';
-          return { value: cc.id, label, searchText: label };
-        }),
+          // Só o nome no filtro; o código continua valendo na busca.
+          const label = cc.name || cc.code || '—';
+          return { value: cc.id, label, searchText: [cc.name, cc.code].filter(Boolean).join(' ') };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
     ],
     [costCentersForEspelho]
   );
@@ -1442,7 +1449,12 @@ export default function EspelhoNfPage() {
   }, [federalTaxContextEnabled]);
 
   useEffect(() => {
-    const raw = localStorage.getItem(SAVED_MIRRORS_STORAGE_KEY);
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(SAVED_MIRRORS_STORAGE_KEY);
+    } catch {
+      raw = null;
+    }
     if (!raw) {
       setSavedMirrorsHydrated(true);
       return;
@@ -1459,7 +1471,18 @@ export default function EspelhoNfPage() {
 
   useEffect(() => {
     if (!savedMirrorsHydrated) return;
-    localStorage.setItem(SAVED_MIRRORS_STORAGE_KEY, JSON.stringify(savedDrafts));
+    // Cache local (os espelhos ficam no servidor). Os anexos (NF/XML em base64) não entram: estouravam o
+    // limite do navegador e derrubavam a página. Se ainda assim não couber, o cache é descartado.
+    try {
+      const semAnexos = savedDrafts.map(({ nfAttachment: _nf, xmlAttachment: _xml, ...resto }) => resto);
+      localStorage.setItem(SAVED_MIRRORS_STORAGE_KEY, JSON.stringify(semAnexos));
+    } catch {
+      try {
+        localStorage.removeItem(SAVED_MIRRORS_STORAGE_KEY);
+      } catch {
+        /* armazenamento indisponível */
+      }
+    }
   }, [savedDrafts, savedMirrorsHydrated]);
 
   useEffect(() => {
@@ -1519,10 +1542,11 @@ export default function EspelhoNfPage() {
             )
           }))
         );
+        // Só libera o salvamento automático no servidor depois de carregar dele: assim o cache local
+        // (sem anexos) nunca sobrescreve a NF/XML gravados.
+        setEspelhoDbHydrated(true);
       } catch {
-        // Mantém fallback local para não bloquear a operação.
-      } finally {
-        if (!cancelled) setEspelhoDbHydrated(true);
+        // Mantém o cache local na tela, sem gravar por cima do servidor.
       }
     };
     loadFromDb();
@@ -3183,6 +3207,22 @@ export default function EspelhoNfPage() {
             )}
 
 
+          {savedDrafts.length > 0 ? (
+            <EspelhoNfResumoCards
+              itens={filteredSavedDrafts.map((m) => ({
+                ...m,
+                status: m.approvalStatus ?? 'PENDING_APPROVAL',
+              })) as never}
+              cadastros={{
+                providers: serviceProviders,
+                takers: serviceTakers,
+                banks: bankAccounts,
+                taxCodes,
+              }}
+              pendentesDetalhe="Em aprovação, correção ou aguardando NF"
+            />
+          ) : null}
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -3278,34 +3318,12 @@ export default function EspelhoNfPage() {
                             allowEmpty={false}
                           />
                         </div>
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Mês
-                          </label>
-                          <StringSingleSelectDropdown
-                            value={espelhoSavedFilterMonth}
-                            onChange={setEspelhoSavedFilterMonth}
-                            options={ESPELHO_SAVED_MONTH_FILTER_OPTIONS}
-                            allowEmpty={false}
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Ano
-                          </label>
-                          <select
-                            value={espelhoSavedFilterYear}
-                            onChange={(e) => setEspelhoSavedFilterYear(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {espelhoSavedYearOptions.map((yr) => (
-                              <option key={yr} value={String(yr)}>
-                                {yr}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <EspelhoNfPeriodoCampos
+                          de={espelhoSavedFilterDe}
+                          ate={espelhoSavedFilterAte}
+                          onDe={setEspelhoSavedFilterDe}
+                          onAte={setEspelhoSavedFilterAte}
+                        />
                       </div>
                       <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                         <button
@@ -3313,8 +3331,8 @@ export default function EspelhoNfPage() {
                           onClick={() => {
                             setEspelhoSavedFilterCostCenter('');
                             setEspelhoSavedFilterTaker('');
-                            setEspelhoSavedFilterMonth('');
-                            setEspelhoSavedFilterYear('');
+                            setEspelhoSavedFilterDe('');
+                            setEspelhoSavedFilterAte('');
                           }}
                           className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                         >
@@ -3559,7 +3577,7 @@ export default function EspelhoNfPage() {
                                 serviceTakers,
                                 bankAccounts,
                                 taxCodes,
-                                federalTaxRates
+                                federalRatesForTaxCode(taxCodes.find((t) => t.id === mirrorMenuItem.taxCodeId))
                               );
                               toast.success('Arquivo PDF gerado.');
                             }}
@@ -3589,7 +3607,8 @@ export default function EspelhoNfPage() {
                     detailMirror,
                     costCentersForEspelho,
                     taxCodeRow,
-                    taxCodeRow?.iss ?? null
+                    taxCodeRow?.iss ?? null,
+                    federalRatesForTaxCode(taxCodeRow)
                   );
                   const pick = (labels: string[]): DetailInfoField[] =>
                     labels
@@ -3609,6 +3628,7 @@ export default function EspelhoNfPage() {
                           'Medição (R$)',
                           'Mão de obra (R$)',
                           'Material (R$)',
+                          'Valor final da nota (R$)',
                           'Vencimento',
                           'Início da medição',
                           'Fim da medição',
@@ -3709,7 +3729,7 @@ export default function EspelhoNfPage() {
                         serviceTakers,
                         bankAccounts,
                         taxCodes,
-                        federalTaxRates
+                        federalRatesForTaxCode(taxCodes.find((t) => t.id === detailMirror.taxCodeId))
                       );
                       toast.success('Arquivo PDF gerado.');
                     }}

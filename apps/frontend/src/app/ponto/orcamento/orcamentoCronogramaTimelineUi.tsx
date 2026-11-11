@@ -27,7 +27,7 @@ const editorLabelCls =
 const editorInputCls = `${FORM_FIELD_INPUT_CLS} h-10 shadow-none`;
 const editorTextareaCls = `${FORM_FIELD_TEXTAREA_CLS} shadow-none`;
 
-function parseQuantidadeUsada(raw: string): number | null {
+export function parseQuantidadeUsada(raw: string): number | null {
   // Fórmula estilo Excel (=10+5, =ARRED(7/3;2)): mesmo avaliador da memória de cálculo.
   if (raw.trim().startsWith('=')) {
     const n = avaliarFormulaMedicao(raw);
@@ -40,7 +40,7 @@ function parseQuantidadeUsada(raw: string): number | null {
   return n;
 }
 
-function formatQtdEditor(n: number): string {
+export function formatQtdEditor(n: number): string {
   return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
 }
 

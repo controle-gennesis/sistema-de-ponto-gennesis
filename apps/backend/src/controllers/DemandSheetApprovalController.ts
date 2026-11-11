@@ -2405,7 +2405,8 @@ export class DemandSheetApprovalController {
         if (it.materiais.some((m) => m.unit !== it.fdUnidade)) alertas.push('unidade');
         alertasPorItem.set(key, alertas);
         if (alertas.length > 0 || it.fdQuantidade === undefined) continue;
-        if (Math.abs(it.materiais[0].quantity - it.fdQuantidade) > FD_QTD_EPS) {
+        // Pode pedir a mais que a FD; abaixo dela o item não é integral.
+        if (it.materiais[0].quantity < it.fdQuantidade - FD_QTD_EPS) {
           throw createError(
             `Item ${it.fdItem}: deve ser solicitado de forma integral (${it.fdQuantidade.toLocaleString('pt-BR')} ${it.fdUnidade}).`,
             400

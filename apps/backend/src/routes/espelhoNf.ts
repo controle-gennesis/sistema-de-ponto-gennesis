@@ -444,6 +444,10 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
           nfAttachmentMimeType: true,
           nfAttachmentSize: true,
           nfAttachmentDataUrl: true,
+          xmlAttachmentName: true,
+          xmlAttachmentMimeType: true,
+          xmlAttachmentSize: true,
+          xmlAttachmentDataUrl: true,
           ...(mirrorHasFinalization
             ? { nfNumber: true, finalizedAt: true, finalizedById: true, finalizedByName: true }
             : {})
@@ -452,6 +456,45 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
       for (const row of existing) approvalById.set(row.id, row);
     }
 
+    // Espelho com NF anexada nunca é apagado pelo PUT: se a lista do navegador vier sem ele (aba antiga,
+    // outro usuário com a lista desatualizada, exclusão na tela), o registro do servidor fica intacto.
+    const idsNoPayload = new Set((mirrors as any[]).map((m: any) => String(m?.id ?? '')));
+    const idsComNfPreservados = [...approvalById.values()]
+      .filter((row: any) => !!row.nfAttachmentDataUrl && !idsNoPayload.has(String(row.id)))
+      .map((row: any) => String(row.id));
+    // Linha do banco pronta para recriar: sem nulos (campos JSON não aceitam null cru no createMany).
+    const semNulos = (row: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(row).filter(([, v]) => v !== null && v !== undefined));
+    const espelhosPreservados: any[] = idsComNfPreservados.length
+      ? await p.espelhoNfMirror.findMany({ where: { id: { in: idsComNfPreservados } } })
+      : [];
+    // Cadastros usados por esses espelhos que não vieram da tela também são mantidos (vínculo Restrict).
+    const faltando = async (model: any, idsNecessarios: string[], lista: any[]) => {
+      const presentes = new Set(lista.map((x: any) => String(x?.id ?? '')));
+      const ids = [...new Set(idsNecessarios.filter((id) => id && !presentes.has(id)))];
+      return ids.length ? ((await model.findMany({ where: { id: { in: ids } } })) as any[]) : [];
+    };
+    const provedoresFaltando = await faltando(
+      p.espelhoNfServiceProvider,
+      espelhosPreservados.map((m) => String(m.providerId)),
+      providers
+    );
+    const tomadoresFaltando = await faltando(
+      p.espelhoNfServiceTaker,
+      espelhosPreservados.map((m) => String(m.takerId)),
+      takers
+    );
+    const contasFaltando = await faltando(
+      p.espelhoNfBankAccount,
+      espelhosPreservados.map((m) => String(m.bankAccountId)),
+      bankAccounts
+    );
+    const codigosFaltando = await faltando(
+      p.espelhoNfTaxCode,
+      espelhosPreservados.map((m) => String(m.taxCodeId)),
+      taxCodes
+    );
+
     const ops: any[] = [
       p.espelhoNfMirror.deleteMany(),
       p.espelhoNfServiceTaker.deleteMany(),
@@ -459,6 +502,10 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
       p.espelhoNfBankAccount.deleteMany(),
       p.espelhoNfTaxCode.deleteMany()
     ];
+    if (provedoresFaltando.length) ops.push(p.espelhoNfServiceProvider.createMany({ data: provedoresFaltando.map(semNulos) }));
+    if (tomadoresFaltando.length) ops.push(p.espelhoNfServiceTaker.createMany({ data: tomadoresFaltando.map(semNulos) }));
+    if (contasFaltando.length) ops.push(p.espelhoNfBankAccount.createMany({ data: contasFaltando.map(semNulos) }));
+    if (codigosFaltando.length) ops.push(p.espelhoNfTaxCode.createMany({ data: codigosFaltando.map(semNulos) }));
 
     if (providers.length > 0) {
       ops.push(
@@ -625,13 +672,23 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
                   finalizedByName: approvalById.get(String(item.id)).finalizedByName ?? null
                 }
               : {}),
-            xmlAttachmentName: item?.xmlAttachment?.name ? String(item.xmlAttachment.name) : null,
-            xmlAttachmentMimeType: item?.xmlAttachment?.mimeType ? String(item.xmlAttachment.mimeType) : null,
-            xmlAttachmentSize:
-              item?.xmlAttachment?.size != null && Number.isFinite(Number(item.xmlAttachment.size))
-                ? Number(item.xmlAttachment.size)
-                : null,
-            xmlAttachmentDataUrl: item?.xmlAttachment?.dataUrl ? String(item.xmlAttachment.dataUrl) : null,
+            ...(item?.xmlAttachment?.dataUrl
+              ? {
+                  xmlAttachmentName: item?.xmlAttachment?.name ? String(item.xmlAttachment.name) : null,
+                  xmlAttachmentMimeType: item?.xmlAttachment?.mimeType ? String(item.xmlAttachment.mimeType) : null,
+                  xmlAttachmentSize:
+                    item?.xmlAttachment?.size != null && Number.isFinite(Number(item.xmlAttachment.size))
+                      ? Number(item.xmlAttachment.size)
+                      : null,
+                  xmlAttachmentDataUrl: String(item.xmlAttachment.dataUrl)
+                }
+              : {
+                  // Sem arquivo na tela: mantém o XML gravado (a tela não guarda anexos no cache).
+                  xmlAttachmentName: approvalById.get(String(item.id))?.xmlAttachmentName ?? null,
+                  xmlAttachmentMimeType: approvalById.get(String(item.id))?.xmlAttachmentMimeType ?? null,
+                  xmlAttachmentSize: approvalById.get(String(item.id))?.xmlAttachmentSize ?? null,
+                  xmlAttachmentDataUrl: approvalById.get(String(item.id))?.xmlAttachmentDataUrl ?? null
+                }),
             ...(mirrorHasNfConstarNaNota
               ? {
                   nfConstarNaNota:
@@ -662,6 +719,9 @@ router.put('/bootstrap', requireEspelhoNfRead, async (req, res, next) => {
       );
     }
 
+    if (espelhosPreservados.length) {
+      ops.push(p.espelhoNfMirror.createMany({ data: espelhosPreservados.map(semNulos) }));
+    }
     await p.$transaction(ops);
 
     return res.status(200).json({ success: true });

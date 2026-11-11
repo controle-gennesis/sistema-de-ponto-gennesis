@@ -68,6 +68,7 @@ router.post('/folders', DriveController.createFolder);
 router.get('/folders', DriveController.listFolders);
 router.patch('/folders/:id', DriveController.renameFolder);
 router.patch('/folders/:id/star', DriveController.starFolder);
+router.patch('/folders/:id/move', DriveController.moveFolder);
 router.patch('/folders/:id/appearance', DriveController.updateFolderAppearance);
 router.post('/folders/:id/restore', DriveController.restoreFolder);
 router.delete('/folders/:id/permanent', DriveController.permanentDeleteFolder);

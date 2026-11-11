@@ -18,6 +18,7 @@ import {
   Trash2,
   User,
   UserCheck,
+  Upload,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -28,7 +29,14 @@ import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppT
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import api from '@/lib/api';
-import { exportLicitacaoAnalisePdf } from '@/lib/exportLicitacaoAnalisePdf';
+import { exportLicitacaoAnalisePdf, exportLicitacaoChecklistParaIaPdf } from '@/lib/exportLicitacaoAnalisePdf';
+import {
+  codigosChecklistParaIa,
+  extrairTextoPdf,
+  lerRespostasChecklist,
+  type RespostaImportada,
+} from './licitacaoChecklistImportIa';
+import { LicitacaoChecklistImportModal } from './LicitacaoChecklistImportModal';
 import { exportLicitacaoAnalisePreliminarPdf } from '@/lib/exportLicitacaoAnalisePreliminarPdf';
 import { LicitacaoChecklistEditor } from './LicitacaoChecklistEditor';
 import { LicitacaoChecklistResumo } from './LicitacaoChecklistResumo';
@@ -285,6 +293,7 @@ type LicitacaoAnaliseJson = {
   checklistAnalise?: Record<string, { checked: boolean; comentario: string }>;
   analisePreliminar?: AnalisePreliminarData | null;
   linkNotebookLm?: string | null;
+  linkPastaDrive?: string | null;
   naoSeHabilita?: boolean;
   naoSeHabilitaItens?: NaoSeHabilitaItem[];
   indiceDocumentos?: Array<{ documentoId: string; nome: string }>;
@@ -479,6 +488,23 @@ export default function LicitacoesPage() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  /**
+   * Link do Notebook LM já preenchido quando a licitação foi aberta (vem da Análise Preliminar):
+   * nas fases seguintes ele só é mostrado; o campo para preencher aparece apenas se estiver vazio.
+   */
+  const [notebookJaPreenchido, setNotebookJaPreenchido] = useState(false);
+  /** Link da pasta da licitação no Drive: mesma regra do Notebook LM. */
+  const [linkPastaDrive, setLinkPastaDrive] = useState('');
+  const linkPastaDriveRef = useRef('');
+  const [driveJaPreenchido, setDriveJaPreenchido] = useState(false);
+  /** Arquivar: janela que pede o status final antes de enviar ao Arquivo. */
+  const [arquivarModalAberto, setArquivarModalAberto] = useState(false);
+  const [arquivarStatus, setArquivarStatus] = useState<LicitacaoArquivadaMotivo | ''>('');
+  /** Importação do checklist respondido pela IA (PDF): prévia antes de preencher. */
+  const [importRespostas, setImportRespostas] = useState<RespostaImportada[] | null>(null);
+  const [importNomeArquivo, setImportNomeArquivo] = useState('');
+  const [importandoChecklist, setImportandoChecklist] = useState(false);
+  const importChecklistInputRef = useRef<HTMLInputElement>(null);
   const [statusSelectHighlight, setStatusSelectHighlight] = useState(false);
   const statusSelectRef = useRef<HTMLSelectElement | null>(null);
   const [responsavelAnalise, setResponsavelAnalise] = useState('');
@@ -683,7 +709,8 @@ export default function LicitacoesPage() {
       return (res.data?.data ?? []) as Licitacao[];
     },
     staleTime: 0,
-    gcTime: 0,
+    // Mantém a última lista por 10 min: ao voltar ao módulo ela aparece na hora e é atualizada em seguida.
+    gcTime: 10 * 60_000,
     refetchOnMount: 'always',
     enabled: showAnaliseLayout,
   });
@@ -811,6 +838,10 @@ export default function LicitacoesPage() {
       setHasUnsavedChanges(false);
       setResponsavelAnalise('');
       setLinkNotebookLm('');
+      setNotebookJaPreenchido(false);
+      setLinkPastaDrive('');
+      linkPastaDriveRef.current = '';
+      setDriveJaPreenchido(false);
       setNaoSeHabilita(false);
       setNaoSeHabilitaItens([]);
       setAnaliseUsuario('');
@@ -837,6 +868,10 @@ export default function LicitacoesPage() {
       responsavelAnalise: savedResponsavelId ? savedResponsavel : '',
     };
     setLinkNotebookLm(selected.analiseJson?.linkNotebookLm ?? '');
+    setNotebookJaPreenchido(Boolean(selected.analiseJson?.linkNotebookLm?.trim()));
+    setLinkPastaDrive(selected.analiseJson?.linkPastaDrive ?? '');
+    linkPastaDriveRef.current = selected.analiseJson?.linkPastaDrive ?? '';
+    setDriveJaPreenchido(Boolean(selected.analiseJson?.linkPastaDrive?.trim()));
     setNaoSeHabilita(selected.analiseJson?.naoSeHabilita === true);
     setNaoSeHabilitaItens(
       Array.isArray(selected.analiseJson?.naoSeHabilitaItens)
@@ -959,6 +994,22 @@ export default function LicitacoesPage() {
     [checklistSections, updateChecklistTemplateMutation]
   );
 
+  /** Muda a posição de um item dentro da seção do checklist (vale para todas as licitações). */
+  const handleMoveChecklistItem = useCallback(
+    async (sectionId: string, fromIndex: number, toIndex: number) => {
+      const next = checklistSections.map((s) => {
+        if (s.id !== sectionId) return s;
+        const items = [...s.items];
+        const [movido] = items.splice(fromIndex, 1);
+        if (!movido) return s;
+        items.splice(Math.max(0, Math.min(toIndex, items.length)), 0, movido);
+        return { ...s, items };
+      });
+      await updateChecklistTemplateMutation.mutateAsync(next);
+    },
+    [checklistSections, updateChecklistTemplateMutation]
+  );
+
   const saveAnaliseMutation = useMutation({
     mutationFn: async (opts?: { silent?: boolean }) => {
       const id = selectedIdRef.current;
@@ -966,6 +1017,7 @@ export default function LicitacoesPage() {
       const payload = analiseManualRef.current;
       const res = await api.patch(`/licitacoes/${id}/analise-manual`, {
         linkNotebookLm: payload.linkNotebookLm,
+        linkPastaDrive: linkPastaDriveRef.current,
         analiseUsuario: payload.analiseUsuario,
         decisaoAnaliseFinal: payload.decisaoAnaliseFinal,
         analiseFinalTexto: payload.analiseFinalTexto,
@@ -995,6 +1047,27 @@ export default function LicitacoesPage() {
 
   const saveAnaliseRef = useRef(saveAnaliseMutation.mutate);
   saveAnaliseRef.current = saveAnaliseMutation.mutate;
+  const saveAnaliseAsyncRef = useRef(saveAnaliseMutation.mutateAsync);
+  saveAnaliseAsyncRef.current = saveAnaliseMutation.mutateAsync;
+
+  /**
+   * Salva o que o usuário editou e ainda não foi gravado (o salvamento automático espera até 60s)
+   * antes de mudar a fase, arquivar ou trocar de aba. Retorna false se não conseguiu salvar.
+   */
+  const salvarPendencias = useCallback(async (): Promise<boolean> => {
+    if (!selectedIdRef.current || !hasUserEditedRef.current) return true;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    try {
+      await saveAnaliseAsyncRef.current({ silent: true });
+      return true;
+    } catch {
+      toast.error('Não foi possível salvar as alterações. Tente salvar antes de continuar.');
+      return false;
+    }
+  }, []);
 
   const triggerSave = useCallback(() => {
     if (!selectedIdRef.current || !hasUserEditedRef.current) return;
@@ -1085,6 +1158,10 @@ export default function LicitacoesPage() {
       toast.error('Informe o link do caderno no Notebook LM para finalizar a análise.');
       return;
     }
+    if (!isValidNotebookLmUrl(linkPastaDrive)) {
+      toast.error('Informe o link da pasta no Drive para finalizar a análise.');
+      return;
+    }
     if (
       !window.confirm(
         'Finalizar a análise desta licitação? Você ainda poderá editar depois; o status voltará para "Em análise".'
@@ -1093,47 +1170,87 @@ export default function LicitacoesPage() {
       return;
     }
     finalizarAnaliseMutation.mutate();
-  }, [finalizarAnaliseMutation, linkNotebookLm, selectedId]);
+  }, [finalizarAnaliseMutation, linkNotebookLm, linkPastaDrive, selectedId]);
 
   const handleExportChecklistPdf = useCallback(async () => {
     if (!selected) return;
-
     setExportingPdf(true);
     try {
-      const manual = analiseManualRef.current;
-      // Checklist completo (todos os itens, inclusive os não marcados).
-      const sections = buildChecklistExportSections(checklistSections, manual.checklistState);
-      const responsavel =
-        manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '';
-
-      await exportLicitacaoAnalisePdf({
+      // Checklist em branco (sem marcações nem comentários), com códigos [1.1]… para a IA responder.
+      await exportLicitacaoChecklistParaIaPdf({
         titulo: tituloParaExibicao(display ?? selected, list),
-        sectionTitle: 'Checklist — Completo',
-        responsavelAnalise: responsavel,
-        linkNotebookLm: manual.linkNotebookLm,
-        analiseUsuario: manual.analiseUsuario,
-        naoSeHabilita: manual.naoSeHabilita,
-        naoSeHabilitaItens: manual.naoSeHabilitaItens.map((item) => ({
-          title: item.title,
-          isDone: item.isDone,
-        })),
-        sections: sections.map((section) => ({
-          title: section.title,
-          items: section.items.map((item) => ({
-            label: item.label,
-            checked: item.checked,
-            comentario: item.comentario,
-          })),
+        sections: codigosChecklistParaIa(checklistSections).map((sec) => ({
+          codigo: sec.codigo,
+          title: sec.title,
+          items: sec.items.map((it) => ({ codigo: it.codigo, label: it.label })),
         })),
       });
-
-      toast.success('Checklist exportado em PDF.');
+      toast.success('Checklist em branco exportado. Envie para a IA e importe o PDF respondido.');
     } catch {
       toast.error('Erro ao gerar o PDF. Tente novamente.');
     } finally {
       setExportingPdf(false);
     }
-  }, [checklistSections, display, list, selected, userData?.data?.name]);
+  }, [checklistSections, display, list, selected]);
+
+  /** Limpa todo o checklist desta licitação (marcações e comentários), após confirmação. */
+  const handleLimparChecklist = useCallback(() => {
+    if (!selected) return;
+    if (
+      !window.confirm(
+        'Tem certeza que deseja limpar todo o checklist desta licitação? Todas as marcações e comentários serão apagados.'
+      )
+    ) {
+      return;
+    }
+    hasUserEditedRef.current = true;
+    const vazio = emptyChecklistState(checklistSections);
+    setChecklistState(vazio);
+    analiseManualRef.current = { ...analiseManualRef.current, checklistState: vazio };
+    triggerSave();
+    toast.success('Checklist limpo.');
+  }, [checklistSections, selected, triggerSave]);
+
+  /** Lê o PDF devolvido pela IA e abre a prévia das respostas encontradas. */
+  const handleImportChecklistFile = useCallback(
+    async (file: File) => {
+      setImportandoChecklist(true);
+      try {
+        const texto = await extrairTextoPdf(file);
+        if (!texto.trim()) {
+          toast.error('Este PDF não tem texto para ler (parece escaneado). Peça o PDF em texto à IA.');
+          return;
+        }
+        setImportNomeArquivo(file.name);
+        setImportRespostas(lerRespostasChecklist(texto, checklistSections));
+      } catch {
+        toast.error('Não foi possível ler o PDF. Confira o arquivo e tente de novo.');
+      } finally {
+        setImportandoChecklist(false);
+      }
+    },
+    [checklistSections]
+  );
+
+  /** Preenche o checklist com as respostas confirmadas: marca o item e grava a resposta no comentário. */
+  const aplicarChecklistImportado = useCallback(
+    (respondidas: RespostaImportada[]) => {
+      if (respondidas.length === 0) return;
+      hasUserEditedRef.current = true;
+      setChecklistState((prev) => {
+        const next = { ...prev };
+        for (const r of respondidas) {
+          next[r.key] = { ...(prev[r.key] ?? { checked: false, comentario: '' }), checked: true, comentario: r.resposta };
+        }
+        analiseManualRef.current = { ...analiseManualRef.current, checklistState: next };
+        return next;
+      });
+      triggerSave();
+      setImportRespostas(null);
+      toast.success(`${respondidas.length} item(ns) do checklist preenchido(s).`);
+    },
+    [triggerSave]
+  );
 
   const handleExportAnalisePdf = useCallback(async () => {
     if (!selected) return;
@@ -1141,16 +1258,19 @@ export default function LicitacoesPage() {
     setExportingPdf(true);
     try {
       const manual = analiseManualRef.current;
-      // “Análise de Viabilidade” (resumo: só itens marcados ou comentados)
-      const sections = buildChecklistResumo(checklistSections, manual.checklistState);
+      // Análise completa: análise preliminar no início e o checklist preenchido (todos os itens).
+      const sections = buildChecklistExportSections(checklistSections, manual.checklistState);
       const responsavel =
         manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '';
 
       await exportLicitacaoAnalisePdf({
         titulo: tituloParaExibicao(display ?? selected, list),
-        sectionTitle: 'Checklist — Análise de Viabilidade',
+        sectionTitle: 'Checklist preenchido',
+        analisePreliminar: manual.analisePreliminar ?? null,
+        fileBaseName: 'licitacao-analise',
         responsavelAnalise: responsavel,
         linkNotebookLm: manual.linkNotebookLm,
+        linkPastaDrive: linkPastaDriveRef.current,
         analiseUsuario: manual.analiseUsuario,
         naoSeHabilita: manual.naoSeHabilita,
         naoSeHabilitaItens: manual.naoSeHabilitaItens.map((item) => ({
@@ -1212,6 +1332,7 @@ export default function LicitacoesPage() {
         responsavelAnalise:
           manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '',
         linkNotebookLm: manual.linkNotebookLm,
+        linkPastaDrive: linkPastaDriveRef.current,
       });
       toast.success('Análise preliminar exportada em PDF.');
     } catch {
@@ -1278,6 +1399,17 @@ export default function LicitacoesPage() {
       setHasUnsavedChanges(true);
       setLinkNotebookLm(value);
       analiseManualRef.current = { ...analiseManualRef.current, linkNotebookLm: value };
+      triggerSave();
+    },
+    [triggerSave]
+  );
+
+  const handleLinkPastaDriveChange = useCallback(
+    (value: string) => {
+      hasUserEditedRef.current = true;
+      setHasUnsavedChanges(true);
+      setLinkPastaDrive(value);
+      linkPastaDriveRef.current = value;
       triggerSave();
     },
     [triggerSave]
@@ -1482,29 +1614,21 @@ export default function LicitacoesPage() {
     },
   });
 
+  /** Arquivar: pede para atualizar o status final e só depois arquiva. */
   const handleEnviarParaArquivo = useCallback(() => {
     if (!selectedId || enviarArquivoMutation.isPending) return;
-    const motivo = display ? resolveStatusParaArquivar(display) : null;
-    if (!motivo || !isStatusArquivoPermitido(motivo)) {
-      setStatusSelectHighlight(true);
-      toast.error(
-        'Selecione um status permitido e depois clique em Arquivar: Suspensa, Declinada, Encerrada, Em andamento ou Vencida.'
-      );
-      window.setTimeout(() => {
-        statusSelectRef.current?.focus();
-      }, 0);
-      return;
-    }
-    if (
-      !window.confirm(
-        `Enviar esta licitação para o Arquivo com status "${arquivadaMotivoLabel(motivo)}"?`
-      )
-    ) {
-      return;
-    }
+    const atual = display ? resolveStatusParaArquivar(display) : null;
+    setArquivarStatus(atual && isStatusArquivoPermitido(atual) ? atual : '');
+    setArquivarModalAberto(true);
+  }, [display, enviarArquivoMutation.isPending, selectedId]);
+
+  const confirmarArquivar = useCallback(async () => {
+    if (!selectedId || !arquivarStatus || !isStatusArquivoPermitido(arquivarStatus)) return;
     setStatusSelectHighlight(false);
-    enviarArquivoMutation.mutate({ id: selectedId, motivo });
-  }, [display, enviarArquivoMutation, selectedId]);
+    setArquivarModalAberto(false);
+    if (!(await salvarPendencias())) return;
+    enviarArquivoMutation.mutate({ id: selectedId, motivo: arquivarStatus });
+  }, [arquivarStatus, enviarArquivoMutation, salvarPendencias, selectedId]);
 
   const setAnaliseEtapaMutation = useMutation({
     mutationFn: async ({
@@ -1576,6 +1700,42 @@ export default function LicitacoesPage() {
       selectedId,
       setStatusSelecionadoMutation,
     ]
+  );
+
+  /** Fase atual do processo aberto. */
+  const faseAtual: 'preliminar' | 'em_analise' | 'diretoria' = isPreliminarView
+    ? 'preliminar'
+    : isArquivadasView
+      ? 'diretoria'
+      : 'em_analise';
+
+  /** Botão Fase: só muda de fase (as mesmas ações de antes). */
+  const handleFaseSelect = useCallback(
+    async (fase: string) => {
+      if (!selectedId || fase === faseAtual) return;
+      // Salva automaticamente o que estiver pendente antes de mudar de fase.
+      if (!(await salvarPendencias())) return;
+      if (fase === 'preliminar' || fase === 'em_analise') {
+        const nome = fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
+        if (!window.confirm(`Enviar para ${nome}? O processo sairá da lista atual e ficará na aba ${nome}.`)) return;
+        setAnaliseEtapaMutation.mutate({ id: selectedId, etapa: fase });
+        return;
+      }
+      if (fase === 'diretoria') handleAtualizarStatusAnalise('aguardando_aprovacao');
+      else if (fase === 'orcamento') handleAtualizarStatusAnalise('orcamento');
+    },
+    [faseAtual, handleAtualizarStatusAnalise, salvarPendencias, selectedId, setAnaliseEtapaMutation]
+  );
+
+  /** Botão Status: só classifica (não move o processo). */
+  const handleStatusClassificar = useCallback(
+    (motivo: LicitacaoArquivadaMotivo) => {
+      if (!selectedId || !isStatusArquivoPermitido(motivo)) return;
+      const atual = display ? resolveStatusSelecionado(display) : null;
+      if (atual === motivo) return;
+      setStatusSelecionadoMutation.mutate({ id: selectedId, motivo });
+    },
+    [display, selectedId, setStatusSelecionadoMutation]
   );
 
   useEffect(() => {
@@ -1693,17 +1853,35 @@ export default function LicitacoesPage() {
           </span>
         ) : null}
       </p>
-      <button
-        type="button"
-        onClick={() => setListPanelExpanded(true)}
-        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
-      >
-        <ClipboardList className="h-4 w-4" />
-        Licitações
-        <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
-          {list.length}
-        </span>
-      </button>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {showAnaliseLayout && !isPreliminarView && selected ? (
+          <button
+            type="button"
+            onClick={() => void handleExportAnalisePdf()}
+            disabled={exportingPdf}
+            title="PDF com a análise preliminar e o checklist preenchido"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 text-sm font-semibold text-amber-950 shadow-sm transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {exportingPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Download className="h-4 w-4" aria-hidden />
+            )}
+            {exportingPdf ? 'Gerando PDF…' : 'Exportar Análise'}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setListPanelExpanded(true)}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+        >
+          <ClipboardList className="h-4 w-4" />
+          Licitações
+          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+            {list.length}
+          </span>
+        </button>
+      </div>
     </div>
   );
 
@@ -2027,6 +2205,42 @@ export default function LicitacoesPage() {
         <div className="space-y-5">
           <header className="flex flex-col gap-4">
             <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              {/* Fases de apoio: separadas das fases do processo, no canto superior esquerdo. */}
+              <nav
+                aria-label="Fases de apoio"
+                className="flex flex-wrap items-center justify-center gap-1.5 lg:col-start-1 lg:row-start-1 lg:justify-start lg:self-start"
+              >
+                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Apoio
+                </span>
+                {(
+                  [
+                    { id: 'habilitacao-pendente' as const, label: 'Habilitação Pendente' },
+                    { id: 'consulta-rapida-cats' as const, label: 'Consulta Rápida - CATs' },
+                    { id: 'banco-cats' as const, label: 'Banco CATs' },
+                  ] as const
+                ).map((tab) => {
+                  const active = viewMode === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={async () => {
+                        if (tab.id !== viewMode && !(await salvarPendencias())) return;
+                        setViewMode(tab.id);
+                      }}
+                      aria-current={active ? 'page' : undefined}
+                      className={`inline-flex h-9 items-center whitespace-nowrap rounded-full border px-3.5 text-sm font-medium transition-colors ${
+                        active
+                          ? 'border-red-600 bg-red-600 text-white shadow-sm'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-red-300 hover:text-red-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-700 dark:hover:text-red-300'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </nav>
               <div className="text-center lg:col-start-2">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
                   Licitações
@@ -2065,18 +2279,71 @@ export default function LicitacoesPage() {
             </div>
           </header>
 
+          {arquivarModalAberto ? (
+            <AppModalOverlay className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                  <Archive className="h-6 w-6 text-gray-700 dark:text-gray-200" aria-hidden />
+                </div>
+                <h3 className="text-center text-lg font-semibold text-gray-900 dark:text-gray-100">Arquivar licitação</h3>
+                <p className="mt-1 text-center text-sm text-gray-600 dark:text-gray-400">
+                  Atualize o status final antes de arquivar. A licitação vai para o Arquivo com esse status.
+                </p>
+                <div className="mt-5 space-y-2">
+                  {ARQUIVADA_MOTIVO_OPTIONS.filter((o) => isStatusArquivoPermitido(o.value)).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setArquivarStatus(option.value)}
+                      className={`flex w-full items-center justify-between rounded-lg border-2 px-3 py-2.5 text-left text-sm font-medium transition-colors ${
+                        arquivarStatus === option.value
+                          ? 'border-red-500 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/30 dark:text-red-200'
+                          : 'border-gray-200 text-gray-800 hover:border-gray-300 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      {option.singular}
+                      {arquivarStatus === option.value ? <span className="text-xs font-semibold">Selecionado</span> : null}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setArquivarModalAberto(false)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!arquivarStatus}
+                    onClick={confirmarArquivar}
+                    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Archive className="h-4 w-4" aria-hidden />
+                    Arquivar
+                  </button>
+                </div>
+              </div>
+            </AppModalOverlay>
+          ) : null}
+
+          <LicitacaoChecklistImportModal
+            respostas={importRespostas}
+            nomeArquivo={importNomeArquivo}
+            onClose={() => setImportRespostas(null)}
+            onConfirmar={aplicarChecklistImportado}
+          />
+
           <AppUnderlineTabList aria-label="Seções do módulo">
             {(
               [
-                { id: 'orcamento' as const, label: 'Orçamento' },
-                { id: 'arquivadas' as const, label: 'Análise Diretoria' },
-                { id: 'analise' as const, label: 'Em Análise' },
-                { id: 'preliminar' as const, label: 'Análise Preliminar' },
-                { id: 'regioes' as const, label: 'Por Região' },
-                { id: 'banco-cats' as const, label: 'Banco CATs' },
-                { id: 'consulta-rapida-cats' as const, label: 'Consulta Rápida - CATs' },
-                { id: 'habilitacao-pendente' as const, label: 'Habilitação Pendente' },
                 { id: 'arquivo' as const, label: 'Arquivo' },
+                { id: 'regioes' as const, label: 'Por Região' },
+                { id: 'preliminar' as const, label: 'Análise Preliminar' },
+                { id: 'analise' as const, label: 'Em Análise' },
+                { id: 'arquivadas' as const, label: 'Análise Diretoria' },
+                { id: 'orcamento' as const, label: 'Orçamento' },
               ] as const
             ).map((tab) => {
               const active = viewMode === tab.id;
@@ -2084,11 +2351,12 @@ export default function LicitacoesPage() {
                 <AppUnderlineTabButton
                   key={tab.id}
                   active={active}
-                  onClick={() => {
+                  onClick={async () => {
+                    if (tab.id !== viewMode && !(await salvarPendencias())) return;
                     if (tab.id === 'arquivadas') setSelectedId(null);
                     setViewMode(tab.id);
                   }}
-                  className="inline-flex items-center whitespace-nowrap px-2 py-2.5 text-xs sm:px-3 sm:text-sm"
+                  className="inline-flex items-center whitespace-nowrap px-2.5 py-3 text-sm font-medium sm:px-4 sm:text-base"
                 >
                   {tab.label}
                 </AppUnderlineTabButton>
@@ -2225,6 +2493,94 @@ export default function LicitacoesPage() {
 
             <main className="min-w-0 space-y-5">
               {!selectedId ? (
+                loadingList ? (
+                  <Card className="border-dashed">
+                    <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                      <Loader2 className="mb-3 h-7 w-7 animate-spin text-red-600" aria-hidden />
+                      <p className="font-medium text-gray-900 dark:text-gray-100">Carregando licitações…</p>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Buscando os processos desta etapa. Só um instante.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : list.length > 0 ? (
+                  <Card>
+                    <CardContent className="p-0">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                        <div className="flex items-center gap-3">
+                          <span className="inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-xl bg-red-600 px-2 text-lg font-bold tabular-nums text-white">
+                            {list.length}
+                          </span>
+                          <div>
+                            <p className="font-semibold text-gray-900 dark:text-gray-100">
+                              {isArquivadasView
+                                ? 'análise(s) na Diretoria'
+                                : isPreliminarView
+                                  ? 'processo(s) na Análise Preliminar'
+                                  : 'processo(s) em análise'}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Escolha um processo para abrir.</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setListPanelExpanded(true)}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                          Ver todos e filtrar
+                        </button>
+                      </div>
+                      <ul className="divide-y divide-gray-100 dark:divide-gray-700/70">
+                        {list.slice(0, 8).map((item) => {
+                          const titulo = tituloParaExibicao(item, list);
+                          const responsavel =
+                            !isArquivadasView && item.analiseJson?.responsavelAnaliseId?.trim()
+                              ? item.analiseJson.responsavelAnalise?.trim() || 'Assumida'
+                              : !isArquivadasView
+                                ? 'Disponível'
+                                : null;
+                          return (
+                            <li key={item.id}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedId(item.id)}
+                                className="flex w-full items-start justify-between gap-3 px-5 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    {titulo}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                                    {formatDateOnly(
+                                      isArquivadasView && item.arquivadaEm ? item.arquivadaEm : item.createdAt
+                                    )}
+                                    {item.estado ? ` · ${item.estado}` : ''}
+                                    {responsavel ? ` · ${responsavel}` : ''}
+                                  </span>
+                                </span>
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${licitacaoStatusBadgeClass(item, false, isArquivadasView)}`}
+                                >
+                                  {licitacaoStatusLabel(item, isArquivadasView)}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {list.length > 8 ? (
+                        <button
+                          type="button"
+                          onClick={() => setListPanelExpanded(true)}
+                          className="w-full border-t border-gray-200 px-5 py-2.5 text-center text-sm font-medium text-red-600 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/30"
+                        >
+                          Ver os outros {list.length - 8} processo(s)
+                        </button>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                ) : (
                 <Card className="border-dashed">
                   <CardContent className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-50 dark:bg-red-950/40">
@@ -2250,6 +2606,7 @@ export default function LicitacoesPage() {
                     </button>
                   </CardContent>
                 </Card>
+                )
               ) : loadingSelected || !display ? (
                 <Card>
                   <CardContent className="flex justify-center py-20">
@@ -2299,129 +2656,90 @@ export default function LicitacoesPage() {
                           <ClipboardList className="h-4 w-4" />
                           Lista
                         </button>
-                        {isArquivadasView ? (
-                          <>
-                            <label className="relative inline-flex items-center">
-                              <ChevronDown
-                                className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
-                                aria-hidden
-                              />
-                              <select
-                                ref={statusSelectRef}
-                                aria-label="Status"
-                                disabled={arquivarMutation.isPending || desarquivarMutation.isPending}
-                                value={display ? resolveArquivadaMotivo(display) ?? '' : ''}
-                                onChange={(e) => {
-                                  const motivo = e.target.value as LicitacaoArquivadaMotivo | '';
-                                  if (!motivo) return;
-                                  setStatusSelectHighlight(false);
-                                  handleStatusSelect(motivo);
-                                }}
-                                className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
-                                  statusSelectHighlight
-                                    ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
-                                    : 'border-gray-300 dark:border-gray-600'
-                                }`}
-                              >
-                                <option value="" disabled>
-                                  Status
-                                </option>
-                                {ARQUIVADA_MOTIVO_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <button
-                              type="button"
-                              disabled={desarquivarMutation.isPending || enviarArquivoMutation.isPending}
-                              onClick={handleDesarquivarAnalise}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-                            >
-                              {desarquivarMutation.isPending ? (
-                                <span className="inline-flex items-center gap-1.5">
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  Restaurando…
-                                </span>
-                              ) : (
-                                'Reabrir análise'
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={enviarArquivoMutation.isPending || desarquivarMutation.isPending}
-                              onClick={handleEnviarParaArquivo}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-                            >
-                              {enviarArquivoMutation.isPending ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Archive className="h-4 w-4" />
-                              )}
-                              Arquivar
-                            </button>
-                          </>
-                        ) : !display.arquivada ? (
-                          <label className="relative inline-flex items-center">
-                            <ChevronDown
-                              className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
-                              aria-hidden
-                            />
-                            <select
-                              ref={statusSelectRef}
-                              aria-label="Status"
-                              disabled={
-                                saveAnaliseMutation.isPending ||
-                                arquivarMutation.isPending ||
-                                finalizarAnaliseMutation.isPending ||
-                                setAnaliseEtapaMutation.isPending ||
-                                enviarArquivoMutation.isPending ||
-                                setStatusSelecionadoMutation.isPending
-                              }
-                              value={display ? resolveStatusSelecionado(display) ?? '' : ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                if (!value) return;
-                                if (value === '__em_analise__') {
-                                  setStatusSelectHighlight(false);
-                                  handleEnviarParaEmAnalise();
-                                  return;
-                                }
-                                if (value === '__preliminar__') {
-                                  setStatusSelectHighlight(false);
-                                  handleEnviarParaAnalisePreliminar();
-                                  return;
-                                }
-                                handleStatusSelect(value as LicitacaoArquivadaMotivo);
-                              }}
-                              className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
-                                statusSelectHighlight
-                                  ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
-                                  : 'border-gray-300 dark:border-gray-600'
-                              }`}
-                            >
-                              <option value="" disabled>
-                                {arquivarMutation.isPending ||
-                                setAnaliseEtapaMutation.isPending ||
-                                setStatusSelecionadoMutation.isPending
-                                  ? 'Salvando…'
-                                  : 'Status'}
+                        <label className="relative inline-flex items-center" title="Mudar a fase do processo">
+                          <ChevronDown
+                            className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
+                            aria-hidden
+                          />
+                          <select
+                            aria-label="Fase"
+                            disabled={
+                              saveAnaliseMutation.isPending ||
+                              arquivarMutation.isPending ||
+                              desarquivarMutation.isPending ||
+                              finalizarAnaliseMutation.isPending ||
+                              setAnaliseEtapaMutation.isPending ||
+                              enviarArquivoMutation.isPending ||
+                              setStatusSelecionadoMutation.isPending
+                            }
+                            value={faseAtual}
+                            onChange={(e) => handleFaseSelect(e.target.value)}
+                            className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 border-gray-300 dark:border-gray-600`}
+                          >
+                            <option value="preliminar">Fase: Análise Preliminar</option>
+                            <option value="em_analise">Fase: Em Análise</option>
+                            <option value="diretoria">Fase: Análise Diretoria</option>
+                            <option value="orcamento">Fase: Orçamento</option>
+                          </select>
+                        </label>
+                        <label className="relative inline-flex items-center" title="Classificar o processo (não muda a fase)">
+                          <ChevronDown
+                            className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
+                            aria-hidden
+                          />
+                          <select
+                            ref={statusSelectRef}
+                            aria-label="Status"
+                            disabled={
+                              saveAnaliseMutation.isPending ||
+                              arquivarMutation.isPending ||
+                              desarquivarMutation.isPending ||
+                              finalizarAnaliseMutation.isPending ||
+                              setAnaliseEtapaMutation.isPending ||
+                              enviarArquivoMutation.isPending ||
+                              setStatusSelecionadoMutation.isPending
+                            }
+                            value={display ? resolveStatusSelecionado(display) ?? '' : ''}
+                            onChange={(e) => {
+                              const motivo = e.target.value as LicitacaoArquivadaMotivo | '';
+                              if (!motivo) return;
+                              setStatusSelectHighlight(false);
+                              handleStatusClassificar(motivo);
+                            }}
+                            className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
+                              statusSelectHighlight
+                                ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
+                                : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                          >
+                            <option value="" disabled>
+                              {setStatusSelecionadoMutation.isPending ? 'Salvando…' : 'Status'}
+                            </option>
+                            {ARQUIVADA_MOTIVO_OPTIONS.filter((o) => isStatusArquivoPermitido(o.value)).map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.singular}
                               </option>
-                              {isPreliminarView ? (
-                                <option value="__em_analise__">Em Análise</option>
-                              ) : (
-                                <option value="__preliminar__">Análise Preliminar</option>
-                              )}
-                              {ARQUIVADA_MOTIVO_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                            ))}
+                          </select>
+                        </label>
+                        {isArquivadasView ? (
+                          <button
+                            type="button"
+                            disabled={desarquivarMutation.isPending || enviarArquivoMutation.isPending}
+                            onClick={handleDesarquivarAnalise}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                          >
+                            {desarquivarMutation.isPending ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Restaurando…
+                              </span>
+                            ) : (
+                              'Reabrir análise'
+                            )}
+                          </button>
                         ) : null}
-                        {!display.arquivada ? (
+                        {isArquivadasView || !display.arquivada ? (
                           <button
                             type="button"
                             disabled={enviarArquivoMutation.isPending || arquivarMutation.isPending}
@@ -2526,8 +2844,10 @@ export default function LicitacoesPage() {
                       titulo={display ? buildLicitacaoTituloDisplay(display) : undefined}
                       showPreliminar
                       analisePreliminar={analisePreliminar}
-                      showNotebook
+                      showNotebook={notebookJaPreenchido}
                       linkNotebookLm={linkNotebookLm}
+                      showDrive={driveJaPreenchido}
+                      linkPastaDrive={linkPastaDrive}
                       showEmAnaliseResumo={false}
                     />
                   ) : null}
@@ -2539,6 +2859,8 @@ export default function LicitacoesPage() {
                       analisePreliminar={analisePreliminar}
                       showNotebook
                       linkNotebookLm={linkNotebookLm}
+                      showDrive
+                      linkPastaDrive={linkPastaDrive}
                       showEmAnaliseResumo
                       analiseUsuario={analiseUsuario}
                       responsavelAnalise={responsavelAnalise}
@@ -2548,9 +2870,16 @@ export default function LicitacoesPage() {
                     />
                   ) : null}
 
-                  {!isArquivadasView ? (
+                  {!isArquivadasView &&
+                  (isPreliminarView || !notebookJaPreenchido || !driveJaPreenchido) ? (
                   <Card padding="none" className="shadow-sm">
                     <CardContent className="px-5 py-3">
+                      <div
+                        className={`grid grid-cols-1 gap-4 ${
+                          isPreliminarView || (!notebookJaPreenchido && !driveJaPreenchido) ? 'lg:grid-cols-2' : ''
+                        }`}
+                      >
+                      {isPreliminarView || !notebookJaPreenchido ? (
                       <label className="block">
                         <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                           Link do caderno no Notebook LM
@@ -2587,6 +2916,46 @@ export default function LicitacoesPage() {
                             : 'Obrigatório para finalizar a análise.'}
                         </p>
                       </label>
+                      ) : null}
+                      {isPreliminarView || !driveJaPreenchido ? (
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Link da pasta no Drive
+                          {!isPreliminarView ? (
+                            <span className="ml-0.5 text-red-600" aria-hidden="true">
+                              *
+                            </span>
+                          ) : null}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="url"
+                            value={linkPastaDrive}
+                            onChange={(e) => handleLinkPastaDriveChange(e.target.value)}
+                            placeholder="https://drive.google.com/..."
+                            disabled={!canEditAnaliseManual || saveAnaliseMutation.isPending}
+                            className="h-9 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-gray-950"
+                          />
+                          {isValidNotebookLmUrl(linkPastaDrive) ? (
+                            <a
+                              href={normalizeNotebookLmUrl(linkPastaDrive)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                              Abrir
+                            </a>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {isPreliminarView
+                            ? 'Segue para as próximas fases.'
+                            : 'Obrigatório para finalizar a análise.'}
+                        </p>
+                      </label>
+                      ) : null}
+                      </div>
                     </CardContent>
                   </Card>
                   ) : null}
@@ -2652,6 +3021,45 @@ export default function LicitacoesPage() {
                                 ? 'Exportar PDF'
                                 : 'Exportar Checklist'}
                           </button>
+                          {!isPreliminarView ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={handleLimparChecklist}
+                                disabled={!selected || !canEditAnaliseManual || saveAnaliseMutation.isPending}
+                                title="Apagar todas as marcações e comentários do checklist"
+                                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                              >
+                                <Trash2 className="h-4 w-4" aria-hidden />
+                                Limpar checklist
+                              </button>
+                              <input
+                                ref={importChecklistInputRef}
+                                type="file"
+                                accept="application/pdf,.pdf"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = '';
+                                  if (file) void handleImportChecklistFile(file);
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => importChecklistInputRef.current?.click()}
+                                disabled={importandoChecklist || !selected}
+                                title="Importar o PDF do checklist respondido pela IA e preencher automaticamente"
+                                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                              >
+                                {importandoChecklist ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                ) : (
+                                  <Upload className="h-4 w-4" aria-hidden />
+                                )}
+                                {importandoChecklist ? 'Lendo PDF…' : 'Importar checklist respondido'}
+                              </button>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     </CardHeader>
@@ -2803,6 +3211,7 @@ export default function LicitacoesPage() {
                           canManageItems={canManageChecklistItems}
                           onAddItem={handleAddChecklistItem}
                           onRemoveItem={handleRemoveChecklistItem}
+                          onMoveItem={handleMoveChecklistItem}
                           managingItems={updateChecklistTemplateMutation.isPending}
                         />
                       </div>
@@ -2852,12 +3261,15 @@ export default function LicitacoesPage() {
                                 !canEditAnaliseManual ||
                                 saveAnaliseMutation.isPending ||
                                 finalizarAnaliseMutation.isPending ||
-                                !isValidNotebookLmUrl(linkNotebookLm)
+                                !isValidNotebookLmUrl(linkNotebookLm) ||
+                                !isValidNotebookLmUrl(linkPastaDrive)
                               }
                               title={
-                                isValidNotebookLmUrl(linkNotebookLm)
-                                  ? undefined
-                                  : 'Informe o link do caderno no Notebook LM'
+                                !isValidNotebookLmUrl(linkNotebookLm)
+                                  ? 'Informe o link do caderno no Notebook LM'
+                                  : !isValidNotebookLmUrl(linkPastaDrive)
+                                    ? 'Informe o link da pasta no Drive'
+                                    : undefined
                               }
                               onClick={handleFinalizarAnalise}
                               className="rounded-lg border border-emerald-600 px-3 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
@@ -2903,19 +3315,6 @@ export default function LicitacoesPage() {
                             Análise de Viabilidade
                           </h3>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleExportAnalisePdf()}
-                          disabled={exportingPdf || !selected}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                        >
-                          {exportingPdf ? (
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          ) : (
-                            <Download className="h-4 w-4" aria-hidden />
-                          )}
-                          {exportingPdf ? 'Gerando PDF…' : 'Exportar Análise'}
-                        </button>
                       </div>
                     </CardHeader>
                     <CardContent className="px-5 pb-5">

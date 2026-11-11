@@ -396,6 +396,35 @@ export class DriveService {
     return prisma.driveFolder.update({ where: { id }, data: { name } });
   }
 
+  /**
+   * Move a pasta (com subpastas e arquivos) para dentro de outra, ou para a raiz (parentId = null).
+   * Só o dono move; precisa poder escrever no destino; não pode ir para dentro dela mesma ou de uma subpasta.
+   */
+  async moveFolder(id: string, parentId: string | null, userId: string) {
+    const folder = await prisma.driveFolder.findFirst({ where: { id, ...NOT_TRASHED } });
+    if (!folder) throw new Error('Pasta não encontrada');
+    if (folder.ownerId !== userId) throw new Error('Apenas o dono da pasta pode movê-la');
+    if ((folder.parentId ?? null) === parentId) return folder;
+    if (parentId) {
+      if (parentId === id) throw new Error('Não é possível mover a pasta para dentro dela mesma');
+      const destino = await prisma.driveFolder.findFirst({ where: { id: parentId, ...NOT_TRASHED } });
+      if (!destino) throw new Error('Pasta de destino não encontrada');
+      // Sobe a partir do destino: se encontrar a própria pasta, o destino é uma subpasta dela.
+      let atual: { id: string; parentId: string | null } | null = destino;
+      const vistos = new Set<string>();
+      while (atual && !vistos.has(atual.id)) {
+        if (atual.id === id) throw new Error('Não é possível mover a pasta para dentro de uma subpasta dela');
+        vistos.add(atual.id);
+        atual = atual.parentId
+          ? await prisma.driveFolder.findUnique({ where: { id: atual.parentId }, select: { id: true, parentId: true } })
+          : null;
+      }
+      const can = await this.canUserWriteInFolder(userId, parentId);
+      if (!can) throw new Error('Pasta de destino sem permissão de escrita');
+    }
+    return prisma.driveFolder.update({ where: { id }, data: { parentId } });
+  }
+
   /** Ícone e cor da pasta (só o dono). Vazio (null) volta ao padrão. */
   async updateFolderAppearance(
     id: string,

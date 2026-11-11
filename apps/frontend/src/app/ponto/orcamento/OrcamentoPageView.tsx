@@ -16836,7 +16836,7 @@ export function OrcamentoPageView({
             totSem,
             totCom,
             totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
-            observacoesPorItem[row.key] ?? '',
+            observacoesPorItem[row.key]?.trim() || row.dimensoes?.observacao?.trim() || '',
           ],
         });
       });
@@ -17813,7 +17813,8 @@ export function OrcamentoPageView({
       const un = unidadeComposicaoParaExibicao(row.unidadeComposicao, tipoAuto) || unidadeLabel(tipoAuto);
       const rotulo = rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1);
       const rotulos = row.dimensoes?.rotulosColunas;
-      const observacao = observacoesPorItem[row.key]?.trim() || '';
+      // A observação digitada na Memória de Cálculo fica em `dimensoes.observacao`; a da aba Orçamento, em `observacoesPorItem`.
+      const observacao = row.dimensoes?.observacao?.trim() || observacoesPorItem[row.key]?.trim() || '';
       const descricaoItem = (row.item.descricao || '').trim().toUpperCase();
 
       const precoUnitSemBdi = Number(row.item.precoUnitario) || null;
@@ -21799,6 +21800,7 @@ export function OrcamentoPageView({
                     <div className={cronogramaOnly ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : `w-full min-w-0 ${gradeHideVerticalScrollbarCls}`}>
                     <OrcamentoCronogramaPainel
                       linhas={linhasCronograma}
+                      dimensoesPorItem={dimensoesPorItem}
                       cronograma={cronograma}
                       onChange={setCronograma}
                       centroCustoId={centroCustoId}

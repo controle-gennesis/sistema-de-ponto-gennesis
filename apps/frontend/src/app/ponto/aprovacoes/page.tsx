@@ -26,10 +26,15 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Check, Download, Eye, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { DetailInfoSection, type DetailInfoField } from '@/components/ui/DetailInfoLayout';
+import { useCostCenters } from '@/hooks/useCostCenters';
+import { federalRatesForTaxCode } from '@/components/espelho-nf/EspelhoNfResumo';
 import {
   exportEspelhoNfPdf,
   fmtEspelhoBrl,
   parseEspelhoBrCurrencyToNumber,
+  buildEspelhoDetailRows,
+  espelhoMirrorForExport,
   type EspelhoFederalRates
 } from '@/lib/exportEspelhoNfLayout';
 import {
@@ -292,6 +297,8 @@ function AprovacoesPage() {
   const [managerRejectingId, setManagerRejectingId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
   const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
+  /** Espelho aberto na janela de detalhes (clique na linha). */
+  const [espelhoDetailId, setEspelhoDetailId] = useState<string | null>(null);
   const [espelhoActionMenu, setEspelhoActionMenu] = useState<{
     mirrorId: string;
     top: number;
@@ -431,6 +438,11 @@ function AprovacoesPage() {
     taxCodes: []
   };
   const espelhoApprovals = espelhoData.items;
+  const { costCenters: costCentersEspelho } = useCostCenters();
+  const espelhoDetail = useMemo(
+    () => (espelhoDetailId ? espelhoApprovals.find((i) => i.id === espelhoDetailId) ?? null : null),
+    [espelhoDetailId, espelhoApprovals]
+  );
 
   // Decisões antigas (que só existiam no navegador de quem aprovou) são enviadas ao servidor uma vez.
   const legacyEspelhoSyncedRef = React.useRef(false);
@@ -798,24 +810,18 @@ function AprovacoesPage() {
       irpj: '0',
       pis: '0'
     };
-    let federal = fallbackFederal;
-    try {
-      const raw = localStorage.getItem('espelho-nf-federal-tax-rates');
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<EspelhoFederalRates>;
-        federal = {
-          cofins: String(parsed?.cofins ?? '0'),
-          csll: String(parsed?.csll ?? '0'),
-          inss: String(parsed?.inss ?? '0'),
-          irpj: String(parsed?.irpj ?? '0'),
-          pis: String(parsed?.pis ?? '0')
-        };
-      }
-    } catch {
-      federal = fallbackFederal;
-    }
+    // Alíquotas federais do código tributário do espelho (as mesmas do espelho emitido no Conecta).
+    const taxCodeDoEspelho = espelhoData.taxCodes.find(
+      (t: any) => String(t?.id ?? '') === String(item.mirror?.taxCodeId ?? '')
+    );
+    const federal: EspelhoFederalRates = taxCodeDoEspelho
+      ? federalRatesForTaxCode(taxCodeDoEspelho)
+      : fallbackFederal;
     exportEspelhoNfPdf(
-      item.mirror,
+      espelhoMirrorForExport(
+        item.mirror,
+        (costCentersEspelho ?? []).map((cc: any) => ({ id: cc.id, code: cc.code, name: cc.name }))
+      ),
       espelhoData.providers,
       espelhoData.takers,
       espelhoData.bankAccounts,
@@ -1260,7 +1266,20 @@ function AprovacoesPage() {
                           const takerName = m.takerName || 'Tomador não informado';
                           const measurementRef = m.measurementRef?.trim() || '—';
                           return (
-                            <tr key={m.id} className={listTableRowClasses.tr} title={m.id}>
+                            <tr
+                              key={m.id}
+                              className={getListTableRowClassName(true, listTableRowClasses.tr)}
+                              title="Ver detalhes do espelho"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setEspelhoDetailId(m.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setEspelhoDetailId(m.id);
+                                }
+                              }}
+                            >
                               <td className={espelhoTdRefCls}>
                                 <span className="line-clamp-2" title={measurementRef}>
                                   {measurementRef}
@@ -1282,7 +1301,7 @@ function AprovacoesPage() {
                               <td className={espelhoTdCenterCls}>
                                 <ApprovalStatusBadge kind={espelhoToApprovalStatus(m.status)} />
                               </td>
-                              <td className={espelhoActionTdCls}>
+                              <td className={espelhoActionTdCls} onClick={(e) => e.stopPropagation()}>
                                 <div className="flex justify-end">
                                   <button
                                     type="button"
@@ -1405,6 +1424,157 @@ function AprovacoesPage() {
               </div>,
               document.body
             )}
+
+          <Modal
+            isOpen={!!espelhoDetail}
+            onClose={() => setEspelhoDetailId(null)}
+            title="Detalhes do espelho"
+            size="lg"
+            footer={
+              espelhoDetail ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadEspelhoPdf(espelhoDetail)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Baixar PDF
+                  </button>
+                  {espelhoDetail.status !== 'FINALIZED' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const id = espelhoDetail.id;
+                          setEspelhoDetailId(null);
+                          void applyEspelhoDecision(id, 'CANCELLED', 'Espelho cancelado.');
+                        }}
+                        className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        Cancelar espelho
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const id = espelhoDetail.id;
+                          setEspelhoDetailId(null);
+                          void applyEspelhoDecision(id, 'SENT_FOR_CORRECTION', 'Espelho enviado para correção.');
+                        }}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                      >
+                        Enviar para correção
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const id = espelhoDetail.id;
+                          setEspelhoDetailId(null);
+                          void applyEspelhoDecision(id, 'APPROVED', 'Espelho aprovado.');
+                        }}
+                        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Aprovar espelho
+                      </button>
+                    </>
+                  ) : null}
+                </>
+              ) : null
+            }
+          >
+            {espelhoDetail
+              ? (() => {
+                  const m = espelhoDetail.mirror ?? {};
+                  const nome = (lista: any[], id: unknown, ...campos: string[]) => {
+                    const row = lista.find((x: any) => String(x?.id ?? '') === String(id ?? ''));
+                    for (const c of campos) if (row?.[c]) return String(row[c]);
+                    return '';
+                  };
+                  const taxCodeRow =
+                    espelhoData.taxCodes.find((t: any) => String(t?.id ?? '') === String(m.taxCodeId ?? '')) ?? null;
+                  // Completa nomes e textos que a lista pode não trazer (evita campos vazios ou nulos).
+                  const draft = {
+                    ...m,
+                    measurementRef: String(m.measurementRef ?? ''),
+                    measurementAmount: String(m.measurementAmount ?? ''),
+                    laborAmount: String(m.laborAmount ?? ''),
+                    materialAmount: String(m.materialAmount ?? ''),
+                    observations: String(m.observations ?? ''),
+                    notes: String(m.notes ?? ''),
+                    providerName: m.providerName || nome(espelhoData.providers, m.providerId, 'corporateName', 'name'),
+                    takerName: espelhoDetail.takerName || m.takerName || '',
+                    bankAccountName: m.bankAccountName || nome(espelhoData.bankAccounts, m.bankAccountId, 'name'),
+                    taxCodeCityName: m.taxCodeCityName || nome(espelhoData.taxCodes, m.taxCodeId, 'cityName'),
+                  };
+                  const rows = buildEspelhoDetailRows(
+                    draft as never,
+                    (costCentersEspelho ?? []).map((cc: any) => ({ id: cc.id, code: cc.code, name: cc.name })),
+                    taxCodeRow as never,
+                    (taxCodeRow as { iss?: never } | null)?.iss ?? null,
+                    federalRatesForTaxCode(taxCodeRow)
+                  );
+                  const pick = (labels: string[]): DetailInfoField[] =>
+                    labels
+                      .map((label) => rows.find(([l]) => l === label))
+                      .filter((r): r is [string, string] => !!r)
+                      .map(([label, value]) => ({
+                        label,
+                        value: value || '—',
+                        stacked: label === 'Observações' || label === 'Outras informações',
+                      }));
+                  return (
+                    <div className="space-y-6">
+                      <DetailInfoSection
+                        title="Aprovação"
+                        fields={[
+                          {
+                            label: 'Status',
+                            value: <ApprovalStatusBadge kind={espelhoToApprovalStatus(espelhoDetail.status)} />,
+                          },
+                        ]}
+                      />
+                      <DetailInfoSection
+                        title="Medição"
+                        fields={pick([
+                          'Referência da medição',
+                          'Medição (R$)',
+                          'Mão de obra (R$)',
+                          'Material (R$)',
+                          'Valor final da nota (R$)',
+                          'Vencimento',
+                          'Início da medição',
+                          'Fim da medição',
+                        ])}
+                      />
+                      <DetailInfoSection
+                        title="Material e bases de cálculo"
+                        fields={pick([
+                          'Limite Material INSS',
+                          'Limite Material ISS',
+                          'Base de cálculo INSS',
+                          'Base de cálculo ISS',
+                        ])}
+                      />
+                      <DetailInfoSection
+                        title="Dados da nota"
+                        fields={pick([
+                          'Prestador',
+                          'Tomador',
+                          'Centro de custo',
+                          'Conta bancária',
+                          'Código tributário (contrato)',
+                          'Nº Empenho',
+                          'Nº Processo',
+                          'Ordem de Serviço',
+                          'Unidade Predial',
+                          'Observações',
+                          'Outras informações',
+                        ])}
+                      />
+                    </div>
+                  );
+                })()
+              : null}
+          </Modal>
 
           {canApproveFd && activeTab === 'fd' && <FdApprovalsSection />}
 

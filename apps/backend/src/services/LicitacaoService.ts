@@ -41,6 +41,22 @@ import {
 } from './licitacaoDocumentContext';
 import { tryFastPathAnswer } from './licitacaoQaFastPath';
 import { syncAllPendingAceitesToLicitacoes } from './licitacaoRegiaoAceiteLicitacaoSync';
+
+const INTERVALO_SYNC_ACEITES_MS = 60_000;
+let syncAceitesEmAndamento: Promise<unknown> | null = null;
+let ultimoSyncAceites = 0;
+
+/** Dispara a sincronização dos aceites sem bloquear quem chamou (uma por vez, no máximo 1x/min). */
+function sincronizarAceitesEmSegundoPlano(): void {
+  if (syncAceitesEmAndamento) return;
+  if (Date.now() - ultimoSyncAceites < INTERVALO_SYNC_ACEITES_MS) return;
+  ultimoSyncAceites = Date.now();
+  syncAceitesEmAndamento = syncAllPendingAceitesToLicitacoes()
+    .catch((err) => console.warn('[LicitacaoService] falha ao sincronizar aceites em segundo plano', err))
+    .finally(() => {
+      syncAceitesEmAndamento = null;
+    });
+}
 import { unlinkAceitesFromDeletedLicitacao } from './licitacaoRegiaoAceiteStore';
 import {
   licitacaoStoreAddDocumento,
@@ -143,6 +159,8 @@ export type LicitacaoOrigemRegiao = {
 
 export type LicitacaoAnalisePreliminar = {
   cabecalho?: string;
+  /** Análise aberta (texto longo) da Análise Preliminar. */
+  analiseAberta?: string;
   rows?: Array<{
     id?: string;
     label?: string;
@@ -184,6 +202,8 @@ export type LicitacaoAnalisePersistida = {
   checklistAnalise?: Record<string, { checked: boolean; comentario: string | null }>;
   analisePreliminar?: LicitacaoAnalisePreliminar | null;
   linkNotebookLm?: string | null;
+  /** Link da pasta da licitação no Drive (mesma regra do Notebook LM). */
+  linkPastaDrive?: string | null;
   naoSeHabilita?: boolean;
   naoSeHabilitaItens?: Array<{ id: string; title: string; isDone: boolean }>;
   analiseManualFinalizada?: boolean;
@@ -332,6 +352,11 @@ function parseAnalisePreliminar(raw: unknown): LicitacaoAnalisePreliminar | null
     hasAny = true;
   }
 
+  if (typeof o.analiseAberta === 'string') {
+    out.analiseAberta = o.analiseAberta.slice(0, 50_000);
+    if (o.analiseAberta.trim()) hasAny = true;
+  }
+
   if (Array.isArray(o.rows)) {
     const rows: NonNullable<LicitacaoAnalisePreliminar['rows']> = [];
     for (const entry of o.rows) {
@@ -404,6 +429,7 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
     analiseUsuarioAtualizadaEm:
       typeof o.analiseUsuarioAtualizadaEm === 'string' ? o.analiseUsuarioAtualizadaEm : null,
     linkNotebookLm: typeof o.linkNotebookLm === 'string' ? o.linkNotebookLm : null,
+    linkPastaDrive: typeof o.linkPastaDrive === 'string' ? o.linkPastaDrive : null,
     checklistAnalise: parseChecklistAnalise(o.checklistAnalise),
     analisePreliminar: parseAnalisePreliminar(o.analisePreliminar),
     naoSeHabilita: o.naoSeHabilita === true,
@@ -521,6 +547,8 @@ function mergeAnaliseJson(
         : base.analiseUsuarioAtualizadaEm,
     linkNotebookLm:
       patch.linkNotebookLm !== undefined ? patch.linkNotebookLm : base.linkNotebookLm,
+    linkPastaDrive:
+      patch.linkPastaDrive !== undefined ? patch.linkPastaDrive : base.linkPastaDrive,
     checklistAnalise:
       patch.checklistAnalise !== undefined ? patch.checklistAnalise : base.checklistAnalise,
     analisePreliminar:
@@ -702,7 +730,9 @@ async function readDocumentBuffer(storagePath: string): Promise<Buffer> {
 
 export class LicitacaoService {
   async list(filters: LicitacaoListFilters = {}) {
-    await syncAllPendingAceitesToLicitacoes();
+    // A sincronização dos aceites (rede de segurança; o aceite já cria o processo na hora) roda em
+    // segundo plano e no máximo 1x por minuto: a lista responde na hora, sem esperar as planilhas.
+    sincronizarAceitesEmSegundoPlano();
     const rows = await licitacaoStoreList({
       search: filters.search,
       dataInicio: filters.dataInicio,
@@ -801,6 +831,7 @@ export class LicitacaoService {
       vigenciaContrato: string;
       responsavelAnalise: string;
       linkNotebookLm: string;
+      linkPastaDrive: string;
       analiseUsuario: string;
       checklistAnalise: Record<string, { checked: boolean; comentario: string }>;
       analisePreliminar: LicitacaoAnalisePreliminar | null;
@@ -813,6 +844,7 @@ export class LicitacaoService {
     const hasAnaliseManual =
       data.responsavelAnalise !== undefined ||
       data.linkNotebookLm !== undefined ||
+      data.linkPastaDrive !== undefined ||
       data.analiseUsuario !== undefined ||
       data.checklistAnalise !== undefined ||
       data.analisePreliminar !== undefined ||
@@ -846,6 +878,9 @@ export class LicitacaoService {
           : {}),
         ...(data.linkNotebookLm !== undefined
           ? { linkNotebookLm: data.linkNotebookLm.trim() || null }
+          : {}),
+        ...(data.linkPastaDrive !== undefined
+          ? { linkPastaDrive: String(data.linkPastaDrive).trim() || null }
           : {}),
         ...(checklistPatch !== undefined ? { checklistAnalise: checklistPatch } : {}),
         ...(data.analisePreliminar !== undefined
@@ -913,6 +948,10 @@ export class LicitacaoService {
       }
     } catch {
       throw new Error('Informe um link válido do caderno no Notebook LM para finalizar a análise.');
+    }
+    const linkPastaDrive = analise.linkPastaDrive?.trim() ?? '';
+    if (!linkPastaDrive) {
+      throw new Error('Informe o link da pasta no Drive para finalizar a análise.');
     }
 
     const now = new Date().toISOString();

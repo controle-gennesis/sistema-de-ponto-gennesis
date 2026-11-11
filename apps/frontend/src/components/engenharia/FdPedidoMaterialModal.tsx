@@ -259,7 +259,7 @@ export function FdPedidoMaterialModal({
       const salvas = initialMap?.[ins.key];
       init[ins.key] = salvas && salvas.length > 0
         ? salvas.map((r) => ({ ...r, unidade: r.materialUnit || r.unidade || '' }))
-        : [linhaVazia(ins.quantidade, '')];
+        : [linhaVazia(0, '')];
     }
     setMappings(init);
     setBusca('');
@@ -291,8 +291,13 @@ export function FdPedidoMaterialModal({
       const multi = rows.length > 1;
       const unidadeAlterada = rows.some((r) => r.unidade.trim().toUpperCase() !== unidadeFd.toUpperCase());
       const alerta = !travado && (multi || unidadeAlterada);
+      // Pode pedir a mais que a FD; abaixo da quantidade da FD o item não é integral.
       const quantidadeDiferente =
-        !travado && !alerta && rows.length === 1 && Math.abs(rows[0].quantity - (ins?.quantidade ?? 0)) > QTD_EPS;
+        !travado &&
+        !alerta &&
+        rows.length === 1 &&
+        rows[0].quantity > 0 &&
+        rows[0].quantity < (ins?.quantidade ?? 0) - QTD_EPS;
       return { rows, travado, multi, unidadeAlterada, alerta, quantidadeDiferente };
     },
     [insumoPorKey, mappings, pedidoPorKey],
@@ -415,7 +420,7 @@ export function FdPedidoMaterialModal({
     if (itensNaoIntegrais.length > 0) {
       const ins = itensNaoIntegrais[0];
       toast.error(
-        `Item ${ins.item}: deve ser solicitado de forma integral (${fmtQtd(ins.quantidade)} ${ins.unidade}).`,
+        `Item ${ins.item}: deve ser solicitado de forma integral (no mínimo ${fmtQtd(ins.quantidade)} ${ins.unidade}).`,
       );
       return;
     }
@@ -477,8 +482,8 @@ export function FdPedidoMaterialModal({
         className={`rounded-lg border p-3 ${
           analise.travado
             ? 'border-gray-200 bg-gray-100/70 opacity-80 dark:border-gray-700 dark:bg-gray-800/30'
-            : analise.alerta || analise.quantidadeDiferente
-            ? 'border-red-400 bg-red-50/60 dark:border-red-700 dark:bg-red-950/20'
+            : analise.quantidadeDiferente
+            ? 'border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20'
             : pronto
             ? 'border-green-300 bg-green-50/60 dark:border-green-800 dark:bg-green-950/20'
             : rmsDoItem.length > 0
@@ -604,10 +609,7 @@ export function FdPedidoMaterialModal({
                 {/* Unidade do material no cadastro (= TOTVS); não editável. */}
                 <span
                   className={`flex w-16 shrink-0 items-center justify-center rounded-md border bg-gray-50 px-2 py-1.5 text-center text-sm dark:bg-gray-800/60 ${
-                    row.materialId &&
-                    row.unidade.trim().toUpperCase() !== ins.unidade.trim().toUpperCase()
-                      ? 'border-red-500 text-red-700 dark:border-red-500 dark:text-red-300'
-                      : 'border-gray-200 text-gray-700 dark:border-gray-700 dark:text-gray-200'
+                    'border-gray-200 text-gray-700 dark:border-gray-700 dark:text-gray-200'
                   }`}
                   title={
                     row.materialId
@@ -649,20 +651,8 @@ export function FdPedidoMaterialModal({
               </div>
             ))}
             {analise.quantidadeDiferente && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
-                O item deve ser solicitado de forma integral: {fmtQtd(ins.quantidade)} {ins.unidade}.
-              </p>
-            )}
-            {analise.alerta && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
-                Atenção:{' '}
-                {[
-                  analise.multi ? '1 item da FD com vários materiais' : '',
-                  analise.unidadeAlterada ? `unidade diferente da FD (${ins.unidade})` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' e ')}
-                . A quantidade não é travada e este item aparecerá destacado para o gestor na aprovação da RM.
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                O item deve ser solicitado de forma integral: no mínimo {fmtQtd(ins.quantidade)} {ins.unidade}.
               </p>
             )}
           </div>
