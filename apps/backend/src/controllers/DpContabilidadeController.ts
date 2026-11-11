@@ -393,6 +393,139 @@ export class DpContabilidadeController {
     }
   }
 
+  /** Aplica a mudança de status (concluir/cancelar/em andamento) e propaga para a solicitação de origem. */
+  private async applyStatus(
+    existing: Prisma.DpContabilidadeRequestGetPayload<Record<string, never>>,
+    actor: Awaited<ReturnType<typeof loadActor>>,
+    status: z.infer<typeof statusSchema>['status'],
+    comment: string | undefined,
+    byLabel: 'Contabilidade' | 'DP'
+  ) {
+    const data: Prisma.DpContabilidadeRequestUpdateInput = { status };
+    if (status === 'CONCLUDED') {
+      data.concludedAt = new Date();
+      data.concludedByUserId = actor.id;
+    }
+    if (status === 'CANCELLED') {
+      data.cancelledAt = new Date();
+      data.cancelledByUserId = actor.id;
+    }
+
+    const commentBody = comment
+      ? status === 'CANCELLED'
+        ? `Motivo do cancelamento: ${comment}`
+        : comment
+      : '';
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.dpContabilidadeRequest.update({
+        where: { id: existing.id, status: existing.status },
+        data,
+      });
+      if (commentBody) {
+        await tx.dpContabilidadeComment.create({
+          data: {
+            requestId: row.id,
+            userId: actor.id,
+            userName: actor.name,
+            body: commentBody,
+          },
+        });
+      }
+      // Pedido nascido de uma solicitação interna direta: o status volta para quem pediu.
+      const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
+      const resumo =
+        status === 'CONCLUDED'
+          ? `${byLabel} concluiu o atendimento${comment ? `: ${comment}` : '.'}`
+          : status === 'CANCELLED'
+            ? `${byLabel} cancelou o atendimento: ${comment}`
+            : '';
+      if (sourceId && resumo) {
+        const origem = await tx.dpRequest.findUnique({
+          where: { id: sourceId },
+          select: { requestType: true },
+        });
+        // Tipos antigos (concluídos pelo DP e encaminhados): a etapa não muda, só o histórico ganha o retorno.
+        if (origem && !isAccountingDirectRequestType(origem.requestType)) {
+          await appendSourceHistoryNote(tx, sourceId, actor, resumo);
+        }
+      }
+      if (sourceId && (status === 'CONCLUDED' || status === 'CANCELLED')) {
+        const source = await tx.dpRequest.findUnique({
+          where: { id: sourceId },
+          select: { id: true, requestType: true, status: true, statusHistory: true },
+        });
+        if (
+          source &&
+          isAccountingDirectRequestType(source.requestType) &&
+          source.status === 'IN_ACCOUNTING'
+        ) {
+          const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+          await tx.dpRequest.update({
+            where: { id: source.id },
+            data: {
+              status,
+              statusHistory: [
+                ...history,
+                {
+                  at: new Date().toISOString(),
+                  status,
+                  actorUserId: actor.id,
+                  actorName: actor.name,
+                  ...(comment ? { note: comment } : {}),
+                },
+              ] as Prisma.InputJsonValue,
+              dpHandledBy: actor.id,
+              ...(status === 'CONCLUDED'
+                ? { dpConcludedAt: new Date(), dpConclusionComment: comment || null }
+                : { dpCancellationReason: comment || null }),
+            },
+          });
+        }
+      }
+      return tx.dpContabilidadeRequest.findUniqueOrThrow({
+        where: { id: row.id },
+        include: listInclude,
+      });
+    });
+    if (status === 'CONCLUDED' || status === 'CANCELLED') {
+      void sendPushToUsers([existing.createdByUserId], {
+        title: status === 'CONCLUDED' ? `${byLabel} concluiu seu pedido` : `${byLabel} cancelou seu pedido`,
+        body: existing.title + (comment ? `: ${comment.slice(0, 120)}` : ''),
+        data: { type: 'dp-contabilidade', id: existing.id },
+      });
+    }
+    return updated;
+  }
+
+  /** O DP encerra o pedido que está com a Contabilidade (depois da conversa entre os dois). */
+  async concludeFromDp(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const { comment } = z.object({ comment: z.string().trim().max(4000).optional() }).parse(req.body ?? {});
+      const actor = await loadActor(req.user.id);
+      const existing = await prisma.dpContabilidadeRequest.findUnique({
+        where: { sourceDpRequestId: req.params.id },
+      });
+      if (!existing) throw createError('Esta solicitação não tem pedido na Contabilidade.', 404);
+      if (existing.status === 'CONCLUDED' || existing.status === 'CANCELLED') {
+        throw createError('O pedido da Contabilidade já está encerrado.', 400);
+      }
+      const updated = await this.applyStatus(existing, actor, 'CONCLUDED', comment || undefined, 'DP');
+      res.json({ success: true, data: { id: updated.id, status: updated.status } });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
+        return;
+      }
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('O pedido foi atualizado por outra pessoa. Atualize a lista e tente novamente.', 409));
+        return;
+      }
+      next(err);
+    }
+  }
+
   async updateStatus(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -408,100 +541,7 @@ export class DpContabilidadeController {
         throw createError('Esta solicitação já está encerrada e permanece no histórico.', 400);
       }
 
-      const data: Prisma.DpContabilidadeRequestUpdateInput = { status };
-      if (status === 'CONCLUDED') {
-        data.concludedAt = new Date();
-        data.concludedByUserId = actor.id;
-      }
-      if (status === 'CANCELLED') {
-        data.cancelledAt = new Date();
-        data.cancelledByUserId = actor.id;
-      }
-
-      const commentBody = comment
-        ? status === 'CANCELLED'
-          ? `Motivo do cancelamento: ${comment}`
-          : comment
-        : '';
-
-      const updated = await prisma.$transaction(async (tx) => {
-        const row = await tx.dpContabilidadeRequest.update({
-          where: { id: existing.id, status: existing.status },
-          data,
-        });
-        if (commentBody) {
-          await tx.dpContabilidadeComment.create({
-            data: {
-              requestId: row.id,
-              userId: actor.id,
-              userName: actor.name,
-              body: commentBody,
-            },
-          });
-        }
-        // Pedido nascido de uma solicitação interna direta: o status volta para quem pediu.
-        const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
-        const resumo =
-          status === 'CONCLUDED'
-            ? `Contabilidade concluiu o atendimento${comment ? `: ${comment}` : '.'}`
-            : status === 'CANCELLED'
-              ? `Contabilidade cancelou o atendimento: ${comment}`
-              : '';
-        if (sourceId && resumo) {
-          const origem = await tx.dpRequest.findUnique({
-            where: { id: sourceId },
-            select: { requestType: true },
-          });
-          // Tipos antigos (concluídos pelo DP e encaminhados): a etapa não muda, só o histórico ganha o retorno.
-          if (origem && !isAccountingDirectRequestType(origem.requestType)) {
-            await appendSourceHistoryNote(tx, sourceId, actor, resumo);
-          }
-        }
-        if (sourceId && (status === 'CONCLUDED' || status === 'CANCELLED')) {
-          const source = await tx.dpRequest.findUnique({
-            where: { id: sourceId },
-            select: { id: true, requestType: true, status: true, statusHistory: true },
-          });
-          if (
-            source &&
-            isAccountingDirectRequestType(source.requestType) &&
-            source.status === 'IN_ACCOUNTING'
-          ) {
-            const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
-            await tx.dpRequest.update({
-              where: { id: source.id },
-              data: {
-                status,
-                statusHistory: [
-                  ...history,
-                  {
-                    at: new Date().toISOString(),
-                    status,
-                    actorUserId: actor.id,
-                    actorName: actor.name,
-                    ...(comment ? { note: comment } : {}),
-                  },
-                ] as Prisma.InputJsonValue,
-                dpHandledBy: actor.id,
-                ...(status === 'CONCLUDED'
-                  ? { dpConcludedAt: new Date(), dpConclusionComment: comment || null }
-                  : { dpCancellationReason: comment || null }),
-              },
-            });
-          }
-        }
-        return tx.dpContabilidadeRequest.findUniqueOrThrow({
-          where: { id: row.id },
-          include: listInclude,
-        });
-      });
-      if (status === 'CONCLUDED' || status === 'CANCELLED') {
-        void sendPushToUsers([existing.createdByUserId], {
-          title: status === 'CONCLUDED' ? 'Contabilidade concluiu seu pedido' : 'Contabilidade cancelou seu pedido',
-          body: existing.title + (comment ? `: ${comment.slice(0, 120)}` : ''),
-          data: { type: 'dp-contabilidade', id: existing.id },
-        });
-      }
+      const updated = await this.applyStatus(existing, actor, status, comment, 'Contabilidade');
       res.json({ success: true, data: (await serializeWithSources([updated]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {

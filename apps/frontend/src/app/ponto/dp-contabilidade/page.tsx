@@ -801,63 +801,77 @@ export default function DpContabilidadePage() {
                 </div>
               )}
 
-              <div>
-                <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Histórico de mensagens
-                </p>
-                {selected.comments.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhuma mensagem registrada ainda.
+              {!selected.sourceDpRequestId ? (
+                <div>
+                  <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Histórico de mensagens
                   </p>
-                ) : (
-                  <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
-                    {selected.comments.map((comment) => (
-                      <div
-                        key={comment.id}
-                        className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
-                      >
-                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                          <span className="font-medium text-gray-700 dark:text-gray-300">
-                            {comment.userName}
-                          </span>
-                          <span>{formatDateTimeBr(comment.createdAt, '—')}</span>
+                  {selected.comments.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Nenhuma mensagem registrada ainda.
+                    </p>
+                  ) : (
+                    <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
+                      {selected.comments.map((comment) => (
+                        <div
+                          key={comment.id}
+                          className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                              {comment.userName}
+                            </span>
+                            <span>{formatDateTimeBr(comment.createdAt, '—')}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">
+                            {comment.body}
+                          </p>
                         </div>
-                        <p className="whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">
-                          {comment.body}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               {selected.sourceDpRequestId ? (
                 <DpRequestMessages
                   requestId={selected.sourceDpRequestId}
-                  title={`Conversa com o DP${selected.source?.displayNumber ? ` (solicitação nº ${selected.source.displayNumber})` : ''}`}
+                  title="Histórico de mensagens"
+                  placeholder="Escreva uma mensagem para a contabilidade ou para o DP..."
+                  legacyItems={selected.comments.map((c) => ({
+                    id: `legacy-${c.id}`,
+                    userId: '',
+                    userName: c.userName,
+                    body: c.body,
+                    createdAt: c.createdAt,
+                  }))}
                 />
               ) : null}
 
               {canActOnSelected ? (
                 <div className="space-y-3">
-                  <textarea
-                    value={commentBody}
-                    onChange={(e) => setCommentBody(e.target.value)}
-                    maxLength={4000}
-                    placeholder="Escreva uma mensagem para a contabilidade ou para o DP..."
-                    className={FORM_FIELD_TEXTAREA_CLS}
-                  />
+                  {!selected.sourceDpRequestId ? (
+                    <textarea
+                      value={commentBody}
+                      onChange={(e) => setCommentBody(e.target.value)}
+                      maxLength={4000}
+                      placeholder="Escreva uma mensagem para a contabilidade ou para o DP..."
+                      className={FORM_FIELD_TEXTAREA_CLS}
+                    />
+                  ) : null}
                   <div className="flex flex-wrap justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!commentBody.trim() || commentMutation.isPending}
-                      onClick={() =>
-                        commentMutation.mutate({ id: selected.id, body: commentBody.trim() })
-                      }
-                    >
-                      {commentMutation.isPending ? 'Enviando...' : 'Enviar mensagem'}
-                    </Button>
+                    {!selected.sourceDpRequestId ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!commentBody.trim() || commentMutation.isPending}
+                        onClick={() =>
+                          commentMutation.mutate({ id: selected.id, body: commentBody.trim() })
+                        }
+                      >
+                        {commentMutation.isPending ? 'Enviando...' : 'Enviar mensagem'}
+                      </Button>
+                    ) : null}
                     {selected.status === 'OPEN' ? (
                       <Button
                         type="button"
@@ -870,22 +884,26 @@ export default function DpContabilidadePage() {
                         Marcar em andamento
                       </Button>
                     ) : null}
-                    <Button
-                      type="button"
-                      variant="success"
-                      disabled={statusMutation.isPending}
-                      onClick={() => openConfirm('CONCLUDED')}
-                    >
-                      Concluir
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="error"
-                      disabled={statusMutation.isPending}
-                      onClick={() => openConfirm('CANCELLED')}
-                    >
-                      Cancelar
-                    </Button>
+                    {!selected.sourceDpRequestId ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="success"
+                          disabled={statusMutation.isPending}
+                          onClick={() => openConfirm('CONCLUDED')}
+                        >
+                          Concluir
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="error"
+                          disabled={statusMutation.isPending}
+                          onClick={() => openConfirm('CANCELLED')}
+                        >
+                          Cancelar
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               ) : (

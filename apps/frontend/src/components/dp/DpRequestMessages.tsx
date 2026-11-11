@@ -19,10 +19,13 @@ export function DpRequestMessages({
   requestId,
   title = 'Histórico de mensagens',
   placeholder = 'Escreva uma mensagem para o DP, a Administração ou a Contabilidade...',
+  legacyItems = [],
 }: {
   requestId: string;
   title?: string;
   placeholder?: string;
+  /** Mensagens antigas (ex.: histórico próprio da Contabilidade) mostradas na mesma lista, por data. */
+  legacyItems?: Message[];
 }) {
   const queryClient = useQueryClient();
   const [body, setBody] = useState('');
@@ -54,7 +57,9 @@ export function DpRequestMessages({
     },
   });
 
-  const items = data ?? [];
+  const items = [...legacyItems, ...(data ?? [])].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
 
   return (
     <div>

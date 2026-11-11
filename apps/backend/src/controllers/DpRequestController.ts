@@ -876,6 +876,18 @@ export class DpRequestController {
       const linked = await findDpRequestIdsLinkedToAccounting(candidates.map((r) => r.id));
       const pending = new Set(candidates.filter((r) => !linked.has(r.id)).map((r) => r.id));
       data = summarized.map((r) => ({ ...r, contabilidadePendente: pending.has(r.id) }));
+      // Pedido ligado na Contabilidade (para o botão "Concluir atendimento da Contabilidade").
+      const linkedRows = candidates.length
+        ? await prisma.dpContabilidadeRequest.findMany({
+            where: { sourceDpRequestId: { in: candidates.map((c) => c.id) } },
+            select: { id: true, status: true, sourceDpRequestId: true },
+          })
+        : [];
+      const byDp = new Map(linkedRows.map((l) => [l.sourceDpRequestId, { id: l.id, status: l.status }]));
+      data = (data as Array<(typeof data)[number] & { id: string }>).map((r) => ({
+        ...r,
+        contabilidade: byDp.get(r.id) ?? null,
+      })) as typeof data;
     }
     return res.json({ success: true, data });
   }
