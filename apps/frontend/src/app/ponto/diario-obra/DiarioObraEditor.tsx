@@ -41,6 +41,8 @@ import { PageStack } from '@/components/ui/pageLayout';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
+import { FileDropZone } from '@/components/ui/FileDropZone';
+import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { exportDiarioObraPdf } from './diarioObraPdf';
 
 // ---------------------------------------------------------------------------------------------
@@ -49,7 +51,8 @@ import { exportDiarioObraPdf } from './diarioObraPdf';
 
 type Sky = 'SUN' | 'PARTLY' | 'RAIN' | null;
 type Period = { sky: Sky; practicable: boolean | null };
-type Row = Record<string, string | number | null> & { id: string };
+type Photo = { url: string; key: string; name: string };
+type Row = Record<string, string | number | null | Photo[]> & { id: string };
 
 type Rdo = {
   noActivity: boolean;
@@ -435,6 +438,110 @@ function RowList({
   );
 }
 
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+/** Atividades do dia: cabeçalho padrão (ícone, título e horário), descrição e fotos. */
+function ActivityCards({
+  rows,
+  locked,
+  uploadingId,
+  onEdit,
+  onRemove,
+  onAddPhotos,
+  onRemovePhoto,
+}: {
+  rows: Row[];
+  locked: boolean;
+  uploadingId: string | null;
+  onEdit: (r: Row) => void;
+  onRemove: (r: Row) => void;
+  onAddPhotos: (r: Row, files: File[]) => void;
+  onRemovePhoto: (r: Row, p: Photo) => void;
+}) {
+  return (
+    <ul className="space-y-4">
+      {rows.map((r, i) => {
+        const photos = (Array.isArray(r.photos) ? r.photos : []) as Photo[];
+        const start = String(r.start ?? '');
+        const end = String(r.end ?? '');
+        const description = String(r.description ?? '');
+        return (
+          <li
+            key={r.id}
+            className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 sm:p-5"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 text-base font-bold text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                {i + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="break-words text-base font-semibold text-gray-900 dark:text-gray-100">
+                  {String(r.title ?? '') || '—'}
+                </h4>
+                {start || end ? (
+                  <p className="mt-0.5 text-sm tabular-nums text-gray-600 dark:text-gray-400">
+                    {start || '--:--'} às {end || '--:--'}
+                  </p>
+                ) : null}
+              </div>
+              {locked ? null : (
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onEdit(r)}
+                    className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                    aria-label="Editar"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(r)}
+                    className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    aria-label="Remover"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {description ? (
+              <p className="mt-3 whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-300">
+                {description}
+              </p>
+            ) : null}
+
+            {photos.length > 0 ? (
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                {photos.map((ph) => (
+                  <FilePreviewCard
+                    key={ph.key || ph.url}
+                    file={{ originalName: ph.name || 'Foto', fileUrl: ph.url, mimeType: 'image/jpeg' }}
+                    onRemove={locked ? undefined : () => onRemovePhoto(r, ph)}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {locked ? null : (
+              <FileDropZone
+                className={photos.length > 0 ? 'mt-3 py-4' : 'mt-4 py-4'}
+                label="Adicionar foto"
+                hint="Clique ou arraste imagens (até 5 MB cada)"
+                accept="image/*"
+                multiple
+                uploading={uploadingId === r.id}
+                onFiles={(files) => onAddPhotos(r, files)}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function FieldsModal({
   config,
   initial,
@@ -784,6 +891,7 @@ export function DiarioObraEditor({
   const [finalizedAt, setFinalizedAt] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | 'delete' | 'finalize' | 'reopen'>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
   const dirtyRef = useRef(false);
   const locked = !!finalizedAt;
 
@@ -1021,8 +1129,62 @@ export function DiarioObraEditor({
     setModal(null);
   };
 
+  const photosUrl = `/diario-obra/${obraId}/${selected}/photos`;
+
   const removeRow = (section: SectionKey, row: Row) => {
+    // Atividade removida: apaga também os arquivos das fotos dela (sem travar se algum falhar).
+    if (section === 'activities' && Array.isArray(row.photos)) {
+      for (const ph of row.photos as Photo[]) {
+        if (ph.key) void api.delete(photosUrl, { data: { key: ph.key } }).catch(() => undefined);
+      }
+    }
     update((r) => ({ ...r, [section]: r[section].filter((x) => x.id !== row.id) }));
+  };
+
+  const addPhotos = async (row: Row, files: File[]) => {
+    if (locked || files.length === 0) return;
+    setUploadingId(row.id);
+    const added: Photo[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`"${file.name}" não é uma imagem.`);
+        continue;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        toast.error(`"${file.name}" passa de 5 MB.`);
+        continue;
+      }
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api.post(photosUrl, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const d = res.data?.data;
+        if (d?.url) added.push({ url: d.url, key: d.key ?? '', name: d.name || file.name });
+      } catch {
+        toast.error(`Não foi possível enviar "${file.name}".`);
+      }
+    }
+    setUploadingId(null);
+    if (added.length > 0) {
+      update((r) => ({
+        ...r,
+        activities: r.activities.map((a) =>
+          a.id === row.id ? { ...a, photos: [...((Array.isArray(a.photos) ? a.photos : []) as Photo[]), ...added] } : a,
+        ),
+      }));
+    }
+  };
+
+  const removePhoto = (row: Row, photo: Photo) => {
+    if (photo.key) void api.delete(photosUrl, { data: { key: photo.key } }).catch(() => undefined);
+    update((r) => ({
+      ...r,
+      activities: r.activities.map((a) =>
+        a.id === row.id
+          ? { ...a, photos: ((Array.isArray(a.photos) ? a.photos : []) as Photo[]).filter((p) => p.url !== photo.url) }
+          : a,
+      ),
+    }));
   };
 
   const NEW_LABEL: Record<SectionKey, string> = {
@@ -1065,6 +1227,19 @@ export function DiarioObraEditor({
           icon={EmptyIcon}
           title={EMPTY_TITLE[section]}
           hint={`Clique em "${NEW_LABEL[section]}" para adicionar`}
+        />
+      );
+    }
+    if (section === 'activities') {
+      return (
+        <ActivityCards
+          rows={rdo.activities}
+          locked={locked}
+          uploadingId={uploadingId}
+          onEdit={(row) => setModal({ section, row })}
+          onRemove={(row) => removeRow(section, row)}
+          onAddPhotos={(row, files) => void addPhotos(row, files)}
+          onRemovePhoto={removePhoto}
         />
       );
     }

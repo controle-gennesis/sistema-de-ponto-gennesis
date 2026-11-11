@@ -1,6 +1,6 @@
 import type jsPDF from 'jspdf';
 
-type Cell = string | number | null | undefined;
+type Cell = string | number | null | undefined | unknown[];
 type Row = Record<string, Cell>;
 type Period = { sky: string | null; practicable: boolean | null };
 
@@ -35,8 +35,8 @@ const MARGIN = 14;
 const SKY_LABEL: Record<string, string> = { SUN: 'Ensolarado', PARTLY: 'Nublado', RAIN: 'Chuvoso' };
 const SEVERITY_LABEL: Record<string, string> = { LOW: 'Baixa', MEDIUM: 'Média', HIGH: 'Alta' };
 
-const s = (v: Cell) => (v === null || v === undefined ? '' : String(v).trim());
-const num = (v: Cell) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
+const s = (v: Cell) => (v === null || v === undefined || Array.isArray(v) ? '' : String(v).trim());
+const num = (v: Cell) => (v === null || v === undefined || v === '' || Array.isArray(v) ? '' : String(v).replace('.', ','));
 const join = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' · ');
 const interval = (r: Row) => (s(r.start) || s(r.end) ? `${s(r.start) || '--:--'} às ${s(r.end) || '--:--'}` : '');
 
@@ -215,7 +215,13 @@ export async function exportDiarioObraPdf(input: DiarioObraPdfInput): Promise<vo
 
   sectionTitle('Atividades', `${input.activities.length} registro(s)`);
   items(
-    input.activities.map((r) => ({ title: s(r.title), detail: join(interval(r), s(r.description)) })),
+    input.activities.map((r) => {
+      const fotos = Array.isArray(r.photos) ? r.photos.length : 0;
+      return {
+        title: s(r.title),
+        detail: join(interval(r), s(r.description), fotos > 0 && `${fotos} foto(s)`),
+      };
+    }),
     'Nenhuma atividade registrada.',
   );
 

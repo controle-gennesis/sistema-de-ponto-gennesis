@@ -1,10 +1,12 @@
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { prisma } from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireModuleAccess } from '../middleware/permissionAuth';
 import { createError } from '../middleware/errorHandler';
 import { getLiberadoContractAccessForUser } from '../lib/contractAccess';
+import { uploadPhoto, handleUploadError } from '../middleware/upload';
+import { savePersistentUpload, deletePersistentUpload } from '../lib/persistentUpload';
 
 const router = Router();
 router.use(authenticate);
@@ -63,6 +65,11 @@ function normalizeContent(body: any) {
       description: str(a?.description),
       start: str(a?.start, 5),
       end: str(a?.end, 5),
+      photos: list(a?.photos, 30).map((p: any) => ({
+        url: str(p?.url, 500),
+        key: str(p?.key, 500),
+        name: str(p?.name, 200),
+      })).filter((p: { url: string }) => !!p.url),
     })),
     labor: { direct: labor(body?.labor?.direct), indirect: labor(body?.labor?.indirect) },
     equipment: list(body?.equipment).map((e: any) => ({
@@ -282,10 +289,68 @@ router.post('/:obraId/:date/reopen', async (req, res, next) => {
   }
 });
 
+/** Envia uma foto de atividade: guarda o arquivo e devolve o endereço para ficar na atividade. */
+router.post(
+  '/:obraId/:date/photos',
+  uploadPhoto.single('file'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { obraId, date } = req.params;
+      if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+      if (!req.file?.buffer) throw createError('Selecione uma foto', 400);
+      const row = await prisma.diarioObra.findUnique({
+        where: { obraId_date: { obraId, date } },
+        select: { finalizedAt: true },
+      });
+      if (row?.finalizedAt) throw createError('RDO finalizado: reabra para editar', 409);
+      const saved = await savePersistentUpload({
+        folder: `diario-obra/${obraId}/${date}`,
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileNamePrefix: 'foto-',
+      });
+      res.json({ success: true, data: { url: saved.url, key: saved.key, name: saved.originalName } });
+    } catch (e) {
+      next(e);
+    }
+  },
+  handleUploadError,
+);
+
+/** Remove o arquivo de uma foto (só de dentro da pasta deste RDO). */
+router.delete('/:obraId/:date/photos', async (req, res, next) => {
+  try {
+    const { obraId, date } = req.params;
+    if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+    const key = str(req.body?.key, 500);
+    if (!key.startsWith(`diario-obra/${obraId}/`)) throw createError('Foto inválida', 400);
+    const row = await prisma.diarioObra.findUnique({
+      where: { obraId_date: { obraId, date } },
+      select: { finalizedAt: true },
+    });
+    if (row?.finalizedAt) throw createError('RDO finalizado: reabra para editar', 409);
+    await deletePersistentUpload(key);
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.delete('/:obraId/:date', async (req, res, next) => {
   try {
     const { obraId, date } = req.params;
     if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+    // Apaga também os arquivos das fotos das atividades (sem travar a exclusão se algum falhar).
+    const existing = await prisma.diarioObra.findUnique({ where: { obraId_date: { obraId, date } }, select: { content: true } });
+    const acts: any[] = Array.isArray((existing?.content as any)?.activities) ? (existing!.content as any).activities : [];
+    for (const a of acts) {
+      for (const p of Array.isArray(a?.photos) ? a.photos : []) {
+        if (typeof p?.key === 'string' && p.key.startsWith(`diario-obra/${obraId}/`)) {
+          await deletePersistentUpload(p.key).catch(() => undefined);
+        }
+      }
+    }
     await prisma.diarioObra.deleteMany({ where: { obraId, date } });
     res.json({ success: true });
   } catch (e) {
