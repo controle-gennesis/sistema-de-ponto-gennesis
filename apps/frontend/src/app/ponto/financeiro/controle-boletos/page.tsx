@@ -46,6 +46,7 @@ import { ListPageHeader, PageStack, pageStatCardsGridClass } from '@/components/
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -187,6 +188,8 @@ function ControleBoletosPage() {
   const router = useRouter();
   const handleLogout = useLogout();
   const user = authService.getUser();
+  // Importar e exportar planilha: só administrador (o servidor também bloqueia).
+  const { isAdministrator } = usePermissions();
 
   const [search, setSearch] = useState('');
   const [polo, setPolo] = useState('');
@@ -557,6 +560,8 @@ function ControleBoletosPage() {
                       role="menu"
                       className="absolute right-0 top-full z-40 mt-1.5 min-w-[240px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
                     >
+                      {isAdministrator ? (
+                        <>
                       <button
                         type="button"
                         role="menuitem"
@@ -582,6 +587,8 @@ function ControleBoletosPage() {
                         <Upload className="h-4 w-4 shrink-0 text-gray-500" />
                         Importar planilha
                       </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         role="menuitem"
