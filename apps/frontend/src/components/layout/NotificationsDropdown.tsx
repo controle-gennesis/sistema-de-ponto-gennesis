@@ -16,6 +16,7 @@ import {
   FileText,
   Fuel,
   HardHat,
+  KanbanSquare,
   MessageCircle,
   Package,
   PackageCheck,
@@ -27,7 +28,7 @@ import {
   type LucideIcon,
   MessageSquare,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
@@ -57,6 +58,7 @@ const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = ['approval', 'operation', 
 
 const APPROVAL_IDS = new Set(['dp', 'espelho', 'fd', 'fuel', 'rm', 'oc', 'medicao']);
 const OPERATION_IDS = new Set([
+  'kanban-assigned',
   'fd-compras',
   'fd-reprovadas',
   'furo-estoque',
@@ -113,6 +115,22 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
   } = usePermissions();
   const { counts, isLoading: approvalsLoading } = useApprovalNotificationCounts();
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
+  const queryClient = useQueryClient();
+
+  // Cards do Kanban atribuídos à pessoa e ainda não abertos.
+  const { data: kanbanAssigned } = useQuery({
+    queryKey: ['kanban-assigned-notifications'],
+    queryFn: async () => {
+      const res = await api.get('/kanban/assigned-notifications');
+      const d = res.data?.data as
+        | { count?: number; items?: Array<{ cardId: string; departmentKey: string }> }
+        | undefined;
+      return { count: Number(d?.count ?? 0) || 0, items: d?.items ?? [] };
+    },
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
 
   const canSeeFuroEstoque = isAdministrator || can(pathToModuleKey('/ponto/furo-estoque'));
   const canSeeFuelSupplies =
@@ -387,7 +405,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canAccessRecebimentoEntregasRoutePage && recebimentoPendingCount > 0) {
       list.push({
         id: 'recebimento',
-        title: 'Recebimento de Entregas',
+        title: 'Entregas',
         description: 'Aguardando confirmação',
         count: recebimentoPendingCount,
         href: '/ponto/recebimento-entregas',
@@ -458,6 +476,20 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         count: dpReturnPendingCount,
         href: '/ponto/solicitacoes-dp',
         Icon: ClipboardCheck,
+      });
+    }
+    if ((kanbanAssigned?.count ?? 0) > 0) {
+      // Abre o card mais recente; ao abri-lo ele sai da contagem e o próximo clique leva ao seguinte.
+      const unico = kanbanAssigned!.items[0];
+      list.push({
+        id: 'kanban-assigned',
+        title: 'Cards do Kanban',
+        description: kanbanAssigned!.count === 1 ? 'Card atribuído a você' : 'Cards atribuídos a você',
+        count: kanbanAssigned!.count,
+        href: unico
+          ? `/ponto/kanban?departmentKey=${encodeURIComponent(unico.departmentKey)}&cardId=${encodeURIComponent(unico.cardId)}`
+          : '/ponto/kanban',
+        Icon: KanbanSquare,
       });
     }
     if (chatUnreadCount > 0) {
@@ -583,6 +615,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     dpMessagesUnread,
     chatUnreadCount,
     gestaoOsInbox,
+    kanbanAssigned,
   ]);
 
   const badgeTotal = useMemo(
@@ -743,7 +776,18 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
                                   <li key={item.id}>
                                     <Link
                                       href={item.href}
-                                      onClick={() => setOpen(false)}
+                                      onClick={() => {
+                                        setOpen(false);
+                                        if (item.id === 'kanban-assigned') {
+                                          window.setTimeout(
+                                            () =>
+                                              void queryClient.invalidateQueries({
+                                                queryKey: ['kanban-assigned-notifications'],
+                                              }),
+                                            2500,
+                                          );
+                                        }
+                                      }}
                                       className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
                                     >
                                       <span

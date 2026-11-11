@@ -10,6 +10,7 @@ const EXTRA_PAGE_TITLES: Record<
   '/ponto/home': { title: 'Início' },
   '/ponto/agenda': { title: 'Agenda', category: 'Principal' },
   '/ponto/cronogramas': { title: 'Cronogramas', category: 'Engenharia', href: '/ponto/cronogramas' },
+  '/ponto/diario-obra': { title: 'Diários de Obra', category: 'Engenharia', href: '/ponto/diario-obra' },
   '/ponto/orcamentos': { title: 'Orçamentos', category: 'Engenharia', href: '/ponto/orcamentos' },
   '/ponto/relatorios-fotograficos': {
     title: 'Relatórios Fotográficos',
@@ -216,9 +217,21 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
 
       // Percorre segmentos conhecidos (pula ids opacos) — ex.: .../orcamento/:id → Orçamentos.
       let built = module.href;
-      for (const raw of segments) {
+      for (let i = 0; i < segments.length; i++) {
+        const raw = segments[i]!;
         const segment = decodePathSegment(raw);
         built += `/${raw}`;
+        // Diário de Obra dentro do contrato (.../obras/:obra/diario/AAAA-MM-DD): mostra «RDO - dd/mm/aaaa»
+        // enquanto a página ainda não publicou o nome da obra, em vez de «Obras › Diario».
+        if (module.href === '/ponto/contratos') {
+          if (segment === 'obras') continue; // não existe lista de obras fora do contrato
+          if (segment === 'diario' && /^\d{4}-\d{2}-\d{2}$/.test(segments[i + 1] ?? '')) continue;
+          if (/^\d{4}-\d{2}-\d{2}$/.test(segment) && decodePathSegment(segments[i - 1] ?? '') === 'diario') {
+            const [y, m, d] = segment.split('-');
+            crumbs.push({ label: `RDO - ${d}/${m}/${y}`, href: built });
+            continue;
+          }
+        }
         if (looksLikeOpaqueId(segment)) continue;
         const subTitle =
           segment === 'analises' && module.href === '/ponto/fds-aprovadas'

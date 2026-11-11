@@ -261,6 +261,50 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       ];
 
       applyDiff(normalized);
+
+      // Cards do Kanban atribuídos a mim e ainda não abertos: entram no feed (o push já avisa fora do app).
+      try {
+        const kRes = await api.get('/api/kanban/assigned-notifications');
+        if (kRes.ok) {
+          const kJson = await kRes.json().catch(() => ({}));
+          const items = (kJson?.data?.items ?? []) as Array<{
+            cardId: string;
+            title: string;
+            boardName?: string;
+            assignedAt?: string;
+          }>;
+          const pendentes = new Set(items.map((i) => i.cardId));
+          const agora = new Date().toISOString();
+          setNotifications((curr) => {
+            const known = new Set(curr.map((c) => c.id));
+            const novas: ActivityNotification[] = items
+              .filter((i) => !known.has(`kanban:${i.cardId}`))
+              .map((i) => ({
+                id: `kanban:${i.cardId}`,
+                entityId: i.cardId,
+                kind: 'kanban' as const,
+                status: 'ASSIGNED',
+                title: 'Você foi atribuído a um card',
+                body: `"${i.title}"${i.boardName ? ` em ${i.boardName}` : ''}`,
+                displayCode: null,
+                updatedAt: i.assignedAt || agora,
+                detectedAt: agora,
+                read: false,
+              }));
+            // Card já aberto (saiu da lista do servidor) deixa de contar como novo.
+            const atualizadas = curr.map((c) =>
+              c.kind === 'kanban' && !c.read && !pendentes.has(c.entityId) ? { ...c, read: true } : c,
+            );
+            const changed = novas.length > 0 || atualizadas.some((c, i) => c !== curr[i]);
+            if (!changed) return curr;
+            const merged = [...novas, ...atualizadas];
+            void saveFeed(merged);
+            return merged;
+          });
+        }
+      } catch {
+        /* sem Kanban, o resto do feed segue normal */
+      }
     } catch {
       // silencioso: badge/feed não devem quebrar o app
     } finally {
@@ -384,7 +428,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   );
 
   const unreadByKind = useMemo(() => {
-    const acc: Record<ActivityKind, number> = { fuel: 0, reservation: 0, dp: 0, workorder: 0 };
+    const acc: Record<ActivityKind, number> = { fuel: 0, reservation: 0, dp: 0, workorder: 0, kanban: 0 };
     for (const n of notifications) {
       if (!n.read) acc[n.kind] += 1;
     }
@@ -442,7 +486,7 @@ export function useNotifications() {
     return {
       notifications: [] as ActivityNotification[],
       unreadCount: 0,
-      unreadByKind: { fuel: 0, reservation: 0, dp: 0, workorder: 0 } as Record<ActivityKind, number>,
+      unreadByKind: { fuel: 0, reservation: 0, dp: 0, workorder: 0, kanban: 0 } as Record<ActivityKind, number>,
       markKindRead: (_kind: ActivityKind) => undefined,
       sheetVisible: false,
       openSheet: () => undefined,

@@ -7,7 +7,7 @@ const RecebimentoEntregasPageClient = dynamic(
   () => import('./RecebimentoEntregasPageClient'),
   {
     ssr: false,
-    loading: () => <Loading message="Carregando recebimento de entregas..." fullScreen size="lg" />,
+    loading: () => <Loading message="Carregando entregas..." fullScreen size="lg" />,
   }
 );
 
