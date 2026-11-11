@@ -452,6 +452,18 @@ export class BoletoControlController {
         });
         return rows.map((r) => (r as Record<string, string | null>)[field]).filter((v): v is string => !!v);
       };
+      // Centros de custo usados em cada polo (para filtrar a lista do formulário pelo polo escolhido).
+      const poloCenterPairs = await prisma.boletoControlEntry.findMany({
+        where: { polo: { not: null }, costCenterName: { not: null } },
+        distinct: ['polo', 'costCenterName'],
+        select: { polo: true, costCenterName: true },
+        orderBy: { costCenterName: 'asc' },
+      });
+      const costCentersByPolo: Record<string, string[]> = {};
+      for (const p of poloCenterPairs) {
+        if (!p.polo || !p.costCenterName) continue;
+        (costCentersByPolo[p.polo] ||= []).push(p.costCenterName);
+      }
       const [polos, costCenters, managerRows, official] = await Promise.all([
         distinct('polo'),
         distinct('costCenterName'),
@@ -466,6 +478,7 @@ export class BoletoControlController {
         data: {
           polos,
           costCenters,
+          costCentersByPolo,
           managers: hasUnmapped ? [...managers, NO_MANAGER] : managers,
           officialCostCenters: Array.from(new Set(official.map((c) => c.name))),
         },
