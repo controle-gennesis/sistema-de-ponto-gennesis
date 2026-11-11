@@ -4988,7 +4988,7 @@ export default function ContractDetailPage() {
             ) : null}
           </AppUnderlineTabList>
 
-          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} /> : null}
+          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} canManage={canAccessObrasModulo} /> : null}
 
           {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">

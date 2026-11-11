@@ -949,7 +949,8 @@ export function useRoutePermission(route: string) {
     '/ponto/reserva-veiculos': isAdministrator || can(pk('/ponto/reserva-veiculos')),
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
     '/ponto/condicoes-pagamento': isAdministrator || canAccessModule(pk('/ponto/condicoes-pagamento')),
-    '/ponto/obras': isAdministrator || canAccessModule(pk('/ponto/obras')),
+    // Obras deixou de ser módulo da matriz de Acesso: o cadastro fica na aba Obras do contrato (permissão por contrato).
+    '/ponto/obras': isAdministrator,
     '/ponto/empreiteiros': isAdministrator || can(pk('/ponto/empreiteiros')),
     '/ponto/natureza-orcamentaria': isAdministrator || canAccessModule(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || canAccessModule(pk('/ponto/formularios')),

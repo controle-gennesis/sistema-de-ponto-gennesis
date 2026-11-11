@@ -505,7 +505,6 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/veiculos',
       '/ponto/regioes-postos-combustivel',
       '/ponto/condicoes-pagamento',
-      '/ponto/obras',
       '/ponto/natureza-orcamentaria',
       '/ponto/formularios',
       '/ponto/prestadores-servico',

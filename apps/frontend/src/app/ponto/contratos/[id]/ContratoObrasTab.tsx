@@ -21,7 +21,6 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
-import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 
 type ObraRow = {
   id: string;
@@ -34,10 +33,13 @@ const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback;
 
 /** Aba "Obras" do contrato: lista e cadastro das obras deste contrato. */
-export function ContratoObrasTab({ contractId }: { contractId: string }) {
+export function ContratoObrasTab({ contractId, canManage }: { contractId: string; canManage: boolean }) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/obras');
+  // Quem tem a aba Obras neste contrato pode criar, editar e excluir as obras dele.
+  const canCreate = canManage;
+  const canEdit = canManage;
+  const canDelete = canManage;
   const showActions = canEdit || canDelete;
 
   const [search, setSearch] = useState('');
@@ -187,7 +189,7 @@ export function ContratoObrasTab({ contractId }: { contractId: string }) {
                 itemLabelPlural="obras"
               />
               <div className="table-scroll">
-                <table className={cadastroListClasses.table}>
+                <table className={cadastroListClasses.table} data-cc-skip-column-customizer="1">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className={cadastroListClasses.th} style={{ width: '5rem' }}>

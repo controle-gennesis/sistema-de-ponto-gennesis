@@ -280,7 +280,6 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Cadastros',
   },
   { key: pathToModuleKey('/ponto/condicoes-pagamento'), name: 'Condições de Pagamento', href: '/ponto/condicoes-pagamento', category: 'Cadastros' },
-  { key: pathToModuleKey('/ponto/obras'), name: 'Obras', href: '/ponto/obras', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/natureza-orcamentaria'), name: 'Natureza Orçamentária', href: '/ponto/natureza-orcamentaria', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/formularios'), name: 'Formulários', href: '/ponto/formularios', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/noticias'), name: 'Notícias', href: '/ponto/noticias', category: 'Cadastros' },
