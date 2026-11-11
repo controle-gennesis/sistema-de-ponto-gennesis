@@ -109,7 +109,12 @@ export default function ObraDoContratoPage() {
   const obra: { name?: string; contratoId?: string; contratoNome?: string } | null = obraData ?? null;
 
   useBreadcrumbEntity(
-    obra?.name ? { label: obra.name, href: `/ponto/contratos/${contractId}/obras/${obraId}` } : null,
+    obra?.name
+      ? [
+          { label: 'Obras', href: `/ponto/contratos/${contractId}?tab=obras` },
+          { label: obra.name, href: `/ponto/contratos/${contractId}/obras/${obraId}` },
+        ]
+      : null,
     { priority: 1 },
   );
 

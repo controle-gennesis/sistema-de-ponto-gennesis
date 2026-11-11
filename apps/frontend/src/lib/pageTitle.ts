@@ -224,8 +224,16 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
         // Diário de Obra dentro do contrato (.../obras/:obra/diario/AAAA-MM-DD): mostra «RDO - dd/mm/aaaa»
         // enquanto a página ainda não publicou o nome da obra, em vez de «Obras › Diario».
         if (module.href === '/ponto/contratos') {
-          if (segment === 'obras') continue; // não existe lista de obras fora do contrato
-          if (segment === 'diario' && /^\d{4}-\d{2}-\d{2}$/.test(segments[i + 1] ?? '')) continue;
+          if (segment === 'obras') {
+            // Não existe lista de obras fora do contrato: o crumb abre a aba Obras do contrato.
+            crumbs.push({ label: 'Obras', href: `/ponto/contratos/${segments[0]}?tab=obras` });
+            continue;
+          }
+          if (segment === 'diario' && /^\d{4}-\d{2}-\d{2}$/.test(segments[i + 1] ?? '')) {
+            // «diario» não é uma página: o crumb leva para a aba Diários de Obra da própria obra.
+            crumbs.push({ label: 'Diários de Obra', href: built.replace(/\/diario$/, '') });
+            continue;
+          }
           if (/^\d{4}-\d{2}-\d{2}$/.test(segment) && decodePathSegment(segments[i - 1] ?? '') === 'diario') {
             const [y, m, d] = segment.split('-');
             crumbs.push({ label: `RDO - ${d}/${m}/${y}`, href: built });

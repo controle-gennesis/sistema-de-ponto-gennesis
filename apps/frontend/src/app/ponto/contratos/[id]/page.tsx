@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
 import {
@@ -2069,6 +2069,16 @@ export default function ContractDetailPage() {
       setMainTab(allowedMainTabs[0]);
     }
   }, [mainTab, allowedMainTabs]);
+
+  // Links como /ponto/contratos/<id>?tab=obras (ex.: breadcrumb) abrem direto a aba pedida — só uma vez.
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams?.get('tab') ?? '';
+  const tabFromUrlApplied = useRef(false);
+  useEffect(() => {
+    if (tabFromUrlApplied.current || !tabFromUrl || allowedMainTabs.length === 0) return;
+    tabFromUrlApplied.current = true;
+    if ((allowedMainTabs as string[]).includes(tabFromUrl)) setMainTab(tabFromUrl as typeof mainTab);
+  }, [tabFromUrl, allowedMainTabs]);
 
   const adjYearSelectOptions = useMemo(
     () =>
@@ -4978,7 +4988,7 @@ export default function ContractDetailPage() {
             ) : null}
           </AppUnderlineTabList>
 
-          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} /> : null}
+          {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} canManage={canAccessObrasModulo} /> : null}
 
           {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">
