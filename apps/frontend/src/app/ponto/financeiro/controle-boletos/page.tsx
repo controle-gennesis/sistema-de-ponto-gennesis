@@ -489,8 +489,8 @@ function ControleBoletosPage() {
             <FilterStatCard
               key={s.key}
               label={s.label}
-              count={s.count}
-              subtitle={brl(s.value)}
+              count={brl(s.value)}
+              subtitle={`${s.count.toLocaleString('pt-BR')} ${s.count === 1 ? 'boleto' : 'boletos'}`}
               icon={s.Icon}
               iconBg={s.iconBg}
               iconColor={s.iconColor}

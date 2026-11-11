@@ -542,13 +542,13 @@ function DashboardBoletosPage() {
           description="Indicadores de pagos, à vencer e vencidos por polo, gestor, centro de custo e mês de vencimento"
         />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
           {kpis.map((k) => (
             <FilterStatCard
               key={k.key}
               label={k.label}
-              count={k.key === 'media' ? brl(k.value) : `${k.count.toLocaleString('pt-BR')} boletos`}
-              subtitle={k.key === 'media' ? 'média por boleto' : brl(k.value)}
+              count={brl(k.value)}
+              subtitle={k.key === 'media' ? 'média por boleto' : `${k.count.toLocaleString('pt-BR')} ${k.count === 1 ? 'boleto' : 'boletos'}`}
               icon={k.Icon}
               iconBg={k.bg}
               iconColor={k.color}
