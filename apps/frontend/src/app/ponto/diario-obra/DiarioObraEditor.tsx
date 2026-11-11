@@ -38,7 +38,9 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { TimePickerField } from '@/components/ui/TimePickerField';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { PageStack } from '@/components/ui/pageLayout';
-import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { FileDropZone } from '@/components/ui/FileDropZone';
@@ -147,7 +149,7 @@ const splitReasons = (v: string) =>
     .filter(Boolean);
 
 const SEVERITY_LABEL: Record<string, string> = { LOW: 'Baixa', MEDIUM: 'Média', HIGH: 'Alta' };
-const UNITS = ['unidade', 'kg', 'saco', 'm', 'm²', 'm³', 'L', 'caixa', 'barra', 'peça', 'lata', 'rolo'];
+const UNITS = ['un', 'kg', 'saco', 'm', 'm²', 'm³', 'L', 'caixa', 'barra', 'peça', 'lata', 'rolo'];
 
 const interval = (r: Row) => (r.start || r.end ? `${r.start || '--:--'} às ${r.end || '--:--'}` : '');
 const join = (...parts: Array<string | null | undefined | false>) => parts.filter(Boolean).join(' · ');
@@ -218,7 +220,7 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
         label: 'Unidade',
         type: 'select',
         half: true,
-        defaultValue: 'unidade',
+        defaultValue: 'un',
         options: UNITS.map((u) => ({ value: u, label: u })),
       },
       { key: 'notes', label: 'Observações', type: 'textarea', placeholder: 'Opcional' },
@@ -315,7 +317,7 @@ function fromApi(row: any): Rdo {
     laborDirect: withId(c.labor?.direct),
     laborIndirect: withId(c.labor?.indirect),
     equipment: withId(c.equipment),
-    materials: withId(c.materials),
+    materials: withId(c.materials).map((m) => (m.unit === 'unidade' ? { ...m, unit: 'un' } : m)),
     occurrences: withId(c.occurrences),
     notes: withId(c.notes),
   };
@@ -381,60 +383,114 @@ function SectionCard({
   );
 }
 
-function RowList({
+type TableColumn = {
+  label: string;
+  render: (r: Row) => React.ReactNode;
+  center?: boolean;
+};
+
+const text = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+const dash = (v: unknown) => text(v).trim() || '—';
+
+/** Colunas de cada lista (a atividade tem cartão próprio, por causa das fotos). */
+const TABLE_COLUMNS: Record<Exclude<SectionKey, 'activities'>, TableColumn[]> = {
+  laborDirect: [
+    { label: 'Função', render: (r) => dash(r.role) },
+    { label: 'Quantidade', render: (r) => dash(fmtNum(r.quantity)), center: true },
+    { label: 'Horas', render: (r) => dash(fmtNum(r.hours)), center: true },
+    { label: 'Observações', render: (r) => dash(r.notes) },
+  ],
+  laborIndirect: [
+    { label: 'Função', render: (r) => dash(r.role) },
+    { label: 'Quantidade', render: (r) => dash(fmtNum(r.quantity)), center: true },
+    { label: 'Horas', render: (r) => dash(fmtNum(r.hours)), center: true },
+    { label: 'Observações', render: (r) => dash(r.notes) },
+  ],
+  equipment: [
+    { label: 'Equipamento', render: (r) => dash(r.name) },
+    { label: 'Quantidade', render: (r) => dash(fmtNum(r.quantity)), center: true },
+    { label: 'Horas', render: (r) => dash(fmtNum(r.hours)), center: true },
+    { label: 'Observações', render: (r) => dash(r.notes) },
+  ],
+  materials: [
+    { label: 'Material', render: (r) => dash(r.name) },
+    { label: 'Quantidade', render: (r) => dash(fmtNum(r.quantity)), center: true },
+    { label: 'Unidade', render: (r) => dash(r.unit), center: true },
+    { label: 'Observações', render: (r) => dash(r.notes) },
+  ],
+  occurrences: [
+    { label: 'Descrição', render: (r) => dash(r.description) },
+    { label: 'Severidade', render: (r) => SEVERITY_LABEL[text(r.severity)] ?? 'Baixa', center: true },
+    { label: 'Horário', render: (r) => dash(interval(r)), center: true },
+    { label: 'Ações Tomadas', render: (r) => dash(r.actions) },
+  ],
+  notes: [{ label: 'Observação', render: (r) => dash(r.text) }],
+};
+
+/** Lista no formato padrão do sistema: cabeçalho de colunas e coluna Ação com o menu de três pontos. */
+function SectionTable({
+  section,
   rows,
-  config,
+  locked,
   onEdit,
   onRemove,
-  locked = false,
 }: {
+  section: Exclude<SectionKey, 'activities'>;
   rows: Row[];
-  config: SectionConfig;
+  locked: boolean;
   onEdit: (r: Row) => void;
   onRemove: (r: Row) => void;
-  locked?: boolean;
 }) {
-  if (rows.length === 0) {
-    return <p className="mb-3 py-3 text-center text-sm text-gray-500 dark:text-gray-400">{config.emptyLabel}</p>;
-  }
+  const columns = TABLE_COLUMNS[section];
+  const { rowActionMenu, rowForActionMenu, toggleRowActionMenu, closeRowActionMenu, isRowMenuOpen } =
+    useRowActionMenu(rows);
   return (
-    <ul className="mb-3 divide-y divide-gray-100 dark:divide-gray-800">
-      {rows.map((r) => {
-        const detail = config.detail(r);
-        return (
-          <li key={r.id} className="flex items-start gap-3 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="whitespace-pre-wrap break-words text-sm font-medium text-gray-900 dark:text-gray-100">
-                {config.title(r) || '—'}
-              </p>
-              {detail ? (
-                <p className="whitespace-pre-wrap break-words text-xs text-gray-500 dark:text-gray-400">{detail}</p>
-              ) : null}
-            </div>
-            {locked ? null : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onEdit(r)}
-                  className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                  aria-label="Editar"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onRemove(r)}
-                  className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                  aria-label="Remover"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <div className="table-scroll">
+        <table className={cadastroListClasses.table}>
+          <thead className="border-b border-gray-200 dark:border-gray-700">
+            <tr>
+              {columns.map((c) => (
+                <th key={c.label} className={`${cadastroListClasses.th}${c.center ? ' !text-center' : ''}`}>
+                  {c.label}
+                </th>
+              ))}
+              {locked ? null : <th className={cadastroListClasses.thRight}>Ação</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+            {rows.map((row) => (
+              <tr key={row.id} className={getListTableRowClassName(false)}>
+                {columns.map((c, i) => (
+                  <td
+                    key={c.label}
+                    className={`px-3 py-4 text-sm sm:px-6 ${
+                      i === 0 ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'
+                    } ${c.center ? 'whitespace-nowrap text-center' : 'whitespace-pre-wrap break-words'}`}
+                  >
+                    {c.render(row)}
+                  </td>
+                ))}
+                {locked ? null : (
+                  <RowActionMenuCell
+                    isOpen={isRowMenuOpen(row.id)}
+                    onToggle={(e) => toggleRowActionMenu(row.id, e.currentTarget as HTMLButtonElement)}
+                  />
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rowActionMenu && rowForActionMenu ? (
+        <RowActionMenuPortal
+          menu={rowActionMenu}
+          onClose={closeRowActionMenu}
+          onEdit={() => onEdit(rowForActionMenu)}
+          onDelete={() => onRemove(rowForActionMenu)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -1220,7 +1276,6 @@ export function DiarioObraEditor({
   );
 
   const renderSection = (section: SectionKey, EmptyIcon: LucideIcon) => {
-    const config = SECTIONS[section];
     if (rdo[section].length === 0) {
       return (
         <CadastroListEmpty
@@ -1244,12 +1299,12 @@ export function DiarioObraEditor({
       );
     }
     return (
-      <RowList
+      <SectionTable
+        section={section}
         rows={rdo[section]}
-        config={config}
+        locked={locked}
         onEdit={(row) => setModal({ section, row })}
         onRemove={(row) => removeRow(section, row)}
-        locked={locked}
       />
     );
   };

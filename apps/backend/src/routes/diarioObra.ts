@@ -83,7 +83,7 @@ function normalizeContent(body: any) {
       id: str(m?.id, 40),
       name: str(m?.name, 200),
       quantity: num(m?.quantity),
-      unit: str(m?.unit, 20) || 'unidade',
+      unit: str(m?.unit, 20) === 'unidade' ? 'un' : str(m?.unit, 20) || 'un',
       notes: str(m?.notes),
     })),
     occurrences: list(body?.occurrences).map((o: any) => ({
