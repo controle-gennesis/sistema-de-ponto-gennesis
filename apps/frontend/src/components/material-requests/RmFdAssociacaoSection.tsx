@@ -56,7 +56,8 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
 
   if (!data || data.itens.length === 0) return null;
 
-  const itensComAlerta = data.itens.filter((i) => (i.alertas ?? []).length > 0);
+  // Alertas de 1:N / unidade diferente não são mais destacados na aprovação.
+  const itensComAlerta: typeof data.itens = [];
   const emAlerta = itensComAlerta.length;
   const orcamentoLink = data.orcamentoId && data.contratoId
     ? `/ponto/orcamentos/${data.contratoId}/${data.orcamentoId}`
@@ -85,12 +86,12 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
       {data.cotacaoEmpreitaPreenchida === false && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 dark:border-red-600 dark:bg-red-950/40 dark:text-red-300"
+          className="flex items-start gap-2 rounded-lg border-2 border-amber-400 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <span>
             COTAÇÃO EMPREITA NÃO PREENCHIDA
-            <span className="block text-xs font-normal text-red-600 dark:text-red-400">
+            <span className="block text-xs font-normal text-amber-700 dark:text-amber-400">
               O orçamento desta FD não tem a cotação de empreita finalizada (mínimo de 3 empreiteiros por empreita).
               Isso não impede a aprovação.
             </span>
@@ -178,7 +179,7 @@ export function RmFdAssociacaoSection({ materialRequestId }: { materialRequestId
             {data.itens.map((it) => {
               const materiais = it.materiais ?? [];
               const rowSpan = Math.max(1, materiais.length);
-              const hasAlerta = (it.alertas ?? []).length > 0;
+              const hasAlerta = false;
               return materiais.length <= 1 ? (
                 <tr key={it.fdItemKey} className={hasAlerta ? 'bg-red-50/50 dark:bg-red-950/20' : ''}>
                   <td className="px-4 py-3 align-top text-gray-900 dark:text-gray-100">

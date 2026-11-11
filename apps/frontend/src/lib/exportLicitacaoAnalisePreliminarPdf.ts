@@ -9,6 +9,8 @@ export type ExportLicitacaoAnalisePreliminarPdfInput = {
   titulo?: string;
   responsavelAnalise?: string;
   linkNotebookLm?: string;
+  /** Link da pasta da licitação no Drive. */
+  linkPastaDrive?: string;
   generatedAt?: Date;
 };
 
@@ -198,7 +200,6 @@ export async function exportLicitacaoAnalisePreliminarPdf(
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const contentW = pageWidth - MARGIN * 2;
-  const valueColW = contentW - LABEL_COL_W;
 
   const titulo =
     data.cabecalho.trim() ||
@@ -209,12 +210,41 @@ export async function exportLicitacaoAnalisePreliminarPdf(
   let y = drawPageHeader(doc, pageWidth, logo, generatedAt, titulo);
   y = drawResponsavelBlock(doc, y, contentW, input.responsavelAnalise);
 
+  y = drawAnalisePreliminarTabela(doc, y, contentW, data, input.linkNotebookLm, true, input.linkPastaDrive);
+
+  drawFooter(doc);
+
+  const stamp = generatedAt.toISOString().slice(0, 10);
+  doc.save(`analise-preliminar_${slugifyFileName(titulo) || 'licitacao'}_${stamp}.pdf`);
+}
+
+/** Tabela da análise preliminar (rótulo | valor), usada também no PDF da análise completa. */
+export function drawAnalisePreliminarTabela(
+  doc: jsPDF,
+  yInicial: number,
+  contentW: number,
+  data: AnalisePreliminarData,
+  linkNotebookLm?: string,
+  /** false quando os links (Notebook LM e pasta no Drive) já aparecem em outro lugar do PDF. */
+  incluirNotebook = true,
+  linkPastaDrive?: string
+): number {
+  let y = yInicial;
+  const valueColW = contentW - LABEL_COL_W;
   const rows = [
     ...analisePreliminarRows(data),
-    {
-      label: 'NOTEBOOK LM',
-      value: (input.linkNotebookLm ?? '').trim() || '—',
-    },
+    ...(incluirNotebook
+      ? [
+          {
+            label: 'NOTEBOOK LM',
+            value: (linkNotebookLm ?? '').trim() || '—',
+          },
+          {
+            label: 'PASTA NO DRIVE',
+            value: (linkPastaDrive ?? '').trim() || '—',
+          },
+        ]
+      : []),
   ];
 
   for (const row of rows) {
@@ -249,8 +279,26 @@ export async function exportLicitacaoAnalisePreliminarPdf(
     y += rowH;
   }
 
-  drawFooter(doc);
-
-  const stamp = generatedAt.toISOString().slice(0, 10);
-  doc.save(`analise-preliminar_${slugifyFileName(titulo) || 'licitacao'}_${stamp}.pdf`);
+  // Análise aberta (texto longo) abaixo da tabela.
+  const aberta = (data.analiseAberta ?? '').trim();
+  if (aberta) {
+    y += 6;
+    y = ensureSpace(doc, y, 14);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...TEXT_BLACK);
+    doc.text('ANÁLISE', MARGIN, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const linhas = aberta
+      .split(/\r?\n/)
+      .flatMap((p) => (p.trim() ? (doc.splitTextToSize(p, contentW) as string[]) : ['']));
+    for (const linha of linhas) {
+      y = ensureSpace(doc, y, 5);
+      doc.text(linha, MARGIN, y);
+      y += 4.4;
+    }
+  }
+  return y;
 }

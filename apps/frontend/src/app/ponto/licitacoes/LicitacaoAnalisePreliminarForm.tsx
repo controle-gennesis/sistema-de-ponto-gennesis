@@ -239,6 +239,27 @@ export function LicitacaoAnalisePreliminarForm({ value, onChange, disabled }: Pr
         <Plus className="h-4 w-4" aria-hidden />
         Adicionar linha
       </button>
+
+      <div className="space-y-1.5">
+        <label
+          htmlFor="analise-preliminar-aberta"
+          className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+        >
+          Análise
+        </label>
+        <textarea
+          id="analise-preliminar-aberta"
+          value={value.analiseAberta ?? ''}
+          disabled={disabled}
+          onChange={(e) => onChange({ ...value, analiseAberta: e.target.value })}
+          rows={8}
+          placeholder="Escreva aqui a análise da licitação: pontos de atenção, riscos, oportunidades, conclusão…"
+          className="min-h-[10rem] w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        />
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Segue para as próximas fases e sai no PDF da Análise Preliminar e no PDF da análise em Em Análise.
+        </p>
+      </div>
     </div>
   );
 }

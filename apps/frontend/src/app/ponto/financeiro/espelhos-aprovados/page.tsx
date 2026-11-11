@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Download, Eye, FileSpreadsheet, FileText, Paperclip, Search, Trash2 } from 'lucide-react';
+import { Download, Eye, FileSpreadsheet, FileText, Filter, Paperclip, Search, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -27,10 +27,11 @@ import {
   type DetailInfoField,
 } from '@/components/ui/DetailInfoLayout';
 import {
-  INITIAL_FEDERAL_TAX_RATES,
-  mergeFederalTaxStateFromApi,
-  type FederalTaxContextKey,
-} from '@/components/espelho-nf/EspelhoNfTaxCodeContractFields';
+  EspelhoNfPeriodoCampos,
+  EspelhoNfResumoCards,
+  espelhoNoPeriodo,
+  federalRatesForTaxCode,
+} from '@/components/espelho-nf/EspelhoNfResumo';
 import {
   buildEspelhoDetailRows,
   espelhoMirrorForExport,
@@ -117,27 +118,18 @@ function normalizeAttachment(raw: unknown): Attachment | undefined {
   };
 }
 
-/** Alíquotas federais do código tributário do espelho (contexto habilitado), como no cadastro. */
-function federalRatesForTaxCode(taxCode: unknown): EspelhoFederalRates {
-  const tc = (taxCode ?? {}) as {
-    federalRatesByContext?: unknown;
-    federalTaxContextEnabled?: unknown;
-  };
-  const fed = mergeFederalTaxStateFromApi(
-    tc.federalRatesByContext as never,
-    tc.federalTaxContextEnabled as never
-  );
-  const key = (Object.keys(fed.federalTaxContextEnabled) as FederalTaxContextKey[]).find(
-    (k) => fed.federalTaxContextEnabled[k]
-  );
-  return key ? fed.federalRatesByContext[key] : INITIAL_FEDERAL_TAX_RATES;
-}
-
 export default function EspelhosAprovadosPage() {
   const router = useRouter();
   const { costCenters } = useCostCenters();
   const { data: bootstrap, isLoading } = useEspelhoNfBootstrap();
   const [search, setSearch] = useState('');
+  /** Filtros: tomador, centro de custo e período (de / até). */
+  const [filtroTomador, setFiltroTomador] = useState('');
+  const [filtroCentroCusto, setFiltroCentroCusto] = useState('');
+  const [filtroDe, setFiltroDe] = useState('');
+  const [filtroAte, setFiltroAte] = useState('');
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  const temFiltros = !!(filtroTomador || filtroCentroCusto || filtroDe || filtroAte);
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<ApprovedMirror | null>(null);
   const queryClient = useQueryClient();
@@ -243,8 +235,14 @@ export default function EspelhosAprovadosPage() {
       .toLowerCase()
       .normalize('NFD')
       .replace(/[̀-ͯ]/g, '');
-    if (!q) return approved;
-    return approved.filter((m) =>
+    const base = approved.filter(
+      (m) =>
+        (!filtroTomador || m.takerId === filtroTomador) &&
+        (!filtroCentroCusto || m.costCenterId === filtroCentroCusto) &&
+        espelhoNoPeriodo(m as never, filtroDe, filtroAte)
+    );
+    if (!q) return base;
+    return base.filter((m) =>
       [m.takerName, m.providerName, m.measurementRef, costCenterName(m.costCenterId)]
         .join(' ')
         .toLowerCase()
@@ -253,7 +251,7 @@ export default function EspelhosAprovadosPage() {
         .includes(q)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [approved, search, costCentersForEspelho]);
+  }, [approved, search, costCentersForEspelho, filtroTomador, filtroCentroCusto, filtroDe, filtroAte]);
 
   const range = getCadastroListRange(page, PAGE_SIZE, filtered.length);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -339,6 +337,91 @@ export default function EspelhosAprovadosPage() {
         description="Acompanhe e gerencie os espelhos de nota fiscal."
       />
 
+      <EspelhoNfResumoCards
+        itens={filtered as never}
+        cadastros={{ providers, takers, banks, taxCodes }}
+        pendentesDetalhe="Aprovados aguardando NF"
+      />
+
+      <Modal isOpen={filtrosAbertos} onClose={() => setFiltrosAbertos(false)} title="Filtros" size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tomador</label>
+            <select
+              value={filtroTomador}
+              onChange={(e) => {
+                setFiltroTomador(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option value="">Todos</option>
+              {[...takers]
+                .sort((a, b) => String(a.corporateName ?? '').localeCompare(String(b.corporateName ?? ''), 'pt-BR'))
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.corporateName}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Centro de custo</label>
+            <select
+              value={filtroCentroCusto}
+              onChange={(e) => {
+                setFiltroCentroCusto(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option value="">Todos</option>
+              {costCentersForEspelho
+                .filter((cc) => approved.some((m) => m.costCenterId === cc.id))
+                .map((cc) => (
+                  <option key={cc.id} value={cc.id}>
+                    {cc.name || cc.code}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <EspelhoNfPeriodoCampos
+            de={filtroDe}
+            ate={filtroAte}
+            onDe={(v) => {
+              setFiltroDe(v);
+              setPage(1);
+            }}
+            onAte={(v) => {
+              setFiltroAte(v);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <button
+            type="button"
+            onClick={() => {
+              setFiltroTomador('');
+              setFiltroCentroCusto('');
+              setFiltroDe('');
+              setFiltroAte('');
+              setPage(1);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            Limpar filtros
+          </button>
+          <button
+            type="button"
+            onClick={() => setFiltrosAbertos(false)}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+          >
+            Aplicar
+          </button>
+        </div>
+      </Modal>
+
       <Card className="w-full">
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -355,6 +438,7 @@ export default function EspelhosAprovadosPage() {
                 </p>
               </div>
             </div>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
@@ -367,6 +451,23 @@ export default function EspelhosAprovadosPage() {
                 placeholder="Buscar tomador, prestador ou referência"
                 className="h-10 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
               />
+            </div>
+            <button
+              type="button"
+              onClick={() => setFiltrosAbertos(true)}
+              className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                temFiltros
+                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+              }`}
+              aria-label="Abrir filtros"
+              title={temFiltros ? 'Filtros ativos' : 'Filtros'}
+            >
+              <Filter className="h-4 w-4" />
+              {temFiltros ? (
+                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+              ) : null}
+            </button>
             </div>
           </div>
         </CardHeader>
@@ -552,7 +653,8 @@ export default function EspelhosAprovadosPage() {
                 detail,
                 costCentersForEspelho,
                 taxCodeRow as never,
-                (taxCodeRow as { iss?: never } | null)?.iss ?? null
+                (taxCodeRow as { iss?: never } | null)?.iss ?? null,
+                federalRatesForTaxCode(taxCodeRow)
               );
               const pick = (labels: string[]): DetailInfoField[] =>
                 labels
@@ -587,6 +689,7 @@ export default function EspelhosAprovadosPage() {
                       'Medição (R$)',
                       'Mão de obra (R$)',
                       'Material (R$)',
+                      'Valor final da nota (R$)',
                       'Vencimento',
                       'Início da medição',
                       'Fim da medição',

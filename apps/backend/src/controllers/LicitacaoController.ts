@@ -868,6 +868,7 @@ export class LicitacaoController {
       const data = await licitacaoService.update(req.params.id, {
         // Responsável só muda via Assumir/Liberar — evita sobrescrever a trava.
         linkNotebookLm: body.linkNotebookLm,
+        linkPastaDrive: body.linkPastaDrive,
         analiseUsuario: body.analiseUsuario,
         checklistAnalise: body.checklistAnalise,
         analisePreliminar: body.analisePreliminar,

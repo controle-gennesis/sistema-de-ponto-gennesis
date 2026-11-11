@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Download,
   Folder,
+  FolderInput,
   MoreVertical,
   Pencil,
   RotateCcw,
@@ -12,6 +13,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
+import { folderDropProps, startDriveItemDrag, type DriveDragItem } from '@/components/drive/driveItemDrag';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 
@@ -61,6 +63,8 @@ type Props = {
   onOpenShare?: (folder: DriveFolder) => void;
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
+  onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
+  onDropInto?: (item: DriveDragItem, targetFolderId: string) => void;
   trashMode?: boolean;
   currentUserId?: string;
 };
@@ -172,6 +176,8 @@ export function DriveListView({
   onOpenShare,
   onToggleStar,
   onRestore,
+  onMove,
+  onDropInto,
   trashMode,
   currentUserId,
 }: Props) {
@@ -179,6 +185,57 @@ export function DriveListView({
     f.canManageShares ?? (!!currentUserId && f.ownerId === currentUserId);
   const isOwnerFile = (f: DriveFile) => !!currentUserId && f.ownerId === currentUserId;
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  /** Pasta destacada enquanto um item é arrastado sobre ela. */
+  const [dropAlvo, setDropAlvo] = useState<string | null>(null);
+  /**
+   * Posição do menu ⋮ na tela (fixa): abre abaixo do botão, ou acima se não couber,
+   * sem ficar cortado pela borda da lista.
+   */
+  const [menuPos, setMenuPos] = useState<React.CSSProperties>({});
+  const abrirMenu = (e: React.MouseEvent<HTMLElement>, key: string, aberto: boolean) => {
+    if (aberto) {
+      setOpenMenuId(null);
+      return;
+    }
+    const r = e.currentTarget.getBoundingClientRect();
+    const ALTURA_MENU = 280;
+    const right = Math.max(8, window.innerWidth - r.right);
+    setMenuPos(
+      r.bottom + 4 + ALTURA_MENU > window.innerHeight
+        ? { position: 'fixed', right, bottom: window.innerHeight - r.top + 4 }
+        : { position: 'fixed', right, top: r.bottom + 4 }
+    );
+    setOpenMenuId(key);
+  };
+  // Clique fora do menu ⋮ (e do botão que o abre) fecha o menu.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const aoClicar = (e: MouseEvent) => {
+      const alvo = e.target as Element | null;
+      if (alvo?.closest?.('[data-drive-menu],[data-drive-menu-btn]')) return;
+      setOpenMenuId(null);
+    };
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', aoClicar);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicar);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [openMenuId]);
+  // Ao rolar a página o menu fecha (a posição dele ficaria errada).
+  useEffect(() => {
+    if (!openMenuId) return;
+    const fechar = () => setOpenMenuId(null);
+    window.addEventListener('scroll', fechar, true);
+    window.addEventListener('resize', fechar);
+    return () => {
+      window.removeEventListener('scroll', fechar, true);
+      window.removeEventListener('resize', fechar);
+    };
+  }, [openMenuId]);
 
   return (
     <div onClick={() => setOpenMenuId(null)}>
@@ -209,6 +266,9 @@ export function DriveListView({
               key={folder.id}
               role="button"
               tabIndex={0}
+              draggable={!trashMode && !!onMove && folder.ownerId === currentUserId}
+              onDragStart={(e) => startDriveItemDrag(e, { type: 'folder', id: folder.id })}
+              {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
               onClick={() => {
                 setOpenMenuId(null);
                 if (!trashMode) onOpenFolder(folder.id);
@@ -220,7 +280,7 @@ export function DriveListView({
                   if (!trashMode) onOpenFolder(folder.id);
                 }
               }}
-              className={rowClass}
+              className={`${rowClass} ${dropAlvo === folder.id ? 'bg-red-50 ring-2 ring-inset ring-red-400 dark:bg-red-950/30' : ''}`}
             >
               <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
                 <Folder className="h-4 w-4 text-red-500 dark:text-red-400" strokeWidth={1.75} />
@@ -247,19 +307,22 @@ export function DriveListView({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenMenuId(menuOpen ? null : menuKey);
+                  abrirMenu(e, menuKey, menuOpen);
                 }}
                 className={`mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200 ${
                   menuOpen ? 'bg-gray-200 text-gray-700 dark:bg-gray-600' : ''
                 }`}
                 aria-label={`Opções de ${folder.name}`}
+                data-drive-menu-btn
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
 
               {menuOpen && (
                 <div
-                  className="absolute right-3 top-[calc(100%-8px)] z-30 min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                  style={menuPos}
+                  data-drive-menu
+                  className="z-[60] min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {trashMode ? (
@@ -303,6 +366,16 @@ export function DriveListView({
                             className={`h-4 w-4 ${folder.starred ? 'fill-amber-400 text-amber-500' : ''}`}
                           />
                           {folder.starred ? 'Remover estrela' : 'Com estrela'}
+                        </MenuItem>
+                      )}
+                      {onMove && folder.ownerId === currentUserId && (
+                        <MenuItem
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            onMove('folder', folder.id, folder.name);
+                          }}
+                        >
+                          <FolderInput className="h-4 w-4" /> Mover
                         </MenuItem>
                       )}
                       {canManage(folder) && onOpenShare && (
@@ -354,6 +427,8 @@ export function DriveListView({
               key={file.id}
               role="button"
               tabIndex={0}
+              draggable={!trashMode && !!onMove && isOwnerFile(file)}
+              onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
               onClick={() => {
                 setOpenMenuId(null);
                 if (!trashMode) onDownload(file);
@@ -392,19 +467,22 @@ export function DriveListView({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenMenuId(menuOpen ? null : menuKey);
+                  abrirMenu(e, menuKey, menuOpen);
                 }}
                 className={`mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200 ${
                   menuOpen ? 'bg-gray-200 text-gray-700 dark:bg-gray-600' : ''
                 }`}
                 aria-label={`Opções de ${file.name}`}
+                data-drive-menu-btn
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
 
               {menuOpen && (
                 <div
-                  className="absolute right-3 top-[calc(100%-8px)] z-30 min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                  style={menuPos}
+                  data-drive-menu
+                  className="z-[60] min-w-[188px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {trashMode ? (
@@ -448,6 +526,16 @@ export function DriveListView({
                             className={`h-4 w-4 ${file.starred ? 'fill-amber-400 text-amber-500' : ''}`}
                           />
                           {file.starred ? 'Remover estrela' : 'Com estrela'}
+                        </MenuItem>
+                      )}
+                      {onMove && isOwnerFile(file) && (
+                        <MenuItem
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            onMove('file', file.id, file.name);
+                          }}
+                        >
+                          <FolderInput className="h-4 w-4" /> Mover
                         </MenuItem>
                       )}
                       <MenuItem

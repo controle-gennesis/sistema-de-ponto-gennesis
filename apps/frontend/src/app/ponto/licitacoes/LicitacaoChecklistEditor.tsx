@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { GripVertical, Loader2, MessageSquare, Plus, Trash2 } from 'lucide-react';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import { LicitacaoCommentEditor, LicitacaoCommentFormatted } from './LicitacaoCommentEditor';
 import {
@@ -18,6 +18,8 @@ type Props = {
   canManageItems?: boolean;
   onAddItem?: (sectionId: string, label: string) => void | Promise<void>;
   onRemoveItem?: (sectionId: string, itemId: string) => void | Promise<void>;
+  /** Move o item para outra posição dentro da mesma seção (arrastando pela alça). */
+  onMoveItem?: (sectionId: string, fromIndex: number, toIndex: number) => void | Promise<void>;
   managingItems?: boolean;
 };
 
@@ -29,8 +31,13 @@ export function LicitacaoChecklistEditor({
   canManageItems,
   onAddItem,
   onRemoveItem,
+  onMoveItem,
   managingItems,
 }: Props) {
+  /** Item sendo arrastado e posição onde ele vai entrar (linha indicadora). */
+  const [arrasto, setArrasto] = useState<{ sectionId: string; from: number } | null>(null);
+  const [alvoArrasto, setAlvoArrasto] = useState<{ sectionId: string; index: number } | null>(null);
+  const podeMover = !!(canManageItems && onMoveItem && !disabled && !managingItems);
   const [addingSectionId, setAddingSectionId] = useState<string | null>(null);
   const [newItemLabel, setNewItemLabel] = useState('');
   const [openCommentKeys, setOpenCommentKeys] = useState<Set<string>>(() => new Set());
@@ -105,7 +112,7 @@ export function LicitacaoChecklistEditor({
             ) : null}
           </div>
           <ul className="space-y-2">
-            {section.items.map((item) => {
+            {section.items.map((item, itemIndex) => {
               const key = checklistItemKey(section.id, item.id);
               const row = state[key] ?? { checked: false, comentario: '' };
               const commentOpen = openCommentKeys.has(key);
@@ -114,9 +121,59 @@ export function LicitacaoChecklistEditor({
                 <li
                   key={key}
                   data-checklist-comment-host={commentOpen ? key : undefined}
-                  className="rounded-md border border-gray-200 bg-gray-50/80 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/40"
+                  onDragOver={(e) => {
+                    if (!arrasto || arrasto.sectionId !== section.id) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    // Metade de cima: entra antes deste item; metade de baixo: depois.
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const index = e.clientY < r.top + r.height / 2 ? itemIndex : itemIndex + 1;
+                    if (alvoArrasto?.sectionId !== section.id || alvoArrasto.index !== index) {
+                      setAlvoArrasto({ sectionId: section.id, index });
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!arrasto || arrasto.sectionId !== section.id || !alvoArrasto) return;
+                    e.preventDefault();
+                    const from = arrasto.from;
+                    // Posição final já descontando o próprio item retirado da lista.
+                    const to = alvoArrasto.index > from ? alvoArrasto.index - 1 : alvoArrasto.index;
+                    setArrasto(null);
+                    setAlvoArrasto(null);
+                    if (to !== from) void onMoveItem?.(section.id, from, to);
+                  }}
+                  className={`rounded-md border border-gray-200 bg-gray-50/80 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/40 ${
+                    arrasto?.sectionId === section.id && arrasto.from === itemIndex ? 'opacity-40' : ''
+                  } ${
+                    alvoArrasto?.sectionId === section.id && alvoArrasto.index === itemIndex
+                      ? 'shadow-[inset_0_3px_0_0_rgb(220,38,38)]'
+                      : alvoArrasto?.sectionId === section.id &&
+                          alvoArrasto.index === itemIndex + 1 &&
+                          itemIndex === section.items.length - 1
+                        ? 'shadow-[inset_0_-3px_0_0_rgb(220,38,38)]'
+                        : ''
+                  }`}
                 >
                   <div className="flex items-start gap-2">
+                    {podeMover ? (
+                      <span
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/plain', key);
+                          setArrasto({ sectionId: section.id, from: itemIndex });
+                        }}
+                        onDragEnd={() => {
+                          setArrasto(null);
+                          setAlvoArrasto(null);
+                        }}
+                        className="mt-0.5 inline-flex shrink-0 cursor-grab items-center text-gray-400 hover:text-gray-600 active:cursor-grabbing dark:hover:text-gray-300"
+                        title="Arraste para mudar a posição do item"
+                        aria-label="Mover item"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                    ) : null}
                     <label
                       className={`group flex min-w-0 flex-1 items-start gap-2 ${
                         disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'

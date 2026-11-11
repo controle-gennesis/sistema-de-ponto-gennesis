@@ -471,25 +471,50 @@ export function LicitacaoOrcamentoPanel() {
     setStatusSelectHighlight(false);
   }, [selectedId]);
 
+  /** Arquivar: pede para atualizar o status final e só depois arquiva. */
+  const [arquivarModalAberto, setArquivarModalAberto] = useState(false);
+  const [arquivarStatus, setArquivarStatus] = useState<ArquivadaMotivo | ''>('');
   const handleArquivar = () => {
     if (!selectedId || enviarArquivoMutation.isPending) return;
-    const motivo = resolveStatusParaArquivar(selectedAnalise);
-    if (!motivo || !isStatusArquivoPermitido(motivo)) {
-      setStatusSelectHighlight(true);
-      toast.error(
-        'Selecione um status permitido e depois clique em Arquivar: Suspensa, Declinada, Encerrada, Em andamento ou Vencida.'
-      );
-      window.setTimeout(() => statusSelectRef.current?.focus(), 0);
+    const atual = resolveStatusParaArquivar(selectedAnalise);
+    setArquivarStatus(atual && isStatusArquivoPermitido(atual) ? atual : '');
+    setArquivarModalAberto(true);
+  };
+  const confirmarArquivar = () => {
+    if (!selectedId || !arquivarStatus || !isStatusArquivoPermitido(arquivarStatus)) return;
+    setStatusSelectHighlight(false);
+    setArquivarModalAberto(false);
+    enviarArquivoMutation.mutate({ id: selectedId, motivo: arquivarStatus });
+  };
+
+  /** Fase: Análise Preliminar / Em Análise voltam o processo; Análise Diretoria envia para lá. */
+  const faseMutation = useMutation({
+    mutationFn: async ({ id, etapa }: { id: string; etapa: 'preliminar' | 'em_analise' }) => {
+      const res = await api.patch(`/licitacoes/${id}/analise-etapa`, { etapa });
+      return { data: res.data?.data, etapa };
+    },
+    onSuccess: ({ etapa }) => {
+      toast.success(etapa === 'preliminar' ? 'Enviada para a Análise Preliminar.' : 'Enviada para Em Análise.');
+      setSelectedId(null);
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+      void refetchList();
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao mudar a fase');
+    },
+  });
+  const handleFase = (fase: string) => {
+    if (!selectedId || fase === 'orcamento') return;
+    if (fase === 'preliminar' || fase === 'em_analise') {
+      const nome = fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
+      if (!window.confirm(`Enviar para ${nome}? A licitação sairá da aba Orçamento.`)) return;
+      faseMutation.mutate({ id: selectedId, etapa: fase });
       return;
     }
-    if (
-      !window.confirm(
-        `Enviar esta licitação para o Arquivo com status "${motivoSingular(motivo)}"?`
-      )
-    ) {
-      return;
+    if (fase === 'diretoria') {
+      if (!window.confirm('Enviar para Análise Diretoria? A licitação sairá da aba Orçamento.')) return;
+      alterarStatusMutation.mutate({ id: selectedId, motivo: 'aguardando_aprovacao' });
     }
-    enviarArquivoMutation.mutate({ id: selectedId, motivo });
   };
 
   const handleStatusChange = (motivo: ArquivadaMotivo) => {
@@ -899,7 +924,30 @@ export function LicitacaoOrcamentoPanel() {
                   <ClipboardList className="h-4 w-4" />
                   Lista
                 </button>
-                <label className="relative inline-flex items-center">
+                <label className="relative inline-flex items-center" title="Mudar a fase do processo">
+                  <ChevronDown
+                    className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
+                    aria-hidden
+                  />
+                  <select
+                    aria-label="Fase"
+                    disabled={
+                      !selectedId ||
+                      alterarStatusMutation.isPending ||
+                      enviarArquivoMutation.isPending ||
+                      faseMutation.isPending
+                    }
+                    value="orcamento"
+                    onChange={(e) => handleFase(e.target.value)}
+                    className="inline-flex h-10 appearance-none rounded-lg border border-gray-300 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <option value="preliminar">Fase: Análise Preliminar</option>
+                    <option value="em_analise">Fase: Em Análise</option>
+                    <option value="diretoria">Fase: Análise Diretoria</option>
+                    <option value="orcamento">Fase: Orçamento</option>
+                  </select>
+                </label>
+                <label className="relative inline-flex items-center" title="Classificar o processo (não muda a fase)">
                   <ChevronDown
                     className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
                     aria-hidden
@@ -913,10 +961,10 @@ export function LicitacaoOrcamentoPanel() {
                       enviarArquivoMutation.isPending ||
                       setStatusSelecionadoMutation.isPending
                     }
-                    value={statusAtual}
+                    value={statusSelecionado ?? ''}
                     onChange={(e) => {
                       const motivo = e.target.value as ArquivadaMotivo;
-                      if (!isMotivoValue(motivo)) return;
+                      if (!isMotivoValue(motivo) || !isStatusArquivoPermitido(motivo)) return;
                       handleStatusChange(motivo);
                     }}
                     className={`inline-flex h-10 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
@@ -925,9 +973,12 @@ export function LicitacaoOrcamentoPanel() {
                         : 'border-gray-300 dark:border-gray-600'
                     }`}
                   >
-                    {STATUS_OPTIONS.map((option) => (
+                    <option value="" disabled>
+                      {setStatusSelecionadoMutation.isPending ? 'Salvando…' : 'Status'}
+                    </option>
+                    {STATUS_OPTIONS.filter((o) => isStatusArquivoPermitido(o.value)).map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label}
+                        {option.singular}
                       </option>
                     ))}
                   </select>
@@ -945,6 +996,54 @@ export function LicitacaoOrcamentoPanel() {
                   )}
                   Arquivar
                 </button>
+                {arquivarModalAberto ? (
+                  <AppModalOverlay className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white p-6 text-left shadow-xl dark:bg-gray-800">
+                      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                        <Archive className="h-6 w-6 text-gray-700 dark:text-gray-200" aria-hidden />
+                      </div>
+                      <h3 className="text-center text-lg font-semibold text-gray-900 dark:text-gray-100">Arquivar licitação</h3>
+                      <p className="mt-1 text-center text-sm text-gray-600 dark:text-gray-400">
+                        Atualize o status final antes de arquivar. A licitação vai para o Arquivo com esse status.
+                      </p>
+                      <div className="mt-5 space-y-2">
+                        {STATUS_OPTIONS.filter((o) => isStatusArquivoPermitido(o.value)).map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setArquivarStatus(option.value)}
+                            className={`flex w-full items-center justify-between rounded-lg border-2 px-3 py-2.5 text-left text-sm font-medium transition-colors ${
+                              arquivarStatus === option.value
+                                ? 'border-red-500 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/30 dark:text-red-200'
+                                : 'border-gray-200 text-gray-800 hover:border-gray-300 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500'
+                            }`}
+                          >
+                            {option.singular}
+                            {arquivarStatus === option.value ? <span className="text-xs font-semibold">Selecionado</span> : null}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-6 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setArquivarModalAberto(false)}
+                          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!arquivarStatus}
+                          onClick={confirmarArquivar}
+                          className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Archive className="h-4 w-4" aria-hidden />
+                          Arquivar
+                        </button>
+                      </div>
+                    </div>
+                  </AppModalOverlay>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => saveMutation.mutate()}

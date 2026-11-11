@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
+  FolderInput,
   HardDrive,
   Folder,
   FolderPlus,
@@ -47,6 +48,13 @@ import {
   type DriveSidebarView,
 } from '@/components/drive/DriveSidebar';
 import { DriveListView } from '@/components/drive/DriveListView';
+import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
+import {
+  folderDropProps,
+  isDriveItemDrag,
+  startDriveItemDrag,
+  type DriveDragItem,
+} from '@/components/drive/driveItemDrag';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { getDropdownPortalRoot } from '@/lib/zIndex';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
@@ -241,8 +249,27 @@ function DrivePageContent() {
       : 'meu-drive';
   const isMyDriveView = driveView === 'meu-drive';
 
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewModeState] = useState<'grid' | 'list'>('grid');
+  // Lembra a escolha (grade/lista) do usuário neste navegador.
+  useEffect(() => {
+    try {
+      const salvo = localStorage.getItem('drive-view-mode');
+      if (salvo === 'grid' || salvo === 'list') setViewModeState(salvo);
+    } catch {
+      /* armazenamento indisponível: fica em grade */
+    }
+  }, []);
+  const setViewMode = useCallback((mode: 'grid' | 'list') => {
+    setViewModeState(mode);
+    try {
+      localStorage.setItem('drive-view-mode', mode);
+    } catch {
+      /* armazenamento indisponível */
+    }
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
+  /** Item aberto na janela "Mover para…". */
+  const [moveTarget, setMoveTarget] = useState<DriveMoveTarget | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploadItems, setUploadItems] = useState<DriveUploadItem[]>([]);
   const [uploadPanelMinimized, setUploadPanelMinimized] = useState(false);
@@ -700,6 +727,25 @@ function DrivePageContent() {
     },
   });
 
+  /** Move pasta (com o conteúdo) ou arquivo para outra pasta, ou para a raiz do Meu Drive (null). */
+  const moveItemMut = useMutation({
+    mutationFn: async ({ type, id, destinoId }: { type: 'folder' | 'file'; id: string; destinoId: string | null }): Promise<unknown> =>
+      type === 'folder'
+        ? api.patch(`/drive/folders/${id}/move`, { parentId: destinoId })
+        : api.patch(`/drive/files/${id}/move`, { folderId: destinoId }),
+    onSuccess: (_res, vars) => {
+      toast.success(vars.type === 'folder' ? 'Pasta movida.' : 'Arquivo movido.');
+      setMoveTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['drive'] });
+      queryClient.invalidateQueries({ queryKey: ['drive-view'] });
+      queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error || 'Não foi possível mover'),
+  });
+  const soltarEmPasta = (item: DriveDragItem, targetFolderId: string) => {
+    moveItemMut.mutate({ type: item.type, id: item.id, destinoId: targetFolderId });
+  };
+
   const renameFolderMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       api.patch(`/drive/folders/${id}`, { name }),
@@ -1151,6 +1197,7 @@ function DrivePageContent() {
       <div
         className="min-h-full"
         onDragOver={(e) => {
+          if (isDriveItemDrag(e)) return;
           if (!canWriteInCurrentFolder) return;
           e.preventDefault();
           setIsDraggingOver(true);
@@ -1160,7 +1207,10 @@ function DrivePageContent() {
             setIsDraggingOver(false);
           }
         }}
-        onDrop={handleDrop}
+        onDrop={(e) => {
+          if (isDriveItemDrag(e)) return;
+          void handleDrop(e);
+        }}
         onContextMenu={openNewMenuFromContext}
       >
         {/* Overlay drag-and-drop */}
@@ -1438,6 +1488,8 @@ function DrivePageContent() {
               if (type === 'folder') restoreFolderMut.mutate(id);
               else restoreFileMut.mutate(id);
             }}
+            onMove={(type, id, name) => setMoveTarget({ type, id, name })}
+            onDropInto={soltarEmPasta}
             trashMode={isTrashView}
             currentUserId={user?.id}
           />
@@ -1458,6 +1510,8 @@ function DrivePageContent() {
               if (type === 'folder') restoreFolderMut.mutate(id);
               else restoreFileMut.mutate(id);
             }}
+            onMove={(type, id, name) => setMoveTarget({ type, id, name })}
+            onDropInto={soltarEmPasta}
             trashMode={isTrashView}
             currentUserId={user?.id}
           />
@@ -1466,6 +1520,13 @@ function DrivePageContent() {
         </div>
 
         {/* ── Modais ─────────────────────────────────────────────────────── */}
+
+        <DriveMoveModal
+          item={moveTarget}
+          onClose={() => setMoveTarget(null)}
+          moving={moveItemMut.isPending}
+          onConfirm={(item, destinoId) => moveItemMut.mutate({ type: item.type, id: item.id, destinoId })}
+        />
 
         {/* Nova Pasta */}
         <Modal
@@ -1881,6 +1942,8 @@ function GridView({
   onOpenShare,
   onToggleStar,
   onRestore,
+  onMove,
+  onDropInto,
   trashMode,
   currentUserId,
 }: {
@@ -1893,6 +1956,8 @@ function GridView({
   onOpenShare?: (folder: DriveFolder) => void;
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
+  onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
+  onDropInto?: (item: DriveDragItem, targetFolderId: string) => void;
   trashMode?: boolean;
   currentUserId?: string;
 }) {
@@ -1900,6 +1965,26 @@ function GridView({
     f.canManageShares ?? (!!currentUserId && f.ownerId === currentUserId);
   const isOwnerFile = (f: DriveFile) => !!currentUserId && f.ownerId === currentUserId;
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  /** Pasta destacada enquanto um item é arrastado sobre ela. */
+  const [dropAlvo, setDropAlvo] = useState<string | null>(null);
+  // Clique fora do menu ⋮ (e do botão que o abre) fecha o menu.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const aoClicar = (e: MouseEvent) => {
+      const alvo = e.target as Element | null;
+      if (alvo?.closest?.('[data-drive-menu],[data-drive-menu-btn]')) return;
+      setOpenMenuId(null);
+    };
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', aoClicar);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicar);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [openMenuId]);
 
   return (
     <div
@@ -1919,6 +2004,9 @@ function GridView({
                   <div
                     role="button"
                     tabIndex={0}
+                    draggable={!trashMode && !!onMove && folder.ownerId === currentUserId}
+                    onDragStart={(e) => startDriveItemDrag(e, { type: 'folder', id: folder.id })}
+                    {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
                     onClick={() => {
                       setOpenMenuId(null);
                       if (!trashMode) onOpenFolder(folder.id);
@@ -1932,7 +2020,7 @@ function GridView({
                     }}
                     className={`group flex w-full select-none items-center gap-2.5 rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:border-red-300 hover:bg-red-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800 dark:hover:bg-red-950/20 ${
                       trashMode ? 'cursor-default' : 'cursor-pointer'
-                    }`}
+                    } ${dropAlvo === folder.id ? 'border-red-400 bg-red-50 ring-2 ring-red-400 dark:bg-red-950/30' : ''}`}
                   >
                     <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
                       {shared ? (
@@ -1955,12 +2043,13 @@ function GridView({
                       }}
                       className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                       aria-label={`Opções de ${folder.name}`}
+                      data-drive-menu-btn
                     >
                       <MoreVertical className="h-4 w-4" />
                     </button>
                   </div>
                   {openMenuId === folder.id && (
-                    <div className="absolute right-0 top-12 z-20 min-w-[180px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div data-drive-menu className="absolute right-0 top-12 z-20 min-w-[180px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                       {trashMode ? (
                         <>
                           <button
@@ -1994,6 +2083,18 @@ function GridView({
                             >
                               <Star className={`h-4 w-4 ${folder.starred ? 'fill-amber-400 text-amber-500' : ''}`} />
                               {folder.starred ? 'Remover estrela' : 'Com estrela'}
+                            </button>
+                          )}
+                          {onMove && folder.ownerId === currentUserId && (
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onMove('folder', folder.id, folder.name);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <FolderInput className="h-4 w-4" />
+                              Mover
                             </button>
                           )}
                           {canManage(folder) && onOpenShare && (
@@ -2043,6 +2144,8 @@ function GridView({
                   <div
                     role="button"
                     tabIndex={0}
+                    draggable={!trashMode && !!onMove && isOwnerFile(file)}
+                    onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
                     onClick={() => {
                       setOpenMenuId(null);
                       if (!trashMode) onDownload(file);
@@ -2088,13 +2191,14 @@ function GridView({
                         }}
                         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                         aria-label={`Opções de ${file.name}`}
+                        data-drive-menu-btn
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
                   {openMenuId === file.id && (
-                    <div className="absolute bottom-10 right-0 z-20 min-w-[170px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div data-drive-menu className="absolute bottom-10 right-0 z-20 min-w-[170px] rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                       {trashMode ? (
                         <>
                           <button
@@ -2128,6 +2232,18 @@ function GridView({
                             >
                               <Star className={`h-4 w-4 ${file.starred ? 'fill-amber-400 text-amber-500' : ''}`} />
                               {file.starred ? 'Remover estrela' : 'Com estrela'}
+                            </button>
+                          )}
+                          {onMove && isOwnerFile(file) && (
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onMove('file', file.id, file.name);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <FolderInput className="h-4 w-4" />
+                              Mover
                             </button>
                           )}
                           <button

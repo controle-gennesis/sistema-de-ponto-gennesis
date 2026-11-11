@@ -19,6 +19,9 @@ export type LicitacaoAnalisesCarregadasProps = {
   analisePreliminar?: AnalisePreliminarData | null | unknown;
   linkNotebookLm?: string | null;
   showNotebook?: boolean;
+  /** Link da pasta da licitação no Drive. */
+  linkPastaDrive?: string | null;
+  showDrive?: boolean;
   /** Sua análise + Análise de Viabilidade + Não se habilita */
   showEmAnaliseResumo?: boolean;
   analiseUsuario?: string | null;
@@ -47,6 +50,8 @@ export function LicitacaoAnalisesCarregadas({
   analisePreliminar,
   linkNotebookLm,
   showNotebook = true,
+  linkPastaDrive,
+  showDrive = false,
   showEmAnaliseResumo = false,
   analiseUsuario,
   responsavelAnalise,
@@ -61,10 +66,13 @@ export function LicitacaoAnalisesCarregadas({
 }: LicitacaoAnalisesCarregadasProps) {
   const prelim = parseAnalisePreliminar(analisePreliminar, titulo ?? '');
   const prelimRows = analisePreliminarRows(prelim);
+  const analiseAbertaPrelim = prelim.analiseAberta?.trim() ?? '';
   const hasPrelim =
     Boolean(prelim.cabecalho?.trim()) ||
-    prelim.rows.some((r) => r.label.trim() || r.value.trim());
+    prelim.rows.some((r) => r.label.trim() || r.value.trim()) ||
+    Boolean(analiseAbertaPrelim);
   const notebook = linkNotebookLm?.trim() ?? '';
+  const pastaDrive = linkPastaDrive?.trim() ?? '';
 
   return (
     <div className={`space-y-5 ${className}`}>
@@ -136,11 +144,21 @@ export function LicitacaoAnalisesCarregadas({
                 </table>
               </div>
             )}
+            {analiseAbertaPrelim ? (
+              <div className="mt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Análise</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-gray-800 dark:text-gray-200">
+                  {analiseAbertaPrelim}
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
 
-      {showNotebook ? (
+      {showNotebook || showDrive ? (
+        <div className={`grid grid-cols-1 gap-5 ${showNotebook && showDrive ? 'lg:grid-cols-2' : ''}`}>
+        {showNotebook ? (
         <Card padding="none" className="shadow-sm">
           <CardContent className="px-5 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -161,6 +179,28 @@ export function LicitacaoAnalisesCarregadas({
             )}
           </CardContent>
         </Card>
+        ) : null}
+        {showDrive ? (
+          <Card padding="none" className="shadow-sm">
+            <CardContent className="px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Pasta no Drive</p>
+              {pastaDrive ? (
+                <a
+                  href={notebookHref(pastaDrive)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-flex items-start gap-1.5 break-all text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {pastaDrive}
+                </a>
+              ) : (
+                <p className="mt-1 text-sm text-gray-500">—</p>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+        </div>
       ) : null}
 
       {showEmAnaliseResumo ? (

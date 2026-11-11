@@ -50,6 +50,8 @@ export type AnalisePreliminarRow = {
 export type AnalisePreliminarData = {
   cabecalho: string;
   rows: AnalisePreliminarRow[];
+  /** Análise aberta (texto longo) escrita abaixo da tabela; segue para as fases seguintes e para os PDFs. */
+  analiseAberta?: string;
 };
 
 const DEFAULT_ROW_HEIGHT_PX = 40;
@@ -183,15 +185,16 @@ export function parseAnalisePreliminar(
     typeof o.cabecalho === 'string' && o.cabecalho.trim()
       ? o.cabecalho
       : fallbackCabecalho;
+  const analiseAberta = typeof o.analiseAberta === 'string' ? o.analiseAberta : '';
   const fromRows = parseRows(o.rows);
   if (fromRows) {
-    return { cabecalho, rows: fromRows };
+    return { cabecalho, rows: fromRows, analiseAberta };
   }
   const hasLegacy = LEGACY_FIELD_KEYS.some((key) => typeof o[key] === 'string');
   if (hasLegacy) {
-    return { cabecalho, rows: rowsFromLegacy(o) };
+    return { cabecalho, rows: rowsFromLegacy(o), analiseAberta };
   }
-  return { cabecalho, rows: base.rows };
+  return { cabecalho, rows: base.rows, analiseAberta };
 }
 
 export function analisePreliminarRows(

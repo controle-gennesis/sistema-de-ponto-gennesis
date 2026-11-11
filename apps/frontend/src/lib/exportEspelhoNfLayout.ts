@@ -393,6 +393,28 @@ function computeEspelhoImpostosBundle(b: EspelhoExportBundle): {
   };
 }
 
+/** Valor líquido a pagar (número): medição − impostos retidos − reforço de garantia retido. */
+function valorLiquidoBundleNumero(b: EspelhoExportBundle): number | null {
+  const med = parseEspelhoBrCurrencyToNumber(b.draft.measurementAmount);
+  if (med === null) return null;
+  const imp = computeEspelhoImpostosBundle(b);
+  const retidos = [imp.cofins.value, imp.csll.value, imp.irpj.value, imp.pis.value, imp.inss.value, imp.iss.value]
+    .reduce((acc, raw) => acc + (parseEspelhoBrCurrencyToNumber(raw) ?? 0), 0);
+  return round2(med - retidos - computeEspelhoReforcoGarantiaRetidoRs(b.draft, b.taxCode));
+}
+
+/** Valor líquido de um espelho (mesma conta do PDF/Excel), para somar nos cards de resumo. */
+export function computeEspelhoValorLiquidoNumero(
+  draft: EspelhoMirrorDraft,
+  providers: EspelhoExportProvider[],
+  takers: EspelhoExportTaker[],
+  banks: EspelhoExportBank[],
+  taxCodes: EspelhoExportTaxCode[],
+  federal: EspelhoFederalRates
+): number | null {
+  return valorLiquidoBundleNumero(resolveBundle(draft, providers, takers, banks, taxCodes, federal));
+}
+
 function computeEspelhoValorLiquidoBundle(b: EspelhoExportBundle): string {
   const med = parseEspelhoBrCurrencyToNumber(b.draft.measurementAmount);
   if (med === null) return '—';
@@ -729,7 +751,7 @@ function buildExcelSheet(b: EspelhoExportBundle): { sheet: XLSX.WorkSheet; merge
       '',
       '',
       'Nº Ordem de Serviço / CNO',
-      dash(draft.serviceOrder),
+      `${dash(draft.serviceOrder)} / ${dash(draft.obraCno)}`,
       '',
       '',
       '',
@@ -1249,7 +1271,11 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y += 2;
 
   doc.setFontSize(7);
-  doc.text(`Número da Ordem de Serviço / Inscrição da Obra (CNO): ${dash(draft.serviceOrder)}`, margin, y);
+  doc.text(
+    `Número da Ordem de Serviço: ${dash(draft.serviceOrder)}   ·   Inscrição da Obra (CNO): ${dash(draft.obraCno)}`,
+    margin,
+    y
+  );
   y += 5;
 
   y = pdfKeyRow(doc, y, margin, contentW, [
@@ -1264,16 +1290,23 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   ]);
 
   const reforcoGarantiaMensagemPdf = buildReforcoGarantiaMensagem(draft, taxCode);
-  const reforcoGarantiaMsg = reforcoGarantiaMensagemPdf ?? '—';
+  // Sem reforço de garantia, não imprime nada (antes saía um "—" solto).
+  const reforcoGarantiaMsg = reforcoGarantiaMensagemPdf ?? '';
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'normal');
-  const reforcoLines = doc.splitTextToSize(reforcoGarantiaMsg, contentW);
+  const reforcoLines = reforcoGarantiaMsg ? doc.splitTextToSize(reforcoGarantiaMsg, contentW) : [];
   reforcoLines.forEach((line: string) => {
     y = pdfCheckPage(doc, y, 5, margin);
     doc.text(line, margin + 1, y);
     y += 4;
   });
   y += 2;
+
+  y = pdfBar(doc, y, margin, contentW, 'VALOR DA NOTA');
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(medValPdf, margin + contentW / 2, y + 2, { align: 'center' });
+  y += 10;
 
   y = pdfBar(doc, y, margin, contentW, 'RETENÇÕES');
   const retY = y;
@@ -1324,12 +1357,6 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     y
   );
   y += 6;
-
-  y = pdfBar(doc, y, margin, contentW, 'VALOR DA NOTA');
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(medValPdf, margin + contentW / 2, y + 2, { align: 'center' });
-  y += 10;
 
   y = pdfBar(doc, y, margin, contentW, 'TRIBUTAÇÃO DO ISSQN');
   doc.setFont('helvetica', 'normal');
@@ -1392,12 +1419,28 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
     { k: 'Lista Serv. ISSQN:', v: dash(draft.serviceIssqn) },
     { k: 'CNAE:', v: dash(draft.cnae) }
   ]);
+  // Valor líquido a pagar em destaque: é a informação mais importante da nota.
+  y = pdfCheckPage(doc, y, 26, margin);
+  y += 2;
+  const fontePadrao = doc.getFontSize();
+  doc.setFillColor(236, 253, 245);
+  doc.setDrawColor(4, 120, 87);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(margin, y, contentW, 20, 2, 2, 'FD');
+  doc.setTextColor(4, 120, 87);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Valor líquido a pagar: ${valorLiquidoPdf}`, margin + contentW / 2, y + 2, { align: 'center' });
-  y += 8;
+  doc.setFontSize(10);
+  doc.text('VALOR LÍQUIDO A PAGAR', margin + contentW / 2, y + 6.5, { align: 'center' });
+  doc.setFontSize(20);
+  doc.text(valorLiquidoPdf, margin + contentW / 2, y + 15.5, { align: 'center' });
+  doc.setFontSize(fontePadrao);
+  doc.setTextColor(0, 0, 0);
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.2);
+  y += 26;
   doc.setFont('helvetica', 'normal');
-  doc.text(`Medição — Início: ${dash(draft.measurementStartDate)}`, margin + contentW * 0.55, y + 2);
-  doc.text(`Término: ${dash(draft.measurementEndDate)}`, margin + contentW * 0.55, y + 6);
+  doc.text(`Medição — Início: ${fmtDateBr(draft.measurementStartDate ?? '')}`, margin + contentW * 0.55, y + 2);
+  doc.text(`Término: ${fmtDateBr(draft.measurementEndDate ?? '')}`, margin + contentW * 0.55, y + 6);
 
   return doc;
 }
@@ -1455,7 +1498,9 @@ export function buildEspelhoDetailRows(
   m: EspelhoMirrorDraft,
   costCenters?: Array<{ id?: string; code?: string; name?: string }>,
   taxCodeLimits?: { inssMaterialLimit: string; issMaterialLimit: string } | null,
-  issRule?: EspelhoTaxRule | null
+  issRule?: EspelhoTaxRule | null,
+  /** Alíquotas federais do código tributário: com elas, calcula o valor final (líquido) da nota. */
+  federal?: EspelhoFederalRates | null
 ): [string, string][] {
   const ccRow =
     costCenters?.find((c) => c.id === m.costCenterId)?.name?.trim() ||
@@ -1480,6 +1525,21 @@ export function buildEspelhoDetailRows(
     ['Medição (R$)', formatEspelhoMirrorCurrencyField(m.measurementAmount)],
     ['Mão de obra (R$)', formatEspelhoMirrorCurrencyField(m.laborAmount)],
     ['Material (R$)', formatEspelhoMirrorCurrencyField(m.materialAmount)],
+    [
+      'Valor final da nota (R$)',
+      (() => {
+        if (!federal) return '—';
+        const v = valorLiquidoBundleNumero({
+          draft: m,
+          provider: null,
+          taker: null,
+          bank: null,
+          taxCode: (taxCodeLimits ?? null) as EspelhoExportTaxCode | null,
+          federal,
+        });
+        return v === null ? '—' : fmtEspelhoBrl(v);
+      })(),
+    ],
     ['Limite Material INSS', limits.inssBrl],
     ['Limite Material ISS', limits.issBrl],
     ['Base de cálculo INSS', bases.baseInss],

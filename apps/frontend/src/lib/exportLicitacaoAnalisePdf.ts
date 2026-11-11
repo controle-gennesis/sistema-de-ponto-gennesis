@@ -1,4 +1,6 @@
 import jsPDF from 'jspdf';
+import { drawAnalisePreliminarTabela } from '@/lib/exportLicitacaoAnalisePreliminarPdf';
+import type { AnalisePreliminarData } from '@/app/ponto/licitacoes/licitacaoAnalisePreliminar';
 
 export type LicitacaoAnalisePdfChecklistItem = {
   label: string;
@@ -16,10 +18,16 @@ export type ExportLicitacaoAnalisePdfInput = {
   sectionTitle?: string;
   responsavelAnalise?: string;
   linkNotebookLm?: string;
+  /** Link da pasta da licitação no Drive. */
+  linkPastaDrive?: string;
   analiseUsuario?: string;
   sections: LicitacaoAnalisePdfChecklistSection[];
   naoSeHabilita?: boolean;
   naoSeHabilitaItens?: Array<{ title: string; isDone: boolean }>;
+  /** Análise preliminar feita antes: vai no início do PDF. */
+  analisePreliminar?: AnalisePreliminarData | null;
+  /** Nome do arquivo (sem extensão). */
+  fileBaseName?: string;
   generatedAt?: Date;
 };
 
@@ -374,7 +382,8 @@ function drawNotebookLinkBlock(
   doc: jsPDF,
   y: number,
   contentW: number,
-  linkNotebookLm: string | undefined
+  linkNotebookLm: string | undefined,
+  titulo = 'CADERNO NO NOTEBOOK LM'
 ): number {
   const raw = linkNotebookLm?.trim() ?? '';
   const href = raw ? normalizeNotebookLmUrl(raw) : '';
@@ -391,7 +400,7 @@ function drawNotebookLinkBlock(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...TEXT_MUTED);
-  doc.text('CADERNO NO NOTEBOOK LM', MARGIN + 4, y + 5.5);
+  doc.text(titulo, MARGIN + 4, y + 5.5);
 
   let ly = y + 11;
   if (!href) {
@@ -678,7 +687,17 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
   const logo = await loadCompanyLogo();
   let y = drawPageHeader(doc, pageWidth, logo, generatedAt, input.titulo);
   y = drawResponsavelBlock(doc, y, contentW, input.responsavelAnalise);
+  // Links do Notebook LM e da pasta no Drive acima da análise preliminar (e não repetidos dentro dela).
   y = drawNotebookLinkBlock(doc, y, contentW, input.linkNotebookLm);
+  if (input.linkPastaDrive !== undefined) {
+    y = drawNotebookLinkBlock(doc, y, contentW, input.linkPastaDrive, 'PASTA NO DRIVE');
+  }
+  if (input.analisePreliminar) {
+    y = drawSectionTitle(doc, y, contentW, 'Análise preliminar');
+    y += 6;
+    y = drawAnalisePreliminarTabela(doc, y, contentW, input.analisePreliminar, input.linkNotebookLm, false);
+    y += 8;
+  }
   y = drawNaoSeHabilitaSection(
     doc,
     y,
@@ -738,5 +757,80 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
 
   const datePart = generatedAt.toISOString().slice(0, 10);
   const slug = slugifyFileName(input.titulo) || 'licitacao';
-  doc.save(`licitacao-checklist_${slug}_${datePart}.pdf`);
+  doc.save(`${input.fileBaseName || 'licitacao-checklist'}_${slug}_${datePart}.pdf`);
+}
+
+export type ChecklistParaIaSection = { codigo: string; title: string; items: Array<{ codigo: string; label: string }> };
+
+/**
+ * Checklist em branco para uma IA responder: cada item com código fixo ([1.1], [1.2]…) e uma linha
+ * "Resposta:". O PDF devolvido pela IA é lido pelo botão "Importar checklist respondido".
+ */
+export async function exportLicitacaoChecklistParaIaPdf(input: {
+  titulo: string;
+  sections: ChecklistParaIaSection[];
+  generatedAt?: Date;
+}): Promise<void> {
+  const generatedAt = input.generatedAt ?? new Date();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const contentW = pageWidth - MARGIN * 2;
+  const logo = await loadCompanyLogo();
+  let y = drawPageHeader(doc, pageWidth, logo, generatedAt, input.titulo);
+
+  // Instruções para a IA
+  const instrucoes = [
+    'INSTRUÇÕES PARA A IA',
+    '1. Responda cada item logo abaixo dele, na linha "Resposta:".',
+    '2. Mantenha o código entre colchetes no início de cada pergunta exatamente como está, um item por vez, na mesma ordem.',
+    '3. Não junte itens, não renumere e não remova perguntas. Se não houver informação no edital, responda "Não informado".',
+    '4. Devolva o documento completo em PDF, sem repetir estas instruções.',
+  ];
+  doc.setFontSize(8.5);
+  const linhasInstr = instrucoes.flatMap((t) => doc.splitTextToSize(t, contentW - 8) as string[]);
+  const boxH = linhasInstr.length * 4.2 + 6;
+  y = ensureSpace(doc, y, boxH + 4);
+  doc.setFillColor(254, 243, 199);
+  doc.setDrawColor(217, 119, 6);
+  doc.roundedRect(MARGIN, y, contentW, boxH, 2, 2, 'FD');
+  doc.setTextColor(...TEXT_BLACK);
+  let iy = y + 5;
+  linhasInstr.forEach((linha, idx) => {
+    doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
+    doc.text(linha, MARGIN + 4, iy);
+    iy += 4.2;
+  });
+  y += boxH + 8;
+
+  for (const section of input.sections) {
+    y = ensureSpace(doc, y, 12);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...BRAND_RED);
+    doc.text(`${section.codigo}. ${section.title}`, MARGIN, y);
+    y += 6;
+    for (const item of section.items) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...TEXT_BLACK);
+      const pergunta = doc.splitTextToSize(`[${item.codigo}] ${item.label}`, contentW) as string[];
+      y = ensureSpace(doc, y, pergunta.length * 4.4 + 12);
+      for (const linha of pergunta) {
+        doc.text(linha, MARGIN, y);
+        y += 4.4;
+      }
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...TEXT_MUTED);
+      doc.text('Resposta:', MARGIN, y + 1);
+      doc.setDrawColor(...BORDER);
+      doc.line(MARGIN + 16, y + 1.6, MARGIN + contentW, y + 1.6);
+      y += 9;
+    }
+    y += 2;
+  }
+
+  drawFooter(doc);
+  const datePart = generatedAt.toISOString().slice(0, 10);
+  const slug = slugifyFileName(input.titulo) || 'licitacao';
+  doc.save(`checklist-para-ia_${slug}_${datePart}.pdf`);
 }
