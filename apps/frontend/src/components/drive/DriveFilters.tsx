@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, Folder, X } from 'lucide-react';
+import { DriveMimeIcon } from './DriveMimeIcon';
 
 export type DriveTypeFilter = 'all' | 'folders' | 'pdf' | 'image' | 'doc' | 'sheet' | 'video' | 'other';
 export type DriveModifiedFilter = 'all' | 'today' | '7d' | '30d' | 'year';
@@ -17,15 +18,20 @@ export const DRIVE_FILTERS_EMPTY: DriveFiltersState = { type: 'all', modified: '
 
 export const driveFiltersActive = (f: DriveFiltersState) => f.type !== 'all' || f.modified !== 'all' || f.owner !== 'all';
 
-const TYPE_OPTIONS: Array<{ value: DriveTypeFilter; label: string }> = [
+type FilterOption<T extends string> = { value: T; label: string; icon?: React.ReactNode };
+
+const mime = (mimeType: string, fileName = '') => <DriveMimeIcon mimeType={mimeType} fileName={fileName} className="h-5 w-5" />;
+
+// Os mesmos ícones usados nos arquivos do Drive.
+const TYPE_OPTIONS: Array<FilterOption<DriveTypeFilter>> = [
   { value: 'all', label: 'Todos os tipos' },
-  { value: 'folders', label: 'Pastas' },
-  { value: 'pdf', label: 'PDF' },
-  { value: 'image', label: 'Imagens' },
-  { value: 'doc', label: 'Documentos' },
-  { value: 'sheet', label: 'Planilhas' },
-  { value: 'video', label: 'Vídeos' },
-  { value: 'other', label: 'Outros' },
+  { value: 'folders', label: 'Pastas', icon: <Folder className="h-5 w-5 text-red-500" /> },
+  { value: 'pdf', label: 'PDF', icon: mime('application/pdf') },
+  { value: 'image', label: 'Imagens', icon: mime('image/png') },
+  { value: 'doc', label: 'Documentos', icon: mime('application/msword') },
+  { value: 'sheet', label: 'Planilhas', icon: mime('application/vnd.ms-excel') },
+  { value: 'video', label: 'Vídeos', icon: mime('video/mp4') },
+  { value: 'other', label: 'Outros', icon: mime('application/octet-stream') },
 ];
 
 const MODIFIED_OPTIONS: Array<{ value: DriveModifiedFilter; label: string }> = [
@@ -89,7 +95,7 @@ function FilterDropdown<T extends string>({
 }: {
   label: string;
   value: T;
-  options: Array<{ value: T; label: string }>;
+  options: Array<FilterOption<T>>;
   onChange: (v: T) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -126,6 +132,7 @@ function FilterDropdown<T extends string>({
             : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-gray-600'
         }`}
       >
+        {active && current?.icon}
         <span className={active ? '' : 'text-gray-500 dark:text-gray-400'}>{active ? current?.label : label}</span>
         <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -146,7 +153,10 @@ function FilterDropdown<T extends string>({
               }}
               className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              <span className={o.value === value ? 'font-medium text-red-600 dark:text-red-400' : ''}>{o.label}</span>
+              <span className="flex items-center gap-2.5 whitespace-nowrap">
+                {o.icon}
+                <span className={o.value === value ? 'font-medium text-red-600 dark:text-red-400' : ''}>{o.label}</span>
+              </span>
               {o.value === value && <Check className="h-4 w-4 text-red-600 dark:text-red-400" />}
             </button>
           ))}
