@@ -38,6 +38,7 @@ import { formatPersonCpf, personInitials, toPersonSelectOptions } from '@/lib/pe
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { DriveFileThumb } from '@/components/drive/DriveFileThumb';
+import { DriveFilePreviewModal, DriveHoverActions } from '@/components/drive/DriveFilePreviewModal';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import {
   DriveSidebar,
@@ -238,6 +239,23 @@ function DrivePageContent() {
   } | null>(null);
 
   const [shareFolder, setShareFolder] = useState<DriveFolder | null>(null);
+  const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
+  /** Aviso "arquivo já existe nesta pasta": resolve true = substituir, false = cancelar. */
+  const [replaceDialog, setReplaceDialog] = useState<{
+    names: string[];
+    resolve: (replace: boolean) => void;
+  } | null>(null);
+  const askReplace = useCallback(
+    (names: string[]) =>
+      new Promise<boolean>((resolve) => {
+        setReplaceDialog({ names, resolve });
+      }),
+    [],
+  );
+  const answerReplace = (replace: boolean) => {
+    replaceDialog?.resolve(replace);
+    setReplaceDialog(null);
+  };
   const [appearanceFolder, setAppearanceFolder] = useState<DriveFolder | null>(null);
   const [selectedShareUserIds, setSelectedShareUserIds] = useState<Set<string>>(() => new Set());
 
@@ -355,6 +373,9 @@ function DrivePageContent() {
     : isMyDriveView
       ? (contents?.files ?? [])
       : (viewContents?.files ?? []);
+  /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const breadcrumb = isMyDriveView ? (contents?.breadcrumb ?? []) : [];
   const currentFolderMeta = isMyDriveView ? (contents?.currentFolder ?? null) : null;
   /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
@@ -907,10 +928,33 @@ function DrivePageContent() {
   );
 
   const uploadFiles = useCallback(
-    async (dropped: DriveDroppedFile[]) => {
-      if (dropped.length === 0) {
+    async (droppedAll: DriveDroppedFile[]) => {
+      if (droppedAll.length === 0) {
         toast.error('Nenhum arquivo encontrado. Se arrastou uma pasta, tente de novo.');
         return;
+      }
+
+      // Nome repetido na pasta atual (só arquivos enviados direto nela, não os de subpastas arrastadas).
+      const existingByName = new Map(filesRef.current.map((f) => [f.name.trim().toLowerCase(), f.id]));
+      const replaceByFile = new Map<File, string>();
+      for (const d of droppedAll) {
+        if (d.relativePath.replace(/\\/g, '/').includes('/')) continue;
+        const existingId = existingByName.get(d.file.name.trim().toLowerCase());
+        if (existingId) replaceByFile.set(d.file, existingId);
+      }
+      let dropped = droppedAll;
+      if (replaceByFile.size > 0) {
+        const names = droppedAll.filter((d) => replaceByFile.has(d.file)).map((d) => d.file.name);
+        const replace = await askReplace(names);
+        if (!replace) {
+          // Cancelar: não envia os repetidos (os demais seguem normalmente).
+          dropped = droppedAll.filter((d) => !replaceByFile.has(d.file));
+          replaceByFile.clear();
+          if (dropped.length === 0) {
+            toast('Envio cancelado.');
+            return;
+          }
+        }
       }
 
       const rootFolderId = currentFolderId;
@@ -982,6 +1026,9 @@ function DrivePageContent() {
           const targetFolderId = await ensureFolderPath(item.dirPath);
           await uploadOneFile(item.file, item.id, targetFolderId, ctrl.signal);
           ok += 1;
+          // Substituição: o novo já subiu, então o antigo vai para a lixeira (dá para restaurar).
+          const oldId = replaceByFile.get(item.file);
+          if (oldId) await api.delete(`/drive/files/${oldId}`).catch(() => undefined);
         } catch (err: unknown) {
           if (isAbortError(err) || ctrl.signal.aborted) {
             patchUploadItem(item.id, { status: 'cancelled' });
@@ -1009,7 +1056,7 @@ function DrivePageContent() {
         toast.error(failed === 1 ? 'Falha no upload' : `${failed} uploads falharam`);
       }
     },
-    [currentFolderId, uploadOneFile, patchUploadItem],
+    [currentFolderId, uploadOneFile, patchUploadItem, askReplace],
   );
 
   const isUploading = uploadItems.some(
@@ -1050,7 +1097,8 @@ function DrivePageContent() {
       const a = document.createElement('a');
       a.href = url;
       a.download = file.originalName;
-      a.target = '_blank';
+      // A URL assinada já força "attachment": baixa direto, sem abrir outra aba.
+      a.rel = 'noopener';
       a.click();
     } catch {
       toast.error('Erro ao gerar link de download');
@@ -1324,6 +1372,7 @@ function DrivePageContent() {
             files={files}
             onOpenFolder={openFolder}
             onDownload={downloadFile}
+            onPreview={setPreviewFile}
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
             onOpenShare={setShareFolder}
@@ -1347,6 +1396,7 @@ function DrivePageContent() {
             files={files}
             onOpenFolder={openFolder}
             onDownload={downloadFile}
+            onPreview={setPreviewFile}
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
             onOpenShare={setShareFolder}
@@ -1376,6 +1426,14 @@ function DrivePageContent() {
           moving={moveItemMut.isPending}
           onConfirm={(item, destinoId) => moveItemMut.mutate({ type: item.type, id: item.id, destinoId })}
         />
+
+        {previewFile ? (
+          <DriveFilePreviewModal
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+            onDownload={() => downloadFile(previewFile)}
+          />
+        ) : null}
 
         {/* Nova Pasta */}
         <FolderAppearanceModal
@@ -1437,6 +1495,52 @@ function DrivePageContent() {
               >
                 {createFolderMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Criar
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Arquivo já existe: substituir ou cancelar */}
+        <Modal
+          isOpen={!!replaceDialog}
+          onClose={() => answerReplace(false)}
+          confirmBeforeClose={false}
+          title={
+            (replaceDialog?.names.length ?? 0) > 1
+              ? 'Arquivos já existem nesta pasta'
+              : 'Arquivo já existe nesta pasta'
+          }
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {(replaceDialog?.names.length ?? 0) > 1
+                ? 'Já existem arquivos com estes nomes. Deseja substituí-los pelos novos?'
+                : 'Já existe um arquivo com este nome. Deseja substituí-lo pelo novo?'}
+            </p>
+            <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+              {replaceDialog?.names.map((n, i) => (
+                <li key={`${n}-${i}`} className="truncate" title={n}>
+                  {n}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Ao substituir, a versão antiga vai para a lixeira. Ao cancelar, o arquivo repetido não é enviado.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => answerReplace(false)}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                autoFocus
+                onClick={() => answerReplace(true)}
+                className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+              >
+                Substituir
               </button>
             </div>
           </div>
@@ -1691,6 +1795,7 @@ function GridView({
   files,
   onOpenFolder,
   onDownload,
+  onPreview,
   onRename,
   onDelete,
   onOpenShare,
@@ -1706,6 +1811,7 @@ function GridView({
   files: DriveFile[];
   onOpenFolder: (id: string) => void;
   onDownload: (f: DriveFile) => void;
+  onPreview: (f: DriveFile) => void;
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
   onOpenShare?: (folder: DriveFolder) => void;
@@ -1889,13 +1995,13 @@ function GridView({
                     onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
                     onClick={() => {
                       setOpenMenuId(null);
-                      if (!trashMode) onDownload(file);
+                      if (!trashMode) onPreview(file);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         setOpenMenuId(null);
-                        if (!trashMode) onDownload(file);
+                        if (!trashMode) onPreview(file);
                       }
                     }}
                     className="group flex cursor-pointer select-none flex-col overflow-hidden rounded-xl border border-gray-200 bg-white transition-colors hover:border-red-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800"
@@ -1914,6 +2020,14 @@ function GridView({
                       />
                       {file.starred && !trashMode && (
                         <Star className="absolute left-2 top-2 h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                      )}
+                      {!trashMode && (
+                        <DriveHoverActions
+                          file={file}
+                          onPreview={() => onPreview(file)}
+                          onDownload={() => onDownload(file)}
+                          className="absolute right-1.5 top-1.5"
+                        />
                       )}
                     </div>
                     <div className="flex items-center gap-2.5 px-3 py-2.5">
