@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { folderDropProps, startDriveItemDrag, type DriveDragItem } from '@/components/drive/driveItemDrag';
+import type { SelectMods } from '@/components/drive/driveSelection';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import { DriveHoverActions } from '@/components/drive/DriveFilePreviewModal';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
@@ -73,7 +74,18 @@ type Props = {
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
-  onDropInto?: (item: DriveDragItem, targetFolderId: string) => void;
+  onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  /** Itens selecionados (chaves `folder-ID` / `file-ID`). */
+  selectedKeys: Set<string>;
+  onSelect: (key: string, mods: SelectMods) => void;
+  onClearSelection: () => void;
+  /** Itens que vão junto ao arrastar (a seleção inteira, se o item arrastado faz parte dela). */
+  dragItemsFor: (item: DriveDragItem) => DriveDragItem[];
+  /** Itens sendo arrastados agora (ficam esmaecidos). */
+  draggingKeys: Set<string>;
+  onDragStateChange: (keys: string[] | null) => void;
+  /** Pode mover também itens de outras pessoas (pasta onde tenho edição). */
+  canMoveOthers?: boolean;
   trashMode?: boolean;
   currentUserId?: string;
 };
@@ -222,7 +234,7 @@ function MenuFlutuante({ ancora, children }: { ancora: AncoraMenu; children: Rea
   );
 }
 
-const rowClass = `group relative grid ${GRID_COLS} items-center gap-4 border-b border-gray-100 px-4 py-3 transition-colors last:border-0 hover:bg-gray-50 dark:border-gray-700/50 dark:hover:bg-gray-700/50 cursor-pointer`;
+const rowClass = `drive-item-row group relative grid ${GRID_COLS} items-center gap-4 select-none outline-none border-b border-gray-100 px-4 py-3 transition-colors last:border-0 hover:bg-gray-50 dark:border-gray-700/50 dark:hover:bg-gray-700/50 cursor-pointer`;
 
 export function DriveListView({
   folders,
@@ -238,6 +250,13 @@ export function DriveListView({
   onRestore,
   onMove,
   onDropInto,
+  selectedKeys,
+  onSelect,
+  onClearSelection,
+  dragItemsFor,
+  draggingKeys,
+  onDragStateChange,
+  canMoveOthers = false,
   trashMode,
   currentUserId,
 }: Props) {
@@ -271,10 +290,15 @@ export function DriveListView({
   };
 
   return (
-    <div onClick={() => setOpenMenuId(null)}>
+    <div
+      onClick={() => {
+        setOpenMenuId(null);
+        onClearSelection();
+      }}
+    >
       <Card padding="none" className="!shadow-none">
         <div className="table-scroll">
-          <div className="min-w-[40rem]">
+          <div className="drive-stagger min-w-[40rem]">
         <div
           className={`grid ${GRID_COLS} gap-4 border-b border-gray-200 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-700 dark:text-gray-400`}
         >
@@ -299,23 +323,38 @@ export function DriveListView({
               key={folder.id}
               role="button"
               tabIndex={0}
-              draggable={!trashMode && !!onMove && folder.ownerId === currentUserId}
-              onDragStart={(e) => startDriveItemDrag(e, { type: 'folder', id: folder.id })}
+              draggable={!trashMode && !!onMove && (canMoveOthers || folder.ownerId === currentUserId)}
+              data-drive-item
+              style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
+              onDragStart={(e) => {
+                const items = dragItemsFor({ type: 'folder', id: folder.id });
+                startDriveItemDrag(e, items);
+                onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
+              }}
+              onDragEnd={() => onDragStateChange(null)}
               {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenMenuId(null);
+                onSelect(menuKey, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+              }}
+              onDoubleClick={() => {
                 setOpenMenuId(null);
                 if (!trashMode) onOpenFolder(folder.id);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (e.key === 'Enter') {
                   e.preventDefault();
                   setOpenMenuId(null);
                   if (!trashMode) onOpenFolder(folder.id);
+                } else if (e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(menuKey, { ctrl: true, shift: false });
                 }
               }}
-              className={`${rowClass} ${dropAlvo === folder.id ? 'bg-red-50 ring-2 ring-inset ring-red-400 dark:bg-red-950/30' : ''}`}
+              className={`${rowClass} ${dropAlvo === folder.id ? '!bg-red-50 ring-1 ring-inset ring-red-300 dark:!bg-red-950/20 dark:ring-red-800' : ''} ${selectedKeys.has(menuKey) ? '!bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
-              <FolderIconTile iconKey={folder.iconKey} color={folder.iconColor} />
+              <FolderIconTile iconKey={folder.iconKey} color={folder.iconColor} className="drive-item-card__icon h-8 w-8 rounded-lg" />
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
                   {folder.name}
@@ -395,7 +434,7 @@ export function DriveListView({
                           {folder.starred ? 'Remover estrela' : 'Com estrela'}
                         </MenuItem>
                       )}
-                      {onMove && folder.ownerId === currentUserId && (
+                      {onMove && (canMoveOthers || folder.ownerId === currentUserId) && (
                         <MenuItem
                           onClick={() => {
                             setOpenMenuId(null);
@@ -456,22 +495,37 @@ export function DriveListView({
               key={file.id}
               role="button"
               tabIndex={0}
-              draggable={!trashMode && !!onMove && isOwnerFile(file)}
-              onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
-              onClick={() => {
+              draggable={!trashMode && !!onMove && (canMoveOthers || isOwnerFile(file))}
+              data-drive-item
+              style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
+              onDragStart={(e) => {
+                const items = dragItemsFor({ type: 'file', id: file.id });
+                startDriveItemDrag(e, items);
+                onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
+              }}
+              onDragEnd={() => onDragStateChange(null)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenMenuId(null);
+                onSelect(menuKey, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+              }}
+              onDoubleClick={() => {
                 setOpenMenuId(null);
                 if (!trashMode) onPreview(file);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (e.key === 'Enter') {
                   e.preventDefault();
                   setOpenMenuId(null);
                   if (!trashMode) onPreview(file);
+                } else if (e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(menuKey, { ctrl: true, shift: false });
                 }
               }}
-              className={rowClass}
+              className={`${rowClass} ${selectedKeys.has(menuKey) ? '!bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
-              <DriveMimeIcon mimeType={file.mimeType} fileName={file.name} className="h-8 w-8" />
+              <DriveMimeIcon mimeType={file.mimeType} fileName={file.name} className="drive-item-card__icon h-8 w-8" />
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
                   {file.name}
@@ -561,7 +615,7 @@ export function DriveListView({
                           {file.starred ? 'Remover estrela' : 'Com estrela'}
                         </MenuItem>
                       )}
-                      {onMove && isOwnerFile(file) && (
+                      {onMove && (canMoveOthers || isOwnerFile(file)) && (
                         <MenuItem
                           onClick={() => {
                             setOpenMenuId(null);

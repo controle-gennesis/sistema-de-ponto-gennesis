@@ -58,6 +58,11 @@ router.get(
   requireModuleAccess(accountingModule),
   controller.getAccountingRequests.bind(controller)
 );
+router.get(
+  '/contabilidade/para-encerrar-count',
+  requireModuleAccess(accountingModule),
+  controller.getAccountingToCloseCount.bind(controller)
+);
 router.post('/', requireModuleAccess(myModule), controller.createRequest.bind(controller));
 router.put('/:id/requester-return', requireModuleAccess(myModule), controller.requesterReturn.bind(controller));
 

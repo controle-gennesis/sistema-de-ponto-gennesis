@@ -400,12 +400,16 @@ export class DriveService {
 
   /**
    * Move a pasta (com subpastas e arquivos) para dentro de outra, ou para a raiz (parentId = null).
-   * Só o dono move; precisa poder escrever no destino; não pode ir para dentro dela mesma ou de uma subpasta.
+   * Pode mover o dono ou quem tem edição na pasta onde ela está; precisa poder escrever no destino; não pode ir
+   * para dentro dela mesma ou de uma subpasta. Se quem move não é o dono, o destino precisa continuar acessível
+   * ao dono (para a pasta não "sumir" para ele).
    */
   async moveFolder(id: string, parentId: string | null, userId: string) {
     const folder = await prisma.driveFolder.findFirst({ where: { id, ...NOT_TRASHED } });
     if (!folder) throw new Error('Pasta não encontrada');
-    if (folder.ownerId !== userId) throw new Error('Apenas o dono da pasta pode movê-la');
+    const isOwner = folder.ownerId === userId;
+    const canEditHere = !!folder.parentId && (await this.canUserWriteInFolder(userId, folder.parentId));
+    if (!isOwner && !canEditHere) throw new Error('Sem permissão para mover esta pasta');
     if ((folder.parentId ?? null) === parentId) return folder;
     if (parentId) {
       if (parentId === id) throw new Error('Não é possível mover a pasta para dentro dela mesma');
@@ -423,6 +427,13 @@ export class DriveService {
       }
       const can = await this.canUserWriteInFolder(userId, parentId);
       if (!can) throw new Error('Pasta de destino sem permissão de escrita');
+    }
+    if (!isOwner) {
+      // Trava: mover pasta de outra pessoa só para um lugar onde o dono continua enxergando.
+      if (!parentId) throw new Error('Só o dono pode mover esta pasta para a raiz do Meu Drive');
+      if (!(await this.canUserAccessFolder(folder.ownerId, parentId))) {
+        throw new Error('Destino inválido: o dono da pasta deixaria de enxergá-la');
+      }
     }
     return prisma.driveFolder.update({ where: { id }, data: { parentId } });
   }
@@ -733,10 +744,20 @@ export class DriveService {
   async moveFile(id: string, folderId: string | null, userId: string) {
     const file = await prisma.driveFile.findFirst({ where: { id, ...NOT_TRASHED } });
     if (!file) throw new Error('Arquivo não encontrado');
-    if (file.ownerId !== userId) throw new Error('Sem permissão');
+    // O dono ou quem tem edição na pasta onde o arquivo está pode movê-lo.
+    const isOwner = file.ownerId === userId;
+    const canEditHere = !!file.folderId && (await this.canUserWriteInFolder(userId, file.folderId));
+    if (!isOwner && !canEditHere) throw new Error('Sem permissão para mover este arquivo');
     if (folderId) {
       const can = await this.canUserWriteInFolder(userId, folderId);
       if (!can) throw new Error('Pasta de destino sem permissão de escrita');
+    }
+    if (!isOwner) {
+      // Trava: mover arquivo de outra pessoa só para um lugar onde o dono continua enxergando.
+      if (!folderId) throw new Error('Só o dono pode mover este arquivo para a raiz do Meu Drive');
+      if (!(await this.canUserAccessFolder(file.ownerId, folderId))) {
+        throw new Error('Destino inválido: o dono do arquivo deixaria de enxergá-lo');
+      }
     }
     return prisma.driveFile.update({ where: { id }, data: { folderId } });
   }

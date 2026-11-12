@@ -6,7 +6,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { isAccountingDirectRequestType } from '../lib/dpRequestDetails';
 import { sendPushToUsers } from '../services/PushNotificationService';
-import { announceAccountingDone } from '../lib/dpRequestMessages';
+import { announceAccountingCancelled, announceAccountingDone } from '../lib/dpRequestMessages';
 
 const REQUEST_TYPES = [
   'ADMISSAO',
@@ -611,6 +611,14 @@ export class DpContabilidadeController {
       }
 
       const updated = await this.applyStatus(existing, actor, status, comment, 'Contabilidade');
+      // Conclusão/cancelamento vira mensagem na conversa (badge + sino + notificação para o DP).
+      const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
+      if (sourceId && status === 'CONCLUDED') {
+        await prisma.dpContabilidadeRequest.update({ where: { id: existing.id }, data: { accountingDoneAt: new Date() } });
+        await announceAccountingDone(sourceId, actor.id, actor.name);
+      } else if (sourceId && status === 'CANCELLED') {
+        await announceAccountingCancelled(sourceId, actor.id, actor.name, comment);
+      }
       res.json({ success: true, data: (await serializeWithSources([updated]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {

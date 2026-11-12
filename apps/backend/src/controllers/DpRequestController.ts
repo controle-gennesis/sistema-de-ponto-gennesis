@@ -610,6 +610,19 @@ export class DpRequestController {
     }
   }
 
+  /** Quantos pedidos a Contabilidade já concluiu e o DP ainda precisa finalizar (badge do menu e do sino). */
+  async getAccountingToCloseCount(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const count = await prisma.dpContabilidadeRequest.count({
+        where: { status: 'CONCLUDED', dpClosedAt: null, sourceDpRequestId: { not: null } },
+      });
+      return res.json({ success: true, data: { count } });
+    } catch (e) {
+      return res.status(500).json({ error: 'Erro ao contar pedidos para encerrar' });
+    }
+  }
+
   async createRequest(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
