@@ -17,6 +17,7 @@ import type { SendAction } from './WhatsAppBotService';
 
 export type WhatsAppDiarioObraFlowStatus =
   | 'RDO_ASK_CPF'
+  | 'RDO_SELECT_CONTRATO'
   | 'RDO_SELECT_OBRA'
   | 'RDO_ASK_DATE'
   | 'RDO_HUB'
@@ -34,7 +35,12 @@ export type WhatsAppDiarioObraFlowStatus =
   | 'RDO_FINALIZE_CONFIRM'
   | 'RDO_COMPLETE';
 
+/** Espera (ms) antes de responder a uma foto: várias fotos seguidas viram uma única resposta. */
+const ACK_DEBOUNCE_MS = 2000;
+
 type Result = {
+  /** Quando definido, o bot segura a resposta e só envia a última da rajada (veja WhatsAppBotService). */
+  ackDebounceMs?: number;
   sendAction: SendAction;
   newStatus: WhatsAppDiarioObraFlowStatus | 'MENU';
   newPayload: Record<string, unknown>;
@@ -48,7 +54,8 @@ type Photo = { url: string; key: string; name: string };
 const FLOW = 'DIARIO_OBRA';
 const MODULE_KEY = pathToModuleKey('/ponto/diario-obra');
 const TZ = 'America/Sao_Paulo';
-const OBRA_PAGE_SIZE = 8;
+const OBRA_PAGE_SIZE = 7;
+const CONTRATO_PAGE_SIZE = 8;
 const IMAGE_EXT = /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i;
 
 const YES_WORDS = /^(sim|s|confirmar|confirmo|ok|pode|yes)$/i;
@@ -71,6 +78,9 @@ const ID = {
   done: 'rdo_done',
   newAct: 'rdo_new_act',
   moreObras: 'rdo_more_obras',
+  moreContratos: 'rdo_more_ctr',
+  changeContrato: 'rdo_change_ctr',
+  contratoPrefix: 'rdo_ctr_',
   otherDate: 'rdo_other_date',
   direct: 'rdo_direct',
   indirect: 'rdo_indirect',
@@ -296,11 +306,12 @@ async function obraScopeWhere(userId: string, isAdmin: boolean) {
   };
 }
 
-async function listObras(userId: string, isAdmin: boolean, query: string, page: number) {
+async function listObras(userId: string, isAdmin: boolean, query: string, page: number, contratoId?: string) {
   const scope = await obraScopeWhere(userId, isAdmin);
   if (!scope) return { rows: [], total: 0 };
   const where = {
     ...scope,
+    ...(contratoId ? { contratoId } : {}),
     ...(query ? { name: { contains: query, mode: 'insensitive' as const } } : {}),
   };
   const [total, rows] = await Promise.all([
@@ -316,14 +327,80 @@ async function listObras(userId: string, isAdmin: boolean, query: string, page: 
   return { rows, total };
 }
 
-async function obraListAction(
+/** Contratos liberados que têm ao menos uma obra ativa. */
+async function listContratos(userId: string, isAdmin: boolean, query: string, page: number) {
+  const access = await getLiberadoContractAccessForUser(userId, isAdmin);
+  if (access.filter === 'none') return { rows: [], total: 0 };
+  const where = {
+    obras: { some: { isActive: true } },
+    ...(access.filter === 'ids' ? { id: { in: access.ids } } : {}),
+    ...(query
+      ? {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' as const } },
+            { number: { contains: query, mode: 'insensitive' as const } },
+          ],
+        }
+      : {}),
+  };
+  const [total, rows] = await Promise.all([
+    prisma.contract.count({ where }),
+    prisma.contract.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      skip: page * CONTRATO_PAGE_SIZE,
+      take: CONTRATO_PAGE_SIZE,
+      select: { id: true, name: true, number: true },
+    }),
+  ]);
+  return { rows, total };
+}
+
+async function contratoListAction(
   userId: string,
   isAdmin: boolean,
   query: string,
   page: number,
   intro?: string,
 ): Promise<{ action: SendAction; empty: boolean }> {
-  const { rows, total } = await listObras(userId, isAdmin, query, page);
+  const { rows, total } = await listContratos(userId, isAdmin, query, page);
+  if (rows.length === 0) {
+    return {
+      empty: true,
+      action: waButtons(
+        query
+          ? `Não achei contrato com «${query}». Digite outra parte do nome ou toque em Menu.`
+          : 'Não encontrei contratos com obras liberados para o seu usuário. Fale com o responsável para liberar o acesso.',
+      ),
+    };
+  }
+  const items = rows.map((c) => ({
+    id: `${ID.contratoPrefix}${c.id}`,
+    title: clip(c.name, 24),
+    description: clip(`Contrato ${c.number}`, 72),
+  }));
+  if ((page + 1) * CONTRATO_PAGE_SIZE < total) {
+    items.push({ id: ID.moreContratos, title: 'Mais contratos…', description: 'Ou digite parte do nome' });
+  }
+  const head = intro ?? 'Qual o *contrato*?';
+  return {
+    empty: false,
+    action: waList(`${head}
+
+(Dica: digite parte do nome ou número do contrato para buscar.)`, items, 'Ver contratos'),
+  };
+}
+
+async function obraListAction(
+  userId: string,
+  isAdmin: boolean,
+  query: string,
+  page: number,
+  contratoId: string | undefined,
+  canChangeContrato: boolean,
+  intro?: string,
+): Promise<{ action: SendAction; empty: boolean }> {
+  const { rows, total } = await listObras(userId, isAdmin, query, page, contratoId);
   if (rows.length === 0) {
     return {
       empty: true,
@@ -341,6 +418,7 @@ async function obraListAction(
   }));
   const hasMore = (page + 1) * OBRA_PAGE_SIZE < total;
   if (hasMore) items.push({ id: ID.moreObras, title: 'Mais obras…', description: 'Ou digite parte do nome' });
+  if (canChangeContrato) items.push({ id: ID.changeContrato, title: 'Trocar contrato', description: 'Voltar para a lista de contratos' });
   const head = intro ?? 'Em qual *obra* você vai lançar o diário?';
   return {
     empty: false,
@@ -475,6 +553,7 @@ export async function processWhatsAppDiarioObraFlow(params: {
   const userId = String(p.userId || '');
   const isAdmin = p.isAdmin === true;
   const stay = (sendAction: SendAction, np = p): Result => ({ sendAction, newStatus: status, newPayload: np });
+  const deferred = (r: Result): Result => ({ ...r, ackDebounceMs: ACK_DEBOUNCE_MS });
   const go = (sendAction: SendAction, newStatus: WhatsAppDiarioObraFlowStatus, np = p): Result => ({
     sendAction,
     newStatus,
@@ -488,7 +567,7 @@ export async function processWhatsAppDiarioObraFlow(params: {
   });
 
   // Daqui em diante já precisamos de obra/dia definidos (exceto nas etapas iniciais).
-  const early = status === 'RDO_ASK_CPF' || status === 'RDO_SELECT_OBRA' || status === 'RDO_ASK_DATE';
+  const early = status === 'RDO_ASK_CPF' || status === 'RDO_SELECT_CONTRATO' || status === 'RDO_SELECT_OBRA' || status === 'RDO_ASK_DATE';
   if (!early && (!p.obraId || !p.date || !userId)) {
     return fail('Perdi o fio do RDO. Abra o menu e escolha «Diário de obra» para recomeçar.');
   }
@@ -565,40 +644,112 @@ export async function processWhatsAppDiarioObraFlow(params: {
       p.userId = employee.userId;
       p.userName = employee.name;
       p.isAdmin = admin;
+      p.ctrQuery = '';
+      p.ctrPage = 0;
       p.obraQuery = '';
       p.obraPage = 0;
-      const { action, empty } = await obraListAction(employee.userId, admin, '', 0, `Olá, ${employee.name.split(' ')[0]}! Em qual *obra* você vai lançar o diário?`);
-      if (empty) return fail('Não encontrei obras liberadas para o seu usuário. Fale com o responsável para liberar o contrato.');
+      const greet = `Olá, ${employee.name.split(' ')[0]}!`;
+      const found = await listContratos(employee.userId, admin, '', 0);
+      if (found.total === 0) {
+        return fail('Não encontrei contratos com obras liberados para o seu usuário. Fale com o responsável para liberar o acesso.');
+      }
+      if (found.total === 1) {
+        // Um único contrato: pula a escolha e já mostra as obras dele.
+        const only = found.rows[0];
+        p.contratoId = only.id;
+        p.contratoName = only.name;
+        p.multiContrato = false;
+        const { action, empty } = await obraListAction(employee.userId, admin, '', 0, only.id, false, `${greet} Contrato *${only.name}*.\n\nEm qual *obra* você vai lançar o diário?`);
+        if (empty) return fail('Não encontrei obras ativas neste contrato.');
+        return go(action, 'RDO_SELECT_OBRA');
+      }
+      p.multiContrato = true;
+      const { action } = await contratoListAction(employee.userId, admin, '', 0, `${greet} Primeiro, qual o *contrato*?`);
+      return go(action, 'RDO_SELECT_CONTRATO');
+    }
+
+    case 'RDO_SELECT_CONTRATO': {
+      if (content === ID.moreContratos) {
+        const total = (await listContratos(userId, isAdmin, String(p.ctrQuery || ''), 0)).total;
+        const nextPage = Number(p.ctrPage || 0) + 1;
+        p.ctrPage = nextPage * CONTRATO_PAGE_SIZE >= total ? 0 : nextPage;
+        return stay((await contratoListAction(userId, isAdmin, String(p.ctrQuery || ''), Number(p.ctrPage))).action);
+      }
+      let chosenId = content.startsWith(ID.contratoPrefix) ? textRaw.trim().slice(ID.contratoPrefix.length) : '';
+      if (!chosenId) {
+        // Texto livre: busca por nome/número; se achar só um, já escolhe.
+        const q = textRaw.trim().slice(0, 80);
+        if (q.length < 2) return stay((await contratoListAction(userId, isAdmin, String(p.ctrQuery || ''), Number(p.ctrPage || 0))).action);
+        const found = await listContratos(userId, isAdmin, q, 0);
+        if (found.total === 1) chosenId = found.rows[0].id;
+        else {
+          p.ctrQuery = found.total ? q : '';
+          p.ctrPage = 0;
+          const { action } = await contratoListAction(userId, isAdmin, found.total ? q : '', 0);
+          return stay(found.total ? action : waButtons(`Não achei contrato com «${q}». Digite outra parte do nome ou toque em Menu.`));
+        }
+      }
+      const access = await getLiberadoContractAccessForUser(userId, isAdmin);
+      const allowed = access.filter === 'all' || (access.filter === 'ids' && access.ids.includes(chosenId));
+      const contrato = allowed
+        ? await prisma.contract.findFirst({
+            where: { id: chosenId, obras: { some: { isActive: true } } },
+            select: { id: true, name: true },
+          })
+        : null;
+      if (!contrato) {
+        return stay((await contratoListAction(userId, isAdmin, '', 0, 'Contrato não encontrado. Escolha na lista:')).action);
+      }
+      p.contratoId = contrato.id;
+      p.contratoName = contrato.name;
+      p.obraQuery = '';
+      p.obraPage = 0;
+      const { action, empty } = await obraListAction(userId, isAdmin, '', 0, contrato.id, true, `Contrato *${contrato.name}*.\n\nEm qual *obra* você vai lançar o diário?`);
+      if (empty) return stay((await contratoListAction(userId, isAdmin, '', 0, 'Esse contrato não tem obras ativas. Escolha outro:')).action);
       return go(action, 'RDO_SELECT_OBRA');
     }
 
     case 'RDO_SELECT_OBRA': {
+      const contratoId = String(p.contratoId || '');
+      const canChange = p.multiContrato === true;
+      const showObras = async (query: string, page: number, intro?: string) =>
+        (await obraListAction(userId, isAdmin, query, page, contratoId, canChange, intro)).action;
+      if (!contratoId) {
+        return go((await contratoListAction(userId, isAdmin, '', 0)).action, 'RDO_SELECT_CONTRATO');
+      }
+      if (content === ID.changeContrato) {
+        p.ctrQuery = '';
+        p.ctrPage = 0;
+        return go((await contratoListAction(userId, isAdmin, '', 0, 'Certo! Qual o *contrato*?')).action, 'RDO_SELECT_CONTRATO');
+      }
       if (content === ID.moreObras) {
-        const total = (await listObras(userId, isAdmin, String(p.obraQuery || ''), 0)).total;
+        const total = (await listObras(userId, isAdmin, String(p.obraQuery || ''), 0, contratoId)).total;
         const nextPage = Number(p.obraPage || 0) + 1;
         p.obraPage = nextPage * OBRA_PAGE_SIZE >= total ? 0 : nextPage;
-        const { action } = await obraListAction(userId, isAdmin, String(p.obraQuery || ''), Number(p.obraPage));
-        return stay(action);
+        return stay(await showObras(String(p.obraQuery || ''), Number(p.obraPage)));
       }
       let chosenId = content.startsWith(ID.obraPrefix) ? textRaw.trim().slice(ID.obraPrefix.length) : '';
       if (!chosenId) {
-        // Texto livre: busca por nome; se achar só uma, já escolhe.
+        // Texto livre: busca por nome dentro do contrato; se achar só uma, já escolhe.
         const q = textRaw.trim().slice(0, 80);
-        if (q.length < 2) return stay((await obraListAction(userId, isAdmin, String(p.obraQuery || ''), Number(p.obraPage || 0))).action);
-        const found = await listObras(userId, isAdmin, q, 0);
+        if (q.length < 2) return stay(await showObras(String(p.obraQuery || ''), Number(p.obraPage || 0)));
+        const found = await listObras(userId, isAdmin, q, 0, contratoId);
         if (found.total === 1) chosenId = found.rows[0].id;
         else {
           p.obraQuery = found.total ? q : '';
           p.obraPage = 0;
-          const { action } = await obraListAction(userId, isAdmin, found.total ? q : '', 0);
-          return stay(found.total ? action : waButtons(`Não achei obra com «${q}». Digite outra parte do nome ou toque em Menu.`));
+          return stay(
+            found.total
+              ? await showObras(q, 0)
+              : waButtons(`Não achei obra com «${q}» neste contrato. Digite outra parte do nome ou toque em Menu.`),
+          );
         }
       }
       const scope = await obraScopeWhere(userId, isAdmin);
       const obra = scope
-        ? await prisma.obra.findFirst({ where: { ...scope, id: chosenId }, select: { id: true, name: true } })
+        ? await prisma.obra.findFirst({ where: { ...scope, contratoId, id: chosenId }, select: { id: true, name: true } })
         : null;
-      if (!obra) return stay((await obraListAction(userId, isAdmin, '', 0, 'Obra não encontrada. Escolha na lista:')).action);
+      if (!obra) return stay(await showObras('', 0, 'Obra não encontrada. Escolha na lista:'));
       p.obraId = obra.id;
       p.obraName = obra.name;
       return go(
@@ -635,9 +786,9 @@ export async function processWhatsAppDiarioObraFlow(params: {
           p.pendingPhotos = [photo];
           const { content: c } = await loadRdo(obraId, date);
           if (!c.activities.length) {
-            return go(waButtons('Recebi sua foto. Qual o *nome da atividade* em que ela entra? (ex.: “Alvenaria no subsolo”)', backToHub()), 'RDO_ACT_TITLE');
+            return deferred(go(waButtons('Recebi sua foto. Qual o *nome da atividade* em que ela entra? (ex.: “Alvenaria no subsolo”)', backToHub()), 'RDO_ACT_TITLE'));
           }
-          return go(await photoSelectAction(), 'RDO_PHOTO_SELECT');
+          return deferred(go(await photoSelectAction(), 'RDO_PHOTO_SELECT'));
         }
       }
       switch (content) {
@@ -715,7 +866,7 @@ export async function processWhatsAppDiarioObraFlow(params: {
       if (hasMedia) {
         const photo = await incomingPhoto();
         if (photo && photo !== 'invalid') p.pendingPhotos = [...pendingList(), photo];
-        return stay(waButtons('Foto recebida 📷. Agora me diga o *nome da atividade* em que ela entra.', backToHub()));
+        return deferred(stay(waButtons('Foto recebida 📷. Agora me diga o *nome da atividade* em que ela entra.', backToHub())));
       }
       const title = textRaw.trim().slice(0, 300);
       if (title.length < 3) return stay(waButtons('Descreva a atividade com pelo menos 3 letras.', backToHub()));
@@ -750,11 +901,18 @@ export async function processWhatsAppDiarioObraFlow(params: {
         if (photo) {
           const r = await attachPhotos(actId, [photo]);
           if (isResult(r)) return r;
-          return stay(
-            waButtons(`📷 Foto salva em «${r.title}» (${r.total} no total). Mande mais ou toque em «Pronto».`, [
-              { id: ID.done, title: 'Pronto' },
-              { id: ID.newAct, title: 'Outra atividade' },
-            ]),
+          // Fotos em sequência (até 10 s entre uma e outra) contam como uma rajada → texto no plural.
+          const now = Date.now();
+          p.photoBurst = now - Number(p.lastPhotoAt || 0) < 10_000 ? Number(p.photoBurst || 0) + 1 : 1;
+          p.lastPhotoAt = now;
+          const many = Number(p.photoBurst) > 1;
+          return deferred(
+            stay(
+              waButtons(`📷 ${many ? 'Fotos salvas' : 'Foto salva'} em «${r.title}» (${r.total} no total). Mande mais ou toque em «Pronto».`, [
+                { id: ID.done, title: 'Pronto' },
+                { id: ID.newAct, title: 'Outra atividade' },
+              ]),
+            ),
           );
         }
       }
@@ -776,7 +934,7 @@ export async function processWhatsAppDiarioObraFlow(params: {
       if (hasMedia) {
         const photo = await incomingPhoto();
         if (photo && photo !== 'invalid') p.pendingPhotos = [...pendingList(), photo];
-        return stay(await photoSelectAction());
+        return deferred(stay(await photoSelectAction()));
       }
       if (content === ID.newAct) {
         return go(waButtons('Qual o *nome da nova atividade*? (ex.: “Reboco da laje 3”)', backToHub()), 'RDO_ACT_TITLE');

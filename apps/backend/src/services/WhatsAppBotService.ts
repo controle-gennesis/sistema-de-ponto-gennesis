@@ -69,6 +69,7 @@ type FlowStatus =
   | 'VRR_CONFIRM'
   | 'VRR_COMPLETE'
   | 'RDO_ASK_CPF'
+  | 'RDO_SELECT_CONTRATO'
   | 'RDO_SELECT_OBRA'
   | 'RDO_ASK_DATE'
   | 'RDO_HUB'
@@ -705,6 +706,44 @@ export class WhatsAppBotService {
         } as any
       });
     });
+  }
+
+  private deferredReplies = new Map<string, NodeJS.Timeout>();
+
+  private cancelDeferredReply(phone: string) {
+    const t = this.deferredReplies.get(phone);
+    if (t) clearTimeout(t);
+    this.deferredReplies.delete(phone);
+  }
+
+  private scheduleDeferredReply(phone: string, conversationId: string, action: SendAction, ms: number) {
+    this.cancelDeferredReply(phone);
+    const timer = setTimeout(() => {
+      this.deferredReplies.delete(phone);
+      this.deliverAction(phone, conversationId, action).catch((err) =>
+        console.error('[WhatsAppBotService] Falha ao enviar resposta agrupada:', err)
+      );
+    }, ms);
+    this.deferredReplies.set(phone, timer);
+  }
+
+  /** Registra a resposta da Gennecy na conversa e envia pelo WhatsApp. */
+  private async deliverAction(phone: string, conversationId: string, sendAction: SendAction) {
+    await prisma.whatsAppMessage.create({
+      data: {
+        conversationId,
+        role: 'assistant',
+        content: sendAction.type === 'text' ? sendAction.text : sendAction.body
+      }
+    });
+
+    if (sendAction.type === 'text') {
+      await metaWhatsApp.sendText(phone, sendAction.text);
+    } else if (sendAction.type === 'buttons') {
+      await metaWhatsApp.sendButtons(phone, sendAction.body, sendAction.buttons);
+    } else {
+      await metaWhatsApp.sendList(phone, sendAction.body, sendAction.buttonText, sendAction.sections);
+    }
   }
 
   /** Fila por telefone: mensagens do mesmo número (ex.: 3 fotos de uma vez) são tratadas em ordem, uma por vez. */
@@ -1787,25 +1826,14 @@ export class WhatsAppBotService {
       } as any
     });
 
-    await prisma.whatsAppMessage.create({
-      data: {
-        conversationId: conversation.id,
-        role: 'assistant',
-        content: sendAction.type === 'text' ? sendAction.text : sendAction.body
-      }
-    });
-
-    if (sendAction.type === 'text') {
-      await metaWhatsApp.sendText(phone, sendAction.text);
-    } else if (sendAction.type === 'buttons') {
-      await metaWhatsApp.sendButtons(phone, sendAction.body, sendAction.buttons);
+    // Rajada de fotos: segura a resposta e só envia a última (cada nova foto reinicia a espera).
+    const ackDebounceMs = !feedbackResult ? diarioObraResult?.ackDebounceMs : undefined;
+    if (ackDebounceMs && ackDebounceMs > 0) {
+      this.scheduleDeferredReply(phone, conversation.id, sendAction, ackDebounceMs);
     } else {
-      await metaWhatsApp.sendList(
-        phone,
-        sendAction.body,
-        sendAction.buttonText,
-        sendAction.sections
-      );
+      // Qualquer outra resposta substitui um aviso de foto que ainda estivesse aguardando.
+      this.cancelDeferredReply(phone);
+      await this.deliverAction(phone, conversation.id, sendAction);
     }
 
     // Atendimento concluído: convida para avaliar o sistema (no máximo a cada 90 dias, nunca para
