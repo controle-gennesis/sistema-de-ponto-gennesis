@@ -499,7 +499,15 @@ function DrivePageContent() {
 
   /** Itens sendo arrastados agora (ficam esmaecidos até soltar). */
   const [draggingKeys, setDraggingKeys] = useState<Set<string>>(new Set());
-  const onDragStateChange = useCallback((keys: string[] | null) => setDraggingKeys(new Set(keys ?? [])), []);
+  const onDragStateChange = useCallback((keys: string[] | null) => {
+    setDraggingKeys(new Set(keys ?? []));
+    // Arrastar um item que não estava selecionado: ele passa a ficar selecionado (e volta assim se o arrasto for cancelado).
+    if (keys && keys.length === 1) {
+      const only = keys[0]!;
+      setSelection((prev) => (prev.includes(only) ? prev : [only]));
+      selectionAnchor.current = only;
+    }
+  }, []);
 
   /** Ao arrastar um item selecionado, leva a seleção toda (só o que é seu pode ser movido). */
   const dragItemsFor = (item: DriveDragItem): DriveDragItem[] => {

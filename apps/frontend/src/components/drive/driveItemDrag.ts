@@ -82,7 +82,8 @@ function startCardStack(anchor: HTMLElement, keys: string[], startX: number, sta
     clone.style.cssText =
       `position:fixed;left:0;top:0;margin:0;width:${r.width}px;height:${r.height}px;box-sizing:border-box;` +
       'pointer-events:none;opacity:1;transform-origin:50% 50%;will-change:transform;animation:none;' +
-      'box-shadow:0 8px 22px rgba(0,0,0,.22);border-radius:14px;overflow:hidden;';
+      // Sempre com o visual de "selecionado" (vermelhinho), mesmo quando o item não estava selecionado.
+      'background-color:#fef2f2;border:1px solid #fca5a5;box-shadow:0 8px 22px rgba(220,38,38,.25);border-radius:14px;overflow:hidden;';
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
     // Já nasce em cima do cartão original (sem isso aparece um instante no canto superior esquerdo).
@@ -195,9 +196,10 @@ export function startDriveItemDrag(e: React.DragEvent, items: DriveDragItem | Dr
   const list = Array.isArray(items) ? items : [items];
   e.dataTransfer.setData(DRIVE_ITEM_MIME, JSON.stringify(list));
   e.dataTransfer.effectAllowed = 'move';
-  if (list.length > 1) {
+  const anchor = e.currentTarget as HTMLElement;
+  // Um ou vários itens: os cartões em si (menores) acompanham o cursor; sem o "fantasma" grande do navegador.
+  if (anchor?.getAttribute?.('data-drive-key')) {
     setBlankDragImage(e);
-    const anchor = e.currentTarget as HTMLElement;
     const keys = list.map((it) => `${it.type}-${it.id}`);
     const { clientX, clientY } = e;
     // Espera o navegador iniciar o arrasto antes de mexer nos cartões (esconder a origem no mesmo instante cancela o arrasto).
