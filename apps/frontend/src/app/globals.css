@@ -836,6 +836,11 @@ body::-webkit-scrollbar:vertical {
   }
 }
 
+/* Drive (lista) — a entrada em cascata move as linhas para baixo; sem isso aparece uma barra de rolagem que some */
+.table-scroll:has(> .drive-stagger) {
+  overflow-y: hidden;
+}
+
 /* Drive — ao abrir uma pasta, os itens entram em cascata (um depois do outro) */
 @keyframes drive-item-in {
   from {
