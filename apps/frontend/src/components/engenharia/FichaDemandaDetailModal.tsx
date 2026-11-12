@@ -209,18 +209,8 @@ export function FichaDemandaDetailModal({
     setOcId(record?.ocId || '');
   }, [record?.id, record?.scNumero, record?.scId, record?.ocId]);
 
-  /** Cancelar FD: só administrador ou gestor do contrato (coluna «Gestor» da aba Contratos). */
-  const podeCancelarQuery = useQuery({
-    queryKey: ['fd-pode-cancelar', record?.id],
-    queryFn: async () => {
-      const res = await api.get(`/demand-sheet-approvals/${record!.id}/pode-cancelar`);
-      return res.data?.data?.podeCancelar === true;
-    },
-    enabled: isOpen && !!record?.id && allowAddOrdemCompra && !isAdministrator,
-    staleTime: 60_000,
-    retry: false,
-  });
-  const podeCancelarFd = isAdministrator || podeCancelarQuery.data === true;
+  /** Cancelar FD: qualquer pessoa com acesso à página (o servidor também confere o módulo). */
+  const podeCancelarFd = true;
 
   /** Orçamento que gerou a FD (nome vem do índice de orçamentos do contrato). */
   const orcamentoQuery = useQuery({
