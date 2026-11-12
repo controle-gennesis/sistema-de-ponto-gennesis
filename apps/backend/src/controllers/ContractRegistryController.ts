@@ -4,7 +4,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { parseBoletoDate, parseBoletoValue } from '../lib/boletoControlImport';
-import { gerarPdfControleContratos } from '../lib/contractRegistryPdf';
+import { gerarPdfControleContratos, type RegistryPdfContract } from '../lib/contractRegistryPdf';
+import { EMPTY_TAP, gerarPdfTap, sanitizeTap, tapMissingFields } from '../lib/contractTapPdf';
 
 type Row = Prisma.ContractRegistryEntryGetPayload<{ include: { addenda: true; cats: true; looseArts: true } }>;
 
@@ -120,6 +121,7 @@ function serialize(r: Row) {
     startDate: ymd(r.startDate),
     guarantee: r.guarantee,
     endDate: ymd(r.endDate),
+    tap: sanitizeTap(r.tap),
     addenda: r.addenda.map((a) => ({
       id: a.id,
       addendumNumber: a.addendumNumber,
@@ -210,6 +212,7 @@ function readBody(body: Record<string, unknown>, partial: boolean): Prisma.Contr
   if (has('document')) data.document = str(body.document, 40);
   if (has('notes')) data.notes = str(body.notes, 2000);
   if (has('guarantee')) data.guarantee = str(body.guarantee, 500);
+  if (has('tap')) data.tap = sanitizeTap(body.tap) as unknown as Prisma.InputJsonValue;
 
   if (has('value')) {
     const raw = body.value;
@@ -239,6 +242,50 @@ function readBody(body: Record<string, unknown>, partial: boolean): Prisma.Contr
 }
 
 export class ContractRegistryController {
+  /** TAP (Termo de Abertura do Projeto) em PDF de um contrato. Exige os campos obrigatórios preenchidos. */
+  async tapPdf(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const row = await prisma.contractRegistryEntry.findUnique({ where: { id: req.params.id }, include: withAddenda });
+      if (!row) throw createError('Contrato não encontrado', 404);
+      const s = serialize(row);
+      const tap = s.tap ?? EMPTY_TAP;
+      const missing = tapMissingFields(tap);
+      if (missing.length) {
+        res.status(422).json({ success: false, message: 'Preencha os campos obrigatórios do TAP.', missing });
+        return;
+      }
+      const ccs = s.costCenterIds.length
+        ? await prisma.costCenter.findMany({ where: { id: { in: s.costCenterIds } }, select: { id: true, code: true, name: true } })
+        : [];
+      const ccLabel = new Map(ccs.map((c) => [c.id, c.code ? c.code + ' - ' + c.name : c.name]));
+      const contrato: RegistryPdfContract = {
+        contractorName: s.contractorName,
+        uf: s.uf,
+        contractNumber: s.contractNumber,
+        document: s.document,
+        signedAt: s.signedAt,
+        notes: s.notes,
+        value: s.value,
+        startDate: s.startDate,
+        endDate: s.endDate,
+        guarantee: s.guarantee,
+        arts: s.arts,
+        costCenters: s.costCenterIds.map((id) => ccLabel.get(id)).filter((x): x is string => !!x),
+        addendaTotal: s.addendaTotal,
+        addenda: s.addenda,
+        cats: s.cats,
+        looseArts: s.looseArts,
+      };
+      const buffer = await gerarPdfTap(contrato, tap);
+      const nome = ('TAP - Contrato ' + s.contractNumber + ' - ' + s.contractorName).replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="tap.pdf"; filename*=UTF-8\'\'' + encodeURIComponent(nome + '.pdf'));
+      res.send(buffer);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   /** PDF com a ficha dos contratos escolhidos (body: { ids: string[] }). */
   async pdf(req: AuthRequest, res: Response, next: NextFunction) {
     try {

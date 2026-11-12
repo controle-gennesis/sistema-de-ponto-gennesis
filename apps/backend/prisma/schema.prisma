@@ -6196,6 +6196,8 @@ model ContractRegistryEntry {
   startDate      DateTime? @db.Date
   guarantee      String?
   endDate        DateTime? @db.Date
+  /// Campos do TAP (Termo de Abertura do Projeto) do contrato.
+  tap            Json?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?

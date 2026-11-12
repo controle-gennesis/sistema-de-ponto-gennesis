@@ -133,15 +133,12 @@ async function osDoOrcamentoDaFd(
   return !numeroPasta && unicas.length === 1 ? unicas[0] : undefined;
 }
 
-/** Cancelar a FD: só o administrador ou o gestor do contrato (coluna «Gestor» da aba Contratos). */
-async function podeCancelarFd(userId: string, isAdmin: boolean, contratoId: string): Promise<boolean> {
-  if (isAdmin) return true;
-  if (!contratoId) return false;
-  const gestor = await prisma.userDpApprovalContract.findFirst({
-    where: { userId, contractId: contratoId },
-    select: { id: true },
-  });
-  return !!gestor;
+/**
+ * Cancelar a FD: qualquer pessoa com acesso à página (a rota de status já exige o módulo "FDs aprovadas").
+ * Antes era só administrador ou gestor do contrato.
+ */
+async function podeCancelarFd(_userId: string, _isAdmin: boolean, _contratoId: string): Promise<boolean> {
+  return true;
 }
 
 function clampFichaDemandaPct(value: unknown): number | null {
