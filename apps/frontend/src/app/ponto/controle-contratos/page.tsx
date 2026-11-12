@@ -12,6 +12,7 @@ import {
   BadgeCheck,
   FilePlus2,
   FileSignature,
+  ClipboardCheck,
   FileDown,
   Filter,
   Info,
@@ -24,6 +25,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { DriveLinksMenu } from './DriveLinksMenu';
+import { TapModal, tapMissing, type TapData } from './TapModal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -60,6 +62,7 @@ type RegistryRow = {
   startDate: string | null;
   guarantee: string | null;
   endDate: string | null;
+  tap?: TapData | null;
   addenda: Array<{
     id: string;
     addendumNumber: string | null;
@@ -372,6 +375,33 @@ function ControleContratosPage() {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [tapTarget, setTapTarget] = useState<RegistryRow | null>(null);
+
+  /** Ícone do card: se o TAP já está completo, gera na hora; senão abre a janela para preencher. */
+  const gerarTap = async (r: RegistryRow) => {
+    if (tapMissing(r.tap).length) {
+      setTapTarget(r);
+      return;
+    }
+    if (pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const res = await api.post(`/contract-registry/${r.id}/tap-pdf`, {}, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TAP - Contrato ${r.contractNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Não foi possível gerar o TAP. Abra o TAP e confira os campos.');
+      setTapTarget(r);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
   const [ufFilter, setUfFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -933,6 +963,16 @@ function ControleContratosPage() {
                               >
                                 <FileDown className="h-4 w-4" />
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => void gerarTap(r)}
+                                disabled={pdfLoading}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                title="Gerar TAP (Termo de Abertura do Projeto)"
+                                aria-label="Gerar TAP"
+                              >
+                                <ClipboardCheck className="h-4 w-4" />
+                              </button>
                               <button type="button" onClick={() => openEdit(r)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Editar" aria-label="Editar">
                                 <Pencil className="h-4 w-4" />
                               </button>
@@ -958,6 +998,11 @@ function ControleContratosPage() {
             )}
           </CardContent>
         </Card>
+        <TapModal
+          contract={tapTarget}
+          onClose={() => setTapTarget(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ['contract-registry'] })}
+        />
       </PageStack>
 
       <Modal
@@ -987,6 +1032,17 @@ function ControleContratosPage() {
                 className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
               >
                 <Pencil className="h-3.5 w-3.5" /> Editar dados
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const r = viewing;
+                  setViewingId(null);
+                  setTapTarget(r);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                <ClipboardCheck className="h-3.5 w-3.5" /> Gerar TAP
               </button>
             </div>
 

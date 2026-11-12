@@ -13,6 +13,7 @@ router.use(requireModuleAccess(pathToModuleKey('/ponto/controle-contratos')));
 router.get('/', (req, res, next) => controller.list(req, res, next));
 router.get('/art-options', (req, res, next) => controller.artOptions(req, res, next));
 router.post('/pdf', (req, res, next) => controller.pdf(req, res, next));
+router.post('/:id/tap-pdf', (req, res, next) => controller.tapPdf(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));
 router.patch('/:id', (req, res, next) => controller.update(req, res, next));
 router.post('/:id/addenda', (req, res, next) => controller.addAddendum(req, res, next));
