@@ -28,9 +28,11 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
+import { ContratoResumoGraficoMeta, visaoGeralKpis, type ContratoVisaoGeral } from './ContratoResumoVisaoGeral';
 import { formatCpfInput } from '@/lib/cpf';
 import api from '@/lib/api';
 
@@ -1290,8 +1292,38 @@ function AtalhoKpiCard({
 }
 
 /** Blocos de atalho (só ícone e nome), à direita do card de Reuniões. */
-function AtalhoBlocos({ atalhos }: { atalhos: NonNullable<ContratoResumoKpi['atalhos']> }) {
+function AtalhoBlocos({
+  atalhos,
+  cheio = false,
+}: {
+  atalhos: NonNullable<ContratoResumoKpi['atalhos']>;
+  /** Ocupa a linha toda, com os blocos lado a lado (sem o cartão ao lado). */
+  cheio?: boolean;
+}) {
   if (atalhos.length === 0) return null;
+  if (cheio) {
+    return (
+      <div
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--atalho-cols),minmax(0,1fr))]"
+        style={{ '--atalho-cols': atalhos.length } as React.CSSProperties}
+      >
+        {atalhos.map(({ label, href: to, icon: Icon }) => (
+          <Link
+            key={label}
+            href={to}
+            className={`${cadastroListClasses.card} group flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-3 text-center transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800`}
+          >
+            {Icon ? (
+              <span className="rounded-lg bg-red-100 p-2 text-red-600 transition-colors group-hover:bg-red-600 group-hover:text-white dark:bg-red-900/30 dark:text-red-400">
+                <Icon className="h-5 w-5" aria-hidden />
+              </span>
+            ) : null}
+            <span className="text-xs font-semibold leading-tight text-gray-800 dark:text-gray-100">{label}</span>
+          </Link>
+        ))}
+      </div>
+    );
+  }
   return (
     <div
       className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-4 lg:[grid-template-columns:repeat(var(--atalho-cols),9rem)]"
@@ -1427,7 +1459,10 @@ export function ContratoFaturamentoCharts({
   peopleLoading = false,
   peopleError = false,
   abastecimento,
+  visaoGeral,
 }: {
+  /** Indicadores e gráfico "Faturamento por mês x meta" no topo do Resumo. */
+  visaoGeral?: ContratoVisaoGeral;
   faturamentoInsight: ContratoFaturamentoInsight;
   progressoTitle: string;
   progressoBilled?: number;
@@ -1444,15 +1479,23 @@ export function ContratoFaturamentoCharts({
 
   return (
     <div className="space-y-4">
+      {visaoGeral ? (
+        <>
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {visaoGeralKpis(visaoGeral).map((kpi) => (
+              <FilterStatCard key={kpi.label} {...kpi} />
+            ))}
+          </div>
+          <ContratoResumoGraficoMeta data={visaoGeral} />
+        </>
+      ) : null}
       {resumoKpis.length > 0 ? (
         <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {resumoKpis.map((kpi) =>
             kpi.variant === 'atalho' ? (
-              <div key={kpi.title} className="col-span-full flex flex-col gap-4 lg:flex-row lg:items-stretch">
-                <div className="min-w-0 flex-1 [&>*]:h-full">
-                  <AtalhoKpiCard {...kpi} />
-                </div>
-                <AtalhoBlocos atalhos={kpi.atalhos ?? []} />
+              // Só os blocos de atalho (o cartão "Reuniões" virou uma aba do contrato).
+              <div key={kpi.title} className="col-span-full">
+                <AtalhoBlocos atalhos={kpi.atalhos ?? []} cheio />
               </div>
             ) : (
               <KpiStatCard key={kpi.title} {...kpi} />
