@@ -5496,52 +5496,6 @@ export default function EmpreiteirosPage() {
                           </div>
                         ) : null}
                       </div>
-                      <div>
-                        <label className={labelClass}>Anexo do contrato</label>
-                        <div className="space-y-2">
-                          {newServiceFiles.map((file, fileIndex) => {
-                            const href = resolveApiMediaUrl(file.url) || file.url;
-                            return (
-                              <div
-                                key={`${file.url}-${fileIndex}`}
-                                className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-900/60"
-                              >
-                                <FileText className="h-4 w-4 shrink-0 text-gray-500" />
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="min-w-0 flex-1 truncate text-sm text-red-700 hover:underline dark:text-red-300"
-                                >
-                                  {file.name || 'contrato'}
-                                </a>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setNewServiceFiles((prev) =>
-                                      prev.filter((_, i) => i !== fileIndex)
-                                    )
-                                  }
-                                  className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                                  aria-label="Remover anexo"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            );
-                          })}
-                          <FileDropZone
-                            label="Anexar contrato"
-                            hint="Clique ou arraste PDF, Word ou imagem do contrato assinado"
-                            accept=".pdf,.doc,.docx,image/*,application/pdf"
-                            multiple
-                            uploading={uploadingFile}
-                            onFiles={(files) => {
-                              for (const file of files) void uploadNewServiceFile(file);
-                            }}
-                          />
-                        </div>
-                      </div>
                       <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                         <button
                           type="button"
