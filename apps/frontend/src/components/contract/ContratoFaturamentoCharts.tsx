@@ -21,7 +21,9 @@ import type { ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ChevronRight,
+  ClipboardCheck,
   ExternalLink,
+  Gauge,
   Loader2,
   TrendingDown,
   TrendingUp,
@@ -195,7 +197,12 @@ function ProgressoGaugeCard({
 
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
-      <CardHeading title={title} />
+      <CardHeading
+        title={title}
+        icon={Gauge}
+        iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+        iconColor="text-emerald-600 dark:text-emerald-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
         {/* flex-1 + items-center: arco no meio do espaço entre título e blocos */}
         <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -525,7 +532,12 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
 
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
-      <CardHeading title="Ordem de serviço" />
+      <CardHeading
+        title="Ordem de serviço"
+        icon={ClipboardCheck}
+        iconBg="bg-sky-100 dark:bg-sky-900/30"
+        iconColor="text-sky-600 dark:text-sky-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
         <div className="min-h-[200px] flex-1 w-full">
               <ResponsiveContainer width="100%" height="100%">
