@@ -8,6 +8,7 @@ import { feedbackInviteAction, processWhatsAppFeedbackFlow } from './WhatsAppFee
 import { registerWhatsAppFeedbackAsk, shouldAskWhatsAppFeedback } from '../lib/appFeedbackRules';
 import { processWhatsAppVehicleReservationFlow } from './WhatsAppVehicleReservationFlowHandler';
 import { processWhatsAppVehicleReservationReturnFlow } from './WhatsAppVehicleReservationReturnFlowHandler';
+import { processWhatsAppDiarioObraFlow } from './WhatsAppDiarioObraFlowHandler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -67,6 +68,23 @@ type FlowStatus =
   | 'VRR_ASK_OBSERVATIONS'
   | 'VRR_CONFIRM'
   | 'VRR_COMPLETE'
+  | 'RDO_ASK_CPF'
+  | 'RDO_SELECT_OBRA'
+  | 'RDO_ASK_DATE'
+  | 'RDO_HUB'
+  | 'RDO_ACT_TITLE'
+  | 'RDO_ACT_PHOTOS'
+  | 'RDO_PHOTO_SELECT'
+  | 'RDO_LABOR_TYPE'
+  | 'RDO_LABOR_TEXT'
+  | 'RDO_EQUIP_TEXT'
+  | 'RDO_MAT_TEXT'
+  | 'RDO_OCC_TEXT'
+  | 'RDO_NOTE_TEXT'
+  | 'RDO_WEATHER_SKY'
+  | 'RDO_WEATHER_PRACT'
+  | 'RDO_FINALIZE_CONFIRM'
+  | 'RDO_COMPLETE'
   | 'FEEDBACK_INVITE'
   | 'FEEDBACK_RATING'
   | 'FEEDBACK_LIKES'
@@ -332,7 +350,7 @@ type SendAction =
       type: 'list';
       body: string;
       buttonText: string;
-      sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }>;
+      sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>;
     };
 
 export type { SendAction };
@@ -348,6 +366,7 @@ const GENNECY_MAIN_MENU_ROWS: Array<{ id: string; title: string }> = [
   { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
   { id: 'RESERVAR_CARRO', title: 'Reservar carro' },
   { id: 'DAR_BAIXA_VEICULO', title: 'Dar baixa do veículo' },
+  { id: 'DIARIO_OBRA', title: 'Diário de obra' },
   { id: 'SUPORTE_SISTEMA', title: 'Suporte do sistema' },
   { id: 'ATENDENTE', title: 'Falar com atendente' },
   { id: 'DUVIDAS', title: 'Dúvidas' },
@@ -688,7 +707,29 @@ export class WhatsAppBotService {
     });
   }
 
+  /** Fila por telefone: mensagens do mesmo número (ex.: 3 fotos de uma vez) são tratadas em ordem, uma por vez. */
+  private phoneQueues = new Map<string, Promise<void>>();
+
   async processMessage(
+    phone: string,
+    text: string,
+    hasMedia = false,
+    mediaInfo?: MediaInfo,
+    opts?: { whatsappProfileName?: string }
+  ): Promise<void> {
+    const previous = this.phoneQueues.get(phone) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.processMessageNow(phone, text, hasMedia, mediaInfo, opts));
+    const tail = run.catch(() => undefined);
+    this.phoneQueues.set(phone, tail);
+    void tail.then(() => {
+      if (this.phoneQueues.get(phone) === tail) this.phoneQueues.delete(phone);
+    });
+    return run;
+  }
+
+  private async processMessageNow(
     phone: string,
     text: string,
     hasMedia = false,
@@ -1087,6 +1128,22 @@ export class WhatsAppBotService {
       endConversation,
     });
 
+    const diarioObraResult = feedbackResult
+      ? null
+      : await processWhatsAppDiarioObraFlow({
+          phone,
+          textRaw,
+          content,
+          flowStatus: normalizedFlowStatus,
+          payload: newPayload,
+          hasMedia,
+          savedMedia,
+          isMenuRequest,
+          isEndRequest,
+          resetToMenu,
+          endConversation,
+        });
+
     let skipDefaultSwitch = false;
     if (feedbackResult) {
       sendAction = feedbackResult.sendAction;
@@ -1096,6 +1153,17 @@ export class WhatsAppBotService {
         newConversationStatus = feedbackResult.newConversationStatus;
       }
       if (feedbackResult.clearPayload) {
+        Object.keys(newPayload).forEach((k) => delete newPayload[k]);
+      }
+      skipDefaultSwitch = true;
+    } else if (diarioObraResult) {
+      sendAction = diarioObraResult.sendAction;
+      newStatus = diarioObraResult.newStatus as FlowStatus;
+      newPayload = diarioObraResult.newPayload;
+      if (diarioObraResult.newConversationStatus) {
+        newConversationStatus = diarioObraResult.newConversationStatus;
+      }
+      if (diarioObraResult.clearPayload) {
         Object.keys(newPayload).forEach((k) => delete newPayload[k]);
       }
       skipDefaultSwitch = true;

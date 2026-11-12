@@ -296,11 +296,15 @@ export class MetaWhatsAppService {
     phone: string,
     bodyText: string,
     buttonText: string,
-    sections: Array<{ title: string; rows: Array<{ id: string; title: string }> }>
+    sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>
   ): Promise<boolean> {
     const apiSections = sections.map((sec) => ({
       title: sec.title.slice(0, 24),
-      rows: sec.rows.map((r) => ({ id: r.id, title: r.title.slice(0, 24) }))
+      rows: sec.rows.map((r) => ({
+        id: r.id,
+        title: r.title.slice(0, 24),
+        ...(r.description?.trim() ? { description: r.description.trim().slice(0, 72) } : {})
+      }))
     }));
 
     return this.sendMessage(phone, {
