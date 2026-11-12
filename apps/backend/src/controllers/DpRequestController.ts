@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
@@ -567,7 +568,41 @@ export class DpRequestController {
       );
       const linked = await findDpRequestIdsLinkedToAccounting(directInQueue.map((r) => r.id));
       const notSent = new Set(directInQueue.filter((r) => !linked.has(r.id)).map((r) => r.id));
-      const data = summarized.map((r) => ({ ...r, contabilidadePendente: notSent.has(r.id) }));
+
+      // Solicitações internas finalizadas pelo DP: situação do pedido ligado na Contabilidade (encerrar / reenviar).
+      const sentCandidates = requests.filter(
+        (r) =>
+          isAccountingDirectRequestType(r.requestType) ||
+          (r.status === 'CONCLUDED' && dpRequestGoesToAccounting(r))
+      );
+      const linkedRows = sentCandidates.length
+        ? await prisma.dpContabilidadeRequest.findMany({
+            where: { sourceDpRequestId: { in: sentCandidates.map((c) => c.id) } },
+            select: { id: true, status: true, accountingDoneAt: true, dpClosedAt: true, sourceDpRequestId: true },
+          })
+        : [];
+      const linkByDp = new Map(
+        linkedRows.map((l) => [
+          l.sourceDpRequestId,
+          {
+            id: l.id,
+            status: l.status,
+            accountingDoneAt: l.accountingDoneAt ? l.accountingDoneAt.toISOString() : null,
+            dpClosedAt: l.dpClosedAt ? l.dpClosedAt.toISOString() : null,
+          },
+        ])
+      );
+      const sentIds = new Set(sentCandidates.map((c) => c.id));
+      const data = (summarized as Array<(typeof summarized)[number] & { id: string; requestType: string }>).map((r) => ({
+        ...r,
+        // Pedido direto: "pendente de envio" só enquanto está na fila sem pedido ligado (regra de antes).
+        contabilidadePendente: isAccountingDirectRequestType(r.requestType)
+          ? notSent.has(r.id)
+          : sentIds.has(r.id)
+            ? !linkByDp.has(r.id)
+            : false,
+        contabilidade: sentIds.has(r.id) ? (linkByDp.get(r.id) ?? null) : null,
+      }));
 
       return res.json({ success: true, data });
     } catch (e) {
@@ -1454,7 +1489,21 @@ export class DpRequestController {
         return res.json({ success: true, contabilidadeCreated });
       }
 
-      await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+      try {
+        await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+      } catch (permErr) {
+        // Também pode reenviar quem usa a tela Solicitações à Contabilidade.
+        const hasAccountingPage = await prisma.userPermission.findFirst({
+          where: {
+            userId: req.user.id,
+            module: pathToModuleKey('/ponto/solicitacoes-contabilidade'),
+            action: PERMISSION_ACCESS_ACTION,
+            allowed: true,
+          },
+          select: { id: true },
+        });
+        if (!hasAccountingPage) throw permErr;
+      }
 
       if (dpRequest.status !== 'CONCLUDED') {
         throw createError('Só é possível reenviar solicitações já finalizadas.', 400);

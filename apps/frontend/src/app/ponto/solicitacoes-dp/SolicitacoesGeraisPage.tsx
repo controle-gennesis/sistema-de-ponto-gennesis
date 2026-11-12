@@ -48,6 +48,7 @@ import {
 import {
   DpRequestHistoryMetaCard,
   DpRequestHistoryModalFooter,
+  DpRequestHistoryModalBody,
   DpRequestHistoryModalTabs,
   DpRequestHistorySectionCard,
   DpRequestHistoryTimeline,
@@ -1709,14 +1710,12 @@ export function SolicitacoesGeraisPage() {
           onClose={closeHistoryRequest}
           title="Histórico da solicitação"
           size="lg"
+          headerClassName="border-b-0 pb-2 sm:pb-2"
+          contentClassName="!p-0"
+          scrollContent={false}
         >
           {historyRequest && (
-            <div className="space-y-5">
-              <DpRequestHistoryModalTabs
-                activeTab={historyModalTab}
-                onTabChange={setHistoryModalTab}
-              />
-
+            <DpRequestHistoryModalBody tabs={<DpRequestHistoryModalTabs activeTab={historyModalTab} onTabChange={setHistoryModalTab} />}>
               {historyModalTab === 'detalhes' ? (
                 <div className="space-y-4">
                   <DpRequestHistoryMetaCard fields={buildHistoryMetaFields(historyRequest)} />
@@ -1792,7 +1791,7 @@ export function SolicitacoesGeraisPage() {
                   </DpRequestHistoryModalFooter>
                 </div>
               )}
-            </div>
+            </DpRequestHistoryModalBody>
           )}
         </Modal>
       </MainLayout>

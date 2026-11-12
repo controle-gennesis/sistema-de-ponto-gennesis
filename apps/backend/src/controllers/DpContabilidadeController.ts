@@ -104,6 +104,32 @@ async function appendSourceHistoryNote(
   });
 }
 
+/** O DP finalizou: a solicitação criada direto (ainda "Na Contabilidade") passa a Finalizada. */
+async function finalizeDirectSource(
+  sourceId: string | null | undefined,
+  actor: { id: string; name: string }
+) {
+  if (!sourceId) return;
+  const source = await prisma.dpRequest.findUnique({
+    where: { id: sourceId },
+    select: { id: true, requestType: true, status: true, statusHistory: true },
+  });
+  if (!source || !isAccountingDirectRequestType(source.requestType) || source.status !== 'IN_ACCOUNTING') return;
+  const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+  await prisma.dpRequest.update({
+    where: { id: source.id },
+    data: {
+      status: 'CONCLUDED',
+      statusHistory: [
+        ...history,
+        { at: new Date().toISOString(), status: 'CONCLUDED', actorUserId: actor.id, actorName: actor.name },
+      ] as Prisma.InputJsonValue,
+      dpHandledBy: actor.id,
+      dpConcludedAt: new Date(),
+    },
+  });
+}
+
 type RequestRow = Prisma.DpContabilidadeRequestGetPayload<{ include: { comments: true } }>;
 
 /** Dados estruturados da solicitação interna de origem (só os tipos criados direto para a Contabilidade). */
@@ -453,7 +479,16 @@ export class DpContabilidadeController {
           where: { id: sourceId },
           select: { id: true, requestType: true, status: true, statusHistory: true },
         });
+        const waitsForDp = status === 'CONCLUDED' && byLabel === 'Contabilidade';
         if (
+          source &&
+          isAccountingDirectRequestType(source.requestType) &&
+          source.status === 'IN_ACCOUNTING' &&
+          waitsForDp
+        ) {
+          // Só registra no histórico; o DP finaliza depois (Solicitações à Contabilidade → Finalizar).
+          await appendSourceHistoryNote(tx, sourceId, actor, resumo || 'A Contabilidade concluiu o atendimento.');
+        } else if (
           source &&
           isAccountingDirectRequestType(source.requestType) &&
           source.status === 'IN_ACCOUNTING'
@@ -544,6 +579,8 @@ export class DpContabilidadeController {
         where: { id: existing.id },
         data: { dpClosedAt: new Date() },
       });
+      // Pedido criado direto: agora sim a solicitação de origem fica Finalizada.
+      await finalizeDirectSource(existing.sourceDpRequestId, actor);
       res.json({ success: true, data: { id: updated.id, status: updated.status } });
     } catch (err) {
       if (err instanceof z.ZodError) {

@@ -9,7 +9,7 @@ import {
   postDpRequestMessage,
 } from '../lib/dpRequestMessages';
 import { authenticate, requireAdministrator } from '../middleware/auth';
-import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
+import { requireAnyModuleAccess, requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DpRequestController } from '../controllers/DpRequestController';
 import { DpContabilidadeController } from '../controllers/DpContabilidadeController';
@@ -90,10 +90,10 @@ router.get(
   controller.getManageDetailsAdmTst.bind(controller)
 );
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
-// O DP encerra o pedido ligado na Contabilidade (permissão de Gerenciar Solicitações do DP)
+// O DP encerra o pedido ligado na Contabilidade (a partir de Solicitações à Contabilidade; Gerenciar do DP também vale)
 router.post(
   '/:id/concluir-contabilidade',
-  requireModuleAccess(manageModule),
+  requireAnyModuleAccess([manageModule, accountingModule]),
   contabilidadeController.concludeFromDp.bind(contabilidadeController)
 );
 router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
