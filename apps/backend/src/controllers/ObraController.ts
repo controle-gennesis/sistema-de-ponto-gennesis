@@ -9,11 +9,17 @@ import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSear
  * Criar, editar e excluir obras: administrador ou a aba Obras liberada para o usuário neste contrato
  * (coluna Obras da matriz de contratos).
  */
-async function assertCanManageObras(req: AuthRequest, contratoId: string) {
+async function assertCanManageObras(req: AuthRequest, contratoId: string, quickCreate = false) {
   if (!req.user) throw createError('Usuário não autenticado', 401);
   if (req.user.isAdmin) return;
+  // Criação rápida (orçamento, pleito, caixinha...) só exige ter o contrato liberado, sem a permissão da aba Obras.
   const flag = await prisma.userContractPermission.findFirst({
-    where: { userId: req.user.id, contractId: contratoId, accessLiberado: true, accessObras: true },
+    where: {
+      userId: req.user.id,
+      contractId: contratoId,
+      accessLiberado: true,
+      ...(quickCreate ? {} : { accessObras: true }),
+    },
     select: { contractId: true },
   });
   if (!flag) throw createError('Sem permissão para gerenciar obras deste contrato', 403);
@@ -135,7 +141,7 @@ export class ObraController {
         typeof req.body?.contratoId === 'string' ? req.body.contratoId.trim() : '';
       if (!name) throw createError('Nome é obrigatório', 400);
       if (!contratoId) throw createError('Contrato é obrigatório', 400);
-      await assertCanManageObras(req, contratoId);
+      await assertCanManageObras(req, contratoId, req.body?.quick === true);
 
       const contrato = await prisma.contract.findUnique({ where: { id: contratoId } });
       if (!contrato) throw createError('Contrato não encontrado', 404);

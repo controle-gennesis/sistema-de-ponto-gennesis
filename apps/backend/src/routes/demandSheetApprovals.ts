@@ -142,6 +142,8 @@ router.get('/:id/pedidos-resumo', controller.getPedidosResumo.bind(controller));
 router.get('/:id/custos-reais', controller.getCustosReais.bind(controller));
 // Nome do orçamento que gerou a FD — só leitura.
 router.get('/:id/orcamento', controller.getOrcamentoDaFd.bind(controller));
+// Cancelar FD: só administrador ou gestor do contrato — só leitura.
+router.get('/:id/pode-cancelar', controller.getPodeCancelar.bind(controller));
 router.get(
   '/aprovadas-compras',
   requireModuleAccess(fdsAprovadasModule),

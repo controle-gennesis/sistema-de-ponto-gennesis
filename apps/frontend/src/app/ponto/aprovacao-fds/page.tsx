@@ -188,16 +188,31 @@ const SEM_OS = 'Sem OS';
 const porNome = (a: { label: string }, b: { label: string }) =>
   a.label.localeCompare(b.label, 'pt-BR', { numeric: true, sensitivity: 'base' });
 
-/** Centro de custo → obra → OS/pasta → FDs, em ordem alfabética, com o resultado somado em cada nível. */
+/**
+ * Grupo de OS da FD. Sempre inclui o contrato: o mesmo código de OS em outro contrato é outra OS.
+ * OS definitiva junta as FDs do contrato com o mesmo código e pasta; OS temporária fica só com o próprio orçamento.
+ */
+function grupoOsDaFd(r: FichaDemandaApprovalRecord): { chave: string; label: string } {
+  const os = r.osNumeroPasta?.trim() || '';
+  const contrato = r.contratoId || '';
+  if (!os) return { chave: `${contrato}|${SEM_OS}`, label: SEM_OS };
+  const grupo = r.osGrupoChave?.trim() || `os:${os.replace(/\s+/g, '').toUpperCase()}`;
+  return { chave: `${contrato}|${grupo}`, label: r.osTemporaria ? `${os} (temporária)` : os };
+}
+
+/** Centro de custo → obra → OS/pasta (por contrato) → FDs, em ordem alfabética, com o resultado somado em cada nível. */
 function agruparFds(rows: FichaDemandaApprovalRecord[]): NivelCc[] {
-  const ccs = new Map<string, Map<string, Map<string, FichaDemandaApprovalRecord[]>>>();
+  type GrupoOs = { label: string; contratoNome: string; rows: FichaDemandaApprovalRecord[] };
+  const ccs = new Map<string, Map<string, Map<string, GrupoOs>>>();
   for (const r of rows) {
     const cc = r.centroCustoNome?.trim() || SEM_CC;
     const obra = r.obra?.trim().toUpperCase() || SEM_OBRA;
-    const os = r.osNumeroPasta?.trim() || SEM_OS;
-    const obras = ccs.get(cc) ?? new Map<string, Map<string, FichaDemandaApprovalRecord[]>>();
-    const oss = obras.get(obra) ?? new Map<string, FichaDemandaApprovalRecord[]>();
-    oss.set(os, [...(oss.get(os) ?? []), r]);
+    const { chave, label } = grupoOsDaFd(r);
+    const obras = ccs.get(cc) ?? new Map<string, Map<string, GrupoOs>>();
+    const oss = obras.get(obra) ?? new Map<string, GrupoOs>();
+    const grupo = oss.get(chave) ?? { label, contratoNome: r.contratoNome?.trim() || '', rows: [] };
+    grupo.rows.push(r);
+    oss.set(chave, grupo);
     obras.set(obra, oss);
     ccs.set(cc, obras);
   }
@@ -205,8 +220,16 @@ function agruparFds(rows: FichaDemandaApprovalRecord[]): NivelCc[] {
     .map(([cc, obras]) => {
       const niveisObra = [...obras]
         .map(([obra, oss]) => {
+          // Mesmo rótulo de OS em contratos diferentes (mesmo centro de custo e obra): mostra o contrato junto.
+          const porLabel = new Map<string, number>();
+          for (const g of oss.values()) porLabel.set(g.label, (porLabel.get(g.label) ?? 0) + 1);
           const niveisOs = [...oss]
-            .map(([os, fds]) => ({ key: `${cc}|${obra}|${os}`, label: os, rows: fds, resultado: somarResultado(fds) }))
+            .map(([chave, g]) => ({
+              key: `${cc}|${obra}|${chave}`,
+              label: (porLabel.get(g.label) ?? 0) > 1 && g.contratoNome ? `${g.label} · ${g.contratoNome}` : g.label,
+              rows: g.rows,
+              resultado: somarResultado(g.rows),
+            }))
             .sort(porNome);
           const todas = niveisOs.flatMap((o) => o.rows);
           return { key: `${cc}|${obra}`, label: obra, oss: niveisOs, total: todas.length, resultado: somarResultado(todas) };

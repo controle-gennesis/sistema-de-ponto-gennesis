@@ -45,7 +45,10 @@ export type ContractOsDetailPleito = ContractPleitoHistorico & {
   budgetAmount2?: number | null;
   budgetAmount3?: number | null;
   budgetAmount4?: number | null;
-  budgetAdditives?: { orcamentoId: string; descricao: string; valor: number }[] | null;
+  /** Aditivos e, com `tipo: 'orcamento'`, outros orçamentos da mesma OS definitiva (somam no total). */
+  budgetAdditives?: { orcamentoId: string; descricao: string; valor: number; tipo?: 'orcamento' }[] | null;
+  /** OS temporárias que viraram esta OS definitiva (registro mantido após a troca). */
+  osTemporariasAnteriores?: { codigo?: string; em?: string }[] | null;
   /** Orçamento vinculado à OS (as FDs geradas dele trazem a obra). */
   linkedOrcamentoId?: string | null;
   /** Obra informada no cadastro da OS (OS criada fora do fluxo do orçamento). */
@@ -358,6 +361,26 @@ export function ContractOsDetailModal({
     };
 
     push('OS / SE', osLabel);
+    // Registro das OS temporárias que viraram esta OS definitiva.
+    const tempsAnteriores = (Array.isArray(pleito.osTemporariasAnteriores) ? pleito.osTemporariasAnteriores : [])
+      .filter((t) => t && String(t.codigo || '').trim());
+    if (tempsAnteriores.length > 0) {
+      push(
+        tempsAnteriores.length > 1 ? 'OS temporárias anteriores' : 'OS temporária anterior',
+        <span className="flex flex-col items-end gap-0.5">
+          {tempsAnteriores.map((t, i) => (
+            <span key={`${t.codigo}-${i}`}>
+              {t.codigo}
+              {t.em ? (
+                <span className="ml-1.5 text-xs font-normal text-gray-500 dark:text-gray-400">
+                  (trocada em {formatDateTimeBr(t.em)})
+                </span>
+              ) : null}
+            </span>
+          ))}
+        </span>
+      );
+    }
     push('Descrição do serviço', pleito.serviceDescription, true);
     push('Obra', obraLabel || '—');
     push('Lote', pleito.lot);
@@ -388,8 +411,9 @@ export function ContractOsDetailModal({
     );
     const additives = Array.isArray(pleito.budgetAdditives) ? pleito.budgetAdditives : [];
     additives.forEach((aditivo, index) => {
-      const nome = aditivo.descricao?.trim() || `Aditivo ${index + 1}`;
-      push(`Aditivo — ${nome}`, formatOsCurrency(Number(aditivo.valor) || 0));
+      const ehOrcamento = aditivo.tipo === 'orcamento';
+      const nome = aditivo.descricao?.trim() || (ehOrcamento ? `Orçamento ${index + 2}` : `Aditivo ${index + 1}`);
+      push(`${ehOrcamento ? 'Orçamento' : 'Aditivo'} — ${nome}`, formatOsCurrency(Number(aditivo.valor) || 0));
     });
     if (additives.length > 0) {
       const base = Number(pleito.budgetAmount1 || 0);

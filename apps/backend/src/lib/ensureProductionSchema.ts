@@ -88,6 +88,22 @@ async function ensurePleitoBudgetValueConfirmed(prisma: PrismaClient): Promise<v
   `);
 }
 
+async function ensurePleitoOsTemporaria(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'pleitos', 'osTemporaria')) return;
+  console.warn('[Schema] Coluna pleitos.osTemporaria ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "osTemporaria" BOOLEAN NOT NULL DEFAULT false;
+  `);
+}
+
+async function ensurePleitoOsTemporariasAnteriores(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'pleitos', 'osTemporariasAnteriores')) return;
+  console.warn('[Schema] Coluna pleitos.osTemporariasAnteriores ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "pleitos" ADD COLUMN IF NOT EXISTS "osTemporariasAnteriores" JSONB;
+  `);
+}
+
 async function ensureContractOrcafascioClientId(prisma: PrismaClient): Promise<void> {
   if (!(await columnExists(prisma, 'contracts', 'orcafascioClientId'))) {
     console.warn('[Schema] Coluna contracts.orcafascioClientId ausente — adicionando.');
@@ -3453,6 +3469,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePleitoBudgetAdditives(prisma);
     await ensurePleitoBudgetValueConfirmed(prisma);
     await ensurePleitoObra(prisma);
+    await ensurePleitoOsTemporaria(prisma);
+    await ensurePleitoOsTemporariasAnteriores(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

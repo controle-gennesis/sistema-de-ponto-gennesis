@@ -1,5 +1,6 @@
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
+import { getContractGestorCostCenterIds } from './contractGestorApprovalAccess';
 
 /**
  * Trava do orçamento + FD: ao lançar a FD o orçamento fica trancado (status `aprovado` na meta).
@@ -70,14 +71,12 @@ const SESSAO_PROTEGIDA = [
   'servicosDocumento',
 ] as const;
 
+/** OS do orçamento: trancado, só muda se a OS gravada for temporária ou por administrador / gestor do contrato. */
+const META_OS = ['osNumeroPasta', 'osCodigo', 'numeroPasta', 'osTemporaria', 'linkedPleitoId', 'linkedContractId'] as const;
+
 const META_PROTEGIDA = [
-  'osNumeroPasta',
-  'osCodigo',
-  'numeroPasta',
   'obra',
   'isAditivo',
-  'linkedPleitoId',
-  'linkedContractId',
   'descontoPercentual',
   'bdiPercentual',
   'reajustes',
@@ -115,16 +114,34 @@ function comoObjeto(v: unknown): Record<string, unknown> {
  */
 export function preservarConteudoTrancado(
   gravado: { sessaoOrcamento?: unknown },
-  patch: { sessaoOrcamento?: unknown; servicos?: unknown[] }
+  patch: { sessaoOrcamento?: unknown; servicos?: unknown[] },
+  opts: { podeEditarOsDefinitiva?: boolean } = {}
 ): { sessaoOrcamento?: unknown; servicos?: unknown[] } {
   if (patch.sessaoOrcamento === undefined) return {};
   const sessaoGravada = comoObjeto(gravado.sessaoOrcamento);
   const sessao = { ...comoObjeto(patch.sessaoOrcamento) };
   copiarChaves(sessao, sessaoGravada, SESSAO_PROTEGIDA);
   const meta = { ...comoObjeto(sessao.meta) };
-  copiarChaves(meta, comoObjeto(sessaoGravada.meta), META_PROTEGIDA);
+  const metaGravada = comoObjeto(sessaoGravada.meta);
+  copiarChaves(meta, metaGravada, META_PROTEGIDA);
+  // OS temporária: qualquer um informa a OS definitiva, mesmo trancado. Definitiva: só administrador / gestor.
+  if (metaGravada.osTemporaria !== true && opts.podeEditarOsDefinitiva !== true) {
+    copiarChaves(meta, metaGravada, META_OS);
+  }
   sessao.meta = meta;
   return { sessaoOrcamento: sessao };
+}
+
+/** Administrador ou gestor do contrato (coluna «Gestor» da aba Contratos) do centro de custo do orçamento. */
+export async function podeEditarOsDefinitivaOrcamento(
+  userId: string,
+  isAdmin: boolean,
+  centroCustoId: string
+): Promise<boolean> {
+  if (isAdmin) return true;
+  if (!userId || !centroCustoId) return false;
+  const ccs = await getContractGestorCostCenterIds(userId);
+  return ccs.includes(centroCustoId);
 }
 
 /** Só o servidor tranca: a tela não grava o status de trancado por conta própria. */

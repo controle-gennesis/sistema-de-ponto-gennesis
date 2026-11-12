@@ -229,20 +229,38 @@ type RmItemForProductKind = {
   } | null;
 };
 
+/**
+ * Tipo (Materiais/Serviços) por nome de material, guardado por 30 min — o catálogo só é atualizado
+ * duas vezes por dia. Guarda também "não achei" (null) para não repetir a busca por prefixo.
+ */
+const RM_KIND_POR_NOME_TTL_MS = 30 * 60 * 1000;
+const rmKindPorNomeCache = new Map<string, { kind: RmItemProductKind | null; em: number }>();
+
+function rmKindPorNomeEmCache(chave: string): { kind: RmItemProductKind | null } | undefined {
+  const hit = rmKindPorNomeCache.get(chave);
+  if (!hit) return undefined;
+  if (Date.now() - hit.em > RM_KIND_POR_NOME_TTL_MS) {
+    rmKindPorNomeCache.delete(chave);
+    return undefined;
+  }
+  return hit;
+}
+
+function guardarRmKindPorNome(chave: string, kind: RmItemProductKind | null): void {
+  if (rmKindPorNomeCache.size > 20_000) rmKindPorNomeCache.clear();
+  rmKindPorNomeCache.set(chave, { kind, em: Date.now() });
+}
+
 /** Deriva se a RM tem itens de Materiais e/ou Serviços. */
 async function withRmItemProductKinds<T extends { items?: RmItemForProductKind[] | null }>(
   requests: T[]
 ): Promise<Array<T & { itemProductKinds: RmItemProductKind[] }>> {
   const cmIds = new Set<string>();
-  const namesForFallback = new Set<string>();
 
   for (const r of requests) {
     for (const item of r.items ?? []) {
-      const mat = item.material;
-      const cmId = constructionMaterialIdFromSinapi(mat?.sinapiCode);
+      const cmId = constructionMaterialIdFromSinapi(item.material?.sinapiCode);
       if (cmId) cmIds.add(cmId);
-      const label = (mat?.name || mat?.description || '').trim();
-      if (label) namesForFallback.add(label);
     }
   }
 
@@ -260,26 +278,55 @@ async function withRmItemProductKinds<T extends { items?: RmItemForProductKind[]
     }
   }
 
+  // Busca por nome só para itens que o código do catálogo (CM-*) não resolveu.
+  const namesForFallback = new Map<string, string>(); // chave minúscula → nome original
+  for (const r of requests) {
+    for (const item of r.items ?? []) {
+      const mat = item.material;
+      const cmId = constructionMaterialIdFromSinapi(mat?.sinapiCode);
+      if (cmId && mapProductTypeToRmKind(typeByCmId.get(cmId) ?? null)) continue;
+      const label = (mat?.name || mat?.description || '').trim();
+      if (label) namesForFallback.set(label.toLowerCase(), label);
+    }
+  }
+
   const typeByName = new Map<string, RmItemProductKind>();
-  if (namesForFallback.size > 0) {
-    const names = Array.from(namesForFallback);
+  const pendentes: string[] = [];
+  for (const [chave, nome] of namesForFallback) {
+    const hit = rmKindPorNomeEmCache(chave);
+    if (hit) {
+      if (hit.kind) typeByName.set(chave, hit.kind);
+    } else {
+      pendentes.push(nome);
+    }
+  }
+
+  if (pendentes.length > 0) {
     const exactRows = await prisma.constructionMaterial.findMany({
       where: {
-        OR: names.map((name) => ({ name: { equals: name, mode: 'insensitive' as const } }))
+        OR: pendentes.map((name) => ({ name: { equals: name, mode: 'insensitive' as const } }))
       },
       select: { name: true, productType: true, category: true }
     });
     for (const row of exactRows) {
       const key = (row.name || '').trim().toLowerCase();
       const kind = mapProductTypeToRmKind(row.productType || row.category);
-      if (key && kind) typeByName.set(key, kind);
+      if (key && kind) {
+        typeByName.set(key, kind);
+        guardarRmKindPorNome(key, kind);
+      }
     }
 
     // Prefixo: se todos os candidatos batem o mesmo tipo (ex.: "CIMENTO" → vários Produto).
-    const unresolvedNames = names.filter((n) => !typeByName.has(n.trim().toLowerCase()));
-    for (const name of unresolvedNames) {
+    // Até 4 buscas ao mesmo tempo (antes era uma por vez).
+    const unresolvedNames = pendentes.filter((n) => !typeByName.has(n.trim().toLowerCase()));
+    const buscarPrefixo = async (name: string) => {
       const prefix = name.trim();
-      if (prefix.length < 3) continue;
+      const chave = prefix.toLowerCase();
+      if (prefix.length < 3) {
+        guardarRmKindPorNome(chave, null);
+        return;
+      }
       const candidates = await prisma.constructionMaterial.findMany({
         where: { name: { startsWith: prefix, mode: 'insensitive' } },
         select: { productType: true, category: true },
@@ -290,9 +337,12 @@ async function withRmItemProductKinds<T extends { items?: RmItemForProductKind[]
         const kind = mapProductTypeToRmKind(row.productType || row.category);
         if (kind) candidateKinds.add(kind);
       }
-      if (candidateKinds.size === 1) {
-        typeByName.set(prefix.toLowerCase(), Array.from(candidateKinds)[0]!);
-      }
+      const kind = candidateKinds.size === 1 ? Array.from(candidateKinds)[0]! : null;
+      if (kind) typeByName.set(chave, kind);
+      guardarRmKindPorNome(chave, kind);
+    };
+    for (let i = 0; i < unresolvedNames.length; i += 4) {
+      await Promise.all(unresolvedNames.slice(i, i + 4).map(buscarPrefixo));
     }
   }
 

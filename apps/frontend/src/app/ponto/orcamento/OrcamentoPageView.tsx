@@ -3555,6 +3555,11 @@ type OrcamentoMeta = {
   obra?: string;
   /** Se o orçamento é aditivo na OS vinculada. */
   isAditivo?: boolean;
+  /**
+   * OS temporária: código genérico (ex.: XX/2026) até a OS verdadeira existir; fica sempre separada.
+   * Ausente/false = OS definitiva (soma e agrupa com a mesma OS do contrato).
+   */
+  osTemporaria?: boolean;
   /** Pleito/OS vinculado no contrato após sync. */
   linkedPleitoId?: string;
   /** Contrato onde a OS foi sincronizada. */
@@ -4172,6 +4177,8 @@ type OrcamentoOsDraft = {
   valorOs: string;
   confirmSomarAditivo: boolean;
   isAditivo: boolean | null;
+  /** true = OS temporária, false = OS definitiva, null = não escolhido (obrigatório quando não é aditivo). */
+  osTemporaria: boolean | null;
 };
 
 const ORCAMENTO_OS_DRAFT_VAZIO: OrcamentoOsDraft = {
@@ -4179,11 +4186,19 @@ const ORCAMENTO_OS_DRAFT_VAZIO: OrcamentoOsDraft = {
   valorOs: '',
   confirmSomarAditivo: false,
   isAditivo: null,
+  osTemporaria: null,
 };
 
 function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
   OrcamentoMeta,
-  'osNumeroPasta' | 'osCodigo' | 'numeroPasta' | 'obra' | 'isAditivo' | 'linkedPleitoId' | 'linkedContractId'
+  | 'osNumeroPasta'
+  | 'osCodigo'
+  | 'numeroPasta'
+  | 'obra'
+  | 'isAditivo'
+  | 'osTemporaria'
+  | 'linkedPleitoId'
+  | 'linkedContractId'
 > {
   const osNumeroPastaLegacy = typeof metaRaw.osNumeroPasta === 'string' ? metaRaw.osNumeroPasta : '';
   let osCodigo = typeof metaRaw.osCodigo === 'string' ? metaRaw.osCodigo : '';
@@ -4200,6 +4215,7 @@ function parseOsFieldsFromMetaRaw(metaRaw: Record<string, unknown>): Pick<
     numeroPasta,
     obra: typeof metaRaw.obra === 'string' ? metaRaw.obra.trim() : '',
     isAditivo: typeof metaRaw.isAditivo === 'boolean' ? metaRaw.isAditivo : undefined,
+    osTemporaria: metaRaw.osTemporaria === true ? true : undefined,
     linkedPleitoId:
       typeof metaRaw.linkedPleitoId === 'string' && metaRaw.linkedPleitoId.trim()
         ? metaRaw.linkedPleitoId.trim()
@@ -4219,6 +4235,7 @@ function orcamentoOsDraftValido(
 ): boolean {
   if (!osCodigo.trim() || !numeroPasta.trim()) return false;
   if (draft.isAditivo === null) return false;
+  if (draft.isAditivo === false && draft.osTemporaria === null) return false;
   if (opts?.exigirValor !== false && parseOrcamentoValorBr(draft.valorOs) <= 0) return false;
   if (draft.isAditivo === true && !draft.confirmSomarAditivo) return false;
   return true;
@@ -7374,6 +7391,67 @@ function OrcamentoAditivoEscolha({
   );
 }
 
+/** Código provisório aleatório da OS temporária (ex.: TEMP-7K3Q/2026). */
+function gerarCodigoOsTemporaria(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return `TEMP-${s}/${new Date().getFullYear()}`;
+}
+
+/** Se o código é um provisório gerado pelo sistema (some ao trocar para OS definitiva). */
+function ehCodigoOsTemporaria(codigo: string | undefined | null): boolean {
+  return /^TEMP-[A-Z0-9]{4}\/\d{4}$/i.test(String(codigo ?? '').trim());
+}
+
+/** OS temporária (código genérico até a OS verdadeira existir) ou definitiva. */
+function OrcamentoOsTipoEscolha({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: boolean | null | undefined;
+  onChange: (temporaria: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex gap-2" role="group" aria-label="Tipo da OS">
+        {(
+          [
+            { v: true, label: 'OS temporária' },
+            { v: false, label: 'OS definitiva' },
+          ] as const
+        ).map((opt) => {
+          const active = value === opt.v;
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(opt.v)}
+              className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                active
+                  ? 'border-red-600 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        {value === true
+          ? 'Código provisório gerado pelo sistema: fica separada de qualquer outra OS até você informar a OS definitiva na aba Dados.'
+          : value === false
+            ? 'Se o contrato já tiver esta OS e este número da pasta, o orçamento entra nela e o valor soma ao finalizar.'
+            : 'Temporária: código provisório até a OS verdadeira existir. Definitiva: soma com a mesma OS do contrato.'}
+      </p>
+    </div>
+  );
+}
+
 /** Estado vazio das abas derivadas do orçamento (sem itens na montagem). */
 function OrcamentoSecaoVazia({
   titulo,
@@ -8461,6 +8539,18 @@ export function OrcamentoPageView({
     enabled: !!centroCustoId,
     staleTime: 5 * 60_000,
   });
+  /** OS definitiva: só administrador / gestor do contrato altera (a temporária, qualquer um). */
+  const { data: podeEditarOsDefinitiva = false } = useQuery({
+    queryKey: ['orcamento-os-permissao', centroCustoId],
+    queryFn: async () => {
+      const res = await api.get(`/orcamento/${centroCustoId}/os/permissao`);
+      return !!res.data?.data?.podeEditarOsDefinitiva;
+    },
+    enabled: !!centroCustoId,
+    staleTime: 5 * 60_000,
+  });
+  /** Janela «Editar dados» aberta com o orçamento finalizado/trancado: só a parte da OS. */
+  const [editarDadosSoOs, setEditarDadosSoOs] = useState(false);
   /** Menu botão direito — Ficha de demanda: adicionar/excluir insumo (manual ou catálogo). */
   const [menuCtxFichaDemanda, setMenuCtxFichaDemanda] = useState<
     | { kind: 'composicao'; left: number; top: number; composicaoKey: string }
@@ -10342,6 +10432,10 @@ export function OrcamentoPageView({
       toast.error('Informe se o orçamento é aditivo.');
       return;
     }
+    if (novoOrcamentoOsDraft.isAditivo === false && novoOrcamentoOsDraft.osTemporaria === null) {
+      toast.error('Informe se a OS é temporária ou definitiva.');
+      return;
+    }
     if (novoOrcamentoOsDraft.isAditivo && !novoOrcamentoOsDraft.confirmSomarAditivo) {
       toast.error('Confirme a soma do valor aditivo ao total da OS.');
       return;
@@ -10362,6 +10456,8 @@ export function OrcamentoPageView({
       osNumeroPasta,
       obra: (novoOrcamentoMetaDraft.obra || '').trim(),
       isAditivo: novoOrcamentoOsDraft.isAditivo === true,
+      osTemporaria:
+        novoOrcamentoOsDraft.isAditivo !== true && novoOrcamentoOsDraft.osTemporaria === true ? true : undefined,
       responsavelOrcamento: novoOrcamentoMetaDraft.responsavelOrcamento.trim(),
       descricao: novoOrcamentoMetaDraft.descricao.trim(),
       orcamentoRealizadoPor: currentUserName || novoOrcamentoMetaDraft.orcamentoRealizadoPor.trim(),
@@ -10420,6 +10516,7 @@ export function OrcamentoPageView({
           confirmSomarAditivo: novoOrcamentoOsDraft.isAditivo === true,
           linkOnly: novoOrcamentoOsDraft.isAditivo === true,
           mode: novoOrcamentoOsDraft.isAditivo ? 'aditivo' : 'create',
+          osTemporaria: novoOrcamentoOsDraft.isAditivo !== true && novoOrcamentoOsDraft.osTemporaria === true,
           startDate: d.dataAbertura || null,
           endDate: d.dataEnvio || null,
           orcamentoId: entry.id,
@@ -10465,6 +10562,7 @@ export function OrcamentoPageView({
       return (
         novoOrcamentoMetaDraft.nomeOrcamento.trim().length > 0 &&
         novoOrcamentoOsDraft.isAditivo !== null &&
+        (novoOrcamentoOsDraft.isAditivo === true || novoOrcamentoOsDraft.osTemporaria !== null) &&
         (novoOrcamentoMetaDraft.osCodigo || '').trim().length > 0 &&
         (novoOrcamentoMetaDraft.numeroPasta || '').trim().length > 0 &&
         (novoOrcamentoMetaDraft.dataAbertura || '').trim().length > 0
@@ -10606,6 +10704,12 @@ export function OrcamentoPageView({
       toast.error('Esta revisão está somente leitura.');
       return;
     }
+    // Finalizado/trancado: só a OS (temporária, por qualquer um; definitiva, por administrador / gestor).
+    if (orcamentoFechado && meta.osTemporaria !== true && !podeEditarOsDefinitiva) {
+      toast.error('Orçamento finalizado. Reabra para editar.');
+      return;
+    }
+    setEditarDadosSoOs(orcamentoFechado);
     // Dados do orçamento continuam editáveis mesmo com o orçamento finalizado.
     let osCodigo = meta.osCodigo || '';
     let numeroPasta = meta.numeroPasta || '';
@@ -10646,9 +10750,32 @@ export function OrcamentoPageView({
 
     const osCodigo = (editarDadosDraft.osCodigo || '').trim();
     const numeroPasta = (editarDadosDraft.numeroPasta || '').trim();
-    const nextMeta: OrcamentoMeta = {
+    const eraOsTemporaria = meta.osTemporaria === true;
+    const osTemporariaNova = editarDadosDraft.isAditivo !== true && editarDadosDraft.osTemporaria === true;
+    // Saindo da OS temporária: precisa da OS verdadeira (o código provisório não serve).
+    if (!osTemporariaNova && (ehCodigoOsTemporaria(osCodigo) || (eraOsTemporaria && !osCodigo))) {
+      toast.error('Informe a OS definitiva.');
+      return;
+    }
+    if (osTemporariaNova && !osCodigo) {
+      toast.error('Informe a OS.');
+      return;
+    }
+    // OS definitiva gravada: só administrador / gestor do contrato muda.
+    const osDefinitivaBloqueada = meta.osTemporaria !== true && !podeEditarOsDefinitiva;
+    if (
+      osDefinitivaBloqueada &&
+      (osCodigo !== (meta.osCodigo || '').trim() ||
+        numeroPasta !== (meta.numeroPasta || '').trim() ||
+        osTemporariaNova)
+    ) {
+      toast.error('OS definitiva: só o administrador ou o gestor do contrato pode alterar.');
+      return;
+    }
+    let nextMeta: OrcamentoMeta = {
       ...meta,
       ...editarDadosDraft,
+      osTemporaria: osTemporariaNova ? true : undefined,
       osCodigo,
       numeroPasta,
       osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || editarDadosDraft.osNumeroPasta.trim(),
@@ -10669,6 +10796,64 @@ export function OrcamentoPageView({
         percentual: (r.percentual || '').trim()
       }))
     };
+
+    // Finalizado/trancado: só a OS muda; o resto dos dados fica como está.
+    if (editarDadosSoOs) {
+      nextMeta = {
+        ...meta,
+        osTemporaria: osTemporariaNova ? true : undefined,
+        osCodigo,
+        numeroPasta,
+        osNumeroPasta: composeOsNumeroPasta(osCodigo, numeroPasta) || meta.osNumeroPasta,
+      };
+    }
+    // Trocou entre OS temporária e definitiva: a OS do contrato acompanha. A OS temporária antiga fica
+    // na Gestão de OS como está (quem quiser exclui à mão).
+    const contractIdOs = (meta.linkedContractId || embeddedContractId || '').trim();
+    if (eraOsTemporaria !== osTemporariaNova && contractIdOs && osCodigo && numeroPasta) {
+      try {
+        const servicoOs = nextMeta.descricao || nome;
+        const syncRes = await syncOrcamentoOsToContract({
+          contractId: contractIdOs,
+          osCodigo,
+          numeroPasta,
+          serviceDescription: servicoOs,
+          valor: 0,
+          isAditivo: false,
+          confirmValor: true,
+          mode: 'create',
+          startDate: nextMeta.dataAbertura || null,
+          endDate: nextMeta.dataEnvio || null,
+          orcamentoId: orcamentoAtivoId,
+          osTemporaria: osTemporariaNova,
+          linkedPleitoId: meta.linkedPleitoId || null,
+        });
+        nextMeta = { ...nextMeta, linkedPleitoId: syncRes.id, linkedContractId: contractIdOs };
+        // Já finalizado: o valor do orçamento vai para a OS agora (na definitiva, soma com os outros orçamentos).
+        if (
+          (statusAprovacaoAtivo === 'finalizado' || statusAprovacaoAtivo === 'aprovado') &&
+          !versaoCongelada &&
+          meta.congelado !== true
+        ) {
+          await syncOrcamentoOsToContract({
+            contractId: contractIdOs,
+            osCodigo,
+            numeroPasta,
+            serviceDescription: servicoOs,
+            valor: arredondarMoeda2(resumoFinanceiro.totalComDescontoEBdi),
+            isAditivo: false,
+            confirmValor: true,
+            mode: 'sync-base',
+            orcamentoId: orcamentoAtivoId,
+            osTemporaria: osTemporariaNova,
+            linkedPleitoId: syncRes.id,
+          });
+        }
+      } catch (err) {
+        toast.error(syncOrcamentoOsErrorMessage(err));
+        return;
+      }
+    }
 
     try {
       if (nome !== nomeOrcamentoRascunho.trim()) {
@@ -11515,7 +11700,7 @@ export function OrcamentoPageView({
     const osCodigo = importPlanilhaOsCodigo.trim();
     const numeroPasta = importPlanilhaNumeroPasta.trim();
     if (!orcamentoOsDraftValido(importPlanilhaOsDraft, osCodigo, numeroPasta, { exigirValor: false })) {
-      toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
+      toast.error('Preencha aditivo, tipo da OS, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
       return false;
     }
     if (!importPlanilhaObra.trim()) {
@@ -11630,6 +11815,8 @@ export function OrcamentoPageView({
         osNumeroPasta,
         obra: importPlanilhaObra.trim(),
         isAditivo: importPlanilhaOsDraft.isAditivo === true,
+        osTemporaria:
+          importPlanilhaOsDraft.isAditivo !== true && importPlanilhaOsDraft.osTemporaria === true ? true : undefined,
         prazoExecucaoDias: parsed.metaPlanilha.prazoExecucaoDias || '',
         responsavelOrcamento: parsed.metaPlanilha.responsavelOrcamento || '',
         orcamentoRealizadoPor: parsed.metaPlanilha.orcamentoRealizadoPor || currentUserName || '',
@@ -11684,6 +11871,7 @@ export function OrcamentoPageView({
           confirmSomarAditivo: importPlanilhaOsDraft.isAditivo === true,
           linkOnly: importPlanilhaOsDraft.isAditivo === true,
           mode: importPlanilhaOsDraft.isAditivo ? 'aditivo' : 'create',
+          osTemporaria: importPlanilhaOsDraft.isAditivo !== true && importPlanilhaOsDraft.osTemporaria === true,
           startDate: meta.dataAbertura || null,
           endDate: meta.dataEnvio || null,
           orcamentoId: entry.id,
@@ -11781,7 +11969,7 @@ export function OrcamentoPageView({
     const osCodigo = orcafascioOsCodigo.trim();
     const numeroPasta = orcafascioNumeroPasta.trim();
     if (!orcamentoOsDraftValido(orcafascioOsDraft, osCodigo, numeroPasta, { exigirValor: false })) {
-      toast.error('Preencha aditivo, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
+      toast.error('Preencha aditivo, tipo da OS, OS, Número da pasta e a confirmação de aditivo (se houver) antes de importar.');
       return false;
     }
     if (!orcafascioObra.trim()) {
@@ -11934,6 +12122,8 @@ export function OrcamentoPageView({
         osNumeroPasta,
         obra: orcafascioObra.trim(),
         isAditivo: orcafascioOsDraft.isAditivo === true,
+        osTemporaria:
+          orcafascioOsDraft.isAditivo !== true && orcafascioOsDraft.osTemporaria === true ? true : undefined,
         orcamentoRealizadoPor: currentUserName || '',
         // BDI e desconto: os do cadastro do contrato.
         descontoPercentual,
@@ -12017,6 +12207,7 @@ export function OrcamentoPageView({
           confirmSomarAditivo: orcafascioOsDraft.isAditivo === true,
           linkOnly: orcafascioOsDraft.isAditivo === true,
           mode: orcafascioOsDraft.isAditivo ? 'aditivo' : 'create',
+          osTemporaria: orcafascioOsDraft.isAditivo !== true && orcafascioOsDraft.osTemporaria === true,
           startDate: meta.dataAbertura || null,
           endDate: meta.dataEnvio || null,
           orcamentoId: entry.id,
@@ -18348,6 +18539,8 @@ export function OrcamentoPageView({
         mode: aditivo ? 'sync-aditivo' : 'sync-base',
         orcamentoId: orcamentoAtivoId,
         aditivoDescricao: (nomeOrcamentoRascunho || descricao).trim(),
+        osTemporaria: !aditivo && meta.osTemporaria === true,
+        linkedPleitoId: meta.linkedPleitoId || null,
       });
     },
     [
@@ -18356,6 +18549,8 @@ export function OrcamentoPageView({
       meta.numeroPasta,
       meta.descricao,
       meta.isAditivo,
+      meta.osTemporaria,
+      meta.linkedPleitoId,
       embeddedContractId,
       orcamentoAtivoId,
       nomeOrcamentoRascunho,
@@ -19778,14 +19973,19 @@ export function OrcamentoPageView({
                               <button
                                 type="button"
                                 onClick={abrirEdicaoDados}
-                                disabled={versaoCongelada || orcamentoFechado}
+                                disabled={
+                                  versaoCongelada ||
+                                  (orcamentoFechado && meta.osTemporaria !== true && !podeEditarOsDefinitiva)
+                                }
                                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                                 aria-label="Editar dados"
                                 title={
                                   versaoCongelada
                                     ? 'Versão congelada — somente leitura'
                                     : orcamentoFechado
-                                      ? 'Orçamento finalizado. Reabra para editar.'
+                                      ? meta.osTemporaria === true || podeEditarOsDefinitiva
+                                        ? 'Orçamento finalizado: só a OS pode ser alterada.'
+                                        : 'Orçamento finalizado. Reabra para editar.'
                                       : 'Editar dados'
                                 }
                               >
@@ -24736,15 +24936,36 @@ export function OrcamentoPageView({
                   <OrcamentoAditivoEscolha
                     value={orcafascioOsDraft.isAditivo}
                     disabled={isImportandoOrcamento}
-                    onChange={(next) =>
+                    onChange={(next) => {
                       setOrcafascioOsDraft((p) => ({
                         ...p,
                         isAditivo: next,
                         confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
-                      }))
-                    }
+                      }));
+                      if (next && ehCodigoOsTemporaria(orcafascioOsCodigo)) setOrcafascioOsCodigo('');
+                      else if (!next && orcafascioOsDraft.osTemporaria === true && !ehCodigoOsTemporaria(orcafascioOsCodigo)) {
+                        setOrcafascioOsCodigo(gerarCodigoOsTemporaria());
+                      }
+                    }}
                   />
                 </div>
+                {orcafascioOsDraft.isAditivo === false ? (
+                  <div>
+                    <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo da OS *</p>
+                    <OrcamentoOsTipoEscolha
+                      value={orcafascioOsDraft.osTemporaria}
+                      disabled={isImportandoOrcamento}
+                      onChange={(temp) => {
+                        setOrcafascioOsDraft((p) => ({ ...p, osTemporaria: temp }));
+                        if (temp) {
+                          if (!ehCodigoOsTemporaria(orcafascioOsCodigo)) setOrcafascioOsCodigo(gerarCodigoOsTemporaria());
+                        } else if (ehCodigoOsTemporaria(orcafascioOsCodigo)) {
+                          setOrcafascioOsCodigo('');
+                        }
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -24755,7 +24976,15 @@ export function OrcamentoPageView({
                       onChange={(e) => setOrcafascioOsCodigo(e.target.value)}
                       className={FORM_FIELD_INPUT_CLS}
                       placeholder="Ex: XX/2025"
-                      disabled={isImportandoOrcamento}
+                      disabled={
+                        isImportandoOrcamento ||
+                        (orcafascioOsDraft.isAditivo === false && orcafascioOsDraft.osTemporaria === true)
+                      }
+                      title={
+                        orcafascioOsDraft.isAditivo === false && orcafascioOsDraft.osTemporaria === true
+                          ? 'Código provisório da OS temporária (gerado pelo sistema)'
+                          : undefined
+                      }
                     />
                   </div>
                   <div>
@@ -25263,21 +25492,64 @@ export function OrcamentoPageView({
         closeOnOverlayClick
       >
         <div className="space-y-4">
+          {editarDadosSoOs || (meta.osTemporaria !== true && !podeEditarOsDefinitiva) ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+              {editarDadosSoOs ? 'Orçamento finalizado: só a OS pode ser alterada. ' : ''}
+              {meta.osTemporaria !== true && !podeEditarOsDefinitiva
+                ? 'OS definitiva: só o administrador ou o gestor do contrato altera a OS.'
+                : meta.osTemporaria === true
+                  ? 'Informe a OS definitiva quando ela existir.'
+                  : ''}
+            </p>
+          ) : null}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="sm:col-span-2">
-              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Orçamento aditivo? *
-              </p>
-              <OrcamentoAditivoEscolha
-                value={editarDadosDraft.isAditivo}
-                onChange={(next) =>
-                  setEditarDadosDraft((p) => ({
-                    ...p,
-                    isAditivo: next,
-                  }))
-                }
-              />
-            </div>
+            {!editarDadosSoOs ? (
+              <div className="sm:col-span-2">
+                <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Orçamento aditivo? *
+                </p>
+                <OrcamentoAditivoEscolha
+                  value={editarDadosDraft.isAditivo}
+                  onChange={(next) =>
+                    setEditarDadosDraft((p) => ({
+                      ...p,
+                      isAditivo: next,
+                    }))
+                  }
+                />
+              </div>
+            ) : null}
+            {editarDadosDraft.isAditivo === false ? (
+              <div className="sm:col-span-2">
+                <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo da OS *</p>
+                <OrcamentoOsTipoEscolha
+                  value={editarDadosDraft.osTemporaria === true}
+                  disabled={meta.osTemporaria !== true && !podeEditarOsDefinitiva}
+                  onChange={(temp) =>
+                    setEditarDadosDraft((p) => {
+                      const atual = p.osCodigo || '';
+                      // Já era temporária: mantém o código provisório que tinha.
+                      const codigoTempAnterior = meta.osTemporaria === true ? meta.osCodigo || '' : '';
+                      const osCodigo = temp
+                        ? ehCodigoOsTemporaria(atual)
+                          ? atual
+                          : codigoTempAnterior || gerarCodigoOsTemporaria()
+                        : ehCodigoOsTemporaria(atual) || (meta.osTemporaria === true && atual === codigoTempAnterior)
+                          ? ''
+                          : atual;
+                      return {
+                        ...p,
+                        osTemporaria: temp ? true : undefined,
+                        osCodigo,
+                        osNumeroPasta: composeOsNumeroPasta(osCodigo, p.numeroPasta || ''),
+                      };
+                    })
+                  }
+                />
+              </div>
+            ) : null}
+            {!editarDadosSoOs ? (
+            <>
             <div className="sm:col-span-2">
               <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Requer configuração de desconto?
@@ -25310,6 +25582,8 @@ export function OrcamentoPageView({
                 placeholder="Ex: Orçamento 1"
               />
             </div>
+            </>
+            ) : null}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">OS</label>
               <input
@@ -25324,7 +25598,18 @@ export function OrcamentoPageView({
                     };
                   })
                 }
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                disabled={
+                  (meta.osTemporaria !== true && !podeEditarOsDefinitiva) ||
+                  (editarDadosDraft.isAditivo === false && editarDadosDraft.osTemporaria === true)
+                }
+                title={
+                  meta.osTemporaria !== true && !podeEditarOsDefinitiva
+                    ? 'OS definitiva: só o administrador ou o gestor do contrato altera'
+                    : editarDadosDraft.isAditivo === false && editarDadosDraft.osTemporaria === true
+                      ? 'Código provisório da OS temporária (gerado pelo sistema)'
+                      : undefined
+                }
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Ex: XX/2025"
               />
             </div>
@@ -25342,10 +25627,18 @@ export function OrcamentoPageView({
                     };
                   })
                 }
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                disabled={meta.osTemporaria !== true && !podeEditarOsDefinitiva}
+                title={
+                  meta.osTemporaria !== true && !podeEditarOsDefinitiva
+                    ? 'OS definitiva: só o administrador ou o gestor do contrato altera'
+                    : undefined
+                }
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Ex: 241"
               />
             </div>
+            {!editarDadosSoOs ? (
+            <>
             <div className="sm:col-span-2">
               <ObraSelectField
                 contratoId={embeddedContractId || ''}
@@ -25493,6 +25786,8 @@ export function OrcamentoPageView({
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
               />
             </div>
+            </>
+            ) : null}
           </div>
           <div className="flex items-center justify-end gap-2 pt-1">
             <button
@@ -25594,15 +25889,52 @@ export function OrcamentoPageView({
                 <OrcamentoAditivoEscolha
                   value={novoOrcamentoOsDraft.isAditivo}
                   disabled={isCreatingOrcamento}
-                  onChange={(next) =>
+                  onChange={(next) => {
                     setNovoOrcamentoOsDraft((p) => ({
                       ...p,
                       isAditivo: next,
                       confirmSomarAditivo: next ? p.confirmSomarAditivo : false,
-                    }))
-                  }
+                    }));
+                    const atual = novoOrcamentoMetaDraft.osCodigo || '';
+                    const codigo =
+                      next && ehCodigoOsTemporaria(atual)
+                        ? ''
+                        : !next && novoOrcamentoOsDraft.osTemporaria === true && !ehCodigoOsTemporaria(atual)
+                          ? gerarCodigoOsTemporaria()
+                          : null;
+                    if (codigo !== null) {
+                      setNovoOrcamentoMetaDraft((p) => ({
+                        ...p,
+                        osCodigo: codigo,
+                        osNumeroPasta: composeOsNumeroPasta(codigo, p.numeroPasta || ''),
+                      }));
+                    }
+                  }}
                 />
               </div>
+              {novoOrcamentoOsDraft.isAditivo === false ? (
+                <div className="sm:col-span-2">
+                  <p className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo da OS *</p>
+                  <OrcamentoOsTipoEscolha
+                    value={novoOrcamentoOsDraft.osTemporaria}
+                    disabled={isCreatingOrcamento}
+                    onChange={(temp) => {
+                      setNovoOrcamentoOsDraft((p) => ({ ...p, osTemporaria: temp }));
+                      setNovoOrcamentoMetaDraft((p) => {
+                        const atual = p.osCodigo || '';
+                        const osCodigo = temp
+                          ? ehCodigoOsTemporaria(atual)
+                            ? atual
+                            : gerarCodigoOsTemporaria()
+                          : ehCodigoOsTemporaria(atual)
+                            ? ''
+                            : atual;
+                        return { ...p, osCodigo, osNumeroPasta: composeOsNumeroPasta(osCodigo, p.numeroPasta || '') };
+                      });
+                    }}
+                  />
+                </div>
+              ) : null}
               <div className="sm:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Nome do orçamento *
@@ -25631,7 +25963,15 @@ export function OrcamentoPageView({
                   }
                   className={FORM_FIELD_INPUT_CLS}
                   placeholder="Ex: XX/2025"
-                  disabled={isCreatingOrcamento}
+                  disabled={
+                    isCreatingOrcamento ||
+                    (novoOrcamentoOsDraft.isAditivo === false && novoOrcamentoOsDraft.osTemporaria === true)
+                  }
+                  title={
+                    novoOrcamentoOsDraft.isAditivo === false && novoOrcamentoOsDraft.osTemporaria === true
+                      ? 'Código provisório da OS temporária (gerado pelo sistema)'
+                      : undefined
+                  }
                 />
               </div>
               <div>

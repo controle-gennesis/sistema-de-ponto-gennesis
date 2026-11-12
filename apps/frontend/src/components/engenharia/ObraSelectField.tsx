@@ -58,7 +58,7 @@ export function ObraSelectField({
 
   const createMutation = useMutation({
     mutationFn: async (name: string) => {
-      const res = await api.post('/obras', { name, contratoId });
+      const res = await api.post('/obras', { name, contratoId, quick: true });
       return res.data?.data as ObraOption | undefined;
     },
     onSuccess: async (created) => {

@@ -45,6 +45,8 @@ export interface OrcamentoIndexEntry {
   osCodigo?: string;
   /** Número da pasta, espelhado da meta. */
   numeroPasta?: string;
+  /** OS temporária (código genérico até a OS verdadeira existir), espelhada da meta. Ausente = definitiva. */
+  osTemporaria?: boolean;
   /** Obra informada ao iniciar/importar o orçamento, espelhada da meta. */
   obra?: string;
   /** Encargos do orçamento (Dados → Encargos): espelha meta.orcafascioDados.exempt. '' = não informado. */
@@ -190,11 +192,12 @@ function extractOsPastaFromMeta(meta: Record<string, unknown> | undefined): {
   obra: string;
   osCodigo: string;
   numeroPasta: string;
+  osTemporaria: boolean;
 } {
   const osCodigo = typeof meta?.osCodigo === 'string' ? meta.osCodigo.trim() : '';
   const numeroPasta = typeof meta?.numeroPasta === 'string' ? meta.numeroPasta.trim() : '';
   const obra = typeof meta?.obra === 'string' ? meta.obra.trim() : '';
-  return { osCodigo, numeroPasta, obra };
+  return { osCodigo, numeroPasta, obra, osTemporaria: meta?.osTemporaria === true };
 }
 
 function extractCronogramaResumoFromMeta(meta: Record<string, unknown> | undefined): {
@@ -568,6 +571,7 @@ export class OrcamentoService {
               : fin.totalComBdi ?? o.totalComBdi ?? 0,
           osCodigo: osPasta.osCodigo,
           numeroPasta: osPasta.numeroPasta,
+          osTemporaria: osPasta.osTemporaria,
           ...(statusArquivo ? { statusAprovacao: statusArquivo } : {}),
           obra: osPasta.obra,
           encargos: extractEncargosFromMeta(metaRaw),
@@ -998,6 +1002,8 @@ export class OrcamentoService {
       respeitarTrava?: boolean;
       /** Cotação Empreita finalizada: só gestor do contrato / administrador altera (false = preserva a gravada). */
       podeEditarCotacaoFinalizada?: boolean;
+      /** Trancado: OS definitiva só muda por administrador / gestor do contrato. */
+      podeEditarOsDefinitiva?: boolean;
     } = {}
   ): Promise<
     | { ok: true; revisao: number }
@@ -1026,7 +1032,7 @@ export class OrcamentoService {
         if (opts.respeitarTrava) {
           const gravado = { sessaoOrcamento: arquivo?.sessaoOrcamento };
           patchFinal = orcamentoTrancado(statusDaSessao(gravado.sessaoOrcamento))
-            ? preservarConteudoTrancado(gravado, patch)
+            ? preservarConteudoTrancado(gravado, patch, { podeEditarOsDefinitiva: opts.podeEditarOsDefinitiva === true })
             : impedirTrancarPelaTela(gravado, patch);
           patchFinal = preservarCotacaoEmpreitaFinalizada(
             gravado.sessaoOrcamento,
@@ -1142,6 +1148,7 @@ export class OrcamentoService {
               ...(finFromMeta.totalComBdi !== undefined ? { totalComBdi: finFromMeta.totalComBdi } : {}),
               osCodigo: osPastaFromMeta.osCodigo,
               numeroPasta: osPastaFromMeta.numeroPasta,
+              osTemporaria: osPastaFromMeta.osTemporaria,
               obra: osPastaFromMeta.obra,
               gastoEmpreita: gastoComEmpreita(nextSessao),
               encargos: extractEncargosFromMeta(
@@ -1425,6 +1432,7 @@ export class OrcamentoService {
       totalComBdi: origemNorm.totalComBdi,
       osCodigo: origemNorm.osCodigo,
       numeroPasta: origemNorm.numeroPasta,
+      osTemporaria: origemNorm.osTemporaria,
       obra: origemNorm.obra,
       cronogramaProgressoFisico: origemNorm.cronogramaProgressoFisico,
       cronogramaConcluido: origemNorm.cronogramaConcluido,

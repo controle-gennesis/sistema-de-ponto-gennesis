@@ -137,9 +137,18 @@ function drawRow(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
 
+  // `<coluna>Bold`: texto extra em negrito abaixo do texto da célula (ex.: detalhamento do material).
+  const linhasNegrito = (col: BrandedPdfColumn): string[] => {
+    const extra = String(values[`${col.key}Bold`] || '').trim();
+    if (!extra) return [];
+    doc.setFont('helvetica', 'bold');
+    const out = doc.splitTextToSize(extra, col.width - 3) as string[];
+    doc.setFont('helvetica', 'normal');
+    return out;
+  };
   const lineHeights = columns.map((col) => {
     const lines = doc.splitTextToSize(values[col.key] || '—', col.width - 3) as string[];
-    return Math.max(1, lines.length);
+    return Math.max(1, lines.length + linhasNegrito(col).length);
   });
   const maxLines = Math.max(...lineHeights);
   const rowH = Math.max(7.5, maxLines * 3.4 + 3.2);
@@ -182,6 +191,12 @@ function drawRow(
         doc.setFont('helvetica', 'normal');
         doc.text(line, x + 1.5, ly);
       }
+      ly += 3.4;
+    }
+    for (const line of linhasNegrito(col)) {
+      doc.setTextColor(...TEXT_BLACK);
+      doc.setFont('helvetica', 'bold');
+      doc.text(line, x + 1.5, ly);
       ly += 3.4;
     }
     x += col.width;
