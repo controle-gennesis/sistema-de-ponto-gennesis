@@ -31,6 +31,7 @@ import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActio
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
+import { DpRequestAttachments } from '@/components/dp/DpRequestAttachments';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
 import {
@@ -145,7 +146,12 @@ type DpRequest = {
   /** Finalizada em tipo que vai à Contabilidade, mas sem pedido lá (envio automático falhou). */
   contabilidadePendente?: boolean;
   /** Pedido ligado na Contabilidade (quando a solicitação foi encaminhada para lá). */
-  contabilidade?: { id: string; status: 'OPEN' | 'IN_PROGRESS' | 'CONCLUDED' | 'CANCELLED' } | null;
+  contabilidade?: {
+    id: string;
+    status: 'OPEN' | 'IN_PROGRESS' | 'CONCLUDED' | 'CANCELLED';
+    accountingDoneAt?: string | null;
+    dpClosedAt?: string | null;
+  } | null;
 };
 
 function formatDateTime(iso?: string | null) {
@@ -522,7 +528,7 @@ export function GerenciarSolicitacoesGeraisPage({
       await api.post(`/solicitacoes-dp/${id}/concluir-contabilidade`, {});
     },
     onSuccess: () => {
-      toast.success('Atendimento da Contabilidade concluído.');
+      toast.success('Atendimento encerrado.');
       queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
       queryClient.invalidateQueries({ queryKey: ['dp-contabilidade'] });
       closeHistoryRequest();
@@ -1015,6 +1021,16 @@ export function GerenciarSolicitacoesGeraisPage({
                                 >
                                   {getStatusLabel(r.status, r.requestType)}
                                 </span>
+                                {r.contabilidade?.accountingDoneAt && !r.contabilidade.dpClosedAt && r.contabilidade.status !== 'CANCELLED' ? (
+                                  <span
+                                    className="mt-1 flex items-center justify-center"
+                                    title="A Contabilidade já concluiu o atendimento. Falta o DP encerrar."
+                                  >
+                                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                      Aguardando encerramento
+                                    </span>
+                                  </span>
+                                ) : null}
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                 {formatDateTime(r.createdAt)}
@@ -1193,23 +1209,30 @@ export function GerenciarSolicitacoesGeraisPage({
                     employeeNameById={employeeNameByIdForDetail}
                   />
 
+                  <DpRequestAttachments requestId={historyRequest.id} currentUserId={(user as { id?: string } | undefined)?.id ?? null} />
+
                   <DpRequestMessages requestId={historyRequest.id} />
 
                   {historyRequest.contabilidade &&
-                  (historyRequest.contabilidade.status === 'OPEN' || historyRequest.contabilidade.status === 'IN_PROGRESS') ? (
+                  historyRequest.contabilidade.status !== 'CANCELLED' &&
+                  !historyRequest.contabilidade.dpClosedAt ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-100">
-                      <span>Este pedido está com a Contabilidade. Depois de conversar, conclua o atendimento aqui.</span>
+                      <span>
+                        {historyRequest.contabilidade.accountingDoneAt
+                          ? 'A Contabilidade concluiu o atendimento. Falta você encerrar.'
+                          : 'Este pedido está com a Contabilidade. Depois de conversar, encerre o atendimento aqui.'}
+                      </span>
                       <button
                         type="button"
                         disabled={concludeAccountingMutation.isPending}
                         onClick={() => {
-                          if (window.confirm('Concluir o atendimento da Contabilidade para esta solicitação?')) {
+                          if (window.confirm('Encerrar o atendimento da Contabilidade para esta solicitação?')) {
                             concludeAccountingMutation.mutate(historyRequest.id);
                           }
                         }}
                         className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                       >
-                        {concludeAccountingMutation.isPending ? 'Concluindo...' : 'Concluir atendimento da Contabilidade'}
+                        {concludeAccountingMutation.isPending ? 'Encerrando...' : 'Encerrar atendimento'}
                       </button>
                     </div>
                   ) : null}

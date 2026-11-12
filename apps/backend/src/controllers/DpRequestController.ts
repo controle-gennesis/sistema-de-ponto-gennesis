@@ -880,13 +880,13 @@ export class DpRequestController {
       const linkedRows = candidates.length
         ? await prisma.dpContabilidadeRequest.findMany({
             where: { sourceDpRequestId: { in: candidates.map((c) => c.id) } },
-            select: { id: true, status: true, sourceDpRequestId: true },
+            select: { id: true, status: true, accountingDoneAt: true, dpClosedAt: true, sourceDpRequestId: true },
           })
         : [];
-      const byDp = new Map(linkedRows.map((l) => [l.sourceDpRequestId, { id: l.id, status: l.status }]));
+      const byDp = new Map(linkedRows.map((l) => [l.sourceDpRequestId, { id: l.id, status: l.status, accountingDoneAt: l.accountingDoneAt ? l.accountingDoneAt.toISOString() : null, dpClosedAt: l.dpClosedAt ? l.dpClosedAt.toISOString() : null }]));
       data = (data as Array<(typeof data)[number] & { id: string }>).map((r) => ({
         ...r,
-        contabilidade: byDp.get(r.id) ?? null,
+        contabilidade: isAccountingDirectRequestType(r.requestType) ? null : (byDp.get(r.id) ?? null),
       })) as typeof data;
     }
     return res.json({ success: true, data });

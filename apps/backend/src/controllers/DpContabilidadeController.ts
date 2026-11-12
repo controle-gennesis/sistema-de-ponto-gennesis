@@ -6,6 +6,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { isAccountingDirectRequestType } from '../lib/dpRequestDetails';
 import { sendPushToUsers } from '../services/PushNotificationService';
+import { announceAccountingDone } from '../lib/dpRequestMessages';
 
 const REQUEST_TYPES = [
   'ADMISSAO',
@@ -263,7 +264,7 @@ export class DpContabilidadeController {
 
       const statsWhere = { ...where };
       if (status && STATUSES.includes(status as (typeof STATUSES)[number])) {
-        where.status = status as (typeof STATUSES)[number];
+        where.status = status === 'OPEN' ? { in: ['OPEN', 'IN_PROGRESS'] } : (status as (typeof STATUSES)[number]);
       }
 
       const [rows, counts] = await Promise.all([
@@ -291,6 +292,9 @@ export class DpContabilidadeController {
         stats.total += row._count._all;
         stats[row.status] = row._count._all;
       }
+      // "Em andamento" deixou de existir para o usuário: conta como Pendente.
+      stats.OPEN += stats.IN_PROGRESS;
+      stats.IN_PROGRESS = 0;
 
       res.json({
         success: true,
@@ -320,7 +324,7 @@ export class DpContabilidadeController {
   async pendingCount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const count = await prisma.dpContabilidadeRequest.count({ where: { status: 'OPEN' } });
+      const count = await prisma.dpContabilidadeRequest.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] } } });
       res.json({ success: true, data: { count } });
     } catch (err) {
       next(err);
@@ -361,12 +365,6 @@ export class DpContabilidadeController {
             body,
           },
         });
-        if (existing.status === 'OPEN' && respondidoPorOutro) {
-          await tx.dpContabilidadeRequest.update({
-            where: { id: existing.id },
-            data: { status: 'IN_PROGRESS' },
-          });
-        }
         if (sourceId && respondidoPorOutro) {
           await appendSourceHistoryNote(tx, sourceId, actor, `Contabilidade: ${body}`);
         }
@@ -498,7 +496,35 @@ export class DpContabilidadeController {
     return updated;
   }
 
-  /** O DP encerra o pedido que está com a Contabilidade (depois da conversa entre os dois). */
+  /** A Contabilidade conclui o atendimento (status Concluída) e o DP é avisado sem precisar de mensagem digitada. */
+  async concludeFromAccounting(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const actor = await loadActor(req.user.id);
+      const existing = await prisma.dpContabilidadeRequest.findUnique({
+        where: { sourceDpRequestId: req.params.id },
+      });
+      if (!existing) throw createError('Esta solicitação não tem pedido na Contabilidade.', 404);
+      if (existing.status === 'CONCLUDED' || existing.status === 'CANCELLED') {
+        throw createError('Este pedido já está encerrado.', 400);
+      }
+      await this.applyStatus(existing, actor, 'CONCLUDED', undefined, 'Contabilidade');
+      await prisma.dpContabilidadeRequest.update({
+        where: { id: existing.id },
+        data: { accountingDoneAt: new Date() },
+      });
+      await announceAccountingDone(req.params.id, actor.id, actor.name);
+      res.json({ success: true, data: { id: existing.id, status: 'CONCLUDED' } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('Este pedido foi atualizado por outra pessoa. Atualize a lista e tente novamente.', 409));
+        return;
+      }
+      next(err);
+    }
+  }
+
+  /** O DP encerra o acompanhamento do pedido que estava com a Contabilidade (depois da conversa entre os dois). */
   async concludeFromDp(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -508,10 +534,16 @@ export class DpContabilidadeController {
         where: { sourceDpRequestId: req.params.id },
       });
       if (!existing) throw createError('Esta solicitação não tem pedido na Contabilidade.', 404);
-      if (existing.status === 'CONCLUDED' || existing.status === 'CANCELLED') {
-        throw createError('O pedido da Contabilidade já está encerrado.', 400);
+      if (existing.status === 'CANCELLED') throw createError('O pedido da Contabilidade foi cancelado.', 400);
+      if (existing.dpClosedAt) throw createError('O atendimento já foi encerrado pelo DP.', 400);
+      // Se a Contabilidade ainda não concluiu, o DP conclui por ela; se já concluiu, só encerra o acompanhamento.
+      if (existing.status !== 'CONCLUDED') {
+        await this.applyStatus(existing, actor, 'CONCLUDED', comment || undefined, 'DP');
       }
-      const updated = await this.applyStatus(existing, actor, 'CONCLUDED', comment || undefined, 'DP');
+      const updated = await prisma.dpContabilidadeRequest.update({
+        where: { id: existing.id },
+        data: { dpClosedAt: new Date() },
+      });
       res.json({ success: true, data: { id: updated.id, status: updated.status } });
     } catch (err) {
       if (err instanceof z.ZodError) {
