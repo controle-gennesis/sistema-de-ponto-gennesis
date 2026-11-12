@@ -48,6 +48,14 @@ import { DriveListView } from '@/components/drive/DriveListView';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
 import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
+import {
+  DriveFilters,
+  DRIVE_FILTERS_EMPTY,
+  driveFileCategory,
+  driveFiltersActive,
+  driveMatchesModified,
+  type DriveFiltersState,
+} from '@/components/drive/DriveFilters';
 import { computeSelection, fileKey, folderKey, type SelectMods } from '@/components/drive/driveSelection';
 import {
   folderDropProps,
@@ -375,16 +383,40 @@ function DrivePageContent() {
     enabled: !!user && !!searchQuery.trim(),
   });
 
-  const folders = searchQuery
+  const rawFolders = searchQuery
     ? (searchResults?.folders ?? [])
     : isMyDriveView
       ? (contents?.folders ?? [])
       : (viewContents?.folders ?? []);
-  const files = searchQuery
+  const rawFiles = searchQuery
     ? (searchResults?.files ?? [])
     : isMyDriveView
       ? (contents?.files ?? [])
       : (viewContents?.files ?? []);
+
+  // ── Filtros (tipo / data de modificação / proprietário) ───────────────────
+  const [filters, setFilters] = useState<DriveFiltersState>(DRIVE_FILTERS_EMPTY);
+  const filtersActive = driveFiltersActive(filters);
+  const ownerOk = (ownerId: string) =>
+    filters.owner === 'all' || (filters.owner === 'me' ? ownerId === user?.id : ownerId !== user?.id);
+  const folders = useMemo(() => {
+    if (!filtersActive) return rawFolders;
+    // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
+    if (filters.type !== 'all' && filters.type !== 'folders') return [];
+    return rawFolders.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFolders, filters, user?.id]);
+  const files = useMemo(() => {
+    if (!filtersActive) return rawFiles;
+    if (filters.type === 'folders') return [];
+    return rawFiles.filter(
+      (f) =>
+        (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
+        ownerOk(f.ownerId) &&
+        driveMatchesModified(f.updatedAt, filters.modified),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFiles, filters, user?.id]);
   /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -1434,6 +1466,8 @@ function DrivePageContent() {
               )}
             </div>
 
+            <DriveFilters filters={filters} onChange={setFilters} />
+
             <DriveSelectionBar
               count={selectedItems.length}
               trashMode={isTrashView}
@@ -1501,7 +1535,9 @@ function DrivePageContent() {
               )}
             </div>
             <p className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">
-              {searchQuery
+              {filtersActive
+                ? 'Nenhum item com esses filtros'
+                : searchQuery
                 ? 'Nenhum resultado encontrado'
                 : driveView === 'shared'
                   ? 'Nada compartilhado com você'
@@ -1514,7 +1550,9 @@ function DrivePageContent() {
                         : 'Pasta vazia'}
             </p>
             <p className="mx-auto mb-6 max-w-sm text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery
+              {filtersActive
+                ? 'Mude ou limpe os filtros para ver os outros itens.'
+                : searchQuery
                 ? 'Tente uma busca diferente'
                 : driveView === 'shared'
                   ? 'Quando alguém compartilhar uma pasta com você, ela aparecerá aqui.'
@@ -1528,7 +1566,7 @@ function DrivePageContent() {
                           ? 'Faça upload de arquivos ou crie uma nova pasta para começar.'
                           : 'Esta pasta foi compartilhada com acesso somente leitura.'}
             </p>
-            {!searchQuery && isMyDriveView && canWriteInCurrentFolder && (
+            {!searchQuery && !filtersActive && isMyDriveView && canWriteInCurrentFolder && (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
