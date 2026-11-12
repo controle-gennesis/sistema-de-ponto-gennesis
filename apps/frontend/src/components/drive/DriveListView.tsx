@@ -17,6 +17,7 @@ import {
 import { Card } from '@/components/ui/Card';
 import { folderDropProps, startDriveItemDrag, type DriveDragItem } from '@/components/drive/driveItemDrag';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
+import { DriveHoverActions } from '@/components/drive/DriveFilePreviewModal';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { FolderIconTile } from '@/components/drive/folderAppearance';
 
@@ -63,6 +64,7 @@ type Props = {
   files: DriveFile[];
   onOpenFolder: (id: string) => void;
   onDownload: (f: DriveFile) => void | Promise<void>;
+  onPreview: (f: DriveFile) => void;
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
   onOpenShare?: (folder: DriveFolder) => void;
@@ -123,14 +125,22 @@ function OwnerCell({
 }) {
   const label = ownerLabel(ownerId, ownerName, currentUserId);
   const photo = resolveApiMediaUrl(ownerPhotoUrl ?? null);
-  const initialSource =
-    currentUserId && ownerId === currentUserId
-      ? ownerName?.trim() || label
-      : ownerName?.trim() || label;
+  const initialSource = ownerName?.trim() || label;
+  // Só a foto; o nome aparece no hover (mesmo balão das Tasks). Portal: a lista rola e cortaria o balão.
+  const fullName = ownerName?.trim() || label;
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
 
   return (
-    <div className="flex min-w-0 items-center justify-center gap-2">
-      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+    <div className="flex min-w-0 items-center justify-center">
+      <span
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-200"
+        aria-label={fullName}
+        onMouseEnter={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setTip({ x: r.left + r.width / 2, y: r.top });
+        }}
+        onMouseLeave={() => setTip(null)}
+      >
         {photo ? (
           <img
             src={photo}
@@ -142,7 +152,18 @@ function OwnerCell({
           initialsFromName(initialSource === '—' ? '?' : initialSource)
         )}
       </span>
-      <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">{label}</span>
+      {tip && fullName !== '—' && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              role="tooltip"
+              style={{ position: 'fixed', left: tip.x, top: tip.y - 6, transform: 'translate(-50%, -100%)', zIndex: 9500 }}
+              className="pointer-events-none whitespace-nowrap rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+            >
+              {fullName}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -208,6 +229,7 @@ export function DriveListView({
   files,
   onOpenFolder,
   onDownload,
+  onPreview,
   onRename,
   onDelete,
   onOpenShare,
@@ -438,13 +460,13 @@ export function DriveListView({
               onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
               onClick={() => {
                 setOpenMenuId(null);
-                if (!trashMode) onDownload(file);
+                if (!trashMode) onPreview(file);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   setOpenMenuId(null);
-                  if (!trashMode) onDownload(file);
+                  if (!trashMode) onPreview(file);
                 }
               }}
               className={rowClass}
@@ -456,6 +478,14 @@ export function DriveListView({
                 </span>
                 {file.starred && !trashMode && (
                   <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                )}
+                {!trashMode && (
+                  <DriveHoverActions
+                    file={file}
+                    onPreview={() => onPreview(file)}
+                    onDownload={() => void onDownload(file)}
+                    className="ml-auto shrink-0 pr-1"
+                  />
                 )}
               </div>
               <OwnerCell

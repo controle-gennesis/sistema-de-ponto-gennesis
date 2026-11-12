@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { isAdmTstDpRequestType } from './dpRequestAdmTst';
 import { dpRequestGoesToAccounting } from './dpContabilidadeFromInterna';
+import { isAccountingDirectRequestType } from './dpRequestDetails';
 import { DP_CONTABILIDADE_MODULE_KEY } from './dpContabilidadeAccess';
 import { sendPushToUsers } from '../services/PushNotificationService';
 import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
@@ -19,24 +20,32 @@ import { fixMulterOriginalName } from './fixUploadFileName';
 
 const DP_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-dp');
 const ADM_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst');
+/** Tela Solicitações à Contabilidade (onde o DP acompanha o que enviou). */
+const ACCOUNTING_PAGE_KEY = pathToModuleKey('/ponto/solicitacoes-contabilidade');
 
 const bodySchema = z.object({ body: z.string().trim().min(1, 'Escreva a mensagem.').max(4000) });
 
-type Modules = { admin: boolean; dp: boolean; adm: boolean; contab: boolean };
+type Modules = { admin: boolean; dp: boolean; adm: boolean; contab: boolean; acctPage: boolean };
 
 async function loadModules(userId: string, isAdmin: boolean): Promise<Modules> {
-  if (isAdmin) return { admin: true, dp: true, adm: true, contab: true };
+  if (isAdmin) return { admin: true, dp: true, adm: true, contab: true, acctPage: true };
   const rows = await prisma.userPermission.findMany({
     where: {
       userId,
       allowed: true,
       action: PERMISSION_ACCESS_ACTION,
-      module: { in: [DP_MANAGE_KEY, ADM_MANAGE_KEY, DP_CONTABILIDADE_MODULE_KEY] },
+      module: { in: [DP_MANAGE_KEY, ADM_MANAGE_KEY, DP_CONTABILIDADE_MODULE_KEY, ACCOUNTING_PAGE_KEY] },
     },
     select: { module: true },
   });
   const has = (k: string) => rows.some((r) => r.module === k);
-  return { admin: false, dp: has(DP_MANAGE_KEY), adm: has(ADM_MANAGE_KEY), contab: has(DP_CONTABILIDADE_MODULE_KEY) };
+  return {
+    admin: false,
+    dp: has(DP_MANAGE_KEY),
+    adm: has(ADM_MANAGE_KEY),
+    contab: has(DP_CONTABILIDADE_MODULE_KEY),
+    acctPage: has(ACCOUNTING_PAGE_KEY),
+  };
 }
 
 /** Quem tem o módulo liberado + administradores. */
@@ -58,10 +67,15 @@ function isAdmRow(row: { requestType: string }): boolean {
   return isAdmTstDpRequestType(row.requestType as never);
 }
 
+/** Vai à Contabilidade (interna finalizada) ou é um pedido criado direto para ela. */
+function involvesAccounting(row: Parameters<typeof dpRequestGoesToAccounting>[0]): boolean {
+  return dpRequestGoesToAccounting(row) || isAccountingDirectRequestType((row as { requestType: string }).requestType);
+}
+
 function canAccess(mods: Modules, row: Parameters<typeof dpRequestGoesToAccounting>[0]): boolean {
   if (mods.admin) return true;
   if (isAdmRow(row as { requestType: string })) return mods.adm;
-  return mods.dp || (mods.contab && dpRequestGoesToAccounting(row));
+  return mods.dp || ((mods.contab || mods.acctPage) && involvesAccounting(row));
 }
 
 /** Avisa as outras pessoas da conversa (push no celular; o sininho usa a contagem de não lidas). */
@@ -76,7 +90,9 @@ function notifyParticipants(
       ? [await userIdsWithModule(ADM_MANAGE_KEY)]
       : [
           await userIdsWithModule(DP_MANAGE_KEY),
-          ...(dpRequestGoesToAccounting(row) ? [await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY)] : []),
+          ...(involvesAccounting(row)
+            ? [await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY), await userIdsWithModule(ACCOUNTING_PAGE_KEY)]
+            : []),
         ];
     const recipients = [...new Set(groups.flat())].filter((id) => id !== authorId);
     await sendPushToUsers(recipients, { title, body: bodyText, data: { type: 'dp-request-message', id: (row as { id: string }).id } });

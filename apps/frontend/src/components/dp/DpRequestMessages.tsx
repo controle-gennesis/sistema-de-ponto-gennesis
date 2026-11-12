@@ -8,6 +8,7 @@ import api from '@/lib/api';
 import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { Button } from '@/components/ui/Button';
+import { DpChatFeed } from '@/components/dp/DpChatFeed';
 
 type Message = { id: string; userId: string; userName: string; body: string; createdAt: string };
 
@@ -20,12 +21,15 @@ export function DpRequestMessages({
   title = 'Histórico de mensagens',
   placeholder = 'Escreva uma mensagem para o DP, a Administração ou a Contabilidade...',
   legacyItems = [],
+  variant = 'default',
 }: {
   requestId: string;
   title?: string;
   placeholder?: string;
   /** Mensagens antigas (ex.: histórico próprio da Contabilidade) mostradas na mesma lista, por data. */
   legacyItems?: Message[];
+  /** `chat`: layout da aba Comentários das OCs (lista que rola + caixa fixa embaixo). */
+  variant?: 'default' | 'chat';
 }) {
   const queryClient = useQueryClient();
   const [body, setBody] = useState('');
@@ -60,6 +64,20 @@ export function DpRequestMessages({
   const items = [...legacyItems, ...(data ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
+
+  if (variant === 'chat') {
+    return (
+      <DpChatFeed
+        items={items}
+        loading={isLoading}
+        error={isError}
+        value={body}
+        onChange={setBody}
+        onSend={() => send.mutate(body.trim())}
+        sending={send.isPending}
+      />
+    );
+  }
 
   return (
     <div>

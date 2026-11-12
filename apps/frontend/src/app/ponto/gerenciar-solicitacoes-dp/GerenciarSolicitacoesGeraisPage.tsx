@@ -24,7 +24,6 @@ import {
   Users,
   X,
   XCircle,
-  Calculator,
   type LucideIcon,
 } from 'lucide-react';
 import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
@@ -48,7 +47,6 @@ import {
   buildDpFeedbackSelectOptions,
   buildDpFeedbackSelectOptionsForType,
   buildDpStatusFilterOptions,
-  DP_SENT_TO_ACCOUNTING_LABEL,
   dpRequestIsSentToAccounting,
 } from '@/lib/dpRequestDpUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -57,6 +55,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   DpRequestHistoryMetaCard,
   DpRequestHistoryModalFooter,
+  DpRequestHistoryModalBody,
   DpRequestHistoryModalTabs,
   DpRequestHistorySectionCard,
   DpRequestHistoryTimeline,
@@ -323,7 +322,7 @@ const MANAGE_SCOPE_CONFIG: Record<
   },
 };
 
-type ManageCardFilter = 'all' | 'pending' | 'ACCOUNTING' | 'CONCLUDED' | 'CANCELLED';
+type ManageCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
 
 const MANAGE_CARD_LIST_CONFIG: Record<
   ManageCardFilter,
@@ -349,13 +348,6 @@ const MANAGE_CARD_LIST_CONFIG: Record<
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400',
   },
-  ACCOUNTING: {
-    title: 'Solicitações na Contabilidade',
-    subtitle: 'Enviadas à Contabilidade: aguardando o atendimento e o encerramento pelo DP.',
-    Icon: Calculator,
-    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
-    iconColor: 'text-indigo-600 dark:text-indigo-400',
-  },
   CONCLUDED: {
     title: 'Solicitações Finalizadas',
     subtitle: 'Histórico de solicitações finalizadas pelo DP.',
@@ -378,7 +370,7 @@ const MANAGE_STAT_CARDS: {
   iconBg: string;
   iconColor: string;
   Icon: LucideIcon;
-  countKey: keyof { total: number; pending: number; accounting: number; concluded: number; cancelled: number };
+  countKey: keyof { total: number; pending: number; concluded: number; cancelled: number };
 }[] = [
   {
     filter: 'all',
@@ -395,14 +387,6 @@ const MANAGE_STAT_CARDS: {
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: Clock,
     countKey: 'pending',
-  },
-  {
-    filter: 'ACCOUNTING',
-    label: 'Na Contabilidade',
-    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
-    iconColor: 'text-indigo-600 dark:text-indigo-400',
-    Icon: Calculator,
-    countKey: 'accounting',
   },
   {
     filter: 'CONCLUDED',
@@ -440,6 +424,9 @@ export function GerenciarSolicitacoesGeraisPage({
   const [dpNextStatus, setDpNextStatus] = useState<Record<string, DpDpFeedbackNextStatus>>({});
   const [dpCancellationReason, setDpCancellationReason] = useState<Record<string, string>>({});
   const [historyRequest, setHistoryRequest] = useState<DpRequest | null>(null);
+  /** Aviso exibido antes de enviar à Contabilidade (com opção de não mostrar de novo). */
+  const [sendNoticeFor, setSendNoticeFor] = useState<DpRequest | null>(null);
+  const [sendNoticeSkip, setSendNoticeSkip] = useState(false);
   const [historyModalTab, setHistoryModalTab] = useState<'detalhes' | 'timeline'>('detalhes');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
@@ -539,22 +526,6 @@ export function GerenciarSolicitacoesGeraisPage({
     staleTime: 5 * 60_000,
   });
 
-  const concludeAccountingMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.post(`/solicitacoes-dp/${id}/concluir-contabilidade`, {});
-    },
-    onSuccess: () => {
-      toast.success('Atendimento encerrado.');
-      queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
-      queryClient.invalidateQueries({ queryKey: ['dp-contabilidade'] });
-      closeHistoryRequest();
-    },
-    onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
-      toast.error(d?.message || d?.error || 'Não foi possível concluir o atendimento da Contabilidade.');
-    },
-  });
-
   const loadingStats = loadingList;
   const statsResp = allRequestsResp;
 
@@ -565,40 +536,22 @@ export function GerenciarSolicitacoesGeraisPage({
     return `Não foi possível carregar as solicitações${status ? ` (erro ${status})` : ''}${detail ? `: ${detail}` : '.'}`;
   })();
 
-  /**
-   * Está com a Contabilidade: finalizada pelo DP e encaminhada, enquanto a Contabilidade não atendeu ou o DP
-   * ainda não encerrou o acompanhamento. Sai daqui quando o DP encerra (ou o pedido é cancelado).
-   */
-  const isInAccounting = (r: DpRequest) => {
-    if (scope !== 'DP') return false;
-    if ((r.status as string) === 'IN_ACCOUNTING') return true;
-    if (r.status !== 'CONCLUDED' || !dpRequestIsSentToAccounting(r.requestType)) return false;
-    if (r.contabilidadePendente) return true; // ainda não chegou lá (reenviar)
-    const c = r.contabilidade;
-    if (!c) return false;
-    if (c.status === 'OPEN' || c.status === 'IN_PROGRESS') return true;
-    return c.status === 'CONCLUDED' && !!c.accountingDoneAt && !c.dpClosedAt;
-  };
-
   const requests = useMemo(() => {
     const all = (allRequestsResp as DpRequest[]) || [];
     if (cardFilter === 'all') return all;
-    if (cardFilter === 'pending') return all.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED' && !isInAccounting(r));
-    if (cardFilter === 'ACCOUNTING') return all.filter((r) => isInAccounting(r));
-    if (cardFilter === 'CONCLUDED') return all.filter((r) => r.status === 'CONCLUDED' && !isInAccounting(r));
+    if (cardFilter === 'pending') return all.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
     return all.filter((r) => r.status === cardFilter);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRequestsResp, cardFilter, scope]);
+  }, [allRequestsResp, cardFilter]);
 
+  // Enviada à Contabilidade = finalizada para o DP; o acompanhamento passa a ser em Solicitações à Contabilidade.
   const manageStats = useMemo(() => {
     const list = ((statsResp as DpRequest[]) || []).filter((r) =>
       scope === 'DP' ? r.status !== 'WAITING_MANAGER' : true
     );
-    const accounting = list.filter((r) => isInAccounting(r)).length;
-    const concluded = list.filter((r) => r.status === 'CONCLUDED' && !isInAccounting(r)).length;
+    const concluded = list.filter((r) => r.status === 'CONCLUDED').length;
     const cancelled = list.filter((r) => r.status === 'CANCELLED').length;
-    const pending = list.length - concluded - cancelled - accounting;
-    return { total: list.length, pending, accounting, concluded, cancelled };
+    const pending = list.length - concluded - cancelled;
+    return { total: list.length, pending, concluded, cancelled };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statsResp, scope]);
 
@@ -677,28 +630,16 @@ export function GerenciarSolicitacoesGeraisPage({
     scope !== 'ADM_TST' && dpRequestIsSentToAccounting(r.requestType);
 
   const buildTimeline = (r: DpRequest) =>
-    buildDpRequestTimeline(
-      r,
-      sentToAccounting(r)
-        ? { ...statusLabelsForScope, CONCLUDED: DP_SENT_TO_ACCOUNTING_LABEL }
-        : statusLabelsForScope,
-      formatDuration
-    );
+    buildDpRequestTimeline(r, statusLabelsForScope, formatDuration);
 
-  const getStatusLabel = (status: DpRequestStatus, requestType?: DpRequestType) => {
+  const getStatusLabel = (status: DpRequestStatus, _requestType?: DpRequestType) => {
     if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
       return getAdmTstStatusLabel(status);
-    }
-    if (status === 'CONCLUDED' && requestType && sentToAccounting({ requestType })) {
-      return DP_SENT_TO_ACCOUNTING_LABEL;
     }
     return STATUS_LABELS[status];
   };
 
-  const getStatusRowBadge = (status: DpRequestStatus, requestType?: DpRequestType) => {
-    if (status === 'CONCLUDED' && requestType && sentToAccounting({ requestType })) {
-      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
-    }
+  const getStatusRowBadge = (status: DpRequestStatus, _requestType?: DpRequestType) => {
     if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
       return getAdmTstStatusRowBadge(status);
     }
@@ -752,25 +693,6 @@ export function GerenciarSolicitacoesGeraisPage({
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
   });
 
-  const resendToAccountingMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.post(`/solicitacoes-dp/${id}/reenviar-contabilidade`);
-      return res.data as { contabilidadeCreated?: boolean };
-    },
-    onSuccess: async (payload) => {
-      toast.success(
-        payload?.contabilidadeCreated
-          ? 'Enviada ao Atendimento Contábil.'
-          : 'Esta solicitação já foi enviada à Contabilidade.'
-      );
-      closeHistoryRequest();
-      await queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
-      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
-    },
-    onError: (err: any) =>
-      toast.error(err?.response?.data?.error || err?.message || 'Não foi possível reenviar.'),
-  });
-
   const cancelRowDraft = (id: string) => {
     setDpFeedback((p) => {
       const n = { ...p };
@@ -802,12 +724,52 @@ export function GerenciarSolicitacoesGeraisPage({
       toast.error('Informe o motivo do cancelamento');
       return;
     }
+    if (
+      scope === 'DP' &&
+      nextStatus === 'CONCLUDED' &&
+      r.status !== 'CONCLUDED' &&
+      dpRequestIsSentToAccounting(r.requestType) &&
+      !isSendNoticeHidden()
+    ) {
+      setSendNoticeSkip(false);
+      setSendNoticeFor(r);
+      return;
+    }
     feedbackMutation.mutate({
       id: r.id,
       feedback,
       nextStatus,
       responsibleNote: saverName || undefined,
       cancellationReason,
+    });
+  };
+
+  // "Não mostrar novamente" do aviso de envio à Contabilidade (guardado por usuário neste navegador).
+  const sendNoticeStorageKey = `gerenciar-dp:aviso-enviar-contabilidade-oculto:${(user as { id?: string } | undefined)?.id ?? ''}`;
+  const isSendNoticeHidden = () => {
+    try {
+      return localStorage.getItem(sendNoticeStorageKey) === '1';
+    } catch {
+      return false;
+    }
+  };
+
+  const confirmSendNotice = () => {
+    const r = sendNoticeFor;
+    if (!r) return;
+    if (sendNoticeSkip) {
+      try {
+        localStorage.setItem(sendNoticeStorageKey, '1');
+      } catch {
+        /* sem armazenamento: o aviso volta a aparecer, sem prejuízo */
+      }
+    }
+    setSendNoticeFor(null);
+    feedbackMutation.mutate({
+      id: r.id,
+      feedback: (dpFeedback[r.id] || '').trim(),
+      nextStatus: 'CONCLUDED' as DpDpFeedbackNextStatus,
+      responsibleNote: saverName || undefined,
     });
   };
 
@@ -887,8 +849,8 @@ export function GerenciarSolicitacoesGeraisPage({
             </p>
           </div>
 
-          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 ${scope === 'DP' ? '2xl:grid-cols-5' : '2xl:grid-cols-4'}`}>
-            {MANAGE_STAT_CARDS.filter((card) => card.filter !== 'ACCOUNTING' || scope === 'DP').map((card) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+            {MANAGE_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}
                 label={card.label}
@@ -1057,16 +1019,6 @@ export function GerenciarSolicitacoesGeraisPage({
                                 >
                                   {getStatusLabel(r.status, r.requestType)}
                                 </span>
-                                {r.contabilidade?.accountingDoneAt && !r.contabilidade.dpClosedAt && r.contabilidade.status !== 'CANCELLED' ? (
-                                  <span
-                                    className="mt-1 flex items-center justify-center"
-                                    title="A Contabilidade já concluiu o atendimento. Falta o DP encerrar."
-                                  >
-                                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                      Aguardando encerramento
-                                    </span>
-                                  </span>
-                                ) : null}
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                 {formatDateTime(r.createdAt)}
@@ -1227,14 +1179,12 @@ export function GerenciarSolicitacoesGeraisPage({
           onClose={closeHistoryRequest}
           title="Solicitação"
           size="lg"
+          headerClassName="border-b-0 pb-2 sm:pb-2"
+          contentClassName="!p-0"
+          scrollContent={false}
         >
           {historyRequest && (
-            <div className="space-y-5">
-              <DpRequestHistoryModalTabs
-                activeTab={historyModalTab}
-                onTabChange={setHistoryModalTab}
-              />
-
+            <DpRequestHistoryModalBody tabs={<DpRequestHistoryModalTabs activeTab={historyModalTab} onTabChange={setHistoryModalTab} />}>
               {historyModalTab === 'detalhes' ? (
                 <div className="space-y-4">
                   <DpRequestHistoryMetaCard fields={buildHistoryMetaFields(historyRequest)} />
@@ -1247,31 +1197,14 @@ export function GerenciarSolicitacoesGeraisPage({
 
                   <DpRequestAttachments requestId={historyRequest.id} currentUserId={(user as { id?: string } | undefined)?.id ?? null} />
 
-                  <DpRequestMessages requestId={historyRequest.id} />
-
-                  {historyRequest.contabilidade &&
-                  historyRequest.contabilidade.status !== 'CANCELLED' &&
-                  !historyRequest.contabilidade.dpClosedAt ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-100">
-                      <span>
-                        {historyRequest.contabilidade.accountingDoneAt
-                          ? 'A Contabilidade concluiu o atendimento. Falta você encerrar.'
-                          : 'Este pedido está com a Contabilidade. Depois de conversar, encerre o atendimento aqui.'}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={concludeAccountingMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm('Encerrar o atendimento da Contabilidade para esta solicitação?')) {
-                            concludeAccountingMutation.mutate(historyRequest.id);
-                          }
-                        }}
-                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        {concludeAccountingMutation.isPending ? 'Encerrando...' : 'Encerrar atendimento'}
-                      </button>
+                  {sentToAccounting(historyRequest) && historyRequest.status === 'CONCLUDED' ? (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-800/60 dark:bg-indigo-950/30 dark:text-indigo-200">
+                      Esta solicitação foi finalizada e enviada à Contabilidade. A conversa, o encerramento do
+                      atendimento e o reenvio (se o envio falhar) ficam em <strong>Solicitações à Contabilidade</strong>.
                     </div>
-                  ) : null}
+                  ) : (
+                    <DpRequestMessages requestId={historyRequest.id} />
+                  )}
 
                   {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (
                     <DpRequestHistorySectionCard
@@ -1339,22 +1272,6 @@ export function GerenciarSolicitacoesGeraisPage({
                     </DpRequestHistorySectionCard>
                   ) : null}
 
-                  {historyRequest.contabilidadePendente ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
-                      <p>Esta solicitação foi finalizada, mas ainda não chegou à Contabilidade.</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={resendToAccountingMutation.isPending}
-                        onClick={() => resendToAccountingMutation.mutate(historyRequest.id)}
-                      >
-                        {resendToAccountingMutation.isPending
-                          ? 'Enviando...'
-                          : 'Reenviar à Contabilidade'}
-                      </Button>
-                    </div>
-                  ) : null}
-
                   <DpRequestHistoryModalFooter>
                     <Button type="button" variant="outline" onClick={closeHistoryRequest}>
                       Fechar
@@ -1383,8 +1300,53 @@ export function GerenciarSolicitacoesGeraisPage({
                   </DpRequestHistoryModalFooter>
                 </div>
               )}
-            </div>
+            </DpRequestHistoryModalBody>
           )}
+        </Modal>
+
+        {/* Aviso: o que acontece ao enviar à Contabilidade */}
+        <Modal
+          isOpen={!!sendNoticeFor}
+          onClose={() => setSendNoticeFor(null)}
+          confirmBeforeClose={false}
+          title="Enviar à Contabilidade"
+          size="md"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              Ao confirmar, esta solicitação será enviada à Contabilidade. Veja o que muda:
+            </p>
+            <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700 dark:text-gray-300">
+              <li>
+                Ela será <strong>finalizada aqui</strong>, em Gerenciar Solicitações, e passa a contar em{' '}
+                <strong>Finalizadas</strong>.
+              </li>
+              <li>
+                A partir daí, ela é gerenciada em <strong>Solicitações à Contabilidade</strong>: o acompanhamento, a
+                conversa com a Contabilidade e o <strong>encerramento do atendimento</strong> são feitos lá.
+              </li>
+              <li>Se o envio falhar, o reenvio à Contabilidade também é feito em Solicitações à Contabilidade.</li>
+            </ul>
+
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={sendNoticeSkip}
+                onChange={(e) => setSendNoticeSkip(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+              />
+              Não mostrar esta mensagem novamente
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setSendNoticeFor(null)}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={confirmSendNotice} disabled={feedbackMutation.isPending}>
+                {feedbackMutation.isPending ? 'Enviando...' : 'Entendi, enviar'}
+              </Button>
+            </div>
+          </div>
         </Modal>
       </MainLayout>
     </ProtectedRoute>

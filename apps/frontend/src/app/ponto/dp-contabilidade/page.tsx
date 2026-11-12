@@ -28,6 +28,18 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
 import { DpRequestAttachments } from '@/components/dp/DpRequestAttachments';
+import { DpChatFeed } from '@/components/dp/DpChatFeed';
+import {
+  DpRequestHistoryMetaCard,
+  DpRequestHistoryModalFooter,
+  DpRequestHistoryModalBody,
+  DpRequestHistoryModalTabs,
+  DpRequestHistorySectionCard,
+  DpRequestHistoryTimeline,
+  type DpRequestHistoryMetaField,
+} from '@/lib/dpRequestHistoryModal';
+import type { DpTimelineStep } from '@/lib/dpRequestTimeline';
+import { DetailInfoRows, DetailInfoSection, type DetailInfoField } from '@/components/ui/DetailInfoLayout';
 import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -147,8 +159,8 @@ const STATUS_LABELS: Record<RequestStatus, string> = {
 };
 
 const STATUS_BADGE: Record<RequestStatus, string> = {
-  OPEN: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  IN_PROGRESS: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  OPEN: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  IN_PROGRESS: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
@@ -228,9 +240,13 @@ export default function DpContabilidadePage() {
   const [listPage, setListPage] = useState(1);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [selected, setSelected] = useState<DpContabilidadeRequest | null>(null);
+  const [selectedTab, setSelectedTab] = useState<'detalhes' | 'timeline' | 'comentarios'>('detalhes');
   const [commentBody, setCommentBody] = useState('');
   const [confirmAction, setConfirmAction] = useState<'CONCLUDED' | 'CANCELLED' | null>(null);
   const [confirmComment, setConfirmComment] = useState('');
+  useEffect(() => {
+    setSelectedTab('detalhes');
+  }, [selected?.id]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -360,6 +376,7 @@ export default function DpContabilidadePage() {
     },
     onSuccess: (dpRequestId) => {
       toast.success('Atendimento concluído. O DP foi avisado.');
+      setSelected(null);
       void queryClient.invalidateQueries({ queryKey: ['dp-request-messages', dpRequestId] });
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
@@ -418,6 +435,82 @@ export default function DpContabilidadePage() {
     setContractFilter('all');
     setFromDate('');
     setToDate('');
+  };
+
+  /** Texto gerado ("Tipo: Admissão", "Solicitante: ...") vira linhas rótulo/valor; o que vem antes é a introdução. */
+  const parseDescription = (text: string): { intro: string; fields: DetailInfoField[] } => {
+    const intro: string[] = [];
+    const fields: DetailInfoField[] = [];
+    for (const line of (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+      const m = line.match(/^([^:]{2,40}):\s*(.+)$/);
+      // Só o nome: tira o e-mail entre parênteses ("David Brito (david@empresa.com)" → "David Brito").
+      if (m) fields.push({ label: m[1], value: m[2].replace(/\s*\([^)]*@[^)]*\)/g, '').trim() });
+      else if (fields.length === 0) intro.push(line);
+      else fields[fields.length - 1].value = `${String(fields[fields.length - 1].value)} ${line}`;
+    }
+    return { intro: intro.join(' '), fields };
+  };
+
+  const buildMetaFields = (r: DpContabilidadeRequest): DpRequestHistoryMetaField[] => [
+    { label: 'Nº da solicitação', value: String(r.displayNumber) },
+    ...(r.source ? [{ label: 'Nº no DP', value: String(r.source.displayNumber) }] : []),
+    { label: 'Tipo', value: TYPE_LABELS[r.requestType] },
+    {
+      label: 'Status',
+      value: (
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[r.status]}`}>
+          {STATUS_LABELS[r.status]}
+        </span>
+      ),
+    },
+    { label: 'Título', value: r.title },
+    { label: 'Solicitante', value: r.createdByName },
+    { label: 'Setor', value: r.sector || '—' },
+    { label: 'Unidade', value: r.source?.costCenterName || r.contractName || '—' },
+    ...(r.source ? [{ label: 'Empresa', value: r.source.company || '—' }, { label: 'Polo', value: r.source.polo || '—' }] : []),
+    ...(r.sourceDpRequestId
+      ? [{ label: 'Origem', value: 'Enviada automaticamente ao finalizar a solicitação interna no DP.' }]
+      : []),
+    { label: 'Aberta em', value: formatDateTimeBr(r.createdAt, '—') },
+    ...(r.concludedAt ? [{ label: 'Concluída em', value: formatDateTimeBr(r.concludedAt, '—') }] : []),
+    ...(r.cancelledAt ? [{ label: 'Cancelada em', value: formatDateTimeBr(r.cancelledAt, '—') }] : []),
+  ];
+
+  const formatLeadTime = (ms: number) => {
+    const min = Math.max(0, Math.round(ms / 60000));
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `${h} h ${min % 60} min`;
+    const d = Math.floor(h / 24);
+    return `${d} d ${h % 24} h`;
+  };
+
+  const buildTimelineSteps = (r: DpContabilidadeRequest): DpTimelineStep[] => {
+    const start = new Date(r.createdAt).getTime();
+    const endIso = r.concludedAt || r.cancelledAt;
+    const end = endIso ? new Date(endIso).getTime() : Date.now();
+    const steps: DpTimelineStep[] = [
+      {
+        key: 'open',
+        title: 'Pendente',
+        from: start,
+        to: end,
+        done: !!endIso,
+        isOngoing: !endIso,
+        leadTime: formatLeadTime(end - start),
+      },
+    ];
+    if (endIso) {
+      steps.push({
+        key: 'end',
+        title: r.concludedAt ? 'Concluída' : 'Cancelada',
+        from: end,
+        to: end,
+        done: true,
+        leadTime: '',
+      });
+    }
+    return steps;
   };
 
   const canActOnSelected =
@@ -685,224 +778,61 @@ export default function DpContabilidadePage() {
             setConfirmAction(null);
             setConfirmComment('');
           }}
-          title={
-            selected
-              ? `Solicitação nº ${selected.displayNumber}`
-              : 'Solicitação'
-          }
+          title="Histórico da solicitação"
           size="lg"
+          headerClassName="border-b-0 pb-2 sm:pb-2"
+          contentClassName="!p-0"
+          scrollContent={false}
+          panelClassName={selectedTab === 'comentarios' ? 'h-[min(92dvh,calc(100dvh-2rem))]' : undefined}
         >
           {selected ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/40 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Tipo
-                  </p>
-                  <p className="mt-1 text-gray-900 dark:text-gray-100">
-                    {TYPE_LABELS[selected.requestType]}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Status
-                  </p>
-                  <p className="mt-1">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[selected.status]}`}
-                    >
-                      {STATUS_LABELS[selected.status]}
-                    </span>
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Título
-                  </p>
-                  <p className="mt-1 text-gray-900 dark:text-gray-100">{selected.title}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Solicitante
-                  </p>
-                  <p className="mt-1 text-gray-900 dark:text-gray-100">{selected.createdByName}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {selected.createdByEmail}
-                    {selected.sector ? ` · ${selected.sector}` : ''}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Unidade
-                  </p>
-                  <p className="mt-1 text-gray-900 dark:text-gray-100">
-                    {selected.source?.costCenterName || selected.contractName || '—'}
-                  </p>
-                </div>
-                {selected.sourceDpRequestId ? (
-                  <div className="sm:col-span-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Origem
-                    </p>
-                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                      Enviada automaticamente ao finalizar a solicitação interna no DP.
-                    </p>
-                  </div>
-                ) : null}
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Aberta em
-                  </p>
-                  <p className="mt-1 text-gray-900 dark:text-gray-100">
-                    {formatDateTimeBr(selected.createdAt, '—')}
-                  </p>
-                </div>
-                {selected.concludedAt ? (
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Concluída em
-                    </p>
-                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                      {formatDateTimeBr(selected.concludedAt, '—')}
-                    </p>
-                  </div>
-                ) : null}
-                {selected.cancelledAt ? (
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Cancelada em
-                    </p>
-                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                      {formatDateTimeBr(selected.cancelledAt, '—')}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+            <DpRequestHistoryModalBody fill={selectedTab === 'comentarios'} tabs={<DpRequestHistoryModalTabs activeTab={selectedTab} onTabChange={setSelectedTab} showComments />}>
+              {selectedTab === 'detalhes' ? (
+                <div className="space-y-4">
+                  <DpRequestHistoryMetaCard fields={buildMetaFields(selected)} />
 
-              {selected.source?.details ? (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Dados da solicitação nº {selected.source.displayNumber}
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/40 sm:grid-cols-2">
-                    {[
-                      { label: 'Unidade', value: selected.source.costCenterName },
-                      { label: 'Empresa', value: selected.source.company },
-                      { label: 'Polo', value: selected.source.polo },
-                    ].map((item) => (
-                      <div key={item.label}>
-                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                          {item.label}
-                        </p>
-                        <p className="mt-1 text-gray-900 dark:text-gray-100">{item.value || '—'}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <ContabilRequestDetailsView
-                    requestType={selected.source.requestType}
-                    details={selected.source.details}
-                    employeeNameById={new Map(Object.entries(selected.source.employeeNames ?? {}))}
-                  />
-                </div>
-              ) : (
-                <div>
-                  <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Descrição
-                  </p>
-                  <p className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                    {selected.description}
-                  </p>
-                </div>
-              )}
-
-              {selected.sourceDpRequestId ? (
-                <DpRequestAttachments
-                  requestId={selected.sourceDpRequestId}
-                  currentUserId={(user as { id?: string }).id ?? null}
-                />
-              ) : null}
-
-              {!selected.sourceDpRequestId ? (
-                <div>
-                  <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Histórico de mensagens
-                  </p>
-                  {selected.comments.length === 0 ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Nenhuma mensagem registrada ainda.
-                    </p>
+                  {selected.source?.details ? (
+                    <ContabilRequestDetailsView
+                      requestType={selected.source.requestType}
+                      details={selected.source.details}
+                      employeeNameById={new Map(Object.entries(selected.source.employeeNames ?? {}))}
+                    />
                   ) : (
-                    <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
-                      {selected.comments.map((comment) => (
-                        <div
-                          key={comment.id}
-                          className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
-                        >
-                          <div className="mb-1 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                            <span className="font-medium text-gray-700 dark:text-gray-300">
-                              {comment.userName}
-                            </span>
-                            <span>{formatDateTimeBr(comment.createdAt, '—')}</span>
-                          </div>
-                          <p className="whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">
-                            {comment.body}
+                    (() => {
+                      const parsed = parseDescription(selected.description);
+                      return parsed.fields.length > 0 ? (
+                        <DetailInfoSection title="Dados da solicitação">
+                          <DetailInfoRows fields={parsed.fields} />
+                        </DetailInfoSection>
+                      ) : (
+                        <DpRequestHistorySectionCard title="Descrição">
+                          <p className="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-300">
+                            {selected.description}
                           </p>
-                        </div>
-                      ))}
-                    </div>
+                        </DpRequestHistorySectionCard>
+                      );
+                    })()
                   )}
-                </div>
-              ) : null}
 
-              {selected.sourceDpRequestId ? (
-                <DpRequestMessages
-                  requestId={selected.sourceDpRequestId}
-                  title="Histórico de mensagens"
-                  placeholder="Escreva uma mensagem para a contabilidade ou para o DP..."
-                  legacyItems={selected.comments.map((c) => ({
-                    id: `legacy-${c.id}`,
-                    userId: '',
-                    userName: c.userName,
-                    body: c.body,
-                    createdAt: c.createdAt,
-                  }))}
-                />
-              ) : null}
-
-              {canActOnSelected ? (
-                <div className="space-y-3">
-                  {!selected.sourceDpRequestId ? (
-                    <textarea
-                      value={commentBody}
-                      onChange={(e) => setCommentBody(e.target.value)}
-                      maxLength={4000}
-                      placeholder="Escreva uma mensagem para a contabilidade ou para o DP..."
-                      className={FORM_FIELD_TEXTAREA_CLS}
+                  {selected.sourceDpRequestId ? (
+                    <DpRequestAttachments
+                      requestId={selected.sourceDpRequestId}
+                      currentUserId={(user as { id?: string }).id ?? null}
                     />
                   ) : null}
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {!selected.sourceDpRequestId ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={!commentBody.trim() || commentMutation.isPending}
-                        onClick={() =>
-                          commentMutation.mutate({ id: selected.id, body: commentBody.trim() })
-                        }
-                      >
-                        {commentMutation.isPending ? 'Enviando...' : 'Enviar mensagem'}
-                      </Button>
-                    ) : null}
-                    {!selected.sourceDpRequestId ? (
+
+                  {!canActOnSelected ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Esta solicitação está encerrada e permanece disponível apenas para consulta.
+                    </p>
+                  ) : null}
+
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={() => setSelected(null)}>
+                      Fechar
+                    </Button>
+                    {canActOnSelected && !selected.sourceDpRequestId ? (
                       <>
-                        <Button
-                          type="button"
-                          variant="success"
-                          disabled={statusMutation.isPending}
-                          onClick={() => openConfirm('CONCLUDED')}
-                        >
-                          Concluir
-                        </Button>
                         <Button
                           type="button"
                           variant="error"
@@ -911,8 +841,17 @@ export default function DpContabilidadePage() {
                         >
                           Cancelar
                         </Button>
+                        <Button
+                          type="button"
+                          variant="success"
+                          disabled={statusMutation.isPending}
+                          onClick={() => openConfirm('CONCLUDED')}
+                        >
+                          Concluir
+                        </Button>
                       </>
-                    ) : (
+                    ) : null}
+                    {canActOnSelected && selected.sourceDpRequestId ? (
                       <Button
                         type="button"
                         variant="success"
@@ -925,15 +864,53 @@ export default function DpContabilidadePage() {
                       >
                         {accountingDoneMutation.isPending ? 'Enviando...' : 'Concluir'}
                       </Button>
-                    )}
-                  </div>
+                    ) : null}
+                  </DpRequestHistoryModalFooter>
+                </div>
+              ) : selectedTab === 'comentarios' ? (
+                <div className="min-h-0 flex-1">
+                  {selected.sourceDpRequestId ? (
+                    <DpRequestMessages
+                      requestId={selected.sourceDpRequestId}
+                      variant="chat"
+                      legacyItems={selected.comments.map((c) => ({
+                        id: `legacy-${c.id}`,
+                        userId: '',
+                        userName: c.userName,
+                        body: c.body,
+                        createdAt: c.createdAt,
+                      }))}
+                    />
+                  ) : (
+                    <DpChatFeed
+                      items={selected.comments.map((c) => ({
+                        id: c.id,
+                        userName: c.userName,
+                        body: c.body,
+                        createdAt: c.createdAt,
+                      }))}
+                      value={commentBody}
+                      onChange={setCommentBody}
+                      onSend={() => commentMutation.mutate({ id: selected.id, body: commentBody.trim() })}
+                      sending={commentMutation.isPending}
+                      readOnly={!canActOnSelected}
+                    />
+                  )}
                 </div>
               ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Esta solicitação está encerrada e permanece disponível apenas para consulta.
-                </p>
+                <div className="space-y-4">
+                  <DpRequestHistoryTimeline
+                    steps={buildTimelineSteps(selected)}
+                    formatDateTime={(iso) => formatDateTimeBr(iso, '—')}
+                  />
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={() => setSelected(null)}>
+                      Fechar
+                    </Button>
+                  </DpRequestHistoryModalFooter>
+                </div>
               )}
-            </div>
+            </DpRequestHistoryModalBody>
           ) : null}
         </Modal>
 
