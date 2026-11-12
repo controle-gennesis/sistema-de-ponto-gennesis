@@ -797,6 +797,13 @@ enum DpRequestType {
   REALOCACAO_COLABORADOR
   RETIFICACAO_RECALCULO
   SOLICITACAO_GERAL
+  // Pedidos criados direto para a Contabilidade (prefixo CONTAB_ porque os nomes sem prefixo já são do fluxo do DP)
+  CONTAB_ADMISSAO
+  CONTAB_AFASTAMENTO
+  CONTAB_ALTERACAO_FUNCAO
+  CONTAB_ALTERACAO_SALARIAL
+  CONTAB_FERIAS
+  CONTAB_RESCISAO
 }
 
 // Modelo de SolicitaÃ§Ã£o DP (especÃ­fico do AppSheet âSolicitaÃ§Ãµes Departamento Pessoalâ)

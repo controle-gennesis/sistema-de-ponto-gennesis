@@ -1024,7 +1024,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
-            name: 'Solicitações à Contabilidade',
+            name: 'Solicitações Contábeis',
             section: 'Folha e Contabilidade',
             href: '/ponto/solicitacoes-contabilidade',
             icon: Calculator,
@@ -1182,7 +1182,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: MessageSquare,
             description: 'Pedidos à Contabilidade e acompanhamento das respostas',
             permission:
-              isAdministrator ||
+              isAdministrator ||
               can(pk('/ponto/dp-contabilidade')),
           },
         ],

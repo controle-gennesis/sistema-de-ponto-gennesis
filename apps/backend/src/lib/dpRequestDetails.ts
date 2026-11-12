@@ -244,7 +244,19 @@ export const ACCOUNTING_DIRECT_REQUEST_TYPES = [
   'REALOCACAO_COLABORADOR',
   'RETIFICACAO_RECALCULO',
   'SOLICITACAO_GERAL',
+  // Têm prefixo CONTAB_ porque Admissão, Férias e Rescisão já existem no fluxo do DP.
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
 ] as const;
+
+/** Tipo equivalente no módulo DP/Contabilidade (tira o prefixo CONTAB_ dos tipos novos). */
+export function accountingTypeOfDirect(requestType: string): string {
+  return requestType.replace(/^CONTAB_/, '');
+}
 
 export type AccountingDirectRequestType = (typeof ACCOUNTING_DIRECT_REQUEST_TYPES)[number];
 
@@ -333,6 +345,97 @@ const solicitacaoGeralDetails = z.object({
   descricao: str,
   anexos: accountingAnexosField,
 });
+
+const contabAdmissaoDetails = z.object({
+  nomeCompleto: str,
+  dataAdmissao: str,
+  tomadorLocal: strOpt,
+  funcao: str,
+  salario: str,
+  cargaHoraria: str,
+  pis: strOpt,
+  optanteVt: simNao,
+  insalubridade: simNao,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const contabAfastamentoDetails = z.object({
+  employeeId: str,
+  tipoMotivo: str,
+  dataInicio: str,
+  dataPrevistaTermino: strOpt,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const contabAlteracaoFuncaoDetails = z
+  .object({
+    employeeId: str,
+    funcaoAtual: str,
+    novaFuncao: str,
+    dataInicio: str,
+    alteracaoSalarial: simNao,
+    novoSalario: strOpt,
+    observacoes: str,
+    anexos: accountingAnexosField,
+  })
+  .superRefine((data, ctx) => {
+    if (data.alteracaoSalarial === 'SIM' && !data.novoSalario?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['novoSalario'], message: 'Informe o novo salário' });
+    }
+  });
+
+const contabAlteracaoSalarialDetails = z.object({
+  employeeId: str,
+  salarioAtual: str,
+  novoSalario: str,
+  dataVigencia: str,
+  motivo: str,
+  observacoes: str,
+  anexos: accountingAnexosField,
+});
+
+const contabFeriasDetails = z
+  .object({
+    employeeId: str,
+    dataInicio: str,
+    quantidadeDias: str,
+    abonoPecuniario: simNao,
+    quantidadeDiasAbono: strOpt,
+    adiantamento13: simNao,
+    observacoes: str,
+    anexos: accountingAnexosField,
+  })
+  .superRefine((data, ctx) => {
+    if (data.abonoPecuniario === 'SIM' && !data.quantidadeDiasAbono?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['quantidadeDiasAbono'], message: 'Informe a quantidade de dias de abono' });
+    }
+  });
+
+const contabRescisaoDetails = z
+  .object({
+    employeeId: str,
+    tipoRescisao: str,
+    tipoAvisoPrevio: str,
+    dataDemissao: str,
+    ultimoDiaTrabalhado: str,
+    possuiProventoDesconto: simNao,
+    proventoDesconto: strOpt,
+    valor: strOpt,
+    observacoes: str,
+    anexos: accountingAnexosField,
+  })
+  .superRefine((data, ctx) => {
+    if (data.possuiProventoDesconto === 'SIM') {
+      if (!data.proventoDesconto?.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['proventoDesconto'], message: 'Informe se é provento ou desconto' });
+      }
+      if (!data.valor?.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['valor'], message: 'Informe o valor' });
+      }
+    }
+  });
 
 /** Anexo de "Outros" (ADM): chega em Base64 e o servidor grava no S3; o tipo do arquivo é opcional. */
 const admOutrosAnexosField = z
@@ -426,6 +529,12 @@ export const dpDetailsSchemas = {
   REALOCACAO_COLABORADOR: realocacaoColaboradorDetails,
   RETIFICACAO_RECALCULO: retificacaoRecalculoDetails,
   SOLICITACAO_GERAL: solicitacaoGeralDetails,
+  CONTAB_ADMISSAO: contabAdmissaoDetails,
+  CONTAB_AFASTAMENTO: contabAfastamentoDetails,
+  CONTAB_ALTERACAO_FUNCAO: contabAlteracaoFuncaoDetails,
+  CONTAB_ALTERACAO_SALARIAL: contabAlteracaoSalarialDetails,
+  CONTAB_FERIAS: contabFeriasDetails,
+  CONTAB_RESCISAO: contabRescisaoDetails,
 } as const;
 
 export type DpRequestTypeKey = keyof typeof dpDetailsSchemas;

@@ -63,6 +63,7 @@ type DpRequestStatus =
   | 'WAITING_MANAGER'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
+  | 'IN_ACCOUNTING'
   | 'WAITING_RETURN'
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
@@ -262,7 +263,7 @@ type StageCardFilter = 'all' | 'ACCOUNTING' | DpRequestStatus;
 function matchesStage(r: { status: DpRequestStatus; requestType: string }, filter: StageCardFilter): boolean {
   if (filter === 'all') return true;
   if (filter === 'ACCOUNTING') {
-    return r.status === 'CONCLUDED' && dpRequestIsSentToAccounting(r.requestType);
+    return r.status === 'IN_ACCOUNTING';
   }
   return r.status === filter;
 }
@@ -335,6 +336,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
+  IN_ACCOUNTING: 'Na Contabilidade',
   WAITING_RETURN: 'Sua Pendência',
   WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
@@ -349,6 +351,7 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_FINANCEIRO: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+  IN_ACCOUNTING: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
   WAITING_RETURN: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   WAITING_RETURN_ACCOUNTING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ADM_TST: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -1590,8 +1593,12 @@ export function SolicitacoesGeraisPage() {
               <Button type="button" variant="outline" onClick={closeCreateModal}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
+              <Button
+                type="submit"
+                disabled={createMutation.isPending}
+                className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+              >
+                {createMutation.isPending ? 'Enviando...' : 'Enviar Solicitação'}
               </Button>
             </div>
           </form>

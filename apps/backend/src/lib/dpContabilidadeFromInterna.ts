@@ -1,6 +1,6 @@
 import { Prisma, type DpContabilidadeRequestType, type DpRequest } from '@prisma/client';
 import { prisma } from './prisma';
-import { isAccountingDirectRequestType } from './dpRequestDetails';
+import { accountingTypeOfDirect, isAccountingDirectRequestType } from './dpRequestDetails';
 import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
 import { listDpContabilidadeUserIds } from './dpContabilidadeAccess';
 import { sendPushToUsers } from '../services/PushNotificationService';
@@ -17,6 +17,12 @@ const INTERNA_TYPE_LABELS: Record<string, string> = {
   REALOCACAO_COLABORADOR: 'Realocação de colaborador',
   RETIFICACAO_RECALCULO: 'Retificação / recálculo',
   SOLICITACAO_GERAL: 'Solicitação geral',
+  CONTAB_ADMISSAO: 'Admissão',
+  CONTAB_AFASTAMENTO: 'Afastamento',
+  CONTAB_ALTERACAO_FUNCAO: 'Alteração de função',
+  CONTAB_ALTERACAO_SALARIAL: 'Alteração salarial',
+  CONTAB_FERIAS: 'Férias',
+  CONTAB_RESCISAO: 'Rescisão',
 };
 
 function mapInternaTypeToContabilidade(row: DpRequest): DpContabilidadeRequestType | null {
@@ -40,9 +46,15 @@ function mapInternaTypeToContabilidade(row: DpRequest): DpContabilidadeRequestTy
   }
 }
 
+/**
+ * Envio automático para a Contabilidade ao finalizar no DP: DESLIGADO. O DP só finaliza; a Contabilidade
+ * passa a ter uma etapa própria (a definir), antes da finalização. Para reativar o envio, volte para `true`.
+ */
+export const ENVIO_AUTOMATICO_CONTABILIDADE = false;
+
 /** O tipo da solicitação gera pedido no Atendimento Contábil ao ser finalizada pelo DP? */
 export function dpRequestGoesToAccounting(row: DpRequest): boolean {
-  return mapInternaTypeToContabilidade(row) !== null;
+  return ENVIO_AUTOMATICO_CONTABILIDADE && mapInternaTypeToContabilidade(row) !== null;
 }
 
 /** IDs de solicitações internas que já têm pedido correspondente no Atendimento Contábil. */
@@ -175,10 +187,11 @@ async function createLinkedAccountingRequest(
   actor: { id: string; name: string },
   mode: MirrorMode
 ): Promise<boolean> {
+  if (mode === 'concluded' && !ENVIO_AUTOMATICO_CONTABILIDADE) return false;
   const requestType: DpContabilidadeRequestType | null =
     mode === 'direct'
       ? isAccountingDirectRequestType(row.requestType)
-        ? (row.requestType as DpContabilidadeRequestType)
+        ? (accountingTypeOfDirect(row.requestType) as DpContabilidadeRequestType)
         : null
       : mapInternaTypeToContabilidade(row);
   if (!requestType) return false;

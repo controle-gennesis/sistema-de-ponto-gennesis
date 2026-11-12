@@ -68,6 +68,7 @@ type DpRequestStatus =
   | 'WAITING_MANAGER'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
+  | 'IN_ACCOUNTING'
   | 'WAITING_RETURN'
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
@@ -81,6 +82,7 @@ type DpRequestStatus =
 type DpDpFeedbackNextStatus =
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
+  | 'IN_ACCOUNTING'
   | 'WAITING_RETURN'
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
@@ -175,6 +177,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
+  IN_ACCOUNTING: 'Na Contabilidade',
   WAITING_RETURN: 'Pendência Colaborador',
   WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
@@ -189,6 +192,7 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_FINANCEIRO: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+  IN_ACCOUNTING: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
   WAITING_RETURN: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   WAITING_RETURN_ACCOUNTING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ADM_TST: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -207,6 +211,7 @@ const ADM_TST_STATUS_FILTER_OPTIONS = buildAdmTstStatusFilterOptions();
 const CAN_DP_SEND_FEEDBACK: DpRequestStatus[] = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
+  'IN_ACCOUNTING',
   'WAITING_RETURN',
   'WAITING_RETURN_ACCOUNTING',
   'WAITING_RETURN_ADM_TST',
@@ -543,7 +548,7 @@ export function GerenciarSolicitacoesGeraisPage({
     return all.filter((r) => r.status === cardFilter);
   }, [allRequestsResp, cardFilter]);
 
-  // Enviada à Contabilidade = finalizada para o DP; o acompanhamento passa a ser em Solicitações à Contabilidade.
+  // Enviada à Contabilidade = finalizada para o DP; o acompanhamento passa a ser em Solicitações Contábeis.
   const manageStats = useMemo(() => {
     const list = ((statsResp as DpRequest[]) || []).filter((r) =>
       scope === 'DP' ? r.status !== 'WAITING_MANAGER' : true
@@ -1200,7 +1205,7 @@ export function GerenciarSolicitacoesGeraisPage({
                   {sentToAccounting(historyRequest) && historyRequest.status === 'CONCLUDED' ? (
                     <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-800/60 dark:bg-indigo-950/30 dark:text-indigo-200">
                       Esta solicitação foi finalizada e enviada à Contabilidade. A conversa, o encerramento do
-                      atendimento e o reenvio (se o envio falhar) ficam em <strong>Solicitações à Contabilidade</strong>.
+                      atendimento e o reenvio (se o envio falhar) ficam em <strong>Solicitações Contábeis</strong>.
                     </div>
                   ) : (
                     <DpRequestMessages requestId={historyRequest.id} />
@@ -1322,10 +1327,10 @@ export function GerenciarSolicitacoesGeraisPage({
                 <strong>Finalizadas</strong>.
               </li>
               <li>
-                A partir daí, ela é gerenciada em <strong>Solicitações à Contabilidade</strong>: o acompanhamento, a
+                A partir daí, ela é gerenciada em <strong>Solicitações Contábeis</strong>: o acompanhamento, a
                 conversa com a Contabilidade e o <strong>encerramento do atendimento</strong> são feitos lá.
               </li>
-              <li>Se o envio falhar, o reenvio à Contabilidade também é feito em Solicitações à Contabilidade.</li>
+              <li>Se o envio falhar, o reenvio à Contabilidade também é feito em Solicitações Contábeis.</li>
             </ul>
 
             <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-gray-400">

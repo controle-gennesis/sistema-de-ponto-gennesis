@@ -190,7 +190,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     staleTime: 20_000,
   });
 
-  // Pedidos que a Contabilidade já concluiu e o DP ainda precisa finalizar ("Para Encerrar").
+  // Pedidos que a Contabilidade já concluiu e o DP ainda precisa finalizar ("Aguardando Encerramento").
   const { data: paraEncerrarCount = 0 } = useQuery({
     queryKey: ['dp-para-encerrar-count'],
     queryFn: async () => {
@@ -484,7 +484,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canSeeSolicitacoesContabilidade && paraEncerrarCount > 0) {
       list.push({
         id: 'contabilidade-para-encerrar',
-        title: 'Solicitações à Contabilidade',
+        title: 'Solicitações Contábeis',
         description: paraEncerrarCount === 1 ? '1 pedido para encerrar' : `${paraEncerrarCount} pedidos para encerrar`,
         count: paraEncerrarCount,
         href: '/ponto/solicitacoes-contabilidade',

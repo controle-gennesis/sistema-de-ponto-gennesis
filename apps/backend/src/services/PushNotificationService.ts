@@ -113,6 +113,7 @@ const DP: Record<string, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
+  IN_ACCOUNTING: 'Na Contabilidade',
   WAITING_RETURN: 'Sua Pendência',
   WAITING_RETURN_ACCOUNTING: 'Pendência Contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',

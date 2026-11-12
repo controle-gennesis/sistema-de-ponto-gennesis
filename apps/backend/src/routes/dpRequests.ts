@@ -95,7 +95,7 @@ router.get(
   controller.getManageDetailsAdmTst.bind(controller)
 );
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
-// O DP encerra o pedido ligado na Contabilidade (a partir de Solicitações à Contabilidade; Gerenciar do DP também vale)
+// O DP encerra o pedido ligado na Contabilidade (a partir de Solicitações Contábeis; Gerenciar do DP também vale)
 router.post(
   '/:id/concluir-contabilidade',
   requireAnyModuleAccess([manageModule, accountingModule]),

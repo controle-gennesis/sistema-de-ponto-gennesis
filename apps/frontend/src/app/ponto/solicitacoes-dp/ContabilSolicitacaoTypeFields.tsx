@@ -17,15 +17,27 @@ export type ContabilFormRequestType =
   | 'IMPOSTOS_ENCARGOS'
   | 'REALOCACAO_COLABORADOR'
   | 'RETIFICACAO_RECALCULO'
-  | 'SOLICITACAO_GERAL';
+  | 'SOLICITACAO_GERAL'
+  | 'CONTAB_ADMISSAO'
+  | 'CONTAB_AFASTAMENTO'
+  | 'CONTAB_ALTERACAO_FUNCAO'
+  | 'CONTAB_ALTERACAO_SALARIAL'
+  | 'CONTAB_FERIAS'
+  | 'CONTAB_RESCISAO';
 
 export const CONTABIL_TYPE_LABELS: Record<ContabilFormRequestType, string> = {
-  CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
-  FECHAMENTO_FOLHA: 'Fechamento da folha',
-  IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
-  REALOCACAO_COLABORADOR: 'Realocação de colaborador',
-  RETIFICACAO_RECALCULO: 'Retificação / recálculo',
-  SOLICITACAO_GERAL: 'Solicitação geral',
+  CONVENCAO_COLETIVA: 'Convenção Coletiva / CCT',
+  FECHAMENTO_FOLHA: 'Fechamento da Folha',
+  IMPOSTOS_ENCARGOS: 'Impostos / Encargos da Folha',
+  REALOCACAO_COLABORADOR: 'Realocação de Colaborador',
+  RETIFICACAO_RECALCULO: 'Retificação / Recálculo',
+  SOLICITACAO_GERAL: 'Solicitação Geral',
+  CONTAB_ADMISSAO: 'Admissão',
+  CONTAB_AFASTAMENTO: 'Afastamento',
+  CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
+  CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
+  CONTAB_FERIAS: 'Férias',
+  CONTAB_RESCISAO: 'Rescisão',
 };
 
 export function isContabilFormRequestType(value: string): value is ContabilFormRequestType {
@@ -97,7 +109,7 @@ function TextField({
     <div>
       <label className={labelCls}>
         {label}
-        {required ? ' *' : ''}
+        {required ? <span className="text-red-600"> *</span> : null}
       </label>
       <input
         type="text"
@@ -127,7 +139,7 @@ function TextAreaField({
     <div className="md:col-span-2">
       <label className={labelCls}>
         {label}
-        {required ? ' *' : ''}
+        {required ? <span className="text-red-600"> *</span> : null}
       </label>
       <textarea
         value={value}
@@ -154,7 +166,7 @@ function DateField({
     <div>
       <label className={labelCls}>
         {label}
-        {required ? ' *' : ''}
+        {required ? <span className="text-red-600"> *</span> : null}
       </label>
       <DatePickerField
         value={value}
@@ -178,7 +190,7 @@ function SimNaoField({
 }) {
   return (
     <div>
-      <label className={labelCls}>{label} *</label>
+      <label className={labelCls}>{label} <span className="text-red-600">*</span></label>
       <div className="flex gap-2">
         <ButtonSeg active={value === 'SIM'} onClick={() => onChange('SIM')} label="Sim" />
         <ButtonSeg active={value === 'NAO'} onClick={() => onChange('NAO')} label="Não" />
@@ -204,11 +216,12 @@ function AnexosField({
         {anexos.length < MAX_CONTABIL_ANEXOS ? (
           <button
             type="button"
+            title="Adicionar anexo"
+            aria-label="Adicionar anexo"
             onClick={() => onChange([...anexos, newContabilAnexoDraft()])}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:border-red-400 hover:bg-red-50/40 hover:text-red-700 dark:border-gray-600 dark:text-gray-200 dark:hover:border-red-500/50 dark:hover:bg-red-950/20 dark:hover:text-red-300"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
-            <Plus className="h-3.5 w-3.5" />
-            Adicionar anexo
+            <Plus className="h-4 w-4" />
           </button>
         ) : null}
       </div>
@@ -232,7 +245,7 @@ function AnexosField({
             </button>
           </div>
           <div>
-            <label className={labelCls}>Arquivo *</label>
+            <label className={labelCls}>Arquivo <span className="text-red-600">*</span></label>
             <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
               <Paperclip className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
               <span className="min-w-0 flex-1 truncate">
@@ -251,7 +264,7 @@ function AnexosField({
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className={labelCls}>Tipo do arquivo *</label>
+              <label className={labelCls}>Tipo do arquivo <span className="text-red-600">*</span></label>
               <SingleSelectSearchDropdown
                 value={anexo.tipoArquivo}
                 onChange={(tipoArquivo) => update(anexo.id, { tipoArquivo })}
@@ -314,7 +327,7 @@ export function ContabilSolicitacaoTypeFields({
     <div className="md:col-span-2">
       <label className={labelCls}>
         {label}
-        {required ? ' *' : ''}
+        {required ? <span className="text-red-600"> *</span> : null}
       </label>
       <SingleSelectSearchDropdown
         value={text(key)}
@@ -443,6 +456,126 @@ export function ContabilSolicitacaoTypeFields({
         </>
       );
       break;
+
+    case 'CONTAB_ADMISSAO':
+      fields = (
+        <>
+          <div className="md:col-span-2">
+            <TextField label="Nome completo" value={text('nomeCompleto')} onChange={set('nomeCompleto')} required placeholder="Nome completo do colaborador" />
+          </div>
+          <DateField label="Data de admissão" value={text('dataAdmissao')} onChange={set('dataAdmissao')} required />
+          <TextField label="Tomador / local de prestação" value={text('tomadorLocal')} onChange={set('tomadorLocal')} placeholder="Onde o colaborador vai trabalhar" />
+          <TextField label="Função" value={text('funcao')} onChange={set('funcao')} required placeholder="Função do colaborador" />
+          <TextField label="Salário" value={text('salario')} onChange={(v) => patchDetails({ salario: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+          <TextField label="Carga horária semanal / jornada" value={text('cargaHoraria')} onChange={set('cargaHoraria')} required placeholder="Ex.: 44h semanais, 07h às 17h" />
+          <TextField label="Nº do PIS" value={text('pis')} onChange={set('pis')} placeholder="Número do PIS" />
+          <SimNaoField label="Optante por vale-transporte (VT)?" value={text('optanteVt')} onChange={set('optanteVt')} />
+          <SimNaoField label="Possui insalubridade?" value={text('insalubridade')} onChange={set('insalubridade')} />
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+
+    case 'CONTAB_AFASTAMENTO':
+      fields = (
+        <>
+          {employeeSelect('employeeId', 'Nome do colaborador', true)}
+          <div className="md:col-span-2">
+            <TextField label="Tipo / motivo do afastamento" value={text('tipoMotivo')} onChange={set('tipoMotivo')} required placeholder="Ex.: Auxílio-doença, licença-maternidade" />
+          </div>
+          <DateField label="Data de início do afastamento" value={text('dataInicio')} onChange={set('dataInicio')} required />
+          <DateField label="Data prevista de término" value={text('dataPrevistaTermino')} onChange={set('dataPrevistaTermino')} />
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+
+    case 'CONTAB_ALTERACAO_FUNCAO': {
+      const alteracaoSalarial = text('alteracaoSalarial');
+      fields = (
+        <>
+          {employeeSelect('employeeId', 'Nome do colaborador', true, (id) => {
+            const emp = employees.find((e) => e.id === id);
+            if (emp?.position) patchDetails({ funcaoAtual: emp.position });
+          })}
+          <TextField label="Função atual" value={text('funcaoAtual')} onChange={set('funcaoAtual')} required placeholder="Função atual" />
+          <TextField label="Nova função" value={text('novaFuncao')} onChange={set('novaFuncao')} required placeholder="Nova função" />
+          <DateField label="Data de início da nova função" value={text('dataInicio')} onChange={set('dataInicio')} required />
+          <div className="hidden md:block" />
+          <SimNaoField label="Haverá alteração salarial?" value={alteracaoSalarial} onChange={set('alteracaoSalarial')} />
+          {alteracaoSalarial === 'SIM' ? (
+            <TextField label="Novo salário" value={text('novoSalario')} onChange={(v) => patchDetails({ novoSalario: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+          ) : (
+            <div className="hidden md:block" />
+          )}
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+    }
+
+    case 'CONTAB_ALTERACAO_SALARIAL':
+      fields = (
+        <>
+          {employeeSelect('employeeId', 'Nome do colaborador', true)}
+          <TextField label="Salário atual" value={text('salarioAtual')} onChange={(v) => patchDetails({ salarioAtual: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+          <TextField label="Novo salário" value={text('novoSalario')} onChange={(v) => patchDetails({ novoSalario: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+          <DateField label="Data de vigência do novo salário" value={text('dataVigencia')} onChange={set('dataVigencia')} required />
+          <TextField label="Motivo da alteração" value={text('motivo')} onChange={set('motivo')} required placeholder="Ex.: Promoção, dissídio, mérito" />
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+
+    case 'CONTAB_FERIAS': {
+      const abono = text('abonoPecuniario');
+      fields = (
+        <>
+          {employeeSelect('employeeId', 'Nome do colaborador', true)}
+          <DateField label="Data de início das férias" value={text('dataInicio')} onChange={set('dataInicio')} required />
+          <TextField label="Quantidade de dias de férias" value={text('quantidadeDias')} onChange={(v) => patchDetails({ quantidadeDias: v.replace(/\D/g, '') })} required placeholder="Ex.: 30" />
+          <SimNaoField label="Abono pecuniário?" value={abono} onChange={set('abonoPecuniario')} />
+          {abono === 'SIM' ? (
+            <TextField label="Quantidade de dias de abono" value={text('quantidadeDiasAbono')} onChange={(v) => patchDetails({ quantidadeDiasAbono: v.replace(/\D/g, '') })} required placeholder="Ex.: 10" />
+          ) : (
+            <div className="hidden md:block" />
+          )}
+          <SimNaoField label="Adiantamento de 13º salário?" value={text('adiantamento13')} onChange={set('adiantamento13')} />
+          <div className="hidden md:block" />
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+    }
+
+    case 'CONTAB_RESCISAO': {
+      const possui = text('possuiProventoDesconto');
+      fields = (
+        <>
+          {employeeSelect('employeeId', 'Nome do colaborador', true)}
+          <TextField label="Tipo de rescisão" value={text('tipoRescisao')} onChange={set('tipoRescisao')} required placeholder="Ex.: Sem justa causa, pedido de demissão" />
+          <TextField label="Tipo de aviso prévio" value={text('tipoAvisoPrevio')} onChange={set('tipoAvisoPrevio')} required placeholder="Ex.: Trabalhado, indenizado, dispensado" />
+          <DateField label="Data da demissão / desligamento" value={text('dataDemissao')} onChange={set('dataDemissao')} required />
+          <DateField label="Último dia trabalhado" value={text('ultimoDiaTrabalhado')} onChange={set('ultimoDiaTrabalhado')} required />
+          <SimNaoField label="Possui provento ou desconto?" value={possui} onChange={set('possuiProventoDesconto')} />
+          <div className="hidden md:block" />
+          {possui === 'SIM' ? (
+            <>
+              <div>
+                <label className={labelCls}>Provento / desconto <span className="text-red-600">*</span></label>
+                <div className="flex gap-2">
+                  <ButtonSeg active={text('proventoDesconto') === 'Provento'} onClick={() => patchDetails({ proventoDesconto: 'Provento' })} label="Provento" />
+                  <ButtonSeg active={text('proventoDesconto') === 'Desconto'} onClick={() => patchDetails({ proventoDesconto: 'Desconto' })} label="Desconto" />
+                </div>
+              </div>
+              <TextField label="Valor" value={text('valor')} onChange={(v) => patchDetails({ valor: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+            </>
+          ) : null}
+          <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
+        </>
+      );
+      break;
+    }
 
     case 'SOLICITACAO_GERAL':
       fields = (
