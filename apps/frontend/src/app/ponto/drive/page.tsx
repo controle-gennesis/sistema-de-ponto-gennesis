@@ -519,6 +519,13 @@ function DrivePageContent() {
     return [item];
   };
 
+  // Enquanto arrasta, o breadcrumb do topo "acende" (as pastas de cima viram alvos de soltar).
+  useEffect(() => {
+    if (draggingKeys.size === 0) return;
+    document.documentElement.setAttribute('data-drive-drag', '');
+    return () => document.documentElement.removeAttribute('data-drive-drag');
+  }, [draggingKeys]);
+
   const topBreadcrumbTrail = useMemo(() => {
     if (!isMyDriveView) {
       if (driveView === 'shared') return [{ label: 'Compartilhados comigo' }];
@@ -532,12 +539,21 @@ function DrivePageContent() {
     if (breadcrumb.length === 0) return null;
     const podeCompartilhar = !!currentFolderId && !!currentFolderMeta?.canManageShares;
     return [
-      { label: 'Meu Drive', onClick: () => goToFolder(undefined) },
+      {
+        label: 'Meu Drive',
+        onClick: () => goToFolder(undefined),
+        onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, null),
+      },
       ...breadcrumb.map((crumb, i) => {
         const ultima = i === breadcrumb.length - 1;
         return {
           label: crumb.name,
-          ...(ultima ? {} : { onClick: () => goToFolder(crumb.id) }),
+          ...(ultima
+            ? {}
+            : {
+                onClick: () => goToFolder(crumb.id),
+                onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, crumb.id),
+              }),
           ...(ultima && podeCompartilhar
             ? {
                 action: {
@@ -842,7 +858,7 @@ function DrivePageContent() {
       queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
     },
   });
-  const soltarEmPasta = (items: DriveDragItem[], targetFolderId: string) => {
+  const soltarEmPasta = (items: DriveDragItem[], targetFolderId: string | null) => {
     if (items.length === 1) {
       moveItemMut.mutate({ type: items[0]!.type, id: items[0]!.id, destinoId: targetFolderId });
       return;
@@ -1477,7 +1493,7 @@ function DrivePageContent() {
             <DriveFilters filters={filters} onChange={setFilters} />
 
             <DriveSelectionBar
-              count={selectedItems.length}
+              count={draggingKeys.size > 0 ? 0 : selectedItems.length}
               trashMode={isTrashView}
               busy={bulkMoveMut.isPending || bulkDeleteMut.isPending || bulkRestoreMut.isPending}
               onMove={() => setBulkMoveItems(selectedItems.map(({ type, id }) => ({ type, id })))}

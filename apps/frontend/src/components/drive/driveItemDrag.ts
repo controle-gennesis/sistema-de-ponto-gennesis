@@ -117,10 +117,13 @@ function startCardStack(anchor: HTMLElement, keys: string[], startX: number, sta
   // Posição de cada cartão da pilha em relação ao cursor.
   const target = (i: number) => {
     const d = Math.min(i, 4);
+    const sc = Math.min(0.55, 190 / cards[i].w);
+    // O canto superior esquerdo da pilha fica logo abaixo/à direita do cursor: o que está sob o cursor (ex.: o
+    // breadcrumb) nunca é coberto pelos cartões.
     return {
-      x: mx + 34 + d * 5,
-      y: my + 26 + d * 5,
-      s: Math.min(0.55, 190 / cards[i].w),
+      x: mx + 16 + (cards[i].w * sc) / 2 + d * 5,
+      y: my + 20 + (cards[i].h * sc) / 2 + d * 5,
+      s: sc,
       r: i === 0 ? -2 : (i % 2 ? 1 : -1) * (3 + d * 2.2),
     };
   };

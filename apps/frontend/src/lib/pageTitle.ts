@@ -144,6 +144,8 @@ export type BreadcrumbItem = {
   badge?: string;
   /** Menu do badge (trocar entre revisões). */
   badgeMenu?: BreadcrumbBadgeMenuItem[];
+  /** Aceita itens arrastados e soltos em cima do crumb (Drive: soltar na pasta de cima). */
+  onDropItems?: (items: Array<{ type: 'folder' | 'file'; id: string }>) => void;
   /** Botão de ação ao lado do crumb (ex.: gerenciar acesso à pasta no Drive). */
   action?: { label: string; icon: 'share'; onClick: () => void };
 };
@@ -159,7 +161,17 @@ export function resolvePageTitle(pathname: string): string | null {
  * Breadcrumb da rota: categoria/módulo (muted) > página atual (destaque).
  * Ex.: `/ponto/aprovacoes` → Principal > Aprovações
  */
+/** Páginas dos atalhos do rodapé da barra lateral: o breadcrumb não mostra "Principal" antes delas. */
+const SHORTCUT_PAGES = ['/ponto/conversas', '/ponto/kanban', '/ponto/agenda', '/ponto/flow', '/ponto/drive', '/ponto/aprovacoes'];
+
 export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
+  const crumbs = resolveBreadcrumbsBase(pathname);
+  const path = normalizePath(pathname);
+  const isShortcut = SHORTCUT_PAGES.some((base) => path === base || path.startsWith(`${base}/`));
+  return isShortcut && crumbs[0]?.label === 'Principal' ? crumbs.slice(1) : crumbs;
+}
+
+function resolveBreadcrumbsBase(pathname: string): BreadcrumbItem[] {
   const path = normalizePath(pathname);
 
   const extra = EXTRA_PAGE_TITLES[path];
@@ -300,6 +312,7 @@ export function appendBreadcrumbEntity(
       label: item.label?.trim() ?? '',
       href: item.href,
       ...(item.onClick ? { onClick: item.onClick } : {}),
+      ...(item.onDropItems ? { onDropItems: item.onDropItems } : {}),
       ...(item.action ? { action: item.action } : {}),
       ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
       ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
@@ -314,11 +327,15 @@ export function appendBreadcrumbEntity(
   const base =
     moduleIdx >= 0 ? crumbs.slice(0, moduleIdx + 1) : crumbs.slice(0, 1);
   // Entidade com o mesmo nome de um crumb da rota e `onClick`: o crumb passa a voltar por estado (sem mudar a URL).
-  const comClique = new Map(entities.filter((e) => e.onClick).map((e) => [e.label, e.onClick as () => void]));
+  const comClique = new Map(entities.filter((e) => e.onClick).map((e) => [e.label, e]));
   for (let i = 0; i < base.length; i += 1) {
     const clique = comClique.get(base[i]!.label);
     if (clique) {
-      base[i] = { label: base[i]!.label, onClick: clique };
+      base[i] = {
+        label: base[i]!.label,
+        onClick: clique.onClick,
+        ...(clique.onDropItems ? { onDropItems: clique.onDropItems } : {}),
+      };
     }
   }
   const baseLabels = new Set(base.map((c) => c.label));

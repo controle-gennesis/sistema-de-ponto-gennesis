@@ -783,6 +783,19 @@ body::-webkit-scrollbar:vertical {
   animation: sidebar-rail-icon-pop 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
+/* Drive — ao arrastar sobre uma pasta do breadcrumb, ela fica vermelha (o :hover não dispara durante o arrasto) */
+[data-drop-crumb] {
+  transition: color 0.15s ease;
+}
+
+[data-drop-crumb][data-drop-over] {
+  color: #dc2626;
+}
+
+.dark [data-drop-crumb][data-drop-over] {
+  color: #fca5a5;
+}
+
 /* Drive — foco por teclado (Tab) na lateral: contorno vermelho em vez do preto padrão */
 .drive-sidebar :focus-visible {
   outline: 2px solid #ef4444 !important;

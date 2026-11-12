@@ -1917,7 +1917,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       canAccessCollaborationTools
         ? {
             href: '/ponto/drive' as const,
-            label: 'Drive',
+            label: 'Meu Drive',
             popId: 'footer:drive',
             Icon: HardDrive,
             badge: 0,

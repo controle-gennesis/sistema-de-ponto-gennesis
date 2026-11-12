@@ -29,6 +29,9 @@ function normalizeEntities(
             },
           }
         : {}),
+      ...(item.onDropItems
+        ? { onDropItems: (items: Array<{ type: 'folder' | 'file'; id: string }>) => latestRef?.current[index]?.onDropItems?.(items) }
+        : {}),
       ...(item.badge?.trim() ? { badge: item.badge.trim() } : {}),
       ...(Array.isArray(item.badgeMenu) && item.badgeMenu.length > 0
         ? { badgeMenu: item.badgeMenu }
@@ -64,7 +67,7 @@ export function useBreadcrumbEntity(
   const key = normalized
     .map(
       (e) =>
-        `${e.label}|${e.href ?? ''}|${e.onClick ? 'fn' : ''}|${e.action?.label ?? ''}|${e.badge ?? ''}|${(e.badgeMenu ?? [])
+        `${e.label}|${e.href ?? ''}|${e.onClick ? 'fn' : ''}${e.onDropItems ? 'drop' : ''}|${e.action?.label ?? ''}|${e.badge ?? ''}|${(e.badgeMenu ?? [])
           .map((m) => m.href)
           .join(',')}`
     )
