@@ -68,7 +68,7 @@ export function DriveSidebar({
   const used = storage?.usedBytes ?? 0;
 
   return (
-    <aside className="flex w-full shrink-0 flex-col">
+    <aside className="drive-sidebar flex w-full shrink-0 flex-col">
       {onNew ? (
         <button
           type="button"
