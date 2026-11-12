@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ListPlus, Plus, Trash2, X } from 'lucide-react';
+import { ListPlus, Merge, Plus, Trash2, X } from 'lucide-react';
 import {
   type CampoFormulaMedicao,
   type DimensoesItem,
@@ -76,6 +76,8 @@ type Props = {
     descricao?: string | string[]
   ) => void;
   removeLinhaMedicao: (itemKey: string, idx: number) => void;
+  /** Mescla linhas numa só (a primeira recebe `dados`; as demais saem), em uma única atualização. */
+  mesclarLinhasMedicao: (itemKey: string, idxs: number[], dados: Partial<LinhaMedicao>) => void;
   estiloTitulo?: React.CSSProperties;
   /** Bloqueia edição (orçamento/memorial travados). */
   readOnly?: boolean;
@@ -218,7 +220,9 @@ function useMemorialFormulaPick() {
 }
 
 /** Colunas da grade na ordem da tela: descrição, C, L, H, %, N, A, V, subtotal. */
-const COLUNAS_MEDICAO = ['descricao', 'C', 'L', 'H', 'empol', 'N', 'A', 'V', 'subtotal'] as const;
+const COLUNAS_MEDICAO = ['detalhes', 'descricao', 'C', 'L', 'H', 'empol', 'N', 'A', 'V', 'subtotal'] as const;
+/** Índice da coluna Descrição (a coluna 0 é Detalhes). */
+const COL_DESC = 1;
 type ColunaMedicao = (typeof COLUNAS_MEDICAO)[number];
 
 type FaixaMedicao = { idxIni: number; idxFim: number; colIni: number; colFim: number };
@@ -267,13 +271,6 @@ function blocoDoTexto(texto: string): string[][] {
   return linhas.map(l => l.split('\t'));
 }
 
-/** Fundo da seleção, célula por célula. O contorno vai num traço só, para o tracejado não quebrar na divisa. */
-function MarcaSelecaoCelula() {
-  return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-red-500/10 dark:bg-red-400/15" />
-  );
-}
-
 type CaixaContorno = { left: number; top: number; width: number; height: number };
 
 /** Cantos da faixa. O cabeçalho sticky entra sempre que a seleção o inclui. */
@@ -291,6 +288,91 @@ function celulasCantoFaixa(raiz: HTMLElement, faixa: FaixaMedicao): HTMLElement[
     }
   }
   return els;
+}
+
+/** Balão com a soma das células numéricas selecionadas (como a barra de status do Excel). */
+function TooltipSomaSelecao({
+  raiz,
+  faixa,
+  soma,
+  media,
+  qtd,
+  onMesclar,
+}: {
+  raiz: HTMLElement | null;
+  faixa: FaixaMedicao;
+  soma: number;
+  media: number;
+  qtd: number;
+  /** Só existe quando as linhas marcadas estão completas (todas as colunas): mostra o botão Mesclar. */
+  onMesclar?: () => void;
+}) {
+  const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const colocar = () => {
+      if (!raiz) {
+        setPos(null);
+        return;
+      }
+      let right = -Infinity;
+      let bottom = -Infinity;
+      for (const el of celulasCantoFaixa(raiz, faixa)) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        right = Math.max(right, r.right);
+        bottom = Math.max(bottom, r.bottom);
+      }
+      if (!Number.isFinite(right)) {
+        setPos(null);
+        return;
+      }
+      setPos({ right: Math.min(right, window.innerWidth - 8), top: Math.min(bottom + 6, window.innerHeight - 64) });
+    };
+    colocar();
+    window.addEventListener('scroll', colocar, true);
+    window.addEventListener('resize', colocar);
+    return () => {
+      window.removeEventListener('scroll', colocar, true);
+      window.removeEventListener('resize', colocar);
+    };
+  }, [raiz, faixa.idxIni, faixa.idxFim, faixa.colIni, faixa.colFim]);
+
+  if (!pos) return null;
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-[80] -translate-x-full"
+      style={{ left: pos.right, top: pos.top }}
+      role="status"
+    >
+      <div
+        data-soma-tooltip
+        className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs tabular-nums text-gray-600 shadow-lg dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300"
+      >
+        <span>
+          Soma: <strong className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatMedicaoCampo(soma)}</strong>
+        </span>
+        <span className="text-gray-300 dark:text-gray-600">|</span>
+        <span>
+          Média: <strong className="font-semibold text-gray-800 dark:text-gray-200">{formatMedicaoCampo(media)}</strong>
+        </span>
+        <span className="text-gray-300 dark:text-gray-600">|</span>
+        <span>
+          Células: <strong className="font-semibold text-gray-800 dark:text-gray-200">{qtd}</strong>
+        </span>
+        {onMesclar ? (
+          <button
+            type="button"
+            onClick={onMesclar}
+            className="pointer-events-auto ml-1 inline-flex items-center gap-1.5 rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+          >
+            <Merge className="h-3.5 w-3.5" aria-hidden />
+            Mesclar
+          </button>
+        ) : null}
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 /** Caixa no conteúdo da tabela. Assim o traço rola com as células, sem perseguir o scroll. */
@@ -1795,6 +1877,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   inserirLinhasMedicao,
   addLinhaCabecalhoSecaoMedicao,
   removeLinhaMedicao,
+  mesclarLinhasMedicao,
   estiloTitulo,
   readOnly = false,
   embedded = false,
@@ -1817,6 +1900,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const calcSelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const descInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [descAberta, setDescAberta] = useState<number | null>(null);
+  const [detAberta, setDetAberta] = useState<number | null>(null);
   const [rotuloAberto, setRotuloAberto] = useState<string | null>(null);
   const resolverFormulaRef = useRef(resolverFormulaExterna);
   resolverFormulaRef.current = resolverFormulaExterna;
@@ -2055,6 +2139,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const copiaCelula = useCopiaCelulaMedicao();
   const [selecao, setSelecao] = useState<FaixaMedicao | null>(null);
+  /** Outras regiões marcadas com Ctrl+clique (a última fica em `selecao`; copiar/colar/apagar agem só nela). */
+  const [selecaoExtras, setSelecaoExtras] = useState<FaixaMedicao[]>([]);
+  /** Célula com o foco/clique atual: a tooltip de soma já aparece com uma só célula. */
+  const [celulaAtiva, setCelulaAtiva] = useState<{ idx: number; col: number } | null>(null);
+  /** Última célula clicada: ponto de partida do Shift+clique. */
+  const ancoraSelecaoRef = useRef<{ idx: number; col: number } | null>(null);
   const tabelaWrapRef = useRef<HTMLDivElement | null>(null);
   const tabelaScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -2085,6 +2175,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   const textoCabecalho = (linhaIdx: number, col: ColunaMedicao): string => {
+    if (col === 'detalhes') return dim.rotulosColunas?.detalhes?.trim() || 'DETALHES';
     if (col === 'descricao') {
       if (linhaIdx < 0) return dim.rotulosColunas?.descricao ?? 'DESCRIÇÃO: ';
       return linhasEfetivas[linhaIdx]?.descricao ?? 'DESCRIÇÃO: ';
@@ -2102,6 +2193,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       const s = String(formula ?? '').trim();
       return s.startsWith('=') ? s : formatMedicaoCampo(n);
     };
+    if (col === 'detalhes') return ln.detalhes ?? '';
     if (col === 'descricao') return ln.descricao ?? '';
     if (col === 'C' || col === 'L' || col === 'H' || col === 'N') return comFormula(f?.[col], ln[col] || 0);
     if (col === 'empol') return comFormula(f?.empolamento, Number(ln.empolamento) || 0);
@@ -2282,6 +2374,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   /** Grava uma célula e devolve a linha já atualizada, para as próximas colunas usarem os valores novos. */
   const gravarCelulaMedicao = (i: number, col: ColunaMedicao, bruto: string, local: LinhaMedicao): LinhaMedicao => {
+    if (col === 'detalhes') {
+      updateLinhaMedicao(rowKey, i, 'detalhes', bruto);
+      return { ...local, detalhes: bruto };
+    }
     if (col === 'descricao') {
       updateLinhaMedicao(rowKey, i, 'descricao', bruto);
       return { ...local, descricao: bruto };
@@ -2310,13 +2406,14 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const gravarRotulo = (col: ColunaMedicao | undefined, bruto: string) => {
     if (!col || !updateRotuloColunaMedicao) return;
     const texto = bruto.trim();
-    if (col === 'descricao') updateRotuloColunaMedicao('descricao', texto || 'DESCRIÇÃO: ');
+    if (col === 'detalhes') updateRotuloColunaMedicao('detalhes', texto || 'DETALHES');
+    else if (col === 'descricao') updateRotuloColunaMedicao('descricao', texto || 'DESCRIÇÃO: ');
     else if (col === 'C' || col === 'L' || col === 'H' || col === 'N') updateRotuloColunaMedicao(col, texto || col);
     else if (col === 'empol') updateRotuloColunaMedicao('pct', texto || '%');
   };
 
   const descricaoCopiada = (row: string[], colIni: number) => {
-    const off = -colIni;
+    const off = COL_DESC - colIni;
     if (off >= 0 && off < row.length) return row[off]?.trim() || 'DESCRIÇÃO: ';
     return 'DESCRIÇÃO: ';
   };
@@ -2350,19 +2447,20 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       });
       return;
     }
-    if (destCol !== 0) return;
+    if (destCol !== COL_DESC) return;
     const descricoes = bloco.map(row => descricaoCopiada(row, destCol));
     addLinhaCabecalhoSecaoMedicao(rowKey, destIdx - 1, descricoes);
     setSelecao({
       idxIni: destIdx,
       idxFim: destIdx + descricoes.length - 1,
-      colIni: 0,
+      colIni: COL_DESC,
       colFim: COLUNAS_MEDICAO.length - 1,
     });
   };
 
   /** Aplica o texto de uma célula na linha, inclusive fórmula, sem gravar no pai. */
   const aplicarCelulaNaLinha = (local: LinhaMedicao, col: ColunaMedicao, bruto: string): LinhaMedicao => {
+    if (col === 'detalhes') return { ...local, detalhes: bruto };
     if (col === 'descricao') return { ...local, descricao: bruto };
     const valor = String(bruto ?? '').trim();
     const vazio = valor === '' || valor === '=';
@@ -2418,7 +2516,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     const aplicarRotulo = (col: ColunaMedicao | undefined, bruto: string) => {
       if (!col) return;
       const texto = String(bruto ?? '').trim();
-      if (col === 'descricao') rotulos.descricao = texto || 'DESCRIÇÃO: ';
+      if (col === 'detalhes') rotulos.detalhes = texto || 'DETALHES';
+      else if (col === 'descricao') rotulos.descricao = texto || 'DESCRIÇÃO: ';
       else if (col === 'C' || col === 'L' || col === 'H' || col === 'N') rotulos[col] = texto || col;
       else if (col === 'empol') rotulos.pct = texto || '%';
     };
@@ -2439,7 +2538,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         }
       }
       if (tipo === 'secao' || (tipo === 'rotulos' && destIdx >= 0)) {
-        const offDesc = -destCol;
+        const offDesc = COL_DESC - destCol;
         const descInformada = offDesc >= 0 && offDesc < row.length;
         const desc = descInformada
           ? row[offDesc]?.trim() || 'DESCRIÇÃO: '
@@ -2586,29 +2685,133 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     memorialPainelUndoAtivo = rowKey;
     if (e.button !== 0 || readOnly || pickApiRef.current?.session) return;
     const ini = celulaDoAlvo(e.target as Element);
-    setSelecao(null);
-    if (!ini) return;
+    if (!ini) {
+      setSelecao(null);
+      setSelecaoExtras([]);
+      return;
+    }
+    const tirarFoco = () => (document.activeElement as HTMLElement | null)?.blur?.();
+    if (e.shiftKey && ancoraSelecaoRef.current) {
+      // Shift+clique: seleciona da última célula clicada até esta.
+      e.preventDefault();
+      tirarFoco();
+      setSelecao(normalizarFaixa(ancoraSelecaoRef.current, ini));
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+clique: soma mais uma região à seleção (também dá para arrastar para ampliá-la).
+      e.preventDefault();
+      tirarFoco();
+      // Sem seleção formal (só um clique simples), a célula clicada antes também entra.
+      const anterior = ancoraSelecaoRef.current;
+      const atual = selecaoRef.current ?? (anterior ? normalizarFaixa(anterior, anterior) : null);
+      setSelecaoExtras((prev) => (atual ? [...prev, atual] : prev));
+      setSelecao(normalizarFaixa(ini, ini));
+    } else {
+      setSelecao(null);
+      setSelecaoExtras([]);
+    }
+    ancoraSelecaoRef.current = ini;
+    // Durante o arrasto o contorno é desenhado direto no DOM, no máximo 1 vez por quadro, e só quando a célula
+    // sob o cursor muda. O estado do React (que re-renderiza a tabela toda) só é atualizado ao soltar.
     let arrastou = false;
-    const mover = (ev: MouseEvent) => {
-      const atual = celulaDoAlvo(document.elementFromPoint(ev.clientX, ev.clientY));
+    let ultima: { idx: number; col: number } | null = null;
+    let faixaFinal: FaixaMedicao | null = null;
+    let quadro = 0;
+    let pontoX = 0;
+    let pontoY = 0;
+    let previa: SVGSVGElement | null = null;
+    let previaRect: SVGRectElement | null = null;
+    const raiz = tabelaScrollRef.current;
+
+    const criarPrevia = () => {
+      if (!raiz) return;
+      const ns = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('class', 'pointer-events-none absolute z-[32] overflow-visible text-red-600 dark:text-red-400');
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', '1');
+      rect.setAttribute('y', '1');
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('stroke', 'currentColor');
+      rect.setAttribute('stroke-width', '2');
+      svg.appendChild(rect);
+      raiz.appendChild(svg);
+      previa = svg;
+      previaRect = rect;
+    };
+
+    const desenhar = () => {
+      quadro = 0;
+      const atual = celulaDoAlvo(document.elementFromPoint(pontoX, pontoY));
       if (!atual) return;
       if (!arrastou && atual.idx === ini.idx && atual.col === ini.col) return;
+      if (ultima && ultima.idx === atual.idx && ultima.col === atual.col) return;
+      ultima = atual;
       if (!arrastou) {
         arrastou = true;
         document.documentElement.classList.add('medicao-selecionando');
         (document.activeElement as HTMLElement | null)?.blur?.();
+        window.getSelection()?.removeAllRanges();
+        criarPrevia();
       }
-      window.getSelection()?.removeAllRanges();
-      setSelecao(normalizarFaixa(ini, atual));
+      faixaFinal = normalizarFaixa(ini, atual);
+      if (!previa || !previaRect || !raiz) return;
+      const visivel = faixaVisivel(faixaFinal);
+      const box = visivel ? caixaDaFaixa(raiz, visivel) : null;
+      if (!box) {
+        previa.style.visibility = 'hidden';
+        return;
+      }
+      previa.style.visibility = 'visible';
+      previa.style.left = `${box.left}px`;
+      previa.style.top = `${box.top}px`;
+      previa.style.width = `${box.width}px`;
+      previa.style.height = `${box.height}px`;
+      previaRect.setAttribute('width', String(Math.max(0, box.width - 2)));
+      previaRect.setAttribute('height', String(Math.max(0, box.height - 2)));
+    };
+
+    const mover = (ev: MouseEvent) => {
+      pontoX = ev.clientX;
+      pontoY = ev.clientY;
+      if (!quadro) quadro = requestAnimationFrame(desenhar);
     };
     const soltar = () => {
       window.removeEventListener('mousemove', mover);
       window.removeEventListener('mouseup', soltar);
+      if (quadro) cancelAnimationFrame(quadro);
       document.documentElement.classList.remove('medicao-selecionando');
+      (previa as SVGSVGElement | null)?.remove();
+      if (arrastou && faixaFinal) setSelecao(faixaFinal);
     };
     window.addEventListener('mousemove', mover);
     window.addEventListener('mouseup', soltar);
   };
+
+  useEffect(() => {
+    const onFocusIn = (ev: FocusEvent) => {
+      const alvo = ev.target;
+      if (!(alvo instanceof Element) || !tabelaWrapRef.current?.contains(alvo)) {
+        setCelulaAtiva(null);
+        return;
+      }
+      setCelulaAtiva(celulaDoAlvo(alvo));
+    };
+    const onMouseDownFora = (ev: MouseEvent) => {
+      const alvo = ev.target;
+      if (alvo instanceof Element && alvo.closest('[data-soma-tooltip]')) return;
+      if (!(alvo instanceof Node) || !tabelaWrapRef.current?.contains(alvo)) setCelulaAtiva(null);
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('mousedown', onMouseDownFora, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('mousedown', onMouseDownFora, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- celulaDoAlvo só lê refs e o DOM
+  }, []);
 
   const selecaoRef = useRef<FaixaMedicao | null>(null);
   selecaoRef.current = selecao;
@@ -2630,6 +2833,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         void navigator.clipboard?.writeText(texto).catch(() => {});
       } else if (ev.key === 'Escape') {
         setSelecao(null);
+        setSelecaoExtras([]);
         definirCopiaCelulaMedicao(null);
       } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !readOnly) {
         ev.preventDefault();
@@ -2657,8 +2861,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     };
     const fora = (ev: MouseEvent) => {
       const alvo = ev.target;
-      if (alvo instanceof Element && alvo.closest('[data-alca-medicao]')) return;
-      if (!tabelaWrapRef.current?.contains(alvo as Node)) setSelecao(null);
+      if (alvo instanceof Element && alvo.closest('[data-alca-medicao], [data-soma-tooltip]')) return;
+      if (!tabelaWrapRef.current?.contains(alvo as Node)) {
+        setSelecao(null);
+        setSelecaoExtras([]);
+      }
     };
     document.addEventListener('keydown', teclas);
     document.addEventListener('copy', copiar);
@@ -2715,16 +2922,58 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   }, [readOnly, rowKey]);
 
   const selecaoVisivel = faixaVisivel(selecao);
+  const extrasVisiveis = selecaoExtras.map(faixaVisivel).filter((f): f is FaixaMedicao => f != null);
+  /** Regiões consideradas na tooltip: a seleção (com as extras do Ctrl) ou, sem seleção, a célula ativa. */
+  const faixasResumo: FaixaMedicao[] = selecaoVisivel
+    ? [...extrasVisiveis, selecaoVisivel]
+    : celulaAtiva
+      ? [faixaVisivel({ idxIni: celulaAtiva.idx, idxFim: celulaAtiva.idx, colIni: celulaAtiva.col, colFim: celulaAtiva.col })].filter(
+          (f): f is FaixaMedicao => f != null
+        )
+      : [];
+  /** Soma/média das células numéricas marcadas (aparece já com uma célula). */
+  const resumoSelecao = (() => {
+    if (!faixasResumo.length) return null;
+    let soma = 0;
+    let celulas = 0;
+    let preenchidas = 0;
+    const vistas = new Set<string>();
+    for (const f of faixasResumo)
+    for (let i = f.idxIni; i <= f.idxFim; i += 1) {
+      const ln = linhasEfetivas[i];
+      if (!ln || ln.cabecalhoSecao) continue;
+      for (let c = f.colIni; c <= f.colFim; c += 1) {
+        const col = COLUNAS_MEDICAO[c];
+        if (!col || col === 'descricao' || col === 'detalhes') continue;
+        const chave = `${i}|${c}`;
+        if (vistas.has(chave)) continue;
+        vistas.add(chave);
+        const v =
+          col === 'C' || col === 'L' || col === 'H' || col === 'N'
+            ? Number(ln[col]) || 0
+            : col === 'empol'
+              ? Number(ln.empolamento) || 0
+              : col === 'A'
+                ? areaExibidaLinha(ln)
+                : col === 'V'
+                  ? volumeExibidoLinha(ln, tipo)
+                  : calcularQuantidadeLinha(ln, tipo);
+        celulas += 1;
+        if (Number.isFinite(v) && v !== 0) {
+          soma += v;
+          preenchidas += 1;
+        }
+      }
+    }
+    return celulas >= 1 ? { soma, media: preenchidas ? soma / preenchidas : 0, qtd: preenchidas } : null;
+  })();
   const copiaVisivel = copiaCelula?.rowKey === rowKey ? faixaVisivel(copiaCelula.faixa) : null;
 
   const alcaCabecalho = (linha: number, col: number) =>
     !readOnly && !!selecao && selecao.idxIni === linha && selecao.idxFim === linha && selecao.colFim === col;
 
-  const marcasCelula = (idx: number, col: ColunaMedicao) => {
-    const c = COLUNAS_MEDICAO.indexOf(col);
-    if (!selecaoVisivel || !faixaContem(selecaoVisivel, idx, c)) return null;
-    return <MarcaSelecaoCelula />;
-  };
+  /** A seleção é marcada só pelo contorno vermelho (sem fundo rosado nas células). */
+  const marcasCelula = (_idx: number, _col: ColunaMedicao): React.ReactNode => null;
 
   const colarNaDescricao = (idx: number) => (e: React.ClipboardEvent<HTMLInputElement>) => {
     const texto = e.clipboardData.getData('text/plain');
@@ -2733,7 +2982,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       // Célula só selecionada (sem edição): o input é somente leitura, então colamos pela memória.
       e.preventDefault();
       e.currentTarget.blur();
-      colarTexto(idx, 0, texto);
+      colarTexto(idx, COL_DESC, texto);
       return;
     }
     const ehBloco =
@@ -2744,7 +2993,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     if (!ehBloco) return;
     e.preventDefault();
     e.currentTarget.blur();
-    colarTexto(idx, 0, texto);
+    colarTexto(idx, COL_DESC, texto);
   };
 
   const textoFonteCelula = (draftKey: string, formula: string | undefined, valorFormatado: string) => {
@@ -3279,7 +3528,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       setSelecao({
         idxIni: ateIdx,
         idxFim: ateIdx,
-        colIni: 0,
+        colIni: COL_DESC,
         colFim: COLUNAS_MEDICAO.length - 1,
       });
     });
@@ -3367,7 +3616,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const renderHeaderRow = (_ln0: LinhaMedicao) => {
     return (
       <tr className={gradeTableRowTrCls} data-linha-medicao={LINHA_ROTULOS}>
-        <th className={thRestSticky} style={stickyHeaderTopStyle}>
+        <th className={thRestSticky} style={stickyHeaderTopStyle} data-col-medicao={0}>
           <MemorialCampoLocal
             committedValue={dim.rotulosColunas?.detalhes ?? 'DETALHES'}
             onCommit={(raw) => updateRotuloColunaMedicao?.('detalhes', raw.trim() || 'DETALHES')}
@@ -3384,11 +3633,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         </th>
         <CelulaCabecalho
           as="th"
-          col={0}
+          col={COL_DESC}
           className={thFirstSticky}
           style={stickyHeaderTopStyle}
           marca={marcasCelula(LINHA_ROTULOS, 'descricao')}
-          alca={alcaCabecalho(LINHA_ROTULOS, 0)}
+          alca={alcaCabecalho(LINHA_ROTULOS, COL_DESC)}
           readOnly={readOnly}
           onCopiarLinha={ate => copiarLinhaCabecalhoArrastando(LINHA_ROTULOS, ate)}
         >
@@ -3470,15 +3719,15 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onClick={e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td className={thRest}>
+        <td className={thRest} data-col-medicao={0}>
           <div className={rotuloFixoCls}>{dim.rotulosColunas?.detalhes?.trim() || 'DETALHES'}</div>
         </td>
         <CelulaCabecalho
           as="td"
-          col={0}
+          col={COL_DESC}
           className={thFirst}
           marca={marcasCelula(idx, 'descricao')}
-          alca={alcaCabecalho(idx, 0)}
+          alca={alcaCabecalho(idx, COL_DESC)}
           readOnly={readOnly}
           onCopiarLinha={ate => copiarLinhaCabecalhoArrastando(idx, ate)}
         >
@@ -3788,8 +4037,38 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         onClick={e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td className={tdItemCol} aria-hidden />
-        <td className={tdFirstBodyQuebra} data-col-medicao={0}>
+        <td className={`${tdItemCol.replace(' max-h-[2.75rem]', '')} relative`} data-col-medicao={0}>
+          <div className={caixaFocoDescricaoQuebraCls}>
+            {/* Mesmo esquema da descrição: o texto quebrado dá a altura; o campo fica por cima e recebe cliques e teclas. */}
+            <div
+              aria-hidden
+              className={`flex min-h-[2.75rem] items-center whitespace-normal break-words px-3 py-2.5 text-left text-sm leading-snug sm:px-3.5 ${
+                detAberta === idx ? 'text-transparent' : 'text-gray-900 dark:text-gray-100'
+              }`}
+            >
+              {ln.detalhes || ''}
+            </div>
+            <MemorialCampoLocal
+              committedValue={ln.detalhes || ''}
+              onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'detalhes', raw)}
+              disabled={readOnly}
+              editando={detAberta === idx}
+              onPedirEdicao={() => setDetAberta(idx)}
+              ariaLabel="Detalhes da linha"
+              className={`${inputCls} !absolute inset-0 !px-3 text-left sm:!px-3.5 ${
+                detAberta === idx ? '' : '!text-transparent'
+              }`}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                if (e.key === 'Enter' || e.key === 'Escape') {
+                  e.preventDefault();
+                  (e.currentTarget as HTMLInputElement).blur();
+                }
+              }}
+              onBlur={() => setDetAberta((atual) => (atual === idx ? null : atual))}
+            />
+          </div>
+        </td>
+        <td className={tdFirstBodyQuebra} data-col-medicao={COL_DESC}>
           {marcasCelula(idx, 'descricao')}
           <div className={caixaFocoDescricaoQuebraCls}>
             {/* Texto quebrado: dá a altura da célula. O campo fica por cima e recebe cliques e teclas. */}
@@ -3892,6 +4171,56 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {idx === 0 ? renderCelulaTotalMedicao() : null}
       </tr>
     );
+  };
+
+  /** Linhas inteiras marcadas (seleção + Ctrl) que podem ser mescladas: só linhas de dados próprias da memória. */
+  const linhasParaMesclar = (() => {
+    const faixas = [...extrasVisiveis, ...(selecaoVisivel ? [selecaoVisivel] : [])];
+    const idxs = new Set<number>();
+    for (const f of faixas) {
+      // Só conta a faixa que pega a linha inteira (de Detalhes até Subtotal).
+      if (f.colIni !== 0 || f.colFim !== COLUNAS_MEDICAO.length - 1) continue;
+      for (let i = f.idxIni; i <= f.idxFim; i += 1) {
+        const ln = linhasEfetivas[i];
+        if (!ln || ln.cabecalhoSecao || ln.origemMemoriaKey || ln.linhaAgregadaCarga) continue;
+        idxs.add(i);
+      }
+    }
+    return [...idxs].sort((a, b) => a - b);
+  })();
+
+  /**
+   * Mescla as linhas marcadas em uma só, na posição da primeira: todas as colunas numéricas (C, L, H, %, N, A, V e
+   * Subtotal) são somadas, e nos textos (descrição e detalhes) fica o da linha de cima.
+   */
+  const mesclarLinhas = (idxs: number[]) => {
+    if (readOnly || idxs.length < 2) return;
+    const linhas = idxs.map((i) => linhasEfetivas[i]).filter((l): l is LinhaMedicao => !!l);
+    const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+    const somar = (valor: (l: LinhaMedicao) => number) => r6(linhas.reduce((t, l) => t + valor(l), 0));
+    const subtotal = r6(linhas.reduce((t, l) => t + calcularQuantidadeLinha(l, tipo), 0));
+    const area = r6(linhas.reduce((t, l) => t + areaExibidaLinha(l), 0));
+    const volume = r6(linhas.reduce((t, l) => t + volumeExibidoLinha(l, tipo), 0));
+    // Textos diferentes: fica sempre o de cima (o da primeira linha que tiver texto).
+    const doTopo = (campo: 'descricao' | 'detalhes') =>
+      linhas.map((l) => String(l[campo] ?? '').trim()).find(Boolean) ?? '';
+    const primeira = idxs[0]!;
+    comUndo(() => {
+      mesclarLinhasMedicao(rowKey, idxs, {
+        descricao: doTopo('descricao'),
+        detalhes: doTopo('detalhes') || undefined,
+        C: somar((l) => Number(l.C) || 0),
+        L: somar((l) => Number(l.L) || 0),
+        H: somar((l) => Number(l.H) || 0),
+        N: somar((l) => Number(l.N) || 0),
+        empolamento: somar((l) => Number(l.empolamento) || 0),
+        subtotalManual: subtotal,
+        aManual: area,
+        vManual: volume,
+      });
+    });
+    setSelecao(null);
+    setSelecaoExtras([]);
   };
 
   const portalMenuCtxMedicao = menuCtxMedicao ? (
@@ -4054,6 +4383,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         </colgroup>
         {children}
       </table>
+      {extrasVisiveis.map((f, i) => (
+        <ContornoFaixa key={`extra-${i}-${f.idxIni}-${f.idxFim}-${f.colIni}-${f.colFim}`} faixa={f} tipo="selecao" raizRef={tabelaScrollRef} />
+      ))}
       {selecaoVisivel ? (
         <ContornoFaixa faixa={selecaoVisivel} tipo="selecao" raizRef={tabelaScrollRef} />
       ) : null}
@@ -4076,6 +4408,16 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {body}
       </div>
       {readOnly ? null : portalMenuCtxMedicao}
+      {faixasResumo.length > 0 && resumoSelecao ? (
+        <TooltipSomaSelecao
+          raiz={tabelaWrapRef.current}
+          faixa={faixasResumo[faixasResumo.length - 1]!}
+          soma={resumoSelecao.soma}
+          media={resumoSelecao.media}
+          qtd={resumoSelecao.qtd}
+          onMesclar={readOnly || linhasParaMesclar.length < 2 ? undefined : () => mesclarLinhas(linhasParaMesclar)}
+        />
+      ) : null}
       {modalMemoriasAberto && onMemoriasIncluidasChange ? (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setModalMemoriasAberto(false)} />

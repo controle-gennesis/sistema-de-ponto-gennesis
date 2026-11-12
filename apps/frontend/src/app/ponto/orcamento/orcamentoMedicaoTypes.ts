@@ -17,6 +17,8 @@ export interface LinhaMedicao {
   /** Linha visual de seção (cabeçalho da grade no corpo); não entra em totais nem na carga agregada. */
   cabecalhoSecao?: boolean;
   descricao?: string;
+  /** Texto livre da coluna DETALHES (primeira coluna da memória). */
+  detalhes?: string;
   origemLinhaId?: string;
   /** Rótulo da composição de origem na planilha (ex.: 2.1.1) — memória / carga agregada. */
   origemComposicaoRotulo?: string;

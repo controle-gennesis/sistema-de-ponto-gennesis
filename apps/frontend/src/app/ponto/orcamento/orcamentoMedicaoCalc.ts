@@ -120,6 +120,7 @@ export function linhasMedicaoEfetivas(dim: { linhas?: LinhaMedicao[]; linhasCont
 export function linhaMedicaoEstaVazia(ln: LinhaMedicao): boolean {
   if (ln.cabecalhoSecao || ln.origemMemoriaKey || ln.linhaAgregadaCarga) return false;
   if ((ln.descricao ?? '').trim()) return false;
+  if ((ln.detalhes ?? '').trim()) return false;
   const numeros = [
     ln.C,
     ln.L,

@@ -579,11 +579,14 @@ async function fillWorkbook(
             color: { argb: MUTED_TEXT },
           };
         } else {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: !spec.semZebra && itemStripe % 2 === 0 ? ROW_ALT : WHITE },
-          };
+          // Sem zebra: a linha fica sem preenchimento (só recebe cor se o usuário pintar).
+          if (!spec.semZebra) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: itemStripe % 2 === 0 ? ROW_ALT : WHITE },
+            };
+          }
           if (c === colCount - 1 || spec.columns[c]?.header.toLowerCase() === 'status') {
             const tone = statusTone(String(rowSpec.values[c] ?? ''));
             if (tone) {
