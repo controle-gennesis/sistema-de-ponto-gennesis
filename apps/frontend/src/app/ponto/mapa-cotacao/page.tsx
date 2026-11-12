@@ -36,6 +36,7 @@ import {
   uploadNamedAttachments,
 } from '@/components/financeiro/FinancialControlAttachmentsField';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
@@ -144,6 +145,7 @@ type Supplier = {
   pixKey?: string | null;
   tradeName?: string | null;
   cnpj?: string | null;
+  state?: string | null;
 };
 
 type PurchaseOrderCreateInput = {
@@ -680,6 +682,10 @@ export default function MapaCotacaoPage() {
   const rawApprovedRequestsForCoverage: MaterialRequest[] =
     requestsData?.data?.requests || requestsData?.data || [];
 
+  /** Filtros do quadro (não ficam salvos: ao entrar na página, sempre "Todos"). */
+  const [ccFiltroRm, setCcFiltroRm] = useState('');
+  const [ufFornecedor, setUfFornecedor] = useState('');
+
   /** RMs cujos itens já estão todos cobertos por OC ativa (não entram no seletor). */
   const materialRequestIdsFullyCovered = useMemo(() => {
     const ordersByRm = new Map<string, PurchaseOrderLite[]>();
@@ -725,7 +731,9 @@ export default function MapaCotacaoPage() {
       ordersByRm.set(mid, list);
     }
 
-    return approvedRequests.map((r) => {
+    return approvedRequests
+      .filter((r) => !ccFiltroRm || r.id === selectedRequestId || String(r.costCenter?.id || '') === ccFiltroRm)
+      .map((r) => {
       const rm = formatRmListDisplayId(r.requestNumber) || r.id.slice(0, 8);
       const os = rmOsDisplay(r);
       const contract = rmContractDisplay(r);
@@ -787,7 +795,26 @@ export default function MapaCotacaoPage() {
           .join(' '),
       };
     });
-  }, [approvedRequests, allOrders]);
+  }, [approvedRequests, allOrders, ccFiltroRm, selectedRequestId]);
+
+  /** Centros de custo das RMs aguardando cotação (filtro da requisição). */
+  const ccRmOptions = useMemo(() => {
+    const porId = new Map<string, string>();
+    for (const r of approvedRequests) {
+      const id = String(r.costCenter?.id || '');
+      if (!id || porId.has(id)) continue;
+      porId.set(id, (r.costCenter?.name || r.costCenter?.code || id).trim());
+    }
+    return [...porId.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' }));
+  }, [approvedRequests]);
+
+  /** RMs aguardando cotação (sem contar a selecionada que já tem OC em todos os itens). */
+  const totalRmsAguardando = useMemo(
+    () => approvedRequests.filter((r) => !materialRequestIdsFullyCovered.has(r.id)).length,
+    [approvedRequests, materialRequestIdsFullyCovered]
+  );
 
   const [supplierSearch, setSupplierSearch] = useState('');
   const handleSupplierSearchChange = useCallback((query: string) => {
@@ -795,10 +822,21 @@ export default function MapaCotacaoPage() {
   }, []);
   const [selectedSuppliersById, setSelectedSuppliersById] = useState<Record<string, Supplier>>({});
 
-  const { data: suppliersSearchData } = useQuery({
-    queryKey: ['suppliers-map', supplierSearch.trim()],
+  /** Só os estados (UF) que têm fornecedor ativo cadastrado. */
+  const { data: ufsComFornecedor = [] } = useQuery({
+    queryKey: ['suppliers-estados'],
     queryFn: async () => {
-      const rows = await searchOcSuppliers(supplierSearch);
+      const res = await api.get('/suppliers/estados');
+      return ((res.data?.data ?? []) as string[]).filter(Boolean);
+    },
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: suppliersSearchData } = useQuery({
+    queryKey: ['suppliers-map', supplierSearch.trim(), ufFornecedor],
+    queryFn: async () => {
+      const rows = await searchOcSuppliers(supplierSearch, { state: ufFornecedor });
       return rows as Supplier[];
     },
     staleTime: 30_000,
@@ -1502,8 +1540,13 @@ export default function MapaCotacaoPage() {
                     <Truck className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    <h3 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
                       RM's Aprovadas
+                      {!loadingRequests && totalRmsAguardando > 0 ? (
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                          {totalRmsAguardando} aguardando cotação
+                        </span>
+                      ) : null}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Escolha a requisição e os fornecedores para montar o mapa
@@ -1554,10 +1597,22 @@ export default function MapaCotacaoPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-                  <div className="min-w-0">
-                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Requisição de Material *
-                    </label>
+                  <div className="min-w-0 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Requisição de Material *</span>
+                      <StringSingleSelectDropdown
+                        value={ccFiltroRm}
+                        onChange={setCcFiltroRm}
+                        options={ccRmOptions}
+                        allowEmpty
+                        emptyOptionLabel="Todos os centros de custo"
+                        placeholder="Todos os centros de custo"
+                        searchPlaceholder="Pesquisar centro de custo..."
+                        emptyOptionsMessage="Nenhum centro de custo."
+                        className="w-full sm:w-60"
+                        menuAlign="end"
+                      />
+                    </div>
                     <SingleSelectSearchDropdown
                       value={selectedRequestId}
                       onChange={setSelectedRequestId}
@@ -1571,10 +1626,42 @@ export default function MapaCotacaoPage() {
                       noFocusRing
                       hideFocus
                     />
+                    {(() => {
+                      const opt = materialRequestOptions.find((o) => o.value === selectedRequestId);
+                      if (!opt) {
+                        return (
+                          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                            {materialRequestOptions.length} requisição(ões) {ccFiltroRm ? 'neste centro de custo' : 'aguardando cotação'}.
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{opt.label}</p>
+                          {opt.description ? (
+                            <p className="mt-0.5 whitespace-pre-line text-xs text-gray-600 dark:text-gray-300">{opt.description}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Fornecedores</span>
+                      <StringSingleSelectDropdown
+                        value={ufFornecedor}
+                        onChange={setUfFornecedor}
+                        options={ufsComFornecedor}
+                        allowEmpty
+                        emptyOptionLabel="Todos os estados"
+                        placeholder="Todos os estados"
+                        searchPlaceholder="Pesquisar UF..."
+                        emptyOptionsMessage="Nenhum estado."
+                        className="w-full sm:w-44"
+                        menuAlign="end"
+                      />
+                    </div>
                     <MultiSelectSearchDropdown
-                      label="Fornecedores"
                       options={supplierOptions}
                       selected={Array.from(selectedSupplierIds)}
                       onChange={(ids) => {
@@ -1593,12 +1680,56 @@ export default function MapaCotacaoPage() {
                       filterLocally={false}
                       placeholder="Selecione fornecedores para comparar..."
                       searchPlaceholder="Digite nome, fantasia ou CNPJ..."
-                      emptyOptionsMessage="Digite para buscar fornecedores."
+                      emptyOptionsMessage={
+                        ufFornecedor ? `Nenhum fornecedor em ${ufFornecedor}.` : 'Digite para buscar fornecedores.'
+                      }
                       emptySearchMessage="Nenhum fornecedor encontrado."
                       listMaxHeight={280}
                       noFocusRing
                       hideFocus
                     />
+                    {selectedSupplierIds.size > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {Array.from(selectedSupplierIds).map((id) => {
+                          const s = selectedSuppliersById[id] || suppliers.find((x) => x.id === id);
+                          const nome = s ? getOcSupplierLabel(s) || s.name : id;
+                          return (
+                            <span
+                              key={id}
+                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-white py-0.5 pl-2.5 pr-1 text-xs font-medium text-gray-800 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            >
+                              <span className="truncate">
+                                {s?.code ? `${s.code} - ` : ''}
+                                {nome}
+                                {s?.state ? ` (${s.state})` : ''}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Tirar ${nome}`}
+                                title="Tirar"
+                                onClick={() => {
+                                  const next = new Set(selectedSupplierIds);
+                                  next.delete(id);
+                                  setSelectedSupplierIds(next);
+                                  setSelectedSuppliersById((prev) => {
+                                    const kept = { ...prev };
+                                    delete kept[id];
+                                    return kept;
+                                  });
+                                }}
+                                className="rounded-full p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+                              >
+                                <X className="h-3 w-3" aria-hidden />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        Nenhum fornecedor escolhido para comparar.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}

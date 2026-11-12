@@ -8,6 +8,8 @@ const controller = new SupplierController();
 router.use(authenticate);
 
 router.get('/', (req, res, next) => controller.getAll(req, res, next));
+// Estados (UF) que têm fornecedor ativo cadastrado — filtro do Mapa de Cotação.
+router.get('/estados', (req, res, next) => controller.getEstados(req, res, next));
 router.post('/sync-totvs', (req, res, next) => controller.syncFromTotvs(req, res, next));
 router.post('/import', (req, res, next) => controller.importSuppliers(req, res, next));
 router.get('/:id', (req, res, next) => controller.getById(req, res, next));

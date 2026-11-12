@@ -131,9 +131,26 @@ async function reserveSupplierCodes(count: number): Promise<string[]> {
 }
 
 export class SupplierController {
+  /** Estados (UF) com pelo menos um fornecedor ativo, em ordem alfabética. Só leitura. */
+  async getEstados(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const rows = await prisma.$queryRaw<Array<{ uf: string }>>`
+        SELECT DISTINCT UPPER(TRIM(state)) AS uf
+        FROM suppliers
+        WHERE "isActive" = true AND state IS NOT NULL AND LENGTH(TRIM(state)) = 2
+        ORDER BY uf
+      `;
+      res.json({ success: true, data: rows.map((r) => r.uf) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { search, isActive, page = 1, limit = 20 } = req.query;
+      const { search, isActive, page = 1, limit = 20, state } = req.query;
+      /** Filtro opcional por estado (UF) — Mapa de Cotação. */
+      const uf = typeof state === 'string' ? state.trim().toUpperCase().slice(0, 2) : '';
       const where: Record<string, unknown> = {};
       if (search) {
         const ids = await findIdsByUnaccentSearch({
@@ -144,6 +161,7 @@ export class SupplierController {
         where.id = { in: ids && ids.length > 0 ? ids : ['__none__'] };
       }
       if (isActive !== undefined) where.isActive = isActive === 'true';
+      if (uf) where.state = { equals: uf, mode: 'insensitive' };
       const limitNum = Math.min(Math.max(Number(limit) || 20, 1), 2000);
       const pageNum = Math.max(1, Number(page) || 1);
       const skip = (pageNum - 1) * limitNum;
@@ -156,6 +174,9 @@ export class SupplierController {
       }
       if (typeof where.isActive === 'boolean') {
         conditions.push(Prisma.sql`"isActive" = ${where.isActive}`);
+      }
+      if (uf) {
+        conditions.push(Prisma.sql`UPPER(TRIM(COALESCE(state, ''))) = ${uf}`);
       }
       const whereSql = Prisma.join(conditions, ' AND ');
 
