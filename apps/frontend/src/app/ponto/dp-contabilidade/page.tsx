@@ -27,6 +27,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
+import { DpRequestAttachments } from '@/components/dp/DpRequestAttachments';
 import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -139,23 +140,22 @@ const TYPE_LABELS: Record<RequestType, string> = {
 };
 
 const STATUS_LABELS: Record<RequestStatus, string> = {
-  OPEN: 'Aberta',
-  IN_PROGRESS: 'Em andamento',
+  OPEN: 'Pendente',
+  IN_PROGRESS: 'Pendente',
   CONCLUDED: 'Concluída',
   CANCELLED: 'Cancelada',
 };
 
 const STATUS_BADGE: Record<RequestStatus, string> = {
   OPEN: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  IN_PROGRESS: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  IN_PROGRESS: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
 
 const STAGE_TABS: { filter: 'all' | RequestStatus; label: string }[] = [
   { filter: 'all', label: 'Todas' },
-  { filter: 'OPEN', label: 'Abertas' },
-  { filter: 'IN_PROGRESS', label: 'Em Andamento' },
+  { filter: 'OPEN', label: 'Pendentes' },
   { filter: 'CONCLUDED', label: 'Concluídas' },
   { filter: 'CANCELLED', label: 'Canceladas' },
 ];
@@ -172,8 +172,8 @@ const STAGE_LIST_HEADER: Record<
     iconColor: 'text-blue-600 dark:text-blue-400',
   },
   OPEN: {
-    title: 'Abertas',
-    subtitle: 'Pedidos que ainda não foram atendidos',
+    title: 'Pendentes',
+    subtitle: 'Pedidos que ainda não foram concluídos',
     Icon: MailPlus,
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
@@ -329,7 +329,6 @@ export default function DpContabilidadePage() {
       labeledToSelectOptions([
         { value: 'all', label: 'Todos' },
         { value: 'OPEN', label: STATUS_LABELS.OPEN },
-        { value: 'IN_PROGRESS', label: STATUS_LABELS.IN_PROGRESS },
         { value: 'CONCLUDED', label: STATUS_LABELS.CONCLUDED },
         { value: 'CANCELLED', label: STATUS_LABELS.CANCELLED },
       ]),
@@ -352,6 +351,21 @@ export default function DpContabilidadePage() {
     void queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
     void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
   };
+
+  // Avisa o DP que a Contabilidade concluiu (mensagem automática + push), sem digitar no chat.
+  const accountingDoneMutation = useMutation({
+    mutationFn: async (dpRequestId: string) => {
+      await api.post(`/solicitacoes-dp/${dpRequestId}/contabilidade-concluiu`, {});
+      return dpRequestId;
+    },
+    onSuccess: (dpRequestId) => {
+      toast.success('Atendimento concluído. O DP foi avisado.');
+      void queryClient.invalidateQueries({ queryKey: ['dp-request-messages', dpRequestId] });
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, 'Não foi possível avisar o DP.')),
+  });
 
   const commentMutation = useMutation({
     mutationFn: async ({ id, body }: { id: string; body: string }) => {
@@ -801,6 +815,13 @@ export default function DpContabilidadePage() {
                 </div>
               )}
 
+              {selected.sourceDpRequestId ? (
+                <DpRequestAttachments
+                  requestId={selected.sourceDpRequestId}
+                  currentUserId={(user as { id?: string }).id ?? null}
+                />
+              ) : null}
+
               {!selected.sourceDpRequestId ? (
                 <div>
                   <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -872,18 +893,6 @@ export default function DpContabilidadePage() {
                         {commentMutation.isPending ? 'Enviando...' : 'Enviar mensagem'}
                       </Button>
                     ) : null}
-                    {selected.status === 'OPEN' ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={statusMutation.isPending}
-                        onClick={() =>
-                          statusMutation.mutate({ id: selected.id, status: 'IN_PROGRESS' })
-                        }
-                      >
-                        Marcar em andamento
-                      </Button>
-                    ) : null}
                     {!selected.sourceDpRequestId ? (
                       <>
                         <Button
@@ -903,7 +912,20 @@ export default function DpContabilidadePage() {
                           Cancelar
                         </Button>
                       </>
-                    ) : null}
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="success"
+                        disabled={accountingDoneMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm('Concluir o atendimento? O DP será avisado.')) {
+                            accountingDoneMutation.mutate(selected.sourceDpRequestId as string);
+                          }
+                        }}
+                      >
+                        {accountingDoneMutation.isPending ? 'Enviando...' : 'Concluir'}
+                      </Button>
+                    )}
                   </div>
                 </div>
               ) : (

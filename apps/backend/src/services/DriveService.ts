@@ -222,7 +222,7 @@ export class DriveService {
   private async listRootFoldersForUser(userId: string) {
     const owned = await prisma.driveFolder.findMany({
       where: { parentId: null, ownerId: userId, ...NOT_TRASHED },
-      orderBy: { name: 'asc' },
+      orderBy: { updatedAt: 'desc' },
     });
 
     const shareRows = await prisma.driveFolderShare.findMany({
@@ -249,8 +249,10 @@ export class DriveService {
       }
     }
 
-    extra.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-    return [...owned, ...extra];
+    extra.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return [...owned, ...extra].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
   }
 
   private async resolveOwnerInfo(
@@ -311,7 +313,7 @@ export class DriveService {
       const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));
       const files = await prisma.driveFile.findMany({
         where: { ownerId: userId, folderId: null, ...NOT_TRASHED },
-        orderBy: { name: 'asc' },
+        orderBy: { updatedAt: 'desc' },
       });
       const ownerNames = await this.resolveOwnerInfo([
         ...foldersRaw.map((f) => f.ownerId),
@@ -332,11 +334,11 @@ export class DriveService {
     const [foldersRaw, allFiles] = await Promise.all([
       prisma.driveFolder.findMany({
         where: { parentId, ...NOT_TRASHED },
-        orderBy: { name: 'asc' },
+        orderBy: { updatedAt: 'desc' },
       }),
       prisma.driveFile.findMany({
         where: { folderId: parentId, ...NOT_TRASHED },
-        orderBy: { name: 'asc' },
+        orderBy: { updatedAt: 'desc' },
       }),
     ]);
     const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));

@@ -1,7 +1,11 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
+  deleteDpRequestAttachment,
+  getDpRequestAttachments,
   getDpRequestMessages,
   getDpRequestUnreadMessages,
+  postDpRequestAttachment,
   postDpRequestMessage,
 } from '../lib/dpRequestMessages';
 import { authenticate, requireAdministrator } from '../middleware/auth';
@@ -9,8 +13,10 @@ import { requireDpApproverAccess, requireModuleAccess } from '../middleware/perm
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DpRequestController } from '../controllers/DpRequestController';
 import { DpContabilidadeController } from '../controllers/DpContabilidadeController';
+import { requireDpContabilidadeAccess } from '../lib/dpContabilidadeAccess';
 
 const router = Router();
+const uploadAnexo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const controller = new DpRequestController();
 const contabilidadeController = new DpContabilidadeController();
 
@@ -25,6 +31,14 @@ router.use(authenticate);
 router.get('/mensagens/nao-lidas', getDpRequestUnreadMessages);
 router.get('/:id/mensagens', getDpRequestMessages);
 router.post('/:id/mensagens', postDpRequestMessage);
+router.post(
+  '/:id/contabilidade-concluiu',
+  requireDpContabilidadeAccess,
+  contabilidadeController.concludeFromAccounting.bind(contabilidadeController)
+);
+router.get('/:id/anexos', getDpRequestAttachments);
+router.post('/:id/anexos', uploadAnexo.single('file'), postDpRequestAttachment);
+router.delete('/:id/anexos/:attachmentId', deleteDpRequestAttachment);
 router.get('/contratos-elegiveis', requireModuleAccess(myModule), controller.getEligibleContracts.bind(controller));
 router.get(
   '/centros-custo-elegiveis',

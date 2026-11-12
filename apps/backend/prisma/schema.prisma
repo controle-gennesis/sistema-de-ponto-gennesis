@@ -804,6 +804,7 @@ model DpRequest {
   id            String @id @default(cuid())
   messages      DpRequestComment[]
   messageReads  DpRequestCommentRead[]
+  attachments   DpRequestAttachment[]
   /// NÃºmero legÃ­vel sequencial (1, 2, 3â¦) para exibiÃ§Ã£o e busca.
   displayNumber Int    @unique
 
@@ -913,6 +914,10 @@ model DpContabilidadeRequest {
   concludedByUserId String?
   cancelledAt       DateTime?
   cancelledByUserId String?
+  /// Quando a Contabilidade avisou o DP que concluiu a parte dela (o DP ainda encerra o pedido).
+  accountingDoneAt  DateTime?
+  /// Quando o DP encerrou o acompanhamento depois da conclusão da Contabilidade.
+  dpClosedAt        DateTime?
 
   /// Solicitação interna (Gerenciar Solicitações) que originou este card.
   sourceDpRequestId String? @unique
@@ -954,6 +959,23 @@ model DpRequestCommentRead {
   @@unique([requestId, userId])
   @@index([userId])
   @@map("dp_request_comment_reads")
+}
+
+/// Documentos anexados na conversa de uma solicitação (ex.: a Contabilidade anexa e o DP vê).
+model DpRequestAttachment {
+  id               String    @id @default(cuid())
+  requestId        String
+  request          DpRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploadedByUserId String
+  uploadedByName   String
+  fileName         String
+  mimeType         String
+  url              String
+  key              String
+  createdAt        DateTime  @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("dp_request_attachments")
 }
 
 model DpContabilidadeComment {
