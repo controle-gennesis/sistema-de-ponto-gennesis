@@ -2,13 +2,19 @@ import api from '@/lib/api';
 import type { OcSupplierOption } from '@/components/oc/OcPurchaseOrderFormFields';
 
 /** Busca fornecedores ativos no servidor (cadastro completo, não só os primeiros N). */
-export async function searchOcSuppliers(query: string): Promise<OcSupplierOption[]> {
+export async function searchOcSuppliers(
+  query: string,
+  opts?: { state?: string }
+): Promise<OcSupplierOption[]> {
+  const uf = (opts?.state || '').trim();
   const res = await api.get('/suppliers', {
     params: {
       search: query.trim() || undefined,
       isActive: true,
+      // Filtro por estado (UF) — opcional.
+      state: uf || undefined,
       // Sem busca: amostra inicial. Com texto: filtra no cadastro inteiro.
-      limit: query.trim() ? 200 : 100,
+      limit: query.trim() || uf ? 200 : 100,
       page: 1,
     },
   });

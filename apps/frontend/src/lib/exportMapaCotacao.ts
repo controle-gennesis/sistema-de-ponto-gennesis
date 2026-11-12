@@ -123,6 +123,7 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
   }
 
   // PDF: cada fornecedor numa coluna (unitário + total); larguras ajustadas à orientação escolhida.
+  // O valor de referência não sai no PDF (só no Excel).
   const pesos: { key: string; label: string; peso: number; tone?: BrandedPdfColumn['tone'] }[] = [
     { key: 'item', label: 'Item', peso: 0.5 },
     { key: 'codigo', label: 'Código', peso: 1.1 },
@@ -130,7 +131,6 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
     { key: 'und', label: 'Und.', peso: 0.6 },
     { key: 'qtdRm', label: 'Qtd. RM', peso: 0.8 },
     { key: 'qtdOc', label: 'Qtd. OC', peso: 0.8 },
-    { key: 'ref', label: 'Valor ref.', peso: 1.1 },
     ...fornecedores.map((f, i) => ({ key: `f${i}`, label: f.nome, peso: 1.4 })),
     { key: 'vencedor', label: 'Vencedor', peso: 1.7, tone: 'bold' as const },
   ];
@@ -153,7 +153,6 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
       und: it.unidade || '—',
       qtdRm: qtd(it.qtdRm),
       qtdOc: qtd(it.qtdOc),
-      ref: brl(it.valorReferencia),
       vencedor: it.vencedor
         ? `${it.vencedor}\n${brl(it.vencedorUnitario)} · ${brl(it.vencedorTotal)}${it.empateTecnico ? '\nEmpate técnico' : ''}`
         : '—',
@@ -164,7 +163,7 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
     return row;
   });
   const linhaFinal = (rotulo: string, valor: (f: MapaCotacaoExportFornecedor) => string) => {
-    const row: Record<string, string> = { item: '', codigo: '', material: rotulo, und: '', qtdRm: '', qtdOc: '', ref: '', vencedor: '' };
+    const row: Record<string, string> = { item: '', codigo: '', material: rotulo, und: '', qtdRm: '', qtdOc: '', vencedor: '' };
     fornecedores.forEach((f, i) => {
       row[`f${i}`] = valor(f);
     });

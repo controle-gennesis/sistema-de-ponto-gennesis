@@ -323,7 +323,39 @@ export default function OrcamentosPage() {
       );
   }, [contractsData, isAdministrator, canAccessContractOrcamentoTab]);
 
-  const contractsDoCc = contractsComOrcamento;
+  /** Centros de custo dos contratos liberados (cada usuário vê só os seus), em ordem alfabética. */
+  const ccOptions = useMemo(() => {
+    const porId = new Map<string, string>();
+    for (const c of contractsComOrcamento) {
+      const id = String(c.costCenterId || '');
+      if (!id || porId.has(id)) continue;
+      const nome = (c.costCenter?.name || '').trim();
+      const codigo = (c.costCenter?.code || '').trim();
+      porId.set(id, nome || codigo || (c.name || c.number || id).trim());
+    }
+    return [...porId.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' }));
+  }, [contractsComOrcamento]);
+
+  // Abre sempre no primeiro centro de custo (A-Z); o usuário troca no seletor (não fica salvo).
+  const [ccFiltroEscolhido, setCcFiltroEscolhido] = useState('');
+  const ccFiltro = ccOptions.some((o) => o.value === ccFiltroEscolhido)
+    ? ccFiltroEscolhido
+    : ccOptions[0]?.value ?? '';
+
+  const contractsDoCc = useMemo(
+    () =>
+      ccFiltro
+        ? contractsComOrcamento.filter((c) => String(c.costCenterId) === ccFiltro)
+        : contractsComOrcamento,
+    [contractsComOrcamento, ccFiltro]
+  );
+
+  const escolherCc = (valor: string) => {
+    setCcFiltroEscolhido(valor);
+    setCurrentPage(1);
+  };
 
   const contratoFilterOptions = useMemo(
     () =>
@@ -336,12 +368,17 @@ export default function OrcamentosPage() {
     [contractsDoCc]
   );
 
-  // Contrato do filtro sem acesso ao orçamento: limpa.
+  // Contrato do filtro fora do centro de custo escolhido: o que veio pela URL leva ao CC dele; o resto é limpo.
   useEffect(() => {
     if (!contratoFiltro || loadingContracts) return;
     if (contractsDoCc.some((c) => c.id === contratoFiltro)) return;
+    const contrato = contractsComOrcamento.find((c) => c.id === contratoFiltro);
+    if (contrato && contratoFiltro === contratoFromUrl) {
+      setCcFiltroEscolhido(String(contrato.costCenterId));
+      return;
+    }
     setContratoFiltro('');
-  }, [contratoFiltro, contractsDoCc, loadingContracts]);
+  }, [contratoFiltro, contractsDoCc, contractsComOrcamento, contratoFromUrl, loadingContracts]);
 
   const hasActiveFilters = Boolean(contratoFiltro || criadoDe || criadoAte);
 
@@ -428,6 +465,7 @@ export default function OrcamentosPage() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
     return list.filter((o) => {
+      if (ccFiltro && o.costCenterId !== ccFiltro) return false;
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
       if (criadoDe || criadoAte) {
         const dia = diaLocal(o.createdAt);
@@ -451,13 +489,14 @@ export default function OrcamentosPage() {
         status.includes(q)
       );
     });
-  }, [orcamentosData, searchTerm, contratoFiltro, criadoDe, criadoAte]);
+  }, [orcamentosData, searchTerm, contratoFiltro, ccFiltro, criadoDe, criadoAte]);
 
   /** Todas as revisões por família (seletor do badge; ignora busca textual). */
   const revisoesPorFamilia = useMemo(() => {
     const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const map = new Map<string, OrcamentoListItem[]>();
     for (const o of list) {
+      if (ccFiltro && o.costCenterId !== ccFiltro) continue;
       if (contratoFiltro && o.contractId !== contratoFiltro) continue;
       const key = `${o.costCenterId}::${o.familiaId}`;
       const arr = map.get(key) ?? [];
@@ -468,7 +507,7 @@ export default function OrcamentosPage() {
       arr.sort((a, b) => b.versao - a.versao);
     }
     return map;
-  }, [orcamentosData, contratoFiltro]);
+  }, [orcamentosData, contratoFiltro, ccFiltro]);
 
   /** Uma linha por família — só a revisão atual (maior número). */
   const familiasAtuais = useMemo(() => {
@@ -664,6 +703,21 @@ export default function OrcamentosPage() {
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
+              {ccOptions.length > 0 ? (
+                <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-200 pb-4 dark:border-gray-700">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Centro de custo</span>
+                  <StringSingleSelectDropdown
+                    value={ccFiltro}
+                    onChange={escolherCc}
+                    options={ccOptions}
+                    allowEmpty={false}
+                    placeholder="Selecione o centro de custo"
+                    searchPlaceholder="Pesquisar centro de custo..."
+                    emptyOptionsMessage="Nenhum centro de custo disponível."
+                    className="w-full max-w-xs"
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
                   <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
