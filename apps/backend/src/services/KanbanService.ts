@@ -1228,6 +1228,154 @@ export class KanbanService {
     };
   }
 
+  /**
+   * Duplica um quadro como quadro novo e personalizado do usuário: listas, etiquetas e cards
+   * (com checklist), sem responsáveis, comentários, anexos nem compartilhamento.
+   * Só quem pode editar o quadro de origem pode duplicar.
+   */
+  async duplicateBoard(userId: string, boardId: string, name?: string) {
+    if (await userIsAdministrator(userId)) {
+      throw new Error('Administradores acessam apenas quadros de setor');
+    }
+    const source = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: {
+        ...this.boardAccessSelect,
+        name: true,
+        labelPresets: true,
+        columns: {
+          where: { archivedAt: null },
+          orderBy: { position: 'asc' },
+          select: {
+            id: true,
+            title: true,
+            color: true,
+            position: true,
+            cardLimit: true,
+            cards: {
+              where: { archivedAt: null },
+              orderBy: { position: 'asc' },
+              select: {
+                title: true,
+                description: true,
+                priority: true,
+                startDate: true,
+                endDate: true,
+                labels: true,
+                totalTasks: true,
+                completedTasks: true,
+                checklistEnabled: true,
+                completedAt: true,
+                workHours: true,
+                checklistItems: {
+                  orderBy: { position: 'asc' },
+                  select: { title: true, isDone: true, dueDate: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!source) throw new Error('Quadro não encontrado');
+    await this.assertBoardAccess(userId, source, 'write');
+
+    const totalCards = source.columns.reduce((sum, c) => sum + c.cards.length, 0);
+    if (totalCards > 1500) {
+      throw new Error('Quadro muito grande para duplicar (mais de 1500 cards). Arquive os cards antigos e tente de novo.');
+    }
+
+    const finalName = (name?.trim() || `Cópia de ${source.name}`).slice(0, 80);
+    const newBoardId = randomUUID();
+    const departmentKey = `${KANBAN_CUSTOM_KEY_PREFIX}${randomUUID().replace(/-/g, '')}`;
+    const slug = `${slugFromDepartmentKey(finalName.slice(0, 40))}-${Date.now()}`;
+
+    const columnsData: Prisma.KanbanColumnCreateManyInput[] = [];
+    const cardsData: Prisma.KanbanCardCreateManyInput[] = [];
+    const itemsData: Prisma.KanbanChecklistItemCreateManyInput[] = [];
+
+    source.columns.forEach((col, colIndex) => {
+      const newColId = randomUUID();
+      columnsData.push({
+        id: newColId,
+        boardId: newBoardId,
+        title: col.title,
+        color: col.color,
+        position: colIndex,
+        cardLimit: col.cardLimit,
+      });
+      col.cards.forEach((card, cardIndex) => {
+        const newCardId = randomUUID();
+        const items = card.checklistItems;
+        cardsData.push({
+          id: newCardId,
+          columnId: newColId,
+          title: card.title,
+          description: card.description,
+          priority: card.priority,
+          startDate: card.startDate,
+          endDate: card.endDate,
+          labels: (card.labels ?? []) as Prisma.InputJsonValue,
+          // Cópia sem responsáveis.
+          assigneeUserId: null,
+          assigneeName: null,
+          totalTasks: card.checklistEnabled ? items.length : card.totalTasks,
+          completedTasks: card.checklistEnabled ? items.filter((i) => i.isDone).length : card.completedTasks,
+          checklistEnabled: card.checklistEnabled,
+          attachmentsEnabled: false,
+          workHours: card.workHours,
+          completedAt: card.completedAt,
+          position: cardIndex,
+        });
+        items.forEach((item, itemIndex) => {
+          itemsData.push({
+            cardId: newCardId,
+            title: item.title,
+            isDone: item.isDone,
+            position: itemIndex,
+            dueDate: item.dueDate,
+          });
+        });
+      });
+    });
+
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.kanbanBoard.create({
+          data: {
+            id: newBoardId,
+            name: finalName,
+            slug,
+            departmentKey,
+            departmentLabel: finalName,
+            isCustom: true,
+            createdById: userId,
+            labelPresets: (source.labelPresets ?? DEFAULT_KANBAN_LABEL_PRESETS) as Prisma.InputJsonValue,
+          },
+        });
+        if (columnsData.length) await tx.kanbanColumn.createMany({ data: columnsData });
+        if (cardsData.length) await tx.kanbanCard.createMany({ data: cardsData });
+        if (itemsData.length) await tx.kanbanChecklistItem.createMany({ data: itemsData });
+      },
+      { timeout: 120_000, maxWait: 15_000 },
+    );
+
+    return {
+      id: newBoardId,
+      name: finalName,
+      slug,
+      departmentKey,
+      department: finalName,
+      columnCount: columnsData.length,
+      updatedAt: new Date().toISOString(),
+      isOwnDepartment: false,
+      isCustom: true,
+      isOwner: true,
+      canManageShares: true,
+      sharedWithMe: false,
+    };
+  }
+
   async updateCustomBoardName(boardId: string, userId: string, name: string) {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome do quadro é obrigatório');

@@ -47,6 +47,7 @@ import {
   fetchArchivedKanbanColumns,
   fetchKanbanBoards,
   createKanbanBoard,
+  duplicateKanbanBoard,
   updateKanbanBoard,
   deleteKanbanBoard,
   updateKanbanBoardLabelPresets,
@@ -2376,6 +2377,7 @@ function KanbanBoardRowActions({
   onShare,
   onEditName,
   onDeleteBoard,
+  onDuplicate,
   onClosePicker,
 }: {
   board: KanbanBoardSummary;
@@ -2384,12 +2386,15 @@ function KanbanBoardRowActions({
   onShare: (board: KanbanBoardSummary) => void;
   onEditName: (board: KanbanBoardSummary) => void;
   onDeleteBoard: (board: KanbanBoardSummary) => void;
+  onDuplicate: (board: KanbanBoardSummary) => void;
   onClosePicker: () => void;
 }) {
   const canManage = Boolean(board.isCustom && board.isOwner && board.id);
   const canDelete = Boolean(
     board.isCustom && board.id && (board.isOwner || isAdministrator),
   );
+  // Duplicar: quem pode editar o quadro (administrador não cria quadros personalizados).
+  const canDuplicate = Boolean(board.id && !isAdministrator);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -2415,12 +2420,12 @@ function KanbanBoardRowActions({
 
   const openMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!canManage && !canDelete) return;
+    if (!canManage && !canDelete && !canDuplicate) return;
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
 
     const menuWidth = 176;
-    const menuHeight = canManage ? 140 : 56;
+    const menuHeight = (canManage ? 140 : 56) + (canDuplicate ? 38 : 0);
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
 
@@ -2434,7 +2439,7 @@ function KanbanBoardRowActions({
     setMenuOpen((v) => !v);
   };
 
-  if (!canManage && !canDelete) {
+  if (!canManage && !canDelete && !canDuplicate) {
     return <span className="inline-block h-8 w-8 shrink-0" aria-hidden />;
   }
 
@@ -2455,6 +2460,23 @@ function KanbanBoardRowActions({
             className="overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
             onMouseDown={(e) => e.stopPropagation()}
           >
+            {canDuplicate ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onMouseDown={runMenuAction(() => {
+                    onDuplicate(board);
+                    onClosePicker();
+                  })}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                  <Copy className="h-4 w-4 shrink-0" />
+                  Duplicar quadro
+                </button>
+                {canManage || canDelete ? <hr className="my-1 border-gray-200 dark:border-gray-700" /> : null}
+              </>
+            ) : null}
             {canManage ? (
               <>
                 <button
@@ -2536,6 +2558,7 @@ function KanbanBoardPicker({
   onShare,
   onEditName,
   onDeleteBoard,
+  onDuplicate,
   archivedBoards = [],
   onRestoreBoard,
 }: {
@@ -2554,6 +2577,7 @@ function KanbanBoardPicker({
   onShare: (board: KanbanBoardSummary) => void;
   onEditName: (board: KanbanBoardSummary) => void;
   onDeleteBoard: (board: KanbanBoardSummary) => void;
+  onDuplicate: (board: KanbanBoardSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -2641,6 +2665,7 @@ function KanbanBoardPicker({
                         onShare={onShare}
                         onEditName={onEditName}
                         onDeleteBoard={onDeleteBoard}
+                        onDuplicate={onDuplicate}
                         onClosePicker={() => setOpen(false)}
                       />
                       <button
@@ -2835,6 +2860,8 @@ function KanbanPage() {
     name: string;
   } | null>(null);
   const [renamingBoard, setRenamingBoard] = useState(false);
+  const [duplicateBoardTarget, setDuplicateBoardTarget] = useState<{ boardId: string; name: string } | null>(null);
+  const [duplicatingBoard, setDuplicatingBoard] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState<KanbanBoardSummary | null>(null);
   const [columnArchiveTarget, setColumnArchiveTarget] = useState<{ id: string; title: string } | null>(null);
   const [archivingColumn, setArchivingColumn] = useState(false);
@@ -2917,6 +2944,28 @@ function KanbanPage() {
       }
     },
     [openBoard, queryClient],
+  );
+
+  const handleDuplicateBoard = useCallback(
+    async (name: string) => {
+      if (!duplicateBoardTarget) return;
+      setDuplicatingBoard(true);
+      try {
+        const created = await duplicateKanbanBoard(duplicateBoardTarget.boardId, name);
+        await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+        setDuplicateBoardTarget(null);
+        toast.success('Quadro duplicado');
+        openBoard(created.departmentKey);
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+          'Erro ao duplicar quadro';
+        toast.error(msg);
+      } finally {
+        setDuplicatingBoard(false);
+      }
+    },
+    [duplicateBoardTarget, openBoard, queryClient],
   );
 
   const handleRenameBoard = useCallback(
@@ -4379,6 +4428,7 @@ function KanbanPage() {
                   setRenameBoardTarget({ boardId: b.id, name: b.department })
                 }
                 onDeleteBoard={setBoardDeleteTarget}
+                onDuplicate={(b) => setDuplicateBoardTarget({ boardId: b.id, name: b.department })}
                 archivedBoards={archivedBoardsList ?? []}
                 onRestoreBoard={handleRestoreBoard}
               />
@@ -5245,6 +5295,17 @@ function KanbanPage() {
         onClose={() => setCreateBoardOpen(false)}
         onSubmit={handleCreateBoard}
         saving={creatingBoard}
+      />
+
+      <KanbanCreateBoardModal
+        isOpen={!!duplicateBoardTarget}
+        onClose={() => !duplicatingBoard && setDuplicateBoardTarget(null)}
+        onSubmit={handleDuplicateBoard}
+        saving={duplicatingBoard}
+        title="Duplicar quadro"
+        submitLabel="Duplicar"
+        initialName={duplicateBoardTarget ? `Cópia de ${duplicateBoardTarget.name}` : ''}
+        hint="Copia as listas, as etiquetas e os cards (com checklist). Os cards vêm sem responsáveis, comentários e anexos, e a cópia é só sua até você compartilhar."
       />
 
       <KanbanCreateBoardModal
