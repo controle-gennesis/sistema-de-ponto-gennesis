@@ -25,6 +25,8 @@ import {
   Loader2,
   TrendingDown,
   TrendingUp,
+  Users,
+  type LucideIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -123,12 +125,19 @@ function CardHeading({
   extra,
   compact = false,
   tone = 'default',
+  icon: Icon,
+  iconBg,
+  iconColor,
 }: {
   title: string;
   subtitle?: React.ReactNode;
   extra?: React.ReactNode;
   compact?: boolean;
   tone?: 'default' | 'brand';
+  /** Ícone num quadradinho colorido ao lado do título (mesmo padrão dos blocos dos módulos). */
+  icon?: LucideIcon;
+  iconBg?: string;
+  iconColor?: string;
 }) {
   const isBrand = tone === 'brand';
   return (
@@ -138,15 +147,22 @@ function CardHeading({
       }`}
     >
       <div className={cadastroListClasses.cardHeaderRow}>
-        <div className="min-w-0">
-          <h3
-            className={`font-semibold ${
-              isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
-            } ${compact && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
-          >
-            {title}
-          </h3>
-          {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+        <div className={`min-w-0 ${Icon ? 'flex items-center gap-3' : ''}`}>
+          {Icon ? (
+            <div className={`rounded-lg p-2 sm:p-3 ${iconBg ?? ''}`}>
+              <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${iconColor ?? ''}`} />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <h3
+              className={`font-semibold ${
+                isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+              } ${compact && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+            >
+              {title}
+            </h3>
+            {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+          </div>
         </div>
         {extra ? <div className={`${cadastroListClasses.cardToolbar} self-start`}>{extra}</div> : null}
       </div>
@@ -895,10 +911,6 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                         {formatCurrency(used)}
                       </p>
                     </div>
-                    <ExternalLink
-                      className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
-                      aria-hidden
-                    />
                   </button>
                 ) : (
                   <div className={usedBlockClass}>
@@ -1132,7 +1144,12 @@ function PessoasContratoCard({
 }) {
   return (
     <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col`}>
-      <CardHeading title="Colaboradores" />
+      <CardHeading
+        title="Colaboradores"
+        icon={Users}
+        iconBg="bg-violet-100 dark:bg-violet-900/30"
+        iconColor="text-violet-600 dark:text-violet-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-2`}>
         {loading ? (
           <div className="flex h-[280px] items-center justify-center">
@@ -1460,7 +1477,10 @@ export function ContratoFaturamentoCharts({
   peopleError = false,
   abastecimento,
   visaoGeral,
+  modulos,
 }: {
+  /** Blocos dos módulos do contrato (Orçamentos, Cronogramas, Diários de Obra...). */
+  modulos?: React.ReactNode;
   /** Indicadores e gráfico "Faturamento por mês x meta" no topo do Resumo. */
   visaoGeral?: ContratoVisaoGeral;
   faturamentoInsight: ContratoFaturamentoInsight;
@@ -1487,6 +1507,7 @@ export function ContratoFaturamentoCharts({
             ))}
           </div>
           <ContratoResumoGraficoMeta data={visaoGeral} />
+          {modulos}
         </>
       ) : null}
       {resumoKpis.length > 0 ? (

@@ -49,6 +49,7 @@ import { ContratoObrasTab } from './ContratoObrasTab';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { ContratoAcompanhamentoListPage } from '@/components/contract/ContratoAcompanhamentoListPage';
 import type { ContratoVisaoGeral } from '@/components/contract/ContratoResumoVisaoGeral';
+import { ContratoResumoModulos } from '@/components/contract/ContratoResumoModulos';
 import { REUNIOES_CONFIG, RELATORIO_MENSAL_CONFIG } from '@/components/contract/contratoReunioesConfigs';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
@@ -5048,6 +5049,20 @@ export default function ContractDetailPage() {
             osTotais={osResumoTotals}
             resumoKpis={resumoModulosKpis}
             visaoGeral={resumoVisaoGeral}
+            modulos={
+              <ContratoResumoModulos
+                contractId={contractId}
+                costCenterId={contract?.costCenterId}
+                acesso={{
+                  orcamentos: canAccessOrcamento,
+                  cronogramas: canAccessCronogramasModulo,
+                  diarios: isAdministrator || can(pathToModuleKey('/ponto/diario-obra')),
+                  obras: canAccessObrasModulo,
+                  fichasDemanda: isAdministrator || can(pathToModuleKey('/ponto/aprovacao-fds')),
+                  ferramentas: isAdministrator || can(pathToModuleKey('/ponto/solicitar-ferramentas')),
+                }}
+              />
+            }
             metaVsReal={resumoMetaVsReal}
             people={contratoPeople}
             peopleLoading={loadingContratoPeople}
