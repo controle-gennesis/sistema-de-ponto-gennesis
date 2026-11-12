@@ -325,7 +325,8 @@ export function DriveListView({
               tabIndex={0}
               draggable={!trashMode && !!onMove && (canMoveOthers || folder.ownerId === currentUserId)}
               data-drive-item
-              style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
+              data-drive-key={`folder-${folder.id}`}
+style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
               onDragStart={(e) => {
                 const items = dragItemsFor({ type: 'folder', id: folder.id });
                 startDriveItemDrag(e, items);
@@ -497,7 +498,8 @@ export function DriveListView({
               tabIndex={0}
               draggable={!trashMode && !!onMove && (canMoveOthers || isOwnerFile(file))}
               data-drive-item
-              style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
+              data-drive-key={`file-${file.id}`}
+style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
               onDragStart={(e) => {
                 const items = dragItemsFor({ type: 'file', id: file.id });
                 startDriveItemDrag(e, items);

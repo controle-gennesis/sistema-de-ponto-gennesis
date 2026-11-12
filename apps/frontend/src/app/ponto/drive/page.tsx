@@ -48,6 +48,14 @@ import { DriveListView } from '@/components/drive/DriveListView';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
 import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
+import {
+  DriveFilters,
+  DRIVE_FILTERS_EMPTY,
+  driveFileCategory,
+  driveFiltersActive,
+  driveMatchesModified,
+  type DriveFiltersState,
+} from '@/components/drive/DriveFilters';
 import { computeSelection, fileKey, folderKey, type SelectMods } from '@/components/drive/driveSelection';
 import {
   folderDropProps,
@@ -375,16 +383,40 @@ function DrivePageContent() {
     enabled: !!user && !!searchQuery.trim(),
   });
 
-  const folders = searchQuery
+  const rawFolders = searchQuery
     ? (searchResults?.folders ?? [])
     : isMyDriveView
       ? (contents?.folders ?? [])
       : (viewContents?.folders ?? []);
-  const files = searchQuery
+  const rawFiles = searchQuery
     ? (searchResults?.files ?? [])
     : isMyDriveView
       ? (contents?.files ?? [])
       : (viewContents?.files ?? []);
+
+  // ── Filtros (tipo / data de modificação / proprietário) ───────────────────
+  const [filters, setFilters] = useState<DriveFiltersState>(DRIVE_FILTERS_EMPTY);
+  const filtersActive = driveFiltersActive(filters);
+  const ownerOk = (ownerId: string) =>
+    filters.owner === 'all' || (filters.owner === 'me' ? ownerId === user?.id : ownerId !== user?.id);
+  const folders = useMemo(() => {
+    if (!filtersActive) return rawFolders;
+    // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
+    if (filters.type !== 'all' && filters.type !== 'folders') return [];
+    return rawFolders.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFolders, filters, user?.id]);
+  const files = useMemo(() => {
+    if (!filtersActive) return rawFiles;
+    if (filters.type === 'folders') return [];
+    return rawFiles.filter(
+      (f) =>
+        (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
+        ownerOk(f.ownerId) &&
+        driveMatchesModified(f.updatedAt, filters.modified),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFiles, filters, user?.id]);
   /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -467,7 +499,15 @@ function DrivePageContent() {
 
   /** Itens sendo arrastados agora (ficam esmaecidos até soltar). */
   const [draggingKeys, setDraggingKeys] = useState<Set<string>>(new Set());
-  const onDragStateChange = useCallback((keys: string[] | null) => setDraggingKeys(new Set(keys ?? [])), []);
+  const onDragStateChange = useCallback((keys: string[] | null) => {
+    setDraggingKeys(new Set(keys ?? []));
+    // Arrastar um item que não estava selecionado: ele passa a ficar selecionado (e volta assim se o arrasto for cancelado).
+    if (keys && keys.length === 1) {
+      const only = keys[0]!;
+      setSelection((prev) => (prev.includes(only) ? prev : [only]));
+      selectionAnchor.current = only;
+    }
+  }, []);
 
   /** Ao arrastar um item selecionado, leva a seleção toda (só o que é seu pode ser movido). */
   const dragItemsFor = (item: DriveDragItem): DriveDragItem[] => {
@@ -478,6 +518,13 @@ function DrivePageContent() {
     }
     return [item];
   };
+
+  // Enquanto arrasta, o breadcrumb do topo "acende" (as pastas de cima viram alvos de soltar).
+  useEffect(() => {
+    if (draggingKeys.size === 0) return;
+    document.documentElement.setAttribute('data-drive-drag', '');
+    return () => document.documentElement.removeAttribute('data-drive-drag');
+  }, [draggingKeys]);
 
   const topBreadcrumbTrail = useMemo(() => {
     if (!isMyDriveView) {
@@ -492,12 +539,21 @@ function DrivePageContent() {
     if (breadcrumb.length === 0) return null;
     const podeCompartilhar = !!currentFolderId && !!currentFolderMeta?.canManageShares;
     return [
-      { label: 'Meu Drive', onClick: () => goToFolder(undefined) },
+      {
+        label: 'Meu Drive',
+        onClick: () => goToFolder(undefined),
+        onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, null),
+      },
       ...breadcrumb.map((crumb, i) => {
         const ultima = i === breadcrumb.length - 1;
         return {
           label: crumb.name,
-          ...(ultima ? {} : { onClick: () => goToFolder(crumb.id) }),
+          ...(ultima
+            ? {}
+            : {
+                onClick: () => goToFolder(crumb.id),
+                onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, crumb.id),
+              }),
           ...(ultima && podeCompartilhar
             ? {
                 action: {
@@ -802,7 +858,7 @@ function DrivePageContent() {
       queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
     },
   });
-  const soltarEmPasta = (items: DriveDragItem[], targetFolderId: string) => {
+  const soltarEmPasta = (items: DriveDragItem[], targetFolderId: string | null) => {
     if (items.length === 1) {
       moveItemMut.mutate({ type: items[0]!.type, id: items[0]!.id, destinoId: targetFolderId });
       return;
@@ -1434,8 +1490,10 @@ function DrivePageContent() {
               )}
             </div>
 
+            <DriveFilters filters={filters} onChange={setFilters} />
+
             <DriveSelectionBar
-              count={selectedItems.length}
+              count={draggingKeys.size > 0 ? 0 : selectedItems.length}
               trashMode={isTrashView}
               busy={bulkMoveMut.isPending || bulkDeleteMut.isPending || bulkRestoreMut.isPending}
               onMove={() => setBulkMoveItems(selectedItems.map(({ type, id }) => ({ type, id })))}
@@ -1501,7 +1559,9 @@ function DrivePageContent() {
               )}
             </div>
             <p className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">
-              {searchQuery
+              {filtersActive
+                ? 'Nenhum item com esses filtros'
+                : searchQuery
                 ? 'Nenhum resultado encontrado'
                 : driveView === 'shared'
                   ? 'Nada compartilhado com você'
@@ -1514,7 +1574,9 @@ function DrivePageContent() {
                         : 'Pasta vazia'}
             </p>
             <p className="mx-auto mb-6 max-w-sm text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery
+              {filtersActive
+                ? 'Mude ou limpe os filtros para ver os outros itens.'
+                : searchQuery
                 ? 'Tente uma busca diferente'
                 : driveView === 'shared'
                   ? 'Quando alguém compartilhar uma pasta com você, ela aparecerá aqui.'
@@ -1528,7 +1590,7 @@ function DrivePageContent() {
                           ? 'Faça upload de arquivos ou crie uma nova pasta para começar.'
                           : 'Esta pasta foi compartilhada com acesso somente leitura.'}
             </p>
-            {!searchQuery && isMyDriveView && canWriteInCurrentFolder && (
+            {!searchQuery && !filtersActive && isMyDriveView && canWriteInCurrentFolder && (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -2146,7 +2208,8 @@ function GridView({
                     tabIndex={0}
                     draggable={!trashMode && !!onMove && (canMoveOthers || folder.ownerId === currentUserId)}
                     data-drive-item
-                    style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
+                    data-drive-key={`folder-${folder.id}`}
+style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                     onDragStart={(e) => {
                       const items = dragItemsFor({ type: 'folder', id: folder.id });
                       startDriveItemDrag(e, items);
@@ -2306,7 +2369,8 @@ function GridView({
                     tabIndex={0}
                     draggable={!trashMode && !!onMove && (canMoveOthers || isOwnerFile(file))}
                     data-drive-item
-                    style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
+                    data-drive-key={`file-${file.id}`}
+style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
                     onDragStart={(e) => {
                       const items = dragItemsFor({ type: 'file', id: file.id });
                       startDriveItemDrag(e, items);
