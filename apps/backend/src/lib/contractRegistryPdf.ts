@@ -90,6 +90,13 @@ function artsText(arts: RegistryPdfArt[]): string {
   return lista.map((a) => (a.professional ? `${a.art} (${a.professional})` : a.art)).join('; ');
 }
 
+/** Uma ART por linha ("número (profissional)"), para a coluna não quebrar no meio do número. */
+function artsLines(arts: RegistryPdfArt[]): string {
+  const lista = arts.filter((a) => a.art);
+  if (!lista.length) return '—';
+  return lista.map((a) => (a.professional ? `${a.art} (${a.professional})` : a.art)).join('\n');
+}
+
 type Doc = InstanceType<typeof PDFDocument>;
 
 function ensureSpace(doc: Doc, height: number) {
@@ -245,13 +252,13 @@ function fichaDoContrato(doc: Doc, c: RegistryPdfContract, today: string) {
     table(
       doc,
       [
-        { label: 'Nº', width: 24 },
-        { label: 'Assinatura', width: 60 },
+        { label: 'Nº', width: 48 },
+        { label: 'Assinatura', width: 56 },
         { label: 'Vigência', width: 108 },
         { label: 'Valor', width: 70, align: 'right' },
-        { label: 'Garantia', width: 54 },
-        { label: 'ARTs', width: 100 },
-        { label: 'Observação', width: 84 },
+        { label: 'Garantia', width: 50 },
+        { label: 'ARTs', width: 136 },
+        { label: 'Obs.', width: 44 },
       ],
       c.addenda.map((a) => [
         a.addendumNumber || '—',
@@ -259,7 +266,7 @@ function fichaDoContrato(doc: Doc, c: RegistryPdfContract, today: string) {
         a.startDate || a.endDate ? `${dateBr(a.startDate)} a ${dateBr(a.endDate)}` : '—',
         brl(a.amount),
         a.guarantee || '—',
-        artsText(a.arts),
+        artsLines(a.arts),
         a.note || '—',
       ])
     );
