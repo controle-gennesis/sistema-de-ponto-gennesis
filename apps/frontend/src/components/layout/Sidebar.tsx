@@ -469,8 +469,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const canSeeCentralAtendimentos =
     isAdministrator || can(pk('/ponto/conversas-whatsapp'));
   const canSeeAtendimentoContabil =
-    isAdministrator ||
+    isAdministrator ||
     can(pk('/ponto/dp-contabilidade'));
+  const canSeeSolicitacoesContabilidade =
+    isAdministrator || can(pk('/ponto/solicitacoes-contabilidade'));
 
   const { data: chatUnreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
@@ -510,6 +512,39 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
+
+  // Pedidos concluídos pela Contabilidade que o DP ainda precisa finalizar.
+  const { data: paraEncerrarCount = 0 } = useQuery({
+    queryKey: ['dp-para-encerrar-count'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/contabilidade/para-encerrar-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeSolicitacoesContabilidade && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
+
+  // Mensagens novas nas conversas dos pedidos à Contabilidade (mesma consulta do sino: cache compartilhado).
+  const { data: dpMessagesUnreadForBadge } = useQuery({
+    queryKey: ['dp-request-unread-messages'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/mensagens/nao-lidas');
+      return (res.data?.data ?? { count: 0, items: [] }) as {
+        count: number;
+        items: Array<{ requestId: string; displayNumber: number; title: string; unread: number; area: string; accounting?: boolean }>;
+      };
+    },
+    enabled: (canSeeAtendimentoContabil || canSeeSolicitacoesContabilidade) && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
+  const accountingUnreadMessages = (dpMessagesUnreadForBadge?.items ?? [])
+    .filter((i) => i.accounting)
+    .reduce((sum, i) => sum + i.unread, 0);
 
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
@@ -651,7 +686,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/solicitacoes-ferramentas') return toolRentalSuppliesPendingCount;
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
-    if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount;
+    if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount + accountingUnreadMessages;
+    if (href === '/ponto/solicitacoes-contabilidade') return paraEncerrarCount + accountingUnreadMessages;
     if (href === '/ponto/contratos') return mensalReportPendingCount;
     if (href === '/ponto/empreiteiros') {
       return pathname?.startsWith('/ponto/empreiteiros') ? 0 : empreitaMedicoesAprovadasCount;

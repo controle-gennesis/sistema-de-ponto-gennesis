@@ -8069,6 +8069,19 @@ function montarNomeArquivoOrcamento(opts: {
   const pastaPrimeiro = codigoBruto.match(/^(.+?)\s*-\s*(N[ºo°.]?\s*\d+)$/i);
   const codigo = pastaPrimeiro ? `${pastaPrimeiro[2].replace(/\s+/g, '')} - ${pastaPrimeiro[1].trim()}` : codigoBruto;
   const descricao = sanitizarTrechoArquivo(opts.descricao || '');
+  if (opts.semTipo) {
+    // Padrão do orçamento: "79_XX.2026_TAG - DESCRIÇÃO" (nº da pasta sem "Nº", ponto entre sigla e ano,
+    // "_" entre as partes, sem o prefixo "Orcamento - ").
+    const numPasta = pastaPrimeiro ? pastaPrimeiro[2].replace(/\D+/g, '') : '';
+    const sigla = (pastaPrimeiro ? pastaPrimeiro[1] : codigoBruto).replace(/\s*-\s*/g, '.').replace(/\s+/g, '');
+    const desc = descricao.replace(/^Or[cç]amento\s*-\s*/i, '').trim();
+    const nome = [numPasta, sigla, desc.toLowerCase() === opts.tipo.toLowerCase() ? '' : desc]
+      .filter(Boolean)
+      .join('_')
+      .slice(0, 120)
+      .trim();
+    return `${nome || opts.tipo}.${opts.ext}`;
+  }
   // O nº da pasta vem primeiro; depois o tipo do arquivo e a descrição.
   const partes: string[] = [];
   if (codigo) partes.push(codigo);

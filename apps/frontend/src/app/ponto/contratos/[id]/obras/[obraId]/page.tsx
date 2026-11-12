@@ -363,19 +363,12 @@ export default function ObraDoContratoPage() {
                           className={`flex min-w-9 flex-1 flex-col items-center gap-1 rounded-lg py-2 text-xs transition-colors ${
                             future ? 'cursor-not-allowed opacity-40' : ''
                           } ${
-                            isToday
-                              ? future
+                            // Fundo só nos fins de semana; o estado do dia aparece na cor do número e no marcador.
+                            weekend
+                              ? `bg-gray-100 dark:bg-gray-800 ${future ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`
+                              : future
                                 ? ''
                                 : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                              : status === 'work'
-                              ? `bg-green-100 dark:bg-green-900/30 ${future ? '' : 'hover:bg-green-200 dark:hover:bg-green-900/50'}`
-                              : status === 'none'
-                                ? `bg-red-100 dark:bg-red-900/30 ${future ? '' : 'hover:bg-red-200 dark:hover:bg-red-900/50'}`
-                                : weekend
-                                  ? `bg-gray-100 dark:bg-gray-800 ${future ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`
-                                  : future
-                                    ? ''
-                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                           }`}
                         >
                           <span className={`font-medium ${tone ?? 'text-gray-500'}`}>{WEEKDAY_LETTER[wd]}</span>

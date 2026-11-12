@@ -187,12 +187,39 @@ export async function announceAccountingDone(dpRequestId: string, actorUserId: s
   );
 }
 
+/** A Contabilidade cancelou o pedido: mensagem automática com o motivo + aviso para o DP. */
+export async function announceAccountingCancelled(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  reason?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const motivo = (reason ?? '').trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: motivo ? `Contabilidade cancelou o pedido. Motivo: ${motivo}` : 'Contabilidade cancelou o pedido.',
+    },
+  });
+  await markRead(row.id, actorUserId);
+  notifyParticipants(
+    row,
+    actorUserId,
+    `Pedido cancelado - solicitação nº ${row.displayNumber}`,
+    `${authorName} cancelou o pedido${motivo ? `: ${motivo.slice(0, 120)}` : '.'}`
+  );
+}
+
 export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     if (!req.user) throw createError('Usuário não autenticado', 401);
     const userId = req.user.id;
     const mods = await loadModules(userId, req.user.isAdmin);
-    if (!mods.admin && !mods.dp && !mods.adm && !mods.contab) {
+    if (!mods.admin && !mods.dp && !mods.adm && !mods.contab && !mods.acctPage) {
       res.json({ success: true, data: { count: 0, items: [] } });
       return;
     }
@@ -215,12 +242,18 @@ export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response
       .filter((r) => canAccess(mods, r))
       .map((r) => {
         const unread = Number(grouped.find((g) => g.requestId === r.id)?.unread ?? 0);
-        const area: 'adm' | 'dp' | 'contabilidade' = isAdmRow(r)
+        const accounting = !isAdmRow(r) && involvesAccounting(r);
+        // Onde abrir: pedidos da Contabilidade vão para a tela de quem acompanha (DP) ou de quem atende.
+        const area: 'adm' | 'dp' | 'contabilidade' | 'acct' = isAdmRow(r)
           ? 'adm'
-          : mods.dp
-            ? 'dp'
-            : 'contabilidade';
-        return { requestId: r.id, displayNumber: r.displayNumber, title: r.title, unread, area };
+          : accounting && mods.acctPage
+            ? 'acct'
+            : accounting && mods.contab
+              ? 'contabilidade'
+              : mods.dp
+                ? 'dp'
+                : 'contabilidade';
+        return { requestId: r.id, displayNumber: r.displayNumber, title: r.title, unread, area, accounting };
       })
       .sort((a, b) => b.displayNumber - a.displayNumber);
     res.json({
