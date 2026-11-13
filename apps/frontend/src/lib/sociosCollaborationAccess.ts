@@ -1,9 +1,17 @@
-/** Rotas de colaboração ocultas/bloqueadas para o setor Sócios (o Drive fica liberado). */
+/**
+ * Rotas ocultas/bloqueadas para o setor Sócios: colaboração (só o Drive fica liberado)
+ * e páginas gerais que não fazem parte do trabalho deles.
+ */
 export const SOCIOS_BLOCKED_COLLABORATION_ROUTES = [
   '/ponto/conversas',
   '/ponto/agenda',
   '/ponto/flow',
   '/ponto/kanban',
+  '/ponto/solicitacoes-gerais',
+  '/ponto/solicitar-combustivel',
+  '/ponto/reserva-veiculos',
+  '/ponto/central-de-ajuda',
+  '/ponto/treinamentos',
 ] as const;
 
 function normalizeDepartment(department?: string | null): string {

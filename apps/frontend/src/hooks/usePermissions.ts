@@ -792,7 +792,7 @@ export function useRoutePermission(route: string) {
     };
   }
 
-  // Setor Sócios: sem chat, agenda, flow, drive nem tasks
+  // Setor Sócios: sem chat, agenda, flow nem tasks (o Drive fica liberado), nem as páginas gerais bloqueadas
   if (!canAccessCollaborationTools && isSociosBlockedCollaborationPath(route)) {
     return { hasAccess: false, isLoading: false, canAccessContract };
   }

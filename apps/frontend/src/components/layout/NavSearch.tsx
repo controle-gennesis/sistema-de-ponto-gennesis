@@ -12,6 +12,7 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { resolveModuleCategoryIcon } from '@/lib/moduleNavIcons';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
+import { isSociosBlockedCollaborationPath } from '@/lib/sociosCollaborationAccess';
 
 type SearchItem = {
   name: string;
@@ -94,6 +95,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
       return catalog.filter((item) => item.href === '/ponto/empreiteiros');
     }
     return catalog.filter((item) => {
+      if (!canAccessCollaborationTools && isSociosBlockedCollaborationPath(item.href)) return false;
       if (
         item.href === '/ponto/agenda' ||
         item.href === '/ponto/conversas' ||

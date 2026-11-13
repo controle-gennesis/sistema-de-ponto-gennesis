@@ -317,6 +317,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
     canAccessDrive,
+    isDepartmentSocios,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
   } = usePermissions();
@@ -892,7 +893,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+            permission: !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitacoes-dp')))
           },
           {
             name: 'Frota',
@@ -901,7 +902,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Car,
             description: 'Solicitar reserva de veículos da frota',
             permission:
-              isAdministrator || can(pk('/ponto/reserva-veiculos'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/reserva-veiculos')))
           },
           {
             name: 'Abastecimento',
@@ -910,7 +911,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Fuel,
             description: 'Solicitar abastecimento de veículos',
             permission:
-              isAdministrator || can(pk('/ponto/solicitar-combustivel'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitar-combustivel')))
           },
           {
             name: 'Alterações de Ponto',
@@ -966,7 +967,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/treinamentos',
             icon: GraduationCap,
             description: 'Videoaulas, avaliações e certificados',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
           {
             name: 'Central de Ajuda',
@@ -974,7 +975,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/central-de-ajuda',
             icon: HelpCircle,
             description: 'Guias e tutoriais passo a passo do sistema',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
         ]
       },
@@ -1949,6 +1950,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     .map((href) => railAtalhosByHref.get(href))
     .filter((item): item is (typeof railAtalhosDisponiveis)[number] => item != null);
 
+  // Só um atalho disponível (ex.: Sócios, só com o Drive): mostra ele direto e dispensa o botão "Atalhos".
+  const railSoUmAtalho = railAtalhosDisponiveis.length === 1;
+  const railFavoritosMostrados = railSoUmAtalho ? railAtalhosDisponiveis : railFavoritosVisiveis;
+
   const favoritosHrefSet = new Set(railFavoritosVisiveis.map((i) => i.href));
   const atalhosBadgeOculto =
     (favoritosHrefSet.has('/ponto/conversas') ? 0 : chatUnreadCount) +
@@ -2619,7 +2624,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           {showRailAtalhos ? (
           <div className="relative z-20 flex flex-shrink-0 flex-col items-center overflow-visible px-2 pb-4 [@media(max-height:820px)]:pb-2">
             <div className="flex flex-col items-center gap-2 [@media(max-height:820px)]:gap-1">
-              {railFavoritosVisiveis.map((item, favIndex) => {
+              {railFavoritosMostrados.map((item, favIndex) => {
                 const active = isFooterShortcutActive(item.href);
                 return (
                   <SidebarRailTooltip
@@ -2656,6 +2661,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   </SidebarRailTooltip>
                 );
               })}
+              {!railSoUmAtalho ? (
               <SidebarRailTooltip
                 label="Atalhos"
                 enterIndex={menuItems.length + 1 + railFavoritosVisiveis.length}
@@ -2710,6 +2716,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   <NotificationCountBadge count={atalhosBadgeOculto} rail />
                 </button>
               </SidebarRailTooltip>
+              ) : null}
             </div>
             {menuAtalhosRail && (
               <ActionMenuOverlay
