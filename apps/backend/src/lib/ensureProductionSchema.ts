@@ -927,6 +927,7 @@ async function ensureDpRequestAccountingDirectEnums(prisma: PrismaClient): Promi
     { enumName: 'DpRequestType', value: 'SOLICITACAO_GERAL' },
     { enumName: 'DpRequestType', value: 'CONTAB_ADMISSAO' },
     { enumName: 'DpRequestType', value: 'CONTAB_AFASTAMENTO' },
+    { enumName: 'DpRequestType', value: 'CONTAB_ATESTADO' },
     { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_FUNCAO' },
     { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_SALARIAL' },
     { enumName: 'DpRequestType', value: 'CONTAB_FERIAS' },
@@ -1691,12 +1692,17 @@ async function ensurePncpTables(prisma: PrismaClient): Promise<void> {
 }
 
 async function ensureDpContabilidadeTables(prisma: PrismaClient): Promise<void> {
+  // Banco já criado antes do tipo ATESTADO: garante o valor no enum.
+  await prisma
+    .$executeRawUnsafe(`ALTER TYPE "DpContabilidadeRequestType" ADD VALUE IF NOT EXISTS 'ATESTADO'`)
+    .catch(() => undefined);
   // Tabelas próprias do módulo DP/Contabilidade (sem vínculo com dp_requests).
   await prisma.$executeRawUnsafe(`
     DO $$ BEGIN
       CREATE TYPE "DpContabilidadeRequestType" AS ENUM (
         'ADMISSAO',
         'AFASTAMENTO',
+        'ATESTADO',
         'ALTERACAO_FUNCAO',
         'ALTERACAO_SALARIAL',
         'CONVENCAO_COLETIVA',

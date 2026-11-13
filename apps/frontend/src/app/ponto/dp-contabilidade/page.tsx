@@ -68,6 +68,7 @@ const QUERY_KEY = 'dp-contabilidade';
 const REQUEST_TYPES = [
   'ADMISSAO',
   'AFASTAMENTO',
+  'ATESTADO',
   'ALTERACAO_FUNCAO',
   'ALTERACAO_SALARIAL',
   'CONVENCAO_COLETIVA',
@@ -141,6 +142,7 @@ type ListResponse = {
 const TYPE_LABELS: Record<RequestType, string> = {
   ADMISSAO: 'Admissão',
   AFASTAMENTO: 'Afastamento',
+  ATESTADO: 'Atestado',
   ALTERACAO_FUNCAO: 'Alteração de Função',
   ALTERACAO_SALARIAL: 'Alteração Salarial',
   CONVENCAO_COLETIVA: 'Convenção Coletiva / CCT',

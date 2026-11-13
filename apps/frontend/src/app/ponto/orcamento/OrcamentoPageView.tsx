@@ -16807,6 +16807,41 @@ export function OrcamentoPageView({
     });
   };
 
+  /** Mescla (span > 1) ou desfaz (span <= 1) células de Descrição/Detalhes a partir da linha `idx`. */
+  const definirMesclagemMedicao = (
+    itemKey: string,
+    campo: 'mesclaDescricao' | 'mesclaDetalhes',
+    idx: number,
+    span: number
+  ) => {
+    if (gradeTravadaRef.current) return;
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey];
+      if (!base) return prev;
+      const atual = dimensoesComLinhasEfetivas(base, 'un');
+      if (!atual.linhas[idx]) return prev;
+      const campoTexto = campo === 'mesclaDescricao' ? 'descricao' : 'detalhes';
+      const linhas = atual.linhas.map((ln, i) => {
+        if (i === idx) {
+          const nova: LinhaMedicao = { ...ln };
+          if (span > 1) nova[campo] = span;
+          else delete nova[campo];
+          return nova;
+        }
+        if (span > 1 && i > idx && i < idx + span) {
+          // Como no Excel, só o texto da célula de cima permanece.
+          const nova: LinhaMedicao = { ...ln };
+          delete nova[campo];
+          if (campoTexto === 'descricao') nova.descricao = '';
+          else delete nova.detalhes;
+          return nova;
+        }
+        return ln;
+      });
+      return aplicarVinculosMemoria({ ...prev, [itemKey]: { ...atual, linhas } });
+    });
+  };
+
   const limparLinhasVaziasTodasMemorias = () => {
     if (gradeTravadaRef.current) return;
     const meta = metaMemoriaIncluidaRef.current;
@@ -22407,7 +22442,7 @@ export function OrcamentoPageView({
                                                 addLinhaCabecalhoSecaoMedicao
                                               }
                                               removeLinhaMedicao={removeLinhaMedicao}
-                                              mesclarLinhasMedicao={mesclarLinhasMedicao}
+                                              definirMesclagemMedicao={definirMesclagemMedicao}
                                               estiloTitulo={estiloLinhaItemOrc(
                                                 aparenciaMemorial,
                                                 isDark

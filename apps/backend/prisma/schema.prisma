@@ -800,6 +800,7 @@ enum DpRequestType {
   // Pedidos criados direto para a Contabilidade (prefixo CONTAB_ porque os nomes sem prefixo já são do fluxo do DP)
   CONTAB_ADMISSAO
   CONTAB_AFASTAMENTO
+  CONTAB_ATESTADO
   CONTAB_ALTERACAO_FUNCAO
   CONTAB_ALTERACAO_SALARIAL
   CONTAB_FERIAS
@@ -880,6 +881,7 @@ model DpRequest {
 enum DpContabilidadeRequestType {
   ADMISSAO
   AFASTAMENTO
+  ATESTADO
   ALTERACAO_FUNCAO
   ALTERACAO_SALARIAL
   CONVENCAO_COLETIVA

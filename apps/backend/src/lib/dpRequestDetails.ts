@@ -247,6 +247,7 @@ export const ACCOUNTING_DIRECT_REQUEST_TYPES = [
   // Têm prefixo CONTAB_ porque Admissão, Férias e Rescisão já existem no fluxo do DP.
   'CONTAB_ADMISSAO',
   'CONTAB_AFASTAMENTO',
+  'CONTAB_ATESTADO',
   'CONTAB_ALTERACAO_FUNCAO',
   'CONTAB_ALTERACAO_SALARIAL',
   'CONTAB_FERIAS',
@@ -368,6 +369,21 @@ const contabAfastamentoDetails = z.object({
   observacoes: str,
   anexos: accountingAnexosField,
 });
+
+const contabAtestadoDetails = z
+  .object({
+    employeeId: str,
+    dataInicial: str,
+    dataFinal: str,
+    numeroDias: numeroDiasField,
+    observacoes: strOpt,
+    anexos: accountingAnexosField,
+  })
+  .superRefine((data, ctx) => {
+    if (!data.anexos || data.anexos.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['anexos'], message: 'Anexe o atestado' });
+    }
+  });
 
 const contabAlteracaoFuncaoDetails = z
   .object({
@@ -531,6 +547,7 @@ export const dpDetailsSchemas = {
   SOLICITACAO_GERAL: solicitacaoGeralDetails,
   CONTAB_ADMISSAO: contabAdmissaoDetails,
   CONTAB_AFASTAMENTO: contabAfastamentoDetails,
+  CONTAB_ATESTADO: contabAtestadoDetails,
   CONTAB_ALTERACAO_FUNCAO: contabAlteracaoFuncaoDetails,
   CONTAB_ALTERACAO_SALARIAL: contabAlteracaoSalarialDetails,
   CONTAB_FERIAS: contabFeriasDetails,

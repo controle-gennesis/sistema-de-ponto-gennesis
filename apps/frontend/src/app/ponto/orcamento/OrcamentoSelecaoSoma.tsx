@@ -147,10 +147,13 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
     }
     lista.forEach((cx, i) => {
       const el = camada!.children[i] as HTMLElement;
-      const left = cx.l - rootRect.left - root.clientLeft + root.scrollLeft;
-      const top = cx.t - rootRect.top - root.clientTop + root.scrollTop;
-      const w = cx.r - cx.l;
-      const h = cx.b - cx.t;
+      // Alinha aos pixels do dispositivo (bordas fracionárias deixavam a lateral direita 1px para dentro).
+      const dpr = window.devicePixelRatio || 1;
+      const px = (n: number) => Math.round(n * dpr) / dpr;
+      const left = px(cx.l - rootRect.left - root.clientLeft + root.scrollLeft);
+      const top = px(cx.t - rootRect.top - root.clientTop + root.scrollTop);
+      const w = px(cx.r - rootRect.left - root.clientLeft + root.scrollLeft) - left;
+      const h = px(cx.b - rootRect.top - root.clientTop + root.scrollTop) - top;
       if (el.style.left !== `${left}px`) el.style.left = `${left}px`;
       if (el.style.top !== `${top}px`) el.style.top = `${top}px`;
       if (el.style.width !== `${w}px`) el.style.width = `${w}px`;
