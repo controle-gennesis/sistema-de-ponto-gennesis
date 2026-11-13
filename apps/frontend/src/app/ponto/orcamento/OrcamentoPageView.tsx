@@ -7774,6 +7774,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   commitOnChange = true,
   disabled = false,
   somenteLeitura = false,
+  editarComDuploClique = false,
 }: {
   id?: string;
   draftKey?: string;
@@ -7797,7 +7798,15 @@ const FdCampoLocal = memo(function FdCampoLocal({
   disabled?: boolean;
   /** Orçamento travado: dá para entrar na célula e ver a fórmula, mas nada é editado nem gravado. */
   somenteLeitura?: boolean;
+  /**
+   * Como na memória de cálculo: um clique seleciona a célula (mostra o valor, sem cursor) e já dá para
+   * alterar digitando (o texto digitado substitui o conteúdo). A fórmula só abre no duplo clique, no Enter ou no F2.
+   */
+  editarComDuploClique?: boolean;
 }) {
+  const [editando, setEditando] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inativo = editarComDuploClique && !editando;
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
   );
@@ -7869,9 +7878,39 @@ const FdCampoLocal = memo(function FdCampoLocal({
     else if (mode === 'live') scheduleCommit(next);
   };
 
+  /**
+   * Começa a edição da célula já focada (duplo clique, Enter, F2 ou tecla digitada).
+   * `inicial` = texto digitado (substitui o conteúdo); sem ele, abre com a fórmula para editar.
+   */
+  const iniciarEdicao = (inicial?: string) => {
+    if (disabled) return;
+    setEditando(true);
+    focusedRef.current = true;
+    setFocadoVisual(true);
+    if (!somenteLeitura && inicial !== undefined) {
+      applyValue(inicial, 'local');
+    } else {
+      const edit = String(editOnFocusRef.current ?? '').trim();
+      if (edit) {
+        localRef.current = edit;
+        setLocal(edit);
+        if (draftKey && !somenteLeitura) fdCampoDrafts.set(draftKey, edit);
+      }
+    }
+    onFocusExtraRef.current?.();
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const fim = el.value.length;
+      el.setSelectionRange(fim, fim);
+    });
+  };
+
   const pintar = Boolean(colorirFormula) && focadoVisual && local.trimStart().startsWith('=');
   const campo = (
     <input
+      ref={inputRef}
       id={id}
       type="text"
       inputMode={inputMode}
@@ -7880,14 +7919,22 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
-      readOnly={somenteLeitura}
+      readOnly={somenteLeitura || inativo}
+      onDoubleClick={() => {
+        if (inativo) iniciarEdicao();
+      }}
       data-formula={focadoVisual && local.trimStart().startsWith('=') ? 'true' : undefined}
       className={`${pintar ? `${className ?? ''} !text-transparent` : className ?? ''}${
         somenteLeitura ? ' pointer-events-auto select-text' : ''
-      }`}
+      }${inativo ? ' !caret-transparent cursor-cell selection:bg-transparent' : ''}`}
       value={local}
       onFocus={() => {
         if (disabled) return;
+        // Só selecionada (um clique ou Tab): mostra o valor, sem abrir a fórmula.
+        if (inativo) {
+          focusedRef.current = true;
+          return;
+        }
         if (somenteLeitura) {
           focusedRef.current = true;
           setFocadoVisual(true);
@@ -7912,6 +7959,24 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onKeyDown={(e) => {
         if (disabled) return;
+        if (inativo) {
+          if (e.key === 'Escape') {
+            e.currentTarget.blur();
+            return;
+          }
+          if (e.key === 'Enter' || e.key === 'F2') {
+            e.preventDefault();
+            e.stopPropagation();
+            iniciarEdicao();
+            return;
+          }
+          // Digitar numa célula selecionada troca o conteúdo (como na memória de cálculo).
+          if (!somenteLeitura && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete')) {
+            e.preventDefault();
+            iniciarEdicao(e.key.length === 1 ? e.key : '');
+          }
+          return;
+        }
         if (somenteLeitura) {
           if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
           return;
@@ -7924,6 +7989,9 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onBlur={(e) => {
         focusedRef.current = false;
         setFocadoVisual(false);
+        setEditando(false);
+        // Só selecionada (nada digitado): não grava nem mexe na fórmula guardada.
+        if (inativo) return;
         onBlurExtraRef.current?.();
         if (disabled) return;
         if (somenteLeitura) {
@@ -22804,6 +22872,7 @@ export function OrcamentoPageView({
                                       >
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={
                                               row.quantidade === 0
                                                 ? ''
@@ -22961,6 +23030,7 @@ export function OrcamentoPageView({
                                           <FdCampoLocal
                                             id={inputId}
                                             draftKey={`orc-${colDef.campo}:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={formatarMoedaCampoOrc(colDef.valor)}
                                             editValueOnFocus={formulaFoco}
                                             colorirFormula={

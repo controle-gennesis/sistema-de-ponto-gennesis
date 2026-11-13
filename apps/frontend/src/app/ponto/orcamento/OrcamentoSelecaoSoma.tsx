@@ -66,7 +66,8 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
   faixasRef.current = faixas;
   const ancoraRef = useRef<{ linha: HTMLTableRowElement; col: string } | null>(null);
   const arrastandoRef = useRef(false);
-  const estilosRef = useRef(new Map<HTMLElement, { sombra: string }>());
+  /** Camada com os contornos vermelhos (dentro da área que rola, para acompanhar as células). */
+  const camadaRef = useRef<HTMLDivElement | null>(null);
   const [resumo, setResumo] = useState<{ soma: number; media: number; qtd: number; tipos: Set<TipoColuna> } | null>(null);
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
 
@@ -85,13 +86,13 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
     (root: HTMLElement) => {
       const linhas = Array.from(root.querySelectorAll('tbody > tr')) as HTMLTableRowElement[];
       const cols = colunasVisiveis(root);
-      const out: Array<{ td: HTMLTableCellElement; col: string; borda: { t: boolean; b: boolean; l: boolean; r: boolean } }> = [];
-      for (const f of faixasRef.current) {
+      const out: Array<{ td: HTMLTableCellElement; col: string; faixa: number }> = [];
+      faixasRef.current.forEach((f, fi) => {
         const ia = linhas.indexOf(f.linhaA);
         const ib = linhas.indexOf(f.linhaB);
         const ca = cols.indexOf(f.colA);
         const cb = cols.indexOf(f.colB);
-        if (ia < 0 || ib < 0 || ca < 0 || cb < 0) continue;
+        if (ia < 0 || ib < 0 || ca < 0 || cb < 0) return;
         const [l1, l2] = ia <= ib ? [ia, ib] : [ib, ia];
         const [c1, c2] = ca <= cb ? [ca, cb] : [cb, ca];
         for (let li = l1; li <= l2; li++) {
@@ -100,43 +101,61 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
             if (!(col in COLUNAS_NUMERICAS)) continue;
             const td = linhas[li]!.querySelector(`:scope > td[data-orc-col="${col}"]`) as HTMLTableCellElement | null;
             if (!td) continue;
-            out.push({ td, col, borda: { t: li === l1, b: li === l2, l: ci === c1, r: ci === c2 } });
+            out.push({ td, col, faixa: fi });
           }
         }
-      }
+      });
       return out;
     },
     [colunasVisiveis],
   );
 
-  /** Pinta o contorno da seleção e recalcula o resumo e a posição do balão. */
+  /** Desenha o contorno da seleção e recalcula o resumo e a posição do balão. */
   const atualizar = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
     const cels = celulasDasFaixas(root);
-    const novos = new Set<HTMLElement>(cels.map((c) => c.td));
 
-    // Tira o destaque do que saiu da seleção.
-    for (const [el, orig] of estilosRef.current) {
-      if (!novos.has(el) || !el.isConnected) {
-        if (el.isConnected) {
-          el.style.boxShadow = orig.sombra;
-        }
-        estilosRef.current.delete(el);
-      }
+    // Contorno: uma caixa por faixa, desenhada por cima das linhas da tabela (as divisórias das células não a cortam).
+    if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
+    let camada = camadaRef.current;
+    if (!camada || !camada.isConnected) {
+      camada = document.createElement('div');
+      camada.setAttribute('data-orc-soma-camada', '');
+      camada.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:6;';
+      root.appendChild(camada);
+      camadaRef.current = camada;
     }
-    for (const { td, borda } of cels) {
-      if (!estilosRef.current.has(td)) {
-        estilosRef.current.set(td, { sombra: td.style.boxShadow });
-      }
-      const partes: string[] = [];
-      if (borda.t) partes.push(`inset 0 2px 0 ${COR}`);
-      if (borda.b) partes.push(`inset 0 -2px 0 ${COR}`);
-      if (borda.l) partes.push(`inset 2px 0 0 ${COR}`);
-      if (borda.r) partes.push(`inset -2px 0 0 ${COR}`);
-      const sombra = partes.join(', ');
-      if (td.style.boxShadow !== sombra) td.style.boxShadow = sombra;
+    const rootRect = root.getBoundingClientRect();
+    const caixas = new Map<number, { l: number; t: number; r: number; b: number }>();
+    for (const { td, faixa } of cels) {
+      const r = td.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const cx = caixas.get(faixa) ?? { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
+      cx.l = Math.min(cx.l, r.left);
+      cx.t = Math.min(cx.t, r.top);
+      cx.r = Math.max(cx.r, r.right);
+      cx.b = Math.max(cx.b, r.bottom);
+      caixas.set(faixa, cx);
     }
+    const lista = [...caixas.values()];
+    while (camada.children.length > lista.length) camada.lastElementChild?.remove();
+    while (camada.children.length < lista.length) {
+      const el = document.createElement('div');
+      el.style.cssText = `position:absolute;box-sizing:border-box;border:2px solid ${COR};`;
+      camada.appendChild(el);
+    }
+    lista.forEach((cx, i) => {
+      const el = camada!.children[i] as HTMLElement;
+      const left = cx.l - rootRect.left - root.clientLeft + root.scrollLeft;
+      const top = cx.t - rootRect.top - root.clientTop + root.scrollTop;
+      const w = cx.r - cx.l;
+      const h = cx.b - cx.t;
+      if (el.style.left !== `${left}px`) el.style.left = `${left}px`;
+      if (el.style.top !== `${top}px`) el.style.top = `${top}px`;
+      if (el.style.width !== `${w}px`) el.style.width = `${w}px`;
+      if (el.style.height !== `${h}px`) el.style.height = `${h}px`;
+    });
 
     // Resumo: soma, média e quantidade de células com número (sem repetir células de faixas que se cruzam).
     let soma = 0;
@@ -234,10 +253,12 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
         if (faixasRef.current.length) limpar();
         return;
       }
-      const emCampo = !!alvo.closest('input, textarea');
+      const campo = alvo.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+      // Campo só para leitura (célula ainda não aberta para edição) não conta como "estar digitando".
+      const emCampo = !!campo && !campo.readOnly;
       const modificador = e.shiftKey || e.ctrlKey || e.metaKey;
       // Com Shift/Ctrl o clique é da seleção (não do texto do campo).
-      if (modificador && emCampo) e.preventDefault();
+      if (modificador && campo) e.preventDefault();
 
       const unica: Faixa = { linhaA: cel.linha, linhaB: cel.linha, colA: cel.col, colB: cel.col };
       if (e.shiftKey && ancoraRef.current) {
@@ -298,13 +319,8 @@ export function OrcamentoSelecaoSoma({ rootRef }: { rootRef: React.RefObject<HTM
       document.removeEventListener('mousedown', aoPressionarFora);
       document.removeEventListener('keydown', aoTecla);
       root.style.userSelect = '';
-      // Sai da tela: devolve o estilo original das células.
-      for (const [el, orig] of estilosRef.current) {
-        if (el.isConnected) {
-          el.style.boxShadow = orig.sombra;
-        }
-      }
-      estilosRef.current.clear();
+      camadaRef.current?.remove();
+      camadaRef.current = null;
     };
   }, [rootRef]);
 
