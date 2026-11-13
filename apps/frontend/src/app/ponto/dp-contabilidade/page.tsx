@@ -110,6 +110,8 @@ type DpContabilidadeRequest = {
   /** Dados estruturados da solicitação interna criada direto para a Contabilidade. */
   source?: {
     displayNumber: number;
+    /** Etapa da solicitação de origem (WAITING_RETURN_ACCOUNTING = devolvida para ajuste). */
+    status?: string;
     requestType: string;
     details: unknown;
     company: string | null;
@@ -157,6 +159,13 @@ const STATUS_LABELS: Record<RequestStatus, string> = {
   CONCLUDED: 'Concluída',
   CANCELLED: 'Cancelada',
 };
+
+const RETURNED_LABEL = 'Devolvida para ajuste';
+const RETURNED_BADGE = 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
+
+/** Devolvida ao solicitante: o card fica parado até ele corrigir e reenviar. */
+const isReturned = (r: { status: RequestStatus; source?: { status?: string } | null }) =>
+  r.source?.status === 'WAITING_RETURN_ACCOUNTING' && (r.status === 'OPEN' || r.status === 'IN_PROGRESS');
 
 const STATUS_BADGE: Record<RequestStatus, string> = {
   OPEN: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
@@ -242,7 +251,7 @@ export default function DpContabilidadePage() {
   const [selected, setSelected] = useState<DpContabilidadeRequest | null>(null);
   const [selectedTab, setSelectedTab] = useState<'detalhes' | 'timeline' | 'comentarios'>('detalhes');
   const [commentBody, setCommentBody] = useState('');
-  const [confirmAction, setConfirmAction] = useState<'CONCLUDED' | 'CANCELLED' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'CONCLUDED' | 'CANCELLED' | 'RETURN' | null>(null);
   const [confirmComment, setConfirmComment] = useState('');
   useEffect(() => {
     setSelectedTab('detalhes');
@@ -427,6 +436,20 @@ export default function DpContabilidadePage() {
     onError: (err) => toast.error(apiErrorMessage(err, 'Não foi possível atualizar o status.')),
   });
 
+  const returnMutation = useMutation({
+    mutationFn: async ({ sourceId, comment }: { sourceId: string; comment: string }) => {
+      await api.post(`/solicitacoes-dp/${sourceId}/devolver-contabilidade`, { comment });
+    },
+    onSuccess: () => {
+      toast.success('Pedido devolvido ao solicitante para ajuste.');
+      setConfirmAction(null);
+      setConfirmComment('');
+      setSelected(null);
+      invalidateList();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'Não foi possível devolver o pedido.')),
+  });
+
   const clearFilters = () => {
     setSearch('');
     setDebouncedSearch('');
@@ -458,8 +481,8 @@ export default function DpContabilidadePage() {
     {
       label: 'Status',
       value: (
-        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[r.status]}`}>
-          {STATUS_LABELS[r.status]}
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${isReturned(r) ? RETURNED_BADGE : STATUS_BADGE[r.status]}`}>
+          {isReturned(r) ? RETURNED_LABEL : STATUS_LABELS[r.status]}
         </span>
       ),
     },
@@ -513,17 +536,18 @@ export default function DpContabilidadePage() {
     return steps;
   };
 
+  const selectedReturned = !!selected && isReturned(selected);
   const canActOnSelected =
-    selected?.status === 'OPEN' || selected?.status === 'IN_PROGRESS';
+    (selected?.status === 'OPEN' || selected?.status === 'IN_PROGRESS') && !selectedReturned;
 
   // Concluir e cancelar pedem confirmação; o texto já digitado na caixa de mensagem segue junto.
-  const openConfirm = (action: 'CONCLUDED' | 'CANCELLED') => {
+  const openConfirm = (action: 'CONCLUDED' | 'CANCELLED' | 'RETURN') => {
     setConfirmComment(commentBody);
     setConfirmAction(action);
   };
 
   const closeConfirm = () => {
-    if (statusMutation.isPending) return;
+    if (statusMutation.isPending || returnMutation.isPending) return;
     setConfirmAction(null);
     setConfirmComment('');
   };
@@ -531,6 +555,15 @@ export default function DpContabilidadePage() {
   const submitConfirm = () => {
     if (!selected || !confirmAction) return;
     const comment = confirmComment.trim();
+    if (confirmAction === 'RETURN') {
+      if (!selected.sourceDpRequestId) return;
+      if (comment.length < 3) {
+        toast.error('Informe o que precisa ser ajustado.');
+        return;
+      }
+      returnMutation.mutate({ sourceId: selected.sourceDpRequestId, comment });
+      return;
+    }
     if (confirmAction === 'CANCELLED' && comment.length < 3) {
       toast.error('Informe o motivo do cancelamento.');
       return;
@@ -723,9 +756,9 @@ export default function DpContabilidadePage() {
                               </td>
                               <td className="px-3 py-3 align-middle text-center sm:px-6">
                                 <span
-                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[row.status]}`}
+                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${isReturned(row) ? RETURNED_BADGE : STATUS_BADGE[row.status]}`}
                                 >
-                                  {STATUS_LABELS[row.status]}
+                                  {isReturned(row) ? RETURNED_LABEL : STATUS_LABELS[row.status]}
                                 </span>
                               </td>
                               <RowActionMenuCell
@@ -821,7 +854,12 @@ export default function DpContabilidadePage() {
                     />
                   ) : null}
 
-                  {!canActOnSelected ? (
+                  {selectedReturned ? (
+                    <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900 dark:border-orange-800/60 dark:bg-orange-950/30 dark:text-orange-200">
+                      Pedido devolvido ao solicitante para ajuste. Ele volta para a sua fila quando for corrigido e
+                      reenviado.
+                    </div>
+                  ) : !canActOnSelected ? (
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                       Esta solicitação está encerrada e permanece disponível apenas para consulta.
                     </p>
@@ -850,6 +888,16 @@ export default function DpContabilidadePage() {
                           Concluir
                         </Button>
                       </>
+                    ) : null}
+                    {canActOnSelected && selected.sourceDpRequestId ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="!border-orange-300 !text-orange-700 hover:!bg-orange-50 dark:!border-orange-800 dark:!text-orange-300 dark:hover:!bg-orange-950/30"
+                        onClick={() => openConfirm('RETURN')}
+                      >
+                        Devolver para ajuste
+                      </Button>
                     ) : null}
                     {canActOnSelected && selected.sourceDpRequestId ? (
                       <Button
@@ -917,25 +965,39 @@ export default function DpContabilidadePage() {
         <Modal
           isOpen={!!selected && !!confirmAction}
           onClose={closeConfirm}
-          title={confirmAction === 'CANCELLED' ? 'Cancelar solicitação' : 'Concluir solicitação'}
+          title={
+            confirmAction === 'RETURN'
+              ? 'Devolver para ajuste'
+              : confirmAction === 'CANCELLED'
+                ? 'Cancelar solicitação'
+                : 'Concluir solicitação'
+          }
           size="md"
         >
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-300">
-              {confirmAction === 'CANCELLED'
+              {confirmAction === 'RETURN'
+                ? 'O pedido volta para o solicitante corrigir os dados ou anexar o que falta. Quando ele reenviar, o atendimento continua daqui.'
+                : confirmAction === 'CANCELLED'
                 ? 'Ao cancelar, a solicitação é encerrada e não poderá ser reaberta. Ela permanece no histórico.'
                 : 'Ao concluir, a solicitação é encerrada e não poderá ser reaberta. Ela permanece no histórico.'}
             </p>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {confirmAction === 'CANCELLED' ? 'Motivo do cancelamento' : 'Mensagem (opcional)'}
+                {confirmAction === 'RETURN'
+                  ? 'O que precisa ser ajustado'
+                  : confirmAction === 'CANCELLED'
+                    ? 'Motivo do cancelamento'
+                    : 'Mensagem (opcional)'}
               </label>
               <textarea
                 value={confirmComment}
                 onChange={(e) => setConfirmComment(e.target.value)}
                 maxLength={4000}
                 placeholder={
-                  confirmAction === 'CANCELLED'
+                  confirmAction === 'RETURN'
+                    ? 'Ex.: falta o ASO do colaborador / a data de admissão está incorreta...'
+                    : confirmAction === 'CANCELLED'
                     ? 'Explique por que está cancelando...'
                     : 'Registre uma observação final, se quiser...'
                 }
@@ -954,12 +1016,14 @@ export default function DpContabilidadePage() {
               <Button
                 type="button"
                 variant={confirmAction === 'CANCELLED' ? 'error' : 'success'}
-                disabled={statusMutation.isPending}
+                disabled={statusMutation.isPending || returnMutation.isPending}
                 onClick={submitConfirm}
               >
-                {statusMutation.isPending
+                {statusMutation.isPending || returnMutation.isPending
                   ? 'Salvando...'
-                  : confirmAction === 'CANCELLED'
+                  : confirmAction === 'RETURN'
+                    ? 'Devolver pedido'
+                    : confirmAction === 'CANCELLED'
                     ? 'Cancelar solicitação'
                     : 'Concluir solicitação'}
               </Button>

@@ -101,6 +101,23 @@ router.post(
   requireAnyModuleAccess([manageModule, accountingModule]),
   contabilidadeController.concludeFromDp.bind(contabilidadeController)
 );
+// O solicitante cancela uma solicitação contábil enviada errada (antes da Contabilidade concluir)
+router.post(
+  '/:id/cancelar-contabilidade',
+  requireModuleAccess(myModule),
+  contabilidadeController.cancelFromRequester.bind(contabilidadeController)
+);
+// A Contabilidade devolve o pedido para o solicitante ajustar; ele corrige e reenvia
+router.post(
+  '/:id/devolver-contabilidade',
+  requireDpContabilidadeAccess,
+  contabilidadeController.returnForAdjustment.bind(contabilidadeController)
+);
+router.put(
+  '/:id/ajustar-contabilidade',
+  requireModuleAccess(myModule),
+  contabilidadeController.resubmitAfterAdjustment.bind(contabilidadeController)
+);
 router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
 
 export default router;
