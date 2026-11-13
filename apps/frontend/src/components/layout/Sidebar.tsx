@@ -316,6 +316,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    canAccessDrive,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
   } = usePermissions();
@@ -1860,7 +1861,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveMaterialRequests ||
     canApproveEmpreiteiroDaily;
 
-  const showRailAtalhos = canAccessCollaborationTools || canSeeAprovacoesAtalho;
+  const showRailAtalhos = canAccessCollaborationTools || canAccessDrive || canSeeAprovacoesAtalho;
 
   useEffect(() => {
     setRailFavorites(readRailFavorites());
@@ -1914,7 +1915,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             badge: 0,
           }
         : null,
-      canAccessCollaborationTools
+      canAccessDrive
         ? {
             href: '/ponto/drive' as const,
             label: 'Meu Drive',
@@ -2257,7 +2258,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (!sidebarHydrated) return;
     if (isLoading && menuItems.length === 0) return;
     if (railEnterPlayedRef.current) return;
-    if (menuItems.length === 0 && !canAccessCollaborationTools && !canSeeAprovacoesAtalho) return;
+    if (menuItems.length === 0 && !canAccessCollaborationTools && !canAccessDrive && !canSeeAprovacoesAtalho) return;
 
     railEnterPlayedRef.current = true;
     setRailEnterClass(false);

@@ -1,9 +1,8 @@
-/** Rotas de colaboração ocultas/bloqueadas para o setor Sócios. */
+/** Rotas de colaboração ocultas/bloqueadas para o setor Sócios (o Drive fica liberado). */
 export const SOCIOS_BLOCKED_COLLABORATION_ROUTES = [
   '/ponto/conversas',
   '/ponto/agenda',
   '/ponto/flow',
-  '/ponto/drive',
   '/ponto/kanban',
 ] as const;
 
