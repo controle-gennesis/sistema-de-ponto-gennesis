@@ -35,7 +35,7 @@ export const CONTABIL_TYPE_LABELS: Record<ContabilFormRequestType, string> = {
   SOLICITACAO_GERAL: 'Solicitação Geral',
   CONTAB_ADMISSAO: 'Admissão',
   CONTAB_AFASTAMENTO: 'Afastamento',
-  CONTAB_ATESTADO: 'Atestado',
+  CONTAB_ATESTADO: 'Atestados',
   CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
   CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
   CONTAB_FERIAS: 'Férias',
@@ -492,25 +492,11 @@ export function ContabilSolicitacaoTypeFields({
       );
       break;
 
-    case 'CONTAB_ATESTADO': {
-      const diasEntre = (ini: string, fim: string) => {
-        const a = Date.parse(`${ini}T00:00:00`);
-        const b = Date.parse(`${fim}T00:00:00`);
-        if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '';
-        return String(Math.round((b - a) / 86400000) + 1);
-      };
+    case 'CONTAB_ATESTADO':
       fields = (
-        <>
-          {employeeSelect('employeeId', 'Nome do colaborador', true)}
-          <DateField label="Data inicial do atestado" value={text('dataInicial')} onChange={(v) => patchDetails({ dataInicial: v, numeroDias: diasEntre(v, text('dataFinal')) || text('numeroDias') })} required />
-          <DateField label="Data final do atestado" value={text('dataFinal')} onChange={(v) => patchDetails({ dataFinal: v, numeroDias: diasEntre(text('dataInicial'), v) || text('numeroDias') })} required />
-          <TextField label="Nº de dias de afastamento" value={text('numeroDias')} onChange={(v) => patchDetails({ numeroDias: v.replace(/\D/g, '') })} required placeholder="Ex.: 3" />
-          <div className="hidden md:block" />
-          <TextAreaField label="Observações" value={text('observacoes')} onChange={set('observacoes')} placeholder="Informações adicionais (opcional)" />
-        </>
+        <TextAreaField label="Observações" value={text('observacoes')} onChange={set('observacoes')} placeholder="Informações adicionais (opcional)" />
       );
       break;
-    }
 
     case 'CONTAB_ALTERACAO_FUNCAO': {
       const alteracaoSalarial = text('alteracaoSalarial');

@@ -95,13 +95,7 @@ const FIELDS_BY_TYPE: Record<string, FieldDef[]> = {
     { key: 'dataPrevistaTermino', label: 'Data prevista de término', kind: 'date' },
     { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
   ],
-  CONTAB_ATESTADO: [
-    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
-    { key: 'dataInicial', label: 'Data inicial do atestado', kind: 'date' },
-    { key: 'dataFinal', label: 'Data final do atestado', kind: 'date' },
-    { key: 'numeroDias', label: 'Nº de dias de afastamento' },
-    { key: 'observacoes', label: 'Observações', kind: 'long' },
-  ],
+  CONTAB_ATESTADO: [{ key: 'observacoes', label: 'Observações', kind: 'long' }],
   CONTAB_ALTERACAO_FUNCAO: [
     { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
     { key: 'funcaoAtual', label: 'Função atual' },

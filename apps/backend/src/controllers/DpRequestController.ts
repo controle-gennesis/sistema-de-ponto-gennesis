@@ -763,7 +763,7 @@ export class DpRequestController {
         SOLICITACAO_GERAL: 'Solicitação Geral',
         CONTAB_ADMISSAO: 'Admissão',
         CONTAB_AFASTAMENTO: 'Afastamento',
-        CONTAB_ATESTADO: 'Atestado',
+        CONTAB_ATESTADO: 'Atestados',
         CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
         CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
         CONTAB_FERIAS: 'Férias',

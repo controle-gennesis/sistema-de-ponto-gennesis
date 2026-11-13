@@ -370,12 +370,9 @@ const contabAfastamentoDetails = z.object({
   anexos: accountingAnexosField,
 });
 
+/** Atestados seguem num arquivo único por empresa (todos da semana juntos): sem colaborador por pedido. */
 const contabAtestadoDetails = z
   .object({
-    employeeId: str,
-    dataInicial: str,
-    dataFinal: str,
-    numeroDias: numeroDiasField,
     observacoes: strOpt,
     anexos: accountingAnexosField,
   })

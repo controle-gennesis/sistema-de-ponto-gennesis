@@ -142,7 +142,7 @@ type ListResponse = {
 const TYPE_LABELS: Record<RequestType, string> = {
   ADMISSAO: 'Admissão',
   AFASTAMENTO: 'Afastamento',
-  ATESTADO: 'Atestado',
+  ATESTADO: 'Atestados',
   ALTERACAO_FUNCAO: 'Alteração de Função',
   ALTERACAO_SALARIAL: 'Alteração Salarial',
   CONVENCAO_COLETIVA: 'Convenção Coletiva / CCT',

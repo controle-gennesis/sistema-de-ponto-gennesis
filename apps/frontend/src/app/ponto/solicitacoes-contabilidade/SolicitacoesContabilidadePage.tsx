@@ -570,6 +570,7 @@ export function SolicitacoesContabilidadePage() {
     mutationFn: async () => {
       if (!form.requestType) throw new Error('Selecione o tipo de solicitação');
       if (!form.costCenterId) throw new Error('Selecione a unidade');
+      if (form.requestType === 'CONTAB_ATESTADO' && !form.company) throw new Error('Selecione a empresa (o atestado é enviado por empresa)');
 
       const anexosPayload: Record<string, unknown>[] = [];
       for (let i = 0; i < anexos.length; i++) {
@@ -1038,7 +1039,9 @@ export function SolicitacoesContabilidadePage() {
                 />
               </div>
               <div className="min-w-0">
-                <label className="mb-1 block text-sm font-medium">Empresa</label>
+                <label className="mb-1 block text-sm font-medium">
+                  Empresa{form.requestType === 'CONTAB_ATESTADO' ? <span className="text-red-600"> *</span> : null}
+                </label>
                 <SingleSelectSearchDropdown
                   value={form.company}
                   onChange={(company) => setForm((p) => ({ ...p, company }))}

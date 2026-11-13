@@ -19,7 +19,7 @@ const INTERNA_TYPE_LABELS: Record<string, string> = {
   SOLICITACAO_GERAL: 'Solicitação geral',
   CONTAB_ADMISSAO: 'Admissão',
   CONTAB_AFASTAMENTO: 'Afastamento',
-  CONTAB_ATESTADO: 'Atestado',
+  CONTAB_ATESTADO: 'Atestados',
   CONTAB_ALTERACAO_FUNCAO: 'Alteração de função',
   CONTAB_ALTERACAO_SALARIAL: 'Alteração salarial',
   CONTAB_FERIAS: 'Férias',
