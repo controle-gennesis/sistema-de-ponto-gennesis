@@ -31,11 +31,18 @@ import {
   Moon,
   Sun,
   ChevronRight,
+  BellRing,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
+import PunchRemindersSheet, { punchReminderSummary } from '../components/PunchRemindersSheet';
+import {
+  DEFAULT_PUNCH_REMINDER_PREFS,
+  readPunchReminderPrefs,
+  type PunchReminderPrefs,
+} from '../notifications/punchReminders';
 import UserAvatar from '../components/UserAvatar';
 import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 import { api } from '../services/api';
@@ -66,6 +73,13 @@ export default function ProfileScreen() {
   const { user, updateUser, logout, biometric, enableBiometrics, disableBiometrics } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const [reminderPrefs, setReminderPrefs] = useState<PunchReminderPrefs>(DEFAULT_PUNCH_REMINDER_PREFS);
+  const showReminders = !!user?.employee && user.employee.requiresTimeClock !== false && !user.empreiteiro;
+
+  React.useEffect(() => {
+    if (user?.id) void readPunchReminderPrefs(user.id).then(setReminderPrefs);
+  }, [user?.id]);
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdCurrent, setPwdCurrent] = useState('');
   const [pwdNew, setPwdNew] = useState('');
@@ -431,6 +445,27 @@ export default function ProfileScreen() {
 
           <Text style={styles.sectionTitle}>Preferências</Text>
           <View style={styles.sectionCard}>
+            {showReminders ? (
+              <>
+                <TouchableOpacity
+                  style={styles.bioRow}
+                  onPress={() => setRemindersOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.infoIcon}>
+                    <BellRing size={18} color={colors.primary} strokeWidth={2} />
+                  </View>
+                  <View style={styles.infoText}>
+                    <Text style={styles.infoValue}>Lembretes de ponto</Text>
+                    <Text style={[styles.infoLabel, { marginTop: 2, marginBottom: 0 }]}>
+                      {punchReminderSummary(reminderPrefs)}
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2} />
+                </TouchableOpacity>
+                <View style={styles.divider} />
+              </>
+            ) : null}
             <View style={styles.bioRow}>
               <View style={styles.infoIcon}>
                 {isDark ? (
@@ -451,6 +486,12 @@ export default function ProfileScreen() {
               />
             </View>
           </View>
+
+          <PunchRemindersSheet
+            visible={remindersOpen}
+            onClose={() => setRemindersOpen(false)}
+            onChange={setReminderPrefs}
+          />
 
           <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout} activeOpacity={0.8}>
             <LogOut size={18} color={colors.primary} strokeWidth={2.2} />

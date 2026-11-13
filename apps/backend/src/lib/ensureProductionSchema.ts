@@ -925,6 +925,12 @@ async function ensureDpRequestAccountingDirectEnums(prisma: PrismaClient): Promi
     { enumName: 'DpRequestType', value: 'REALOCACAO_COLABORADOR' },
     { enumName: 'DpRequestType', value: 'RETIFICACAO_RECALCULO' },
     { enumName: 'DpRequestType', value: 'SOLICITACAO_GERAL' },
+    { enumName: 'DpRequestType', value: 'CONTAB_ADMISSAO' },
+    { enumName: 'DpRequestType', value: 'CONTAB_AFASTAMENTO' },
+    { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_FUNCAO' },
+    { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_SALARIAL' },
+    { enumName: 'DpRequestType', value: 'CONTAB_FERIAS' },
+    { enumName: 'DpRequestType', value: 'CONTAB_RESCISAO' },
     { enumName: 'DpRequestType', value: 'ADM_OUTROS' },
     { enumName: 'DpRequestStatus', value: 'IN_ACCOUNTING' },
   ];

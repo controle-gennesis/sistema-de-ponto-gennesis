@@ -68,12 +68,12 @@ export function DriveSidebar({
   const used = storage?.usedBytes ?? 0;
 
   return (
-    <aside className="flex w-full shrink-0 flex-col">
+    <aside className="drive-sidebar flex w-full shrink-0 flex-col">
       {onNew ? (
         <button
           type="button"
           onClick={(e) => onNew(e.currentTarget.getBoundingClientRect())}
-          className="mb-4 flex h-12 w-full items-center justify-start gap-2 rounded-xl bg-red-600 px-4 text-base font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800"
+          className="mb-4 flex h-12 w-full items-center justify-start gap-2 rounded-xl bg-red-600 px-4 text-base font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800 dark:bg-red-950/40 dark:text-red-300 dark:shadow-none dark:ring-1 dark:ring-inset dark:ring-red-800/60 dark:hover:bg-red-900/40 dark:active:bg-red-900/60"
           aria-label="Novo"
           aria-haspopup="menu"
         >

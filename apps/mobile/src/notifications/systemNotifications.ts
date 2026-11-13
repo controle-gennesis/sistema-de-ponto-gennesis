@@ -30,6 +30,10 @@ type NotificationsModule = {
   requestPermissionsAsync: () => Promise<{ status: string }>;
   scheduleNotificationAsync: (opts: Record<string, unknown>) => Promise<unknown>;
   setBadgeCountAsync: (count: number) => Promise<unknown>;
+  getAllScheduledNotificationsAsync: () => Promise<
+    Array<{ identifier: string; content?: { data?: Record<string, unknown> } }>
+  >;
+  cancelScheduledNotificationAsync: (identifier: string) => Promise<unknown>;
   addNotificationResponseReceivedListener: (
     listener: (response: { notification: { request: { content: { data?: Record<string, unknown> } } } }) => void,
   ) => { remove: () => void };
@@ -195,4 +199,69 @@ export function addNotificationOpenListener(
   } catch {
     return () => undefined;
   }
+}
+
+// ── Lembretes de ponto (notificações locais agendadas no aparelho) ──────────────
+
+const PUNCH_REMINDER_KIND = 'punch-reminder';
+
+export type PunchReminderItem = {
+  at: Date;
+  title: string;
+  body: string;
+  punchType: string;
+};
+
+/** Lembretes só funcionam no app instalado/dev build (não no Expo Go Android nem na web). */
+export function punchRemindersSupported(): boolean {
+  return Platform.OS !== 'web' && !notificationsUnsupported;
+}
+
+/** Remove todos os lembretes de ponto já agendados (sem mexer nas outras notificações). */
+export async function cancelPunchReminders(): Promise<void> {
+  if (!punchRemindersSupported()) return;
+  const mod = getNotifications();
+  if (!mod) return;
+  try {
+    const all = await mod.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      all
+        .filter((n) => n.content?.data?.kind === PUNCH_REMINDER_KIND)
+        .map((n) => mod.cancelScheduledNotificationAsync(n.identifier)),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+/** Troca os lembretes agendados pelos informados. Devolve false se não houver permissão. */
+export async function replacePunchReminders(items: PunchReminderItem[]): Promise<boolean> {
+  if (!punchRemindersSupported()) return false;
+  const mod = getNotifications();
+  if (!mod) return false;
+  const ok = await ensureSystemNotificationPermissions();
+  if (!ok) return false;
+  await cancelPunchReminders();
+  try {
+    ensureHandler(mod);
+    for (const item of items) {
+      await mod.scheduleNotificationAsync({
+        content: {
+          title: item.title,
+          body: item.body,
+          sound: true,
+          data: { kind: PUNCH_REMINDER_KIND, punchType: item.punchType },
+          ...(Platform.OS === 'android' ? { color: '#ce3736' } : {}),
+        },
+        trigger: {
+          type: 'date',
+          date: item.at,
+          ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : {}),
+        },
+      });
+    }
+  } catch {
+    // não quebrar o app se o agendamento falhar
+  }
+  return true;
 }

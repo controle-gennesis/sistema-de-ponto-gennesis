@@ -32,7 +32,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
@@ -330,6 +330,46 @@ function pickLeadTimeColumnHeuristic(rows: Record<string, unknown>[], columnOrde
 }
 
 /** Etapas encerradas: não exibir coluna de lead time (Finalizada / Finalizado / rótulos com "finaliz"). */
+/** Cores do selo de cada etapa (claro/escuro). Etapas conhecidas têm cor fixa; as demais usam uma cor estável. */
+const ETAPA_BADGE_PALETTE = [
+  'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
+  'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
+  'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300',
+  'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300',
+  'bg-lime-100 text-lime-800 dark:bg-lime-900/30 dark:text-lime-300',
+  'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+  'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+];
+
+function etapaBadgeClass(label: string): string {
+  const n = label
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+  if (!n) return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  if (n.includes('finaliz') || n.includes('conclu')) return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+  if (n.includes('cancel') || n.includes('reprov') || n.includes('recus') || n.includes('rejeit'))
+    return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+  if (n.includes('pagamento')) return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300';
+  if (n.includes('aprova')) return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
+  if (n.includes('anexar') || n.includes(' nf')) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  if (n.startsWith('inicio')) return 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300';
+  let h = 0;
+  for (let i = 0; i < n.length; i += 1) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+  return ETAPA_BADGE_PALETTE[h % ETAPA_BADGE_PALETTE.length]!;
+}
+
+/** Etapa de finalizadas: o tempo desde a criação até agora não diz nada (o pedido já terminou). */
+function isEtapaFinalizada(etapaLabel: string): boolean {
+  const n = etapaLabel
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+  return n.includes('finaliz');
+}
+
 function isEtapaSemLeadTime(etapaLabel: string): boolean {
   const n = etapaLabel
     .normalize('NFD')
@@ -928,6 +968,19 @@ function rowMatchesFixedCostCenter(
   const code = normalizeFluigMatchText(fixed.code ?? '');
   const name = normalizeFluigMatchText(fixed.name ?? '');
   if (!code && !name) return true;
+  // G4 (e outros): a coluna CC vem vazia e o centro de custo está em CC_mobile, com o nome curto do contrato
+  // (ex.: " FHE " para "FHE - DF"). Compara sem pontuação/espaços, pelo começo do nome.
+  const compactar = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nomeCompacto = compactar(name);
+  if (nomeCompacto) {
+    for (const key of Object.keys(row)) {
+      if (!/^cc[\s_-]?mobile$/i.test(key.trim())) continue;
+      const v = compactar(normalizeFluigMatchText(fluigCellText(row[key])));
+      if (v.length >= 3 && (nomeCompacto === v || nomeCompacto.startsWith(v) || v.startsWith(nomeCompacto))) {
+        return true;
+      }
+    }
+  }
   for (const key of Object.keys(row)) {
     const n = key.toLowerCase().replace(/\s+/g, ' ').trim();
     const isCcKey =
@@ -1804,6 +1857,8 @@ export function FluigSolicitacoesPage({
 
   const getLeadTimeFromRow = (row: Record<string, unknown>): string => {
     if (!movimentoDataHoraCol) return '—';
+    // Na aba contratual (embutida), o lead time aparece também em "Todos": pedido finalizado não conta.
+    if (config?.embedded && isEtapaFinalizada(etapaLabelByRow.get(row) ?? '')) return '—';
     const date = parseCellDate(row[movimentoDataHoraCol]);
     return formatLeadTime(date);
   };
@@ -2809,9 +2864,15 @@ export function FluigSolicitacoesPage({
 
             {!error && !isEmpty && filteredStatusList.length > 0 && (() => {
               const [etapaAtual, rowsAtuais] = filteredStatusList[selectedEtapaIndex] ?? filteredStatusList[0];
-              const showCreationDateColumn = !!movimentoDataHoraCol;
               const showEtapaColumn = etapaAtual === FLUIG_TODOS_ETAPA_LABEL;
-              const showLeadTimeColumn = !!movimentoDataHoraCol && !isEtapaSemLeadTime(etapaAtual);
+              // Na aba do contrato (embutida): em "Todos" fica a Data de criação; nas etapas, o Lead time.
+              const showCreationDateColumn =
+                !!movimentoDataHoraCol && (!config?.embedded || etapaAtual === FLUIG_TODOS_ETAPA_LABEL);
+              const showLeadTimeColumn =
+                !!movimentoDataHoraCol &&
+                (config?.embedded
+                  ? etapaAtual !== FLUIG_TODOS_ETAPA_LABEL && !isEtapaFinalizada(etapaAtual)
+                  : !isEtapaSemLeadTime(etapaAtual));
               const getHistText = (r: Record<string, unknown>) => {
                 const val = r[produtosMobileCol ?? historicoCol];
                 if (val == null) return '—';
@@ -3011,7 +3072,7 @@ export function FluigSolicitacoesPage({
                       const thPad = 'py-4';
                       const tdPad = 'py-3';
                       const solicitacaoHeader = produtosMobileCol
-                        ? 'Produtos Mobile'
+                        ? 'Produtos'
                         : g5TitleDatasets.has(datasetId)
                           ? 'Título da Solicitação'
                           : 'Histórico';
@@ -3043,6 +3104,18 @@ export function FluigSolicitacoesPage({
                               totalPages={totalPages}
                             />
                           ) : null}
+                          {rowsAtuais.length === 0 ? (
+                            // Vazio padrão do sistema: sem cabeçalho de tabela, só o ícone, o título e a dica.
+                            <CadastroListEmpty
+                              icon={FileText}
+                              title={
+                                etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                  ? 'Nenhuma solicitação encontrada'
+                                  : 'Nenhuma solicitação nesta etapa'
+                              }
+                              hint="Ajuste a busca ou os filtros para ver outros resultados."
+                            />
+                          ) : (
                           <div className="table-scroll">
                             <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                               <thead
@@ -3187,15 +3260,17 @@ export function FluigSolicitacoesPage({
                               >
                                 {rowsToShow.length === 0 ? (
                                   <tr>
-                                    <td
-                                      colSpan={emptyColSpan}
-                                      className="px-5 py-12 text-center text-gray-500 dark:text-gray-400 text-sm"
-                                    >
-                                      Nenhuma solicitação
-                                      {etapaAtual === FLUIG_TODOS_ETAPA_LABEL
-                                        ? '.'
-                                        : ' nesta etapa.'}{' '}
-                                      Tente outro termo na busca ou limpe os filtros.
+                                    <td colSpan={emptyColSpan} className="px-5">
+                                      {/* Vazio padrão do sistema */}
+                                      <CadastroListEmpty
+                                        icon={FileText}
+                                        title={
+                                          etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                            ? 'Nenhuma solicitação encontrada'
+                                            : 'Nenhuma solicitação nesta etapa'
+                                        }
+                                        hint="Ajuste a busca ou os filtros para ver outros resultados."
+                                      />
                                     </td>
                                   </tr>
                                 ) : (
@@ -3236,7 +3311,7 @@ export function FluigSolicitacoesPage({
                                               className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300`}
                                             >
                                               <span
-                                                className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center align-middle"
+                                                className={`mx-auto inline-block max-w-[14rem] rounded-full px-2.5 py-1 text-center align-middle text-xs font-semibold leading-tight ${etapaBadgeClass(etapaLabelByRow.get(row) ?? '')}`}
                                                 title={etapaLabelByRow.get(row) || undefined}
                                               >
                                                 {etapaLabelByRow.get(row) || '—'}
@@ -3336,6 +3411,7 @@ export function FluigSolicitacoesPage({
                                           {showLeadTimeColumn && (
                                             <td
                                               className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums`}
+                                              title={`Criada em ${getCreationDateFromRow(row)}`}
                                             >
                                               {getLeadTimeFromRow(row)}
                                             </td>
@@ -3391,7 +3467,7 @@ export function FluigSolicitacoesPage({
                                         {showEtapaColumn && (
                                           <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle text-center">
                                             <span
-                                              className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center"
+                                              className={`mx-auto inline-block max-w-[14rem] rounded-full px-2.5 py-1 text-center text-xs font-semibold leading-tight ${etapaBadgeClass(etapaLabelByRow.get(row) ?? '')}`}
                                               title={etapaLabelByRow.get(row) || undefined}
                                             >
                                               {etapaLabelByRow.get(row) || '—'}
@@ -3407,7 +3483,10 @@ export function FluigSolicitacoesPage({
                                           </td>
                                         )}
                                         {showLeadTimeColumn && (
-                                          <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap text-center tabular-nums">
+                                          <td
+                                            className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap text-center tabular-nums"
+                                            title={`Criada em ${getCreationDateFromRow(row)}`}
+                                          >
                                             {getLeadTimeFromRow(row)}
                                           </td>
                                         )}
@@ -3437,6 +3516,7 @@ export function FluigSolicitacoesPage({
                               </tbody>
                             </table>
                           </div>
+                          )}
                           <ListPagination
                             currentPage={safePage}
                             totalPages={totalPages}

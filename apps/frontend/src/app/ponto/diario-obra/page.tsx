@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   CadastroListEmpty,
@@ -31,6 +33,14 @@ import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const PAGE_SIZE = 20;
+
+type Stage = 'all' | 'draft' | 'final' | 'none';
+const STAGES: Array<{ key: Stage; label: string }> = [
+  { key: 'all', label: 'Todos' },
+  { key: 'draft', label: 'Em preenchimento' },
+  { key: 'final', label: 'Finalizados' },
+  { key: 'none', label: 'Sem atividade' },
+];
 const WEEKDAYS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
 type DiarioRow = {
@@ -82,6 +92,7 @@ export default function DiarioObraListPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterContratoId, setFilterContratoId] = useState('');
   const [filterObraId, setFilterObraId] = useState('');
+  const [stage, setStage] = useState<Stage>('all');
   const [page, setPage] = useState(1);
 
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -144,10 +155,10 @@ export default function DiarioObraListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterContratoId, filterObraId]);
+  }, [debouncedSearch, filterContratoId, filterObraId, stage]);
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, page],
+    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, stage, page],
     queryFn: async () =>
       (
         await api.get('/diario-obra', {
@@ -155,11 +166,27 @@ export default function DiarioObraListPage() {
             search: debouncedSearch || undefined,
             contratoId: filterContratoId || undefined,
             obraId: filterObraId || undefined,
+            status: stage === 'all' ? undefined : stage,
             page,
             limit: PAGE_SIZE,
           },
         })
       ).data,
+  });
+
+  // Totais de cada etapa, com a busca e os filtros aplicados.
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['diario-obra-list', 'stats', debouncedSearch, filterContratoId, filterObraId],
+    queryFn: async () =>
+      (
+        await api.get('/diario-obra/stats', {
+          params: {
+            search: debouncedSearch || undefined,
+            contratoId: filterContratoId || undefined,
+            obraId: filterObraId || undefined,
+          },
+        })
+      ).data?.data as Record<Stage, number> | undefined,
   });
   const items: DiarioRow[] = listData?.data ?? [];
   const total: number = listData?.pagination?.total ?? 0;
@@ -224,7 +251,7 @@ export default function DiarioObraListPage() {
   }
 
   const activeFilters = !!(filterContratoId || filterObraId);
-  const hasFilters = !!(debouncedSearch || activeFilters);
+  const hasFilters = !!(debouncedSearch || activeFilters || stage !== 'all');
   const startItem = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const endItem = Math.min(page * PAGE_SIZE, total);
 
@@ -237,6 +264,39 @@ export default function DiarioObraListPage() {
             description="Gerencie os diários de obra"
           />
 
+          <div className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas dos diários de obra"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGES.map((st) => {
+                const active = stage === st.key;
+                return (
+                  <React.Fragment key={st.key}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStage(st.key)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {st.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={loadingStats ? 0 : (statsData?.[st.key] ?? 0)} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {st.key === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
+          </div>
+
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
@@ -245,7 +305,9 @@ export default function DiarioObraListPage() {
                     <BookOpen className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Diários de Obra</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {stage === 'all' ? 'Diários de Obra' : STAGES.find((x) => x.key === stage)?.label}
+                    </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">{total} cadastrado(s)</p>
                   </div>
                 </div>
@@ -326,7 +388,7 @@ export default function DiarioObraListPage() {
                         <tr>
                           <th className={cadastroListClasses.th}>Data</th>
                           <th className={cadastroListClasses.th}>Contrato</th>
-                          <th className={`${cadastroListClasses.th} !text-center`}>Situação</th>
+                          <th className={`${cadastroListClasses.th} !text-center`}>Status</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Atividades</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Equipe</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Ocorrências</th>
@@ -362,7 +424,7 @@ export default function DiarioObraListPage() {
                                     : it.noActivity
                                       ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                       : it.activities > 0
-                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                         : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                 }`}
                               >
@@ -371,8 +433,8 @@ export default function DiarioObraListPage() {
                                   : it.noActivity
                                     ? 'Sem atividade'
                                     : it.activities > 0
-                                      ? 'Preenchido'
-                                      : 'Em branco'}
+                                      ? 'Em preenchimento'
+                                      : 'Em preenchimento'}
                               </span>
                             </td>
                             <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">{it.activities}</td>

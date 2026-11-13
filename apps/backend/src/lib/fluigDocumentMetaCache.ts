@@ -83,6 +83,25 @@ async function fetchOne(fluig: FluigService, id: string): Promise<FluigDocumentM
 }
 
 async function fetchMissing(fluig: FluigService, ids: string[]): Promise<FluigDocumentMeta[]> {
+  // Vários anexos novos: tenta UMA consulta ao dataset com a lista de ids.
+  if (ids.length >= 2) {
+    const batch = await fluig.getDocumentFileMetasBatch(ids).catch(() => null);
+    if (batch) {
+      if (batch.unavailable) {
+        // Fluig fora do ar: não adianta consultar um por um (só repetiria o erro).
+        return ids.map((id) => ({ documentId: id, filename: null, empty: false, url: null }));
+      }
+      const resto = ids.filter((id) => !batch.metas.has(id));
+      const restoMetas = resto.length > 0 ? await fetchEach(fluig, resto) : [];
+      const porId = new Map<string, FluigDocumentMeta>(batch.metas);
+      for (const m of restoMetas) porId.set(m.documentId, m);
+      return ids.map((id) => porId.get(id) ?? { documentId: id, filename: null, empty: false, url: null });
+    }
+  }
+  return fetchEach(fluig, ids);
+}
+
+async function fetchEach(fluig: FluigService, ids: string[]): Promise<FluigDocumentMeta[]> {
   const out: FluigDocumentMeta[] = new Array(ids.length);
   let cursor = 0;
   const workers = Array.from({ length: Math.min(FETCH_CONCURRENCY, ids.length) }, async () => {

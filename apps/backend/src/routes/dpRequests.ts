@@ -9,7 +9,7 @@ import {
   postDpRequestMessage,
 } from '../lib/dpRequestMessages';
 import { authenticate, requireAdministrator } from '../middleware/auth';
-import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
+import { requireAnyModuleAccess, requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DpRequestController } from '../controllers/DpRequestController';
 import { DpContabilidadeController } from '../controllers/DpContabilidadeController';
@@ -58,6 +58,11 @@ router.get(
   requireModuleAccess(accountingModule),
   controller.getAccountingRequests.bind(controller)
 );
+router.get(
+  '/contabilidade/para-encerrar-count',
+  requireModuleAccess(accountingModule),
+  controller.getAccountingToCloseCount.bind(controller)
+);
 router.post('/', requireModuleAccess(myModule), controller.createRequest.bind(controller));
 router.put('/:id/requester-return', requireModuleAccess(myModule), controller.requesterReturn.bind(controller));
 
@@ -90,11 +95,28 @@ router.get(
   controller.getManageDetailsAdmTst.bind(controller)
 );
 router.put('/:id/dp-feedback', controller.dpFeedback.bind(controller));
-// O DP encerra o pedido ligado na Contabilidade (permissão de Gerenciar Solicitações do DP)
+// O DP encerra o pedido ligado na Contabilidade (a partir de Solicitações Contábeis; Gerenciar do DP também vale)
 router.post(
   '/:id/concluir-contabilidade',
-  requireModuleAccess(manageModule),
+  requireAnyModuleAccess([manageModule, accountingModule]),
   contabilidadeController.concludeFromDp.bind(contabilidadeController)
+);
+// O solicitante cancela uma solicitação contábil enviada errada (antes da Contabilidade concluir)
+router.post(
+  '/:id/cancelar-contabilidade',
+  requireModuleAccess(myModule),
+  contabilidadeController.cancelFromRequester.bind(contabilidadeController)
+);
+// A Contabilidade devolve o pedido para o solicitante ajustar; ele corrige e reenvia
+router.post(
+  '/:id/devolver-contabilidade',
+  requireDpContabilidadeAccess,
+  contabilidadeController.returnForAdjustment.bind(contabilidadeController)
+);
+router.put(
+  '/:id/ajustar-contabilidade',
+  requireModuleAccess(myModule),
+  contabilidadeController.resubmitAfterAdjustment.bind(contabilidadeController)
 );
 router.post('/:id/reenviar-contabilidade', controller.resendToAccounting.bind(controller));
 

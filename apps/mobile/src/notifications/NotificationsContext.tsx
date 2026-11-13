@@ -398,6 +398,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         navigationRef.navigate('KanbanCard', { cardId: data.cardId });
         return;
       }
+      if (data?.kind === 'punch-reminder' && navigationRef.isReady()) {
+        navigationRef.navigate('Punch');
+        return;
+      }
       const route =
         data?.kind === 'fuel'
           ? 'Combustivel'

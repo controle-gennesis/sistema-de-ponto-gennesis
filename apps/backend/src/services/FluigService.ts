@@ -130,6 +130,14 @@ const DATASET_BASE_PATHS = [
   '/webdesk/api/public',
 ];
 
+/** Erros do próprio servidor do Fluig (fora do ar / gateway). */
+function isFluigServerError(status?: number | null): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+/** Quantas falhas de servidor seguidas bastam para desistir do download (evita 8 tentativas inúteis). */
+const FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP = 2;
+
 export class FluigService {
   private baseUrl: string;
   private datasetBaseUrl: string;
@@ -626,7 +634,10 @@ export class FluigService {
   }
 
   /** Resolve URL temporária de download do documento no Fluig (GED). */
-  async getDocumentDownloadUrl(documentId: string): Promise<string | null> {
+  async getDocumentDownloadUrl(
+    documentId: string,
+    ctx?: { serverErrors: number }
+  ): Promise<string | null> {
     const id = String(documentId || '').trim();
     if (!/^\d+$/.test(id)) return null;
 
@@ -648,6 +659,11 @@ export class FluigService {
       } catch (err) {
         const status = (err as AxiosError)?.response?.status;
         console.warn(`Fluig: downloadURL falhou em ${path} (${status ?? 'erro'})`);
+        // Fluig fora do ar (502/503/504): insistir em outros endereços só repete a falha.
+        if (ctx && isFluigServerError(status)) {
+          ctx.serverErrors += 1;
+          if (ctx.serverErrors >= FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP) break;
+        }
       }
     }
     return null;
@@ -794,7 +810,10 @@ export class FluigService {
    * Dataset Fluig opcional que gera URL com `fluigAPI.getDocumentService().getDownloadURL`.
    * Env: FLUIG_DOCUMENT_URL_DATASET (padrão: DS_DownloadDocumento).
    */
-  private async getDocumentDownloadUrlViaDataset(documentId: string): Promise<string | null> {
+  private async getDocumentDownloadUrlViaDataset(
+    documentId: string,
+    ctx?: { serverErrors: number }
+  ): Promise<string | null> {
     const datasetId = (process.env.FLUIG_DOCUMENT_URL_DATASET || 'DS_DownloadDocumento').trim();
     if (!datasetId) return null;
     try {
@@ -832,6 +851,7 @@ export class FluigService {
       }
     } catch (err) {
       const status = (err as AxiosError)?.response?.status;
+      if (ctx && isFluigServerError(status)) ctx.serverErrors += 1;
       // Dataset ainda não publicado → 404/500; seguimos para os fallbacks.
       console.warn(
         `Fluig: dataset ${datasetId} para download falhou (${status ?? 'erro'}). ` +
@@ -919,6 +939,70 @@ export class FluigService {
     };
   }
 
+  /**
+   * Metadados de VÁRIOS anexos numa única consulta ao dataset (documentId = "101,102,103").
+   * Só funciona com a versão do DS_DownloadDocumento que aceita lista; com a versão antiga (um id
+   * por vez) devolve null e o chamador consulta um por um, como antes.
+   * - metas: o que veio resolvido (com link). Ids sem link ou com erro ficam de fora (o chamador refaz).
+   * - unavailable: o Fluig respondeu erro de servidor (502/503/504); não adianta consultar um por um.
+   */
+  async getDocumentFileMetasBatch(documentIds: string[]): Promise<{
+    metas: Map<string, { documentId: string; filename: string | null; empty: boolean; url: string | null }>;
+    unavailable: boolean;
+  } | null> {
+    const ids = Array.from(new Set(documentIds.map((v) => String(v || '').trim()).filter((v) => /^\d+$/.test(v)))).slice(0, 40);
+    if (ids.length < 2) return null;
+    if (Date.now() < FluigService.batchDatasetUnsupportedUntil) return null;
+
+    const datasetId = (process.env.FLUIG_DOCUMENT_URL_DATASET || 'DS_DownloadDocumento').trim();
+    if (!datasetId) return null;
+    const lista = ids.join(',');
+    let data: Awaited<ReturnType<FluigService['fetchDatasetDirect']>>;
+    try {
+      data = await this.fetchDatasetDirect(datasetId, {
+        constraints: [{ _field: 'documentId', _initialValue: lista, _finalValue: lista, _type: 1, _likeSearch: false }],
+      });
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status;
+      if (isFluigServerError(status)) return { metas: new Map(), unavailable: true };
+      return null;
+    }
+
+    const rows = data?.content?.values;
+    if (!Array.isArray(rows)) return null;
+    const wanted = new Set(ids);
+    const metas = new Map<string, { documentId: string; filename: string | null; empty: boolean; url: string | null }>();
+    let recognized = 0;
+    for (const raw of rows) {
+      const row = raw as Record<string, unknown>;
+      const docId = String(row.documentId ?? row.DOCUMENTID ?? row.documentid ?? '').trim();
+      if (!wanted.has(docId)) continue;
+      recognized += 1;
+      let url: string | null = null;
+      for (const key of Object.keys(row)) {
+        if (/url|download|link/i.test(key)) {
+          url = this.normalizeFluigFileUrl(String(row[key] ?? ''));
+          if (url) break;
+        }
+      }
+      if (!url) continue; // erro ou sem link: o chamador consulta esse id sozinho
+      if (this.isEmptyFluigVolumeUrl(url)) {
+        metas.set(docId, { documentId: docId, filename: null, empty: true, url });
+      } else {
+        metas.set(docId, { documentId: docId, filename: this.extractFilenameFromFluigVolumeUrl(url), empty: false, url });
+      }
+    }
+    if (recognized === 0) {
+      // Dataset antigo (não entende lista): não insiste por 10 minutos.
+      FluigService.batchDatasetUnsupportedUntil = Date.now() + 10 * 60 * 1000;
+      return null;
+    }
+    return { metas, unavailable: false };
+  }
+
+  /** Enquanto o dataset do Fluig não aceitar lista, não tenta a consulta em lote (ms desde 1970). */
+  private static batchDatasetUnsupportedUntil = 0;
+
   /** URLs do volume Fluig com size=0 / file vazio = documento sem conteúdo baixável. */
   private isEmptyFluigVolumeUrl(url: string): boolean {
     const params = this.parseFluigVolumeUrlParams(url);
@@ -983,10 +1067,18 @@ export class FluigService {
       if (reused.file) return reused.file;
     }
 
+    // Conta falhas de servidor do Fluig (502/503/504). Com 2 delas, para de tentar os outros caminhos.
+    const ctx = { serverErrors: 0 };
+    const fluigIndisponivel = () =>
+      Object.assign(
+        new Error('O Fluig está indisponível no momento (erro do servidor dele). Tente novamente em instantes.'),
+        { status: 502 }
+      );
     const urlCandidates: string[] = [];
-    const fromDataset = await this.getDocumentDownloadUrlViaDataset(id);
+    const fromDataset = await this.getDocumentDownloadUrlViaDataset(id, ctx);
     if (fromDataset) urlCandidates.push(fromDataset);
-    const fromApi = await this.getDocumentDownloadUrl(id);
+    const fromApi =
+      ctx.serverErrors >= FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP ? null : await this.getDocumentDownloadUrl(id, ctx);
     if (fromApi && !urlCandidates.includes(fromApi)) urlCandidates.push(fromApi);
 
     for (const u of urlCandidates) {
@@ -1000,6 +1092,10 @@ export class FluigService {
       }
     }
 
+    if (urlCandidates.length === 0 && ctx.serverErrors >= FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP) {
+      throw fluigIndisponivel();
+    }
+
     urlCandidates.push(
       `${this.domainBase()}/webdesk/streamcontrol/${encodeURIComponent(id)}/1000/${encodeURIComponent(id)}`
     );
@@ -1011,7 +1107,7 @@ export class FluigService {
     let lastError: Error | null = null;
     let hadDatasetOrApiUrl = Boolean(fromDataset || fromApi);
 
-    for (const url of urlCandidates) {
+    tentativas: for (const url of urlCandidates) {
       for (const auth of authModes) {
         try {
           const file = await this.fetchBinaryFromUrl(url, auth);
@@ -1030,12 +1126,19 @@ export class FluigService {
               e.message
             );
           }
+          if (isFluigServerError((err as AxiosError)?.response?.status ?? e.status)) {
+            ctx.serverErrors += 1;
+            if (ctx.serverErrors >= FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP) break tentativas;
+          }
         }
       }
     }
 
     if (lastPermissionError) {
       throw lastPermissionError;
+    }
+    if (ctx.serverErrors >= FLUIG_SERVER_ERRORS_BEFORE_GIVING_UP) {
+      throw fluigIndisponivel();
     }
     if (hadDatasetOrApiUrl) {
       throw Object.assign(

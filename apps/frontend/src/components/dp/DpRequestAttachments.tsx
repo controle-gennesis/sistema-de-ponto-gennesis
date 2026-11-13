@@ -3,11 +3,10 @@
 import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Download, FileText, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { Download, FileText, Loader2, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { downloadUploadFile } from '@/lib/downloadUploadFile';
-import { Button } from '@/components/ui/Button';
 
 type Attachment = {
   id: string;
@@ -79,8 +78,8 @@ export function DpRequestAttachments({
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{title}</p>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
         <input
           ref={inputRef}
           type="file"
@@ -92,14 +91,16 @@ export function DpRequestAttachments({
             e.target.value = '';
           }}
         />
-        <Button type="button" variant="outline" disabled={upload.isPending} onClick={() => inputRef.current?.click()}>
-          {upload.isPending ? (
-            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-          ) : (
-            <Paperclip className="mr-1.5 h-4 w-4" />
-          )}
-          {upload.isPending ? 'Enviando...' : 'Anexar documento'}
-        </Button>
+        <button
+          type="button"
+          title="Anexar documento"
+          aria-label="Anexar documento"
+          disabled={upload.isPending}
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+        >
+          {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        </button>
       </div>
       {isLoading ? (
         <div className="flex justify-center py-3">
@@ -114,7 +115,7 @@ export function DpRequestAttachments({
           {items.map((a) => (
             <div
               key={a.id}
-              className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800"
+              className="flex items-center gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-800/50"
             >
               <FileText className="h-5 w-5 shrink-0 text-gray-400" />
               <div className="min-w-0 flex-1">

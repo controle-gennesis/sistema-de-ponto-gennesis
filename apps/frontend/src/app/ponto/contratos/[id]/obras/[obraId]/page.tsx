@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, BookOpen, ChevronLeft, ChevronRight, ClipboardCheck, Plus, TriangleAlert, X } from 'lucide-react';
+import { Ban, BookOpen, Check, ChevronLeft, ChevronRight, ClipboardCheck, Plus, TriangleAlert, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -298,7 +298,10 @@ export default function ObraDoContratoPage() {
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
                       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
                         <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full bg-green-600 dark:bg-green-400" /> Com atividade
+                          <Check className="h-3 w-3 text-green-600 dark:text-green-400" strokeWidth={3} /> Finalizado
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-400" /> Em preenchimento
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                           <X className="h-3 w-3 text-red-600 dark:text-red-400" strokeWidth={3} /> Sem atividade
@@ -336,23 +339,34 @@ export default function ObraDoContratoPage() {
                       const future = iso > today;
                       const weekend = wd === 0 || wd === 6;
                       const row = byDate.get(iso);
-                      // verde = teve atividade; vermelho = sem atividade; sem cor = ainda não registrado
-                      const status: 'work' | 'none' | null = row ? (row.noActivity ? 'none' : 'work') : null;
+                      // verde = finalizado; amarelo = com atividade, ainda não finalizado; vermelho = sem atividade;
+                      // sem cor = ainda não registrado
+                      const status: 'final' | 'draft' | 'none' | null = row
+                        ? row.noActivity
+                          ? 'none'
+                          : row.finalizedAt
+                            ? 'final'
+                            : 'draft'
+                        : null;
                       const tone =
-                        status === 'work'
+                        status === 'final'
                           ? 'text-green-700 dark:text-green-400'
-                          : status === 'none'
-                            ? 'text-red-600 dark:text-red-400'
-                            : null;
-                      // Hoje: sem fundo colorido, só o círculo — verde (teve atividade), vermelho (sem atividade) ou cinza (não começou)
+                          : status === 'draft'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : status === 'none'
+                              ? 'text-red-600 dark:text-red-400'
+                              : null;
+                      // Hoje: sem fundo colorido, só o círculo — na cor da situação do dia (cinza se não começou)
                       const isToday = iso === today;
                       const ringHoje = !isToday
                         ? ''
-                        : status === 'work'
+                        : status === 'final'
                           ? 'ring-1 ring-green-600 dark:ring-green-400'
-                          : status === 'none'
-                            ? 'ring-1 ring-red-600 dark:ring-red-400'
-                            : 'ring-1 ring-gray-400 dark:ring-gray-500';
+                          : status === 'draft'
+                            ? 'ring-1 ring-amber-500 dark:ring-amber-400'
+                            : status === 'none'
+                              ? 'ring-1 ring-red-600 dark:ring-red-400'
+                              : 'ring-1 ring-gray-400 dark:ring-gray-500';
                       return (
                         <button
                           key={iso}
@@ -363,19 +377,12 @@ export default function ObraDoContratoPage() {
                           className={`flex min-w-9 flex-1 flex-col items-center gap-1 rounded-lg py-2 text-xs transition-colors ${
                             future ? 'cursor-not-allowed opacity-40' : ''
                           } ${
-                            isToday
-                              ? future
+                            // Fundo só nos fins de semana; o estado do dia aparece na cor do número e no marcador.
+                            weekend
+                              ? `bg-gray-100 dark:bg-gray-800 ${future ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`
+                              : future
                                 ? ''
                                 : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                              : status === 'work'
-                              ? `bg-green-100 dark:bg-green-900/30 ${future ? '' : 'hover:bg-green-200 dark:hover:bg-green-900/50'}`
-                              : status === 'none'
-                                ? `bg-red-100 dark:bg-red-900/30 ${future ? '' : 'hover:bg-red-200 dark:hover:bg-red-900/50'}`
-                                : weekend
-                                  ? `bg-gray-100 dark:bg-gray-800 ${future ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`
-                                  : future
-                                    ? ''
-                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                           }`}
                         >
                           <span className={`font-medium ${tone ?? 'text-gray-500'}`}>{WEEKDAY_LETTER[wd]}</span>
@@ -393,10 +400,12 @@ export default function ObraDoContratoPage() {
                           <span className="flex h-3 items-center justify-center">
                             {status === 'none' ? (
                               <X className="h-3 w-3 text-red-600 dark:text-red-400" strokeWidth={3} aria-label="Sem atividade" />
+                            ) : status === 'final' ? (
+                              <Check className="h-3 w-3 text-green-600 dark:text-green-400" strokeWidth={3} aria-label="Finalizado" />
                             ) : (
                               <span
                                 className={`h-1.5 w-1.5 rounded-full ${
-                                  status === 'work' ? 'bg-green-600 dark:bg-green-400' : 'bg-transparent'
+                                  status === 'draft' ? 'bg-amber-500 dark:bg-amber-400' : 'bg-transparent'
                                 }`}
                               />
                             )}
@@ -451,7 +460,7 @@ export default function ObraDoContratoPage() {
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
                             <th className={cadastroListClasses.th}>Data</th>
-                            <th className={`${cadastroListClasses.th} !text-center`}>Situação</th>
+                            <th className={`${cadastroListClasses.th} !text-center`}>Status</th>
                             <th className={`${cadastroListClasses.th} !text-center`}>Atividades</th>
                             <th className={`${cadastroListClasses.th} !text-center`}>Equipe</th>
                             <th className={`${cadastroListClasses.th} !text-center`}>Ocorrências</th>
@@ -479,7 +488,7 @@ export default function ObraDoContratoPage() {
                                       : it.noActivity
                                         ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                         : it.activities > 0
-                                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                           : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                   }`}
                                 >
@@ -488,8 +497,8 @@ export default function ObraDoContratoPage() {
                                     : it.noActivity
                                       ? 'Sem atividade'
                                       : it.activities > 0
-                                        ? 'Preenchido'
-                                        : 'Em branco'}
+                                        ? 'Em preenchimento'
+                                        : 'Em preenchimento'}
                                 </span>
                               </td>
                               <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">

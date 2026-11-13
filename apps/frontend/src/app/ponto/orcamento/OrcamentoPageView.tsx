@@ -176,6 +176,7 @@ import {
   type EtapaFd,
 } from './CotacaoEmpreitaPainel';
 import { OrcamentoDetalhadoPainel, type LinhaOrcamentoDetalhado } from './OrcamentoDetalhadoPainel';
+import { OrcamentoSelecaoSoma } from './OrcamentoSelecaoSoma';
 import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
 import {
   downloadCronogramaExcel,
@@ -4717,6 +4718,12 @@ function parseColunasOcultasMontagem(raw: unknown): string[] {
   return out;
 }
 
+/** Ids das colunas da grade do orçamento, na mesma ordem das colunas da planilha exportada. */
+const ORC_COLUNAS_EXPORT = [
+  'item', 'codigo', 'banco', 'descricao', 'und', 'qtd', 'mo', 'mat',
+  'pu', 'puBdi', 'subMo', 'subMat', 'total', 'totalBdi', 'peso', 'obs',
+] as const;
+
 function chaveCelulaOrc(rowKey: string, colId: string): string {
   return `${rowKey}|${colId}`;
 }
@@ -7785,6 +7792,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   commitOnChange = true,
   disabled = false,
   somenteLeitura = false,
+  editarComDuploClique = false,
 }: {
   id?: string;
   draftKey?: string;
@@ -7808,7 +7816,15 @@ const FdCampoLocal = memo(function FdCampoLocal({
   disabled?: boolean;
   /** Orçamento travado: dá para entrar na célula e ver a fórmula, mas nada é editado nem gravado. */
   somenteLeitura?: boolean;
+  /**
+   * Como na memória de cálculo: um clique seleciona a célula (mostra o valor, sem cursor) e já dá para
+   * alterar digitando (o texto digitado substitui o conteúdo). A fórmula só abre no duplo clique, no Enter ou no F2.
+   */
+  editarComDuploClique?: boolean;
 }) {
+  const [editando, setEditando] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inativo = editarComDuploClique && !editando;
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
   );
@@ -7880,9 +7896,39 @@ const FdCampoLocal = memo(function FdCampoLocal({
     else if (mode === 'live') scheduleCommit(next);
   };
 
+  /**
+   * Começa a edição da célula já focada (duplo clique, Enter, F2 ou tecla digitada).
+   * `inicial` = texto digitado (substitui o conteúdo); sem ele, abre com a fórmula para editar.
+   */
+  const iniciarEdicao = (inicial?: string) => {
+    if (disabled) return;
+    setEditando(true);
+    focusedRef.current = true;
+    setFocadoVisual(true);
+    if (!somenteLeitura && inicial !== undefined) {
+      applyValue(inicial, 'local');
+    } else {
+      const edit = String(editOnFocusRef.current ?? '').trim();
+      if (edit) {
+        localRef.current = edit;
+        setLocal(edit);
+        if (draftKey && !somenteLeitura) fdCampoDrafts.set(draftKey, edit);
+      }
+    }
+    onFocusExtraRef.current?.();
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const fim = el.value.length;
+      el.setSelectionRange(fim, fim);
+    });
+  };
+
   const pintar = Boolean(colorirFormula) && focadoVisual && local.trimStart().startsWith('=');
   const campo = (
     <input
+      ref={inputRef}
       id={id}
       type="text"
       inputMode={inputMode}
@@ -7891,14 +7937,22 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
-      readOnly={somenteLeitura}
+      readOnly={somenteLeitura || inativo}
+      onDoubleClick={() => {
+        if (inativo) iniciarEdicao();
+      }}
       data-formula={focadoVisual && local.trimStart().startsWith('=') ? 'true' : undefined}
       className={`${pintar ? `${className ?? ''} !text-transparent` : className ?? ''}${
         somenteLeitura ? ' pointer-events-auto select-text' : ''
-      }`}
+      }${inativo ? ' !caret-transparent cursor-cell selection:bg-transparent' : ''}`}
       value={local}
       onFocus={() => {
         if (disabled) return;
+        // Só selecionada (um clique ou Tab): mostra o valor, sem abrir a fórmula.
+        if (inativo) {
+          focusedRef.current = true;
+          return;
+        }
         if (somenteLeitura) {
           focusedRef.current = true;
           setFocadoVisual(true);
@@ -7923,6 +7977,24 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onKeyDown={(e) => {
         if (disabled) return;
+        if (inativo) {
+          if (e.key === 'Escape') {
+            e.currentTarget.blur();
+            return;
+          }
+          if (e.key === 'Enter' || e.key === 'F2') {
+            e.preventDefault();
+            e.stopPropagation();
+            iniciarEdicao();
+            return;
+          }
+          // Digitar numa célula selecionada troca o conteúdo (como na memória de cálculo).
+          if (!somenteLeitura && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete')) {
+            e.preventDefault();
+            iniciarEdicao(e.key.length === 1 ? e.key : '');
+          }
+          return;
+        }
         if (somenteLeitura) {
           if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
           return;
@@ -7935,6 +8007,9 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onBlur={(e) => {
         focusedRef.current = false;
         setFocadoVisual(false);
+        setEditando(false);
+        // Só selecionada (nada digitado): não grava nem mexe na fórmula guardada.
+        if (inativo) return;
         onBlurExtraRef.current?.();
         if (disabled) return;
         if (somenteLeitura) {
@@ -8087,6 +8162,19 @@ function montarNomeArquivoOrcamento(opts: {
   const pastaPrimeiro = codigoBruto.match(/^(.+?)\s*-\s*(N[ºo°.]?\s*\d+)$/i);
   const codigo = pastaPrimeiro ? `${pastaPrimeiro[2].replace(/\s+/g, '')} - ${pastaPrimeiro[1].trim()}` : codigoBruto;
   const descricao = sanitizarTrechoArquivo(opts.descricao || '');
+  if (opts.semTipo) {
+    // Padrão do orçamento: "79_XX.2026_TAG - DESCRIÇÃO" (nº da pasta sem "Nº", ponto entre sigla e ano,
+    // "_" entre as partes, sem o prefixo "Orcamento - ").
+    const numPasta = pastaPrimeiro ? pastaPrimeiro[2].replace(/\D+/g, '') : '';
+    const sigla = (pastaPrimeiro ? pastaPrimeiro[1] : codigoBruto).replace(/\s*-\s*/g, '.').replace(/\s+/g, '');
+    const desc = descricao.replace(/^Or[cç]amento\s*-\s*/i, '').trim();
+    const nome = [numPasta, sigla, desc.toLowerCase() === opts.tipo.toLowerCase() ? '' : desc]
+      .filter(Boolean)
+      .join('_')
+      .slice(0, 120)
+      .trim();
+    return `${nome || opts.tipo}.${opts.ext}`;
+  }
   // O nº da pasta vem primeiro; depois o tipo do arquivo e a descrição.
   const partes: string[] = [];
   if (codigo) partes.push(codigo);
@@ -14337,6 +14425,19 @@ export function OrcamentoPageView({
     ? embeddedOrcamentoIdFromRoute ?? null
     : orcamentoAtivoId;
 
+  /** Nome do orçamento no breadcrumb = o mesmo nome do arquivo baixado (sem a extensão). */
+  const nomeBreadcrumbOrcamento = useMemo(
+    () =>
+      montarNomeArquivoOrcamento({
+        tipo: 'Orcamento',
+        semTipo: true,
+        codigo: codigoOrcamentoAtivo,
+        descricao: nomeOrcamentoSemCodigo,
+        ext: 'xlsx',
+      }).replace(/\.xlsx$/i, ''),
+    [codigoOrcamentoAtivo, nomeOrcamentoSemCodigo]
+  );
+
   const breadcrumbOrcamentoTrail = useMemo(() => {
     if (fichaDemandaOnly) {
       const codigo = fichaDemandaRecord?.codFichaDemanda?.trim();
@@ -14377,7 +14478,7 @@ export function OrcamentoPageView({
       // Não usar fallback genérico — colide com o crumb da rota e some do breadcrumb.
       if (orcamentoIdNaRota && nomeOrcamentoSemCodigo) {
         crumbs.push({
-          label: nomeOrcamentoSemCodigo,
+          label: nomeBreadcrumbOrcamento,
           ...(revisaoBadge ? { badge: revisaoBadge } : {}),
           ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
             ? { badgeMenu: revisaoBadgeMenu }
@@ -14394,7 +14495,7 @@ export function OrcamentoPageView({
     crumbs.push({ label: 'Orçamentos', href: listHref });
     if (orcamentoIdNaRota) {
       crumbs.push({
-        label: nomeOrcamentoSemCodigo || 'Orçamento',
+        label: nomeBreadcrumbOrcamento || 'Orçamento',
         ...(revisaoBadge ? { badge: revisaoBadge } : {}),
         ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
           ? { badgeMenu: revisaoBadgeMenu }
@@ -14408,6 +14509,7 @@ export function OrcamentoPageView({
     orcamentoIdNaRota,
     nomeContratoBreadcrumb,
     nomeOrcamentoSemCodigo,
+    nomeBreadcrumbOrcamento,
     cronogramaOnly,
     listaGlobalEntry,
     fichaDemandaOnly,
@@ -16271,7 +16373,7 @@ export function OrcamentoPageView({
         const limparA = campo === 'aManual' && campoVazio;
         const limparV = campo === 'vManual' && campoVazio;
         const limparCampoManual = limparSubtotal || limparValorManual || limparA || limparV;
-        const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
+        const v = campo === 'descricao' || campo === 'detalhes' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
         const updated: LinhaMedicao = limparCampoManual
           ? { ...novaLinhas[idx] }
           : ({ ...novaLinhas[idx], [campo]: v } as LinhaMedicao);
@@ -16676,6 +16778,35 @@ export function OrcamentoPageView({
     }
   };
 
+  /**
+   * Mescla linhas da memória numa só, de uma vez (um único setState): a primeira recebe `dados` e as demais saem.
+   * (Chamar atualizar + remover em sequência perdia a atualização, porque remover parte do estado antigo.)
+   */
+  const mesclarLinhasMedicao = (itemKey: string, idxs: number[], dados: Partial<LinhaMedicao>) => {
+    if (gradeTravadaRef.current || idxs.length < 2) return;
+    const ordenados = [...idxs].sort((a, b) => a - b);
+    const primeira = ordenados[0]!;
+    const sair = new Set(ordenados.slice(1));
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey];
+      if (!base) return prev;
+      const atual = dimensoesComLinhasEfetivas(base, 'un');
+      if (!atual.linhas[primeira]) return prev;
+      const linhas = atual.linhas
+        .map((ln, i) => {
+          if (i !== primeira) return ln;
+          const unida: LinhaMedicao = { ...ln, ...dados };
+          delete unida.formulas;
+          delete unida.valorManual;
+          return unida;
+        })
+        .filter((_, i) => !sair.has(i));
+      const nextDim = { ...atual, linhas };
+      queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
+      return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+    });
+  };
+
   const limparLinhasVaziasTodasMemorias = () => {
     if (gradeTravadaRef.current) return;
     const meta = metaMemoriaIncluidaRef.current;
@@ -17057,9 +17188,16 @@ export function OrcamentoPageView({
         if (formulas[12] && bate(r2(totSem * fatorBdi), totCom)) {
           formulas[13] = `M{r}*${fatorBdiTxt}`;
         }
+        // Cores que o usuário pintou na grade (célula ou linha inteira) vão junto para o Excel.
+        const coresPintura: NonNullable<OrcamentoExcelRow['cores']> = {};
+        ORC_COLUNAS_EXPORT.forEach((colId, idx) => {
+          const bg = coresCelulaPorKey[chaveCelulaOrc(row.key, colId)] || coresLinhaPorKey[row.key];
+          if (bg) coresPintura[idx] = { bg };
+        });
         rows.push({
           kind: 'item',
           formulas,
+          ...(Object.keys(coresPintura).length ? { cores: coresPintura } : {}),
           values: [
             `${main}.${subIdx}.${itemIdx + 1}`,
             row.item.codigo,
@@ -17243,6 +17381,7 @@ export function OrcamentoPageView({
           : 'NÃO DESONERADO: encargos sociais embutidos nos preços unitários dos insumos de mão de obra, de acordo com as bases.';
     return {
       name: 'Orçamento',
+      semZebra: true,
       aparencia: aparenciaMontagem,
       tamanhos: { item: 11, header: 12 },
       title: 'Orçamento',
@@ -18144,7 +18283,7 @@ export function OrcamentoPageView({
           rows.push({
             kind: 'item',
             values: [
-              '',
+              ln.detalhes?.trim() || '',
               descLinha,
               celula(ln.C || 0),
               celula(ln.L || 0),
@@ -22268,6 +22407,7 @@ export function OrcamentoPageView({
                                                 addLinhaCabecalhoSecaoMedicao
                                               }
                                               removeLinhaMedicao={removeLinhaMedicao}
+                                              mesclarLinhasMedicao={mesclarLinhasMedicao}
                                               estiloTitulo={estiloLinhaItemOrc(
                                                 aparenciaMemorial,
                                                 isDark
@@ -22811,6 +22951,7 @@ export function OrcamentoPageView({
                                       >
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={
                                               row.quantidade === 0
                                                 ? ''
@@ -22968,6 +23109,7 @@ export function OrcamentoPageView({
                                           <FdCampoLocal
                                             id={inputId}
                                             draftKey={`orc-${colDef.campo}:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={formatarMoedaCampoOrc(colDef.valor)}
                                             editValueOnFocus={formulaFoco}
                                             colorirFormula={
@@ -23127,6 +23269,8 @@ export function OrcamentoPageView({
                         </tbody>
                       </table>
                     </div>
+
+                    <OrcamentoSelecaoSoma rootRef={montagemOrcamentoTableRef} />
 
                     {destaqueCalculoOrc?.balao ? (
                       <DicaFormulaCompleta

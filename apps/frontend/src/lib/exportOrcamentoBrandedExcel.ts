@@ -458,11 +458,11 @@ async function fillWorkbook(
       headerRow.height = 42;
       spec.columns.forEach((col, idx) => {
         const cell = headerRow.getCell(idx + 1);
-        // Título numa linha só: a quebra manual do texto vira espaço (senão as palavras se juntam).
+        // A quebra manual do texto vira espaço (senão as palavras se juntam); título muito longo quebra em até 2 linhas.
         cell.value = String(col.header ?? '').replace(/\s*[\u000d\u000a]+\s*/g, ' ').toUpperCase();
         cell.font = { name: fontName, size: 12, bold: true, color: { argb: headerFg } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerBg } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false, shrinkToFit: false };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true, shrinkToFit: false };
         applyThinBorder(cell);
       });
     }
@@ -533,7 +533,7 @@ async function fillWorkbook(
           };
           cell.font = {
             name: fontName,
-            size: 10,
+            size: 11,
             bold: true,
             color: { argb: rowSpec.destaqueTitulo ? tituloFg : TITLE_TEXT },
           };
@@ -579,11 +579,14 @@ async function fillWorkbook(
             color: { argb: MUTED_TEXT },
           };
         } else {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: !spec.semZebra && itemStripe % 2 === 0 ? ROW_ALT : WHITE },
-          };
+          // Sem zebra: a linha fica sem preenchimento (só recebe cor se o usuário pintar).
+          if (!spec.semZebra) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: itemStripe % 2 === 0 ? ROW_ALT : WHITE },
+            };
+          }
           if (c === colCount - 1 || spec.columns[c]?.header.toLowerCase() === 'status') {
             const tone = statusTone(String(rowSpec.values[c] ?? ''));
             if (tone) {

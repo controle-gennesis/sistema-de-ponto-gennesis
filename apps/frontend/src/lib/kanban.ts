@@ -157,6 +157,11 @@ export async function createKanbanBoard(name: string): Promise<KanbanBoardSummar
   return res.data.data;
 }
 
+export async function duplicateKanbanBoard(boardId: string, name: string): Promise<KanbanBoardSummary> {
+  const res = await api.post(`/kanban/boards/${boardId}/duplicate`, { name });
+  return res.data.data;
+}
+
 export async function updateKanbanBoard(boardId: string, name: string): Promise<KanbanBoardSummary> {
   const res = await api.patch(`/kanban/boards/${boardId}`, { name });
   return res.data.data;

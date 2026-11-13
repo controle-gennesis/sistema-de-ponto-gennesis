@@ -4,9 +4,19 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
-import { isAccountingDirectRequestType } from '../lib/dpRequestDetails';
+import { isAccountingDirectRequestType, parseDpRequestDetails } from '../lib/dpRequestDetails';
 import { sendPushToUsers } from '../services/PushNotificationService';
-import { announceAccountingDone } from '../lib/dpRequestMessages';
+import {
+  announceAccountingCancelled,
+  announceAccountingDone,
+  announceAccountingReturned,
+  announceRequesterAdjusted,
+} from '../lib/dpRequestMessages';
+import {
+  deleteStoredAccountingAttachments,
+  refreshDirectAccountingDescription,
+  storeAccountingAttachments,
+} from '../lib/dpContabilidadeFromInterna';
 
 const REQUEST_TYPES = [
   'ADMISSAO',
@@ -104,11 +114,39 @@ async function appendSourceHistoryNote(
   });
 }
 
+/** O DP finalizou: a solicitação criada direto (ainda "Na Contabilidade") passa a Finalizada. */
+async function finalizeDirectSource(
+  sourceId: string | null | undefined,
+  actor: { id: string; name: string }
+) {
+  if (!sourceId) return;
+  const source = await prisma.dpRequest.findUnique({
+    where: { id: sourceId },
+    select: { id: true, requestType: true, status: true, statusHistory: true },
+  });
+  if (!source || !isAccountingDirectRequestType(source.requestType) || source.status !== 'IN_ACCOUNTING') return;
+  const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+  await prisma.dpRequest.update({
+    where: { id: source.id },
+    data: {
+      status: 'CONCLUDED',
+      statusHistory: [
+        ...history,
+        { at: new Date().toISOString(), status: 'CONCLUDED', actorUserId: actor.id, actorName: actor.name },
+      ] as Prisma.InputJsonValue,
+      dpHandledBy: actor.id,
+      dpConcludedAt: new Date(),
+    },
+  });
+}
+
 type RequestRow = Prisma.DpContabilidadeRequestGetPayload<{ include: { comments: true } }>;
 
 /** Dados estruturados da solicitação interna de origem (só os tipos criados direto para a Contabilidade). */
 type SourceInfo = {
   displayNumber: number;
+  /** Etapa da solicitação de origem (IN_ACCOUNTING, WAITING_RETURN_ACCOUNTING, CONCLUDED...). */
+  status: string;
   requestType: string;
   details: unknown;
   company: string | null;
@@ -132,6 +170,7 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
     select: {
       id: true,
       displayNumber: true,
+      status: true,
       requestType: true,
       details: true,
       company: true,
@@ -164,6 +203,7 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
   for (const s of sources) {
     map.set(s.id, {
       displayNumber: s.displayNumber,
+      status: s.status,
       requestType: s.requestType,
       details: isAccountingDirectRequestType(s.requestType) ? s.details : null,
       company: s.company,
@@ -175,6 +215,24 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
     });
   }
   return map;
+}
+
+/**
+ * Os pedidos que o DP mandava direto à Contabilidade ao finalizar (cards com origem numa solicitação do fluxo do DP)
+ * não aparecem mais no Atendimento Contábil. Só ficam os criados pela própria Contabilidade/Solicitações Contábeis
+ * e os de tipos diretos. Não apaga nada: é só um filtro.
+ */
+async function foraDoEnvioDiretoDoDp(): Promise<Prisma.DpContabilidadeRequestWhereInput> {
+  const ligados = await prisma.dpContabilidadeRequest.findMany({
+    where: { sourceDpRequestId: { not: null } },
+    select: { sourceDpRequestId: true },
+  });
+  const ids = ligados.map((l) => l.sourceDpRequestId).filter((id): id is string => !!id);
+  if (ids.length === 0) return {};
+  const origens = await prisma.dpRequest.findMany({ where: { id: { in: ids } }, select: { id: true, requestType: true } });
+  const doFluxoDoDp = origens.filter((o) => !isAccountingDirectRequestType(o.requestType)).map((o) => o.id);
+  if (doFluxoDoDp.length === 0) return {};
+  return { OR: [{ sourceDpRequestId: null }, { sourceDpRequestId: { notIn: doFluxoDoDp } }] };
 }
 
 async function serializeWithSources(rows: RequestRow[]) {
@@ -233,7 +291,7 @@ export class DpContabilidadeController {
       const to = asString(req.query.to);
       const contractId = asString(req.query.contractId);
 
-      const where: Prisma.DpContabilidadeRequestWhereInput = {};
+      const where: Prisma.DpContabilidadeRequestWhereInput = { AND: [await foraDoEnvioDiretoDoDp()] };
       if (type && REQUEST_TYPES.includes(type as (typeof REQUEST_TYPES)[number])) {
         where.requestType = type as (typeof REQUEST_TYPES)[number];
       }
@@ -324,7 +382,9 @@ export class DpContabilidadeController {
   async pendingCount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const count = await prisma.dpContabilidadeRequest.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] } } });
+      const count = await prisma.dpContabilidadeRequest.count({
+        where: { status: { in: ['OPEN', 'IN_PROGRESS'] }, AND: [await foraDoEnvioDiretoDoDp()] },
+      });
       res.json({ success: true, data: { count } });
     } catch (err) {
       next(err);
@@ -397,7 +457,7 @@ export class DpContabilidadeController {
     actor: Awaited<ReturnType<typeof loadActor>>,
     status: z.infer<typeof statusSchema>['status'],
     comment: string | undefined,
-    byLabel: 'Contabilidade' | 'DP'
+    byLabel: 'Contabilidade' | 'DP' | 'Solicitante'
   ) {
     const data: Prisma.DpContabilidadeRequestUpdateInput = { status };
     if (status === 'CONCLUDED') {
@@ -453,10 +513,19 @@ export class DpContabilidadeController {
           where: { id: sourceId },
           select: { id: true, requestType: true, status: true, statusHistory: true },
         });
+        const waitsForDp = status === 'CONCLUDED' && byLabel === 'Contabilidade';
         if (
           source &&
           isAccountingDirectRequestType(source.requestType) &&
-          source.status === 'IN_ACCOUNTING'
+          source.status === 'IN_ACCOUNTING' &&
+          waitsForDp
+        ) {
+          // Só registra no histórico; o DP finaliza depois (Solicitações Contábeis → Finalizar).
+          await appendSourceHistoryNote(tx, sourceId, actor, resumo || 'A Contabilidade concluiu o atendimento.');
+        } else if (
+          source &&
+          isAccountingDirectRequestType(source.requestType) &&
+          (source.status === 'IN_ACCOUNTING' || source.status === 'WAITING_RETURN_ACCOUNTING')
         ) {
           const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
           await tx.dpRequest.update({
@@ -486,7 +555,7 @@ export class DpContabilidadeController {
         include: listInclude,
       });
     });
-    if (status === 'CONCLUDED' || status === 'CANCELLED') {
+    if ((status === 'CONCLUDED' || status === 'CANCELLED') && existing.createdByUserId !== actor.id) {
       void sendPushToUsers([existing.createdByUserId], {
         title: status === 'CONCLUDED' ? `${byLabel} concluiu seu pedido` : `${byLabel} cancelou seu pedido`,
         body: existing.title + (comment ? `: ${comment.slice(0, 120)}` : ''),
@@ -544,6 +613,8 @@ export class DpContabilidadeController {
         where: { id: existing.id },
         data: { dpClosedAt: new Date() },
       });
+      // Pedido criado direto: agora sim a solicitação de origem fica Finalizada.
+      await finalizeDirectSource(existing.sourceDpRequestId, actor);
       res.json({ success: true, data: { id: updated.id, status: updated.status } });
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -552,6 +623,248 @@ export class DpContabilidadeController {
       }
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
         next(createError('O pedido foi atualizado por outra pessoa. Atualize a lista e tente novamente.', 409));
+        return;
+      }
+      next(err);
+    }
+  }
+
+  /**
+   * Quem abriu a solicitação (ou um administrador) cancela enquanto a Contabilidade ainda não concluiu.
+   * Serve para quando o pedido foi enviado errado: o motivo vai para o histórico e para o chat.
+   */
+  async cancelFromRequester(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const { comment } = z
+        .object({ comment: z.string().trim().min(3, 'Informe o motivo do cancelamento.').max(4000) })
+        .parse(req.body ?? {});
+      const actor = await loadActor(req.user.id);
+      const source = await prisma.dpRequest.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          requestType: true,
+          status: true,
+          statusHistory: true,
+          employee: { select: { userId: true } },
+        },
+      });
+      if (!source) throw createError('Solicitação não encontrada.', 404);
+      if (!isAccountingDirectRequestType(source.requestType)) {
+        throw createError('Esta solicitação não pode ser cancelada por aqui.', 400);
+      }
+      if (source.employee?.userId !== actor.id && !req.user.isAdmin) {
+        throw createError('Só quem abriu a solicitação pode cancelá-la.', 403);
+      }
+      if (source.status !== 'IN_ACCOUNTING' && source.status !== 'WAITING_RETURN_ACCOUNTING') {
+        throw createError('Esta solicitação já foi encerrada.', 400);
+      }
+
+      const existing = await prisma.dpContabilidadeRequest.findUnique({
+        where: { sourceDpRequestId: source.id },
+      });
+      if (existing) {
+        if (existing.status === 'CONCLUDED' || existing.accountingDoneAt) {
+          throw createError('A Contabilidade já concluiu o atendimento. Use "Finalizar" para encerrar.', 400);
+        }
+        if (existing.status === 'CANCELLED') throw createError('Esta solicitação já foi cancelada.', 400);
+        await this.applyStatus(existing, actor, 'CANCELLED', comment, 'Solicitante');
+      } else {
+        // Ainda não chegou à Contabilidade: só encerra a solicitação de origem.
+        const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+        await prisma.dpRequest.update({
+          where: { id: source.id },
+          data: {
+            status: 'CANCELLED',
+            dpCancellationReason: comment,
+            statusHistory: [
+              ...history,
+              { at: new Date().toISOString(), status: 'CANCELLED', actorUserId: actor.id, actorName: actor.name, note: comment },
+            ] as Prisma.InputJsonValue,
+          },
+        });
+      }
+      res.json({ success: true, data: { id: source.id, status: 'CANCELLED' } });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
+        return;
+      }
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('A solicitação foi atualizada por outra pessoa. Atualize a lista e tente novamente.', 409));
+        return;
+      }
+      next(err);
+    }
+  }
+
+  /**
+   * A Contabilidade devolve o pedido ao solicitante para ajuste (dados errados, documento faltando).
+   * A solicitação de origem vai para "Pendência Contábil" e o card fica parado até o solicitante reenviar.
+   */
+  async returnForAdjustment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const { comment } = z
+        .object({ comment: z.string().trim().min(3, 'Informe o que precisa ser ajustado.').max(4000) })
+        .parse(req.body ?? {});
+      const actor = await loadActor(req.user.id);
+      const source = await prisma.dpRequest.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, requestType: true, status: true, statusHistory: true, employee: { select: { userId: true } } },
+      });
+      if (!source) throw createError('Solicitação não encontrada.', 404);
+      if (!isAccountingDirectRequestType(source.requestType)) {
+        throw createError('Só dá para devolver pedidos abertos em Solicitações Contábeis.', 400);
+      }
+      if (source.status === 'WAITING_RETURN_ACCOUNTING') {
+        throw createError('Este pedido já foi devolvido e aguarda o ajuste do solicitante.', 400);
+      }
+      if (source.status !== 'IN_ACCOUNTING') throw createError('Este pedido já foi encerrado.', 400);
+
+      const existing = await prisma.dpContabilidadeRequest.findUnique({ where: { sourceDpRequestId: source.id } });
+      if (!existing) throw createError('Este pedido ainda não chegou à Contabilidade.', 404);
+      if (existing.status === 'CONCLUDED' || existing.status === 'CANCELLED' || existing.accountingDoneAt) {
+        throw createError('Este pedido já foi encerrado.', 400);
+      }
+
+      const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+      await prisma.$transaction(async (tx) => {
+        await tx.dpRequest.update({
+          where: { id: source.id, status: 'IN_ACCOUNTING' },
+          data: {
+            status: 'WAITING_RETURN_ACCOUNTING',
+            statusHistory: [
+              ...history,
+              {
+                at: new Date().toISOString(),
+                status: 'WAITING_RETURN_ACCOUNTING',
+                actorUserId: actor.id,
+                actorName: actor.name,
+                note: `Devolvida para ajuste: ${comment}`,
+              },
+            ] as Prisma.InputJsonValue,
+          },
+        });
+        await tx.dpContabilidadeRequest.update({
+          where: { id: existing.id },
+          data: { status: 'IN_PROGRESS' },
+        });
+        await tx.dpContabilidadeComment.create({
+          data: {
+            requestId: existing.id,
+            userId: actor.id,
+            userName: actor.name,
+            body: `Devolvida para ajuste: ${comment}`,
+          },
+        });
+      });
+      await announceAccountingReturned(source.id, actor.id, actor.name, comment, source.employee?.userId ?? null);
+      res.json({ success: true, data: { id: source.id, status: 'WAITING_RETURN_ACCOUNTING' } });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
+        return;
+      }
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('O pedido foi atualizado por outra pessoa. Atualize a lista e tente novamente.', 409));
+        return;
+      }
+      next(err);
+    }
+  }
+
+  /** O solicitante corrige os dados / anexa o que faltava e reenvia o pedido devolvido à Contabilidade. */
+  async resubmitAfterAdjustment(req: AuthRequest, res: Response, next: NextFunction) {
+    let storedKeys: string[] = [];
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const body = z
+        .object({ details: z.record(z.string(), z.unknown()), note: z.string().trim().max(4000).optional() })
+        .parse(req.body ?? {});
+      const actor = await loadActor(req.user.id);
+      const source = await prisma.dpRequest.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          requestType: true,
+          status: true,
+          statusHistory: true,
+          details: true,
+          employee: { select: { userId: true } },
+        },
+      });
+      if (!source) throw createError('Solicitação não encontrada.', 404);
+      if (!isAccountingDirectRequestType(source.requestType)) {
+        throw createError('Esta solicitação não pode ser ajustada por aqui.', 400);
+      }
+      if (source.employee?.userId !== actor.id && !req.user.isAdmin) {
+        throw createError('Só quem abriu a solicitação pode ajustá-la.', 403);
+      }
+      if (source.status !== 'WAITING_RETURN_ACCOUNTING') {
+        throw createError('Esta solicitação não está aguardando ajuste.', 400);
+      }
+
+      // Valida os campos como na criação; só os anexos novos chegam em base64.
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = parseDpRequestDetails(source.requestType, body.details);
+      } catch (e) {
+        throw createError(e instanceof Error ? e.message : 'Dados do formulário inválidos.', 400);
+      }
+      const stored = await storeAccountingAttachments(parsed);
+      storedKeys = stored.storedKeys;
+      const previous = (source.details ?? {}) as Record<string, unknown>;
+      const keptAnexos = Array.isArray(previous.anexos) ? (previous.anexos as unknown[]) : [];
+      const newAnexos = Array.isArray(stored.details.anexos) ? (stored.details.anexos as unknown[]) : [];
+      const mergedAnexos = [...keptAnexos, ...newAnexos];
+      const nextDetails: Record<string, unknown> = { ...stored.details };
+      if (mergedAnexos.length > 0) nextDetails.anexos = mergedAnexos;
+      else delete nextDetails.anexos;
+
+      const history = Array.isArray(source.statusHistory) ? source.statusHistory : [];
+      await prisma.dpRequest.update({
+        where: { id: source.id, status: 'WAITING_RETURN_ACCOUNTING' },
+        data: {
+          details: nextDetails as Prisma.InputJsonValue,
+          status: 'IN_ACCOUNTING',
+          statusHistory: [
+            ...history,
+            {
+              at: new Date().toISOString(),
+              status: 'IN_ACCOUNTING',
+              actorUserId: actor.id,
+              actorName: actor.name,
+              note: body.note ? `Ajustada e reenviada: ${body.note}` : 'Ajustada e reenviada à Contabilidade',
+            },
+          ] as Prisma.InputJsonValue,
+        },
+      });
+      storedKeys = [];
+
+      const row = await prisma.dpContabilidadeRequest.findUnique({ where: { sourceDpRequestId: source.id } });
+      if (row) {
+        await prisma.dpContabilidadeComment.create({
+          data: {
+            requestId: row.id,
+            userId: actor.id,
+            userName: actor.name,
+            body: body.note ? `Ajustada e reenviada: ${body.note}` : 'Solicitação ajustada e reenviada.',
+          },
+        });
+      }
+      await refreshDirectAccountingDescription(source.id);
+      await announceRequesterAdjusted(source.id, actor.id, actor.name, body.note);
+      res.json({ success: true, data: { id: source.id, status: 'IN_ACCOUNTING' } });
+    } catch (err) {
+      if (storedKeys.length) await deleteStoredAccountingAttachments(storedKeys);
+      if (err instanceof z.ZodError) {
+        next(createError(err.issues[0]?.message || 'Dados inválidos.', 400));
+        return;
+      }
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        next(createError('A solicitação foi atualizada por outra pessoa. Atualize a lista e tente novamente.', 409));
         return;
       }
       next(err);
@@ -574,6 +887,14 @@ export class DpContabilidadeController {
       }
 
       const updated = await this.applyStatus(existing, actor, status, comment, 'Contabilidade');
+      // Conclusão/cancelamento vira mensagem na conversa (badge + sino + notificação para o DP).
+      const sourceId = (existing as { sourceDpRequestId?: string | null }).sourceDpRequestId;
+      if (sourceId && status === 'CONCLUDED') {
+        await prisma.dpContabilidadeRequest.update({ where: { id: existing.id }, data: { accountingDoneAt: new Date() } });
+        await announceAccountingDone(sourceId, actor.id, actor.name);
+      } else if (sourceId && status === 'CANCELLED') {
+        await announceAccountingCancelled(sourceId, actor.id, actor.name, comment);
+      }
       res.json({ success: true, data: (await serializeWithSources([updated]))[0] });
     } catch (err) {
       if (err instanceof z.ZodError) {

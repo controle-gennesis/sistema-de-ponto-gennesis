@@ -316,6 +316,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    canAccessDrive,
+    isDepartmentSocios,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
   } = usePermissions();
@@ -469,8 +471,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const canSeeCentralAtendimentos =
     isAdministrator || can(pk('/ponto/conversas-whatsapp'));
   const canSeeAtendimentoContabil =
-    isAdministrator ||
+    isAdministrator ||
     can(pk('/ponto/dp-contabilidade'));
+  const canSeeSolicitacoesContabilidade =
+    isAdministrator || can(pk('/ponto/solicitacoes-contabilidade'));
 
   const { data: chatUnreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
@@ -510,6 +514,39 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
+
+  // Pedidos concluídos pela Contabilidade que o DP ainda precisa finalizar.
+  const { data: paraEncerrarCount = 0 } = useQuery({
+    queryKey: ['dp-para-encerrar-count'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/contabilidade/para-encerrar-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeSolicitacoesContabilidade && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
+
+  // Mensagens novas nas conversas dos pedidos à Contabilidade (mesma consulta do sino: cache compartilhado).
+  const { data: dpMessagesUnreadForBadge } = useQuery({
+    queryKey: ['dp-request-unread-messages'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/mensagens/nao-lidas');
+      return (res.data?.data ?? { count: 0, items: [] }) as {
+        count: number;
+        items: Array<{ requestId: string; displayNumber: number; title: string; unread: number; area: string; accounting?: boolean }>;
+      };
+    },
+    enabled: (canSeeAtendimentoContabil || canSeeSolicitacoesContabilidade) && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+  });
+  const accountingUnreadMessages = (dpMessagesUnreadForBadge?.items ?? [])
+    .filter((i) => i.accounting)
+    .reduce((sum, i) => sum + i.unread, 0);
 
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
@@ -651,7 +688,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/solicitacoes-ferramentas') return toolRentalSuppliesPendingCount;
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
-    if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount;
+    if (href === '/ponto/dp-contabilidade') return atendimentoContabilPendingCount + accountingUnreadMessages;
+    if (href === '/ponto/solicitacoes-contabilidade') return paraEncerrarCount + accountingUnreadMessages;
     if (href === '/ponto/contratos') return mensalReportPendingCount;
     if (href === '/ponto/empreiteiros') {
       return pathname?.startsWith('/ponto/empreiteiros') ? 0 : empreitaMedicoesAprovadasCount;
@@ -855,7 +893,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+            permission: !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitacoes-dp')))
           },
           {
             name: 'Frota',
@@ -864,7 +902,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Car,
             description: 'Solicitar reserva de veículos da frota',
             permission:
-              isAdministrator || can(pk('/ponto/reserva-veiculos'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/reserva-veiculos')))
           },
           {
             name: 'Abastecimento',
@@ -873,7 +911,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Fuel,
             description: 'Solicitar abastecimento de veículos',
             permission:
-              isAdministrator || can(pk('/ponto/solicitar-combustivel'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitar-combustivel')))
           },
           {
             name: 'Alterações de Ponto',
@@ -929,7 +967,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/treinamentos',
             icon: GraduationCap,
             description: 'Videoaulas, avaliações e certificados',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
           {
             name: 'Central de Ajuda',
@@ -937,7 +975,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/central-de-ajuda',
             icon: HelpCircle,
             description: 'Guias e tutoriais passo a passo do sistema',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
         ]
       },
@@ -988,7 +1026,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
-            name: 'Solicitações à Contabilidade',
+            name: 'Solicitações Contábeis',
             section: 'Folha e Contabilidade',
             href: '/ponto/solicitacoes-contabilidade',
             icon: Calculator,
@@ -1146,7 +1184,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: MessageSquare,
             description: 'Pedidos à Contabilidade e acompanhamento das respostas',
             permission:
-              isAdministrator ||
+              isAdministrator ||
               can(pk('/ponto/dp-contabilidade')),
           },
         ],
@@ -1824,7 +1862,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveMaterialRequests ||
     canApproveEmpreiteiroDaily;
 
-  const showRailAtalhos = canAccessCollaborationTools || canSeeAprovacoesAtalho;
+  const showRailAtalhos = canAccessCollaborationTools || canAccessDrive || canSeeAprovacoesAtalho;
 
   useEffect(() => {
     setRailFavorites(readRailFavorites());
@@ -1878,10 +1916,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             badge: 0,
           }
         : null,
-      canAccessCollaborationTools
+      canAccessDrive
         ? {
             href: '/ponto/drive' as const,
-            label: 'Drive',
+            label: 'Meu Drive',
             popId: 'footer:drive',
             Icon: HardDrive,
             badge: 0,
@@ -1911,6 +1949,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const railFavoritosVisiveis = railFavorites
     .map((href) => railAtalhosByHref.get(href))
     .filter((item): item is (typeof railAtalhosDisponiveis)[number] => item != null);
+
+  // Só um atalho disponível (ex.: Sócios, só com o Drive): mostra ele direto e dispensa o botão "Atalhos".
+  const railSoUmAtalho = railAtalhosDisponiveis.length === 1;
+  const railFavoritosMostrados = railSoUmAtalho ? railAtalhosDisponiveis : railFavoritosVisiveis;
 
   const favoritosHrefSet = new Set(railFavoritosVisiveis.map((i) => i.href));
   const atalhosBadgeOculto =
@@ -2221,7 +2263,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (!sidebarHydrated) return;
     if (isLoading && menuItems.length === 0) return;
     if (railEnterPlayedRef.current) return;
-    if (menuItems.length === 0 && !canAccessCollaborationTools && !canSeeAprovacoesAtalho) return;
+    if (menuItems.length === 0 && !canAccessCollaborationTools && !canAccessDrive && !canSeeAprovacoesAtalho) return;
 
     railEnterPlayedRef.current = true;
     setRailEnterClass(false);
@@ -2582,7 +2624,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           {showRailAtalhos ? (
           <div className="relative z-20 flex flex-shrink-0 flex-col items-center overflow-visible px-2 pb-4 [@media(max-height:820px)]:pb-2">
             <div className="flex flex-col items-center gap-2 [@media(max-height:820px)]:gap-1">
-              {railFavoritosVisiveis.map((item, favIndex) => {
+              {railFavoritosMostrados.map((item, favIndex) => {
                 const active = isFooterShortcutActive(item.href);
                 return (
                   <SidebarRailTooltip
@@ -2619,6 +2661,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   </SidebarRailTooltip>
                 );
               })}
+              {!railSoUmAtalho ? (
               <SidebarRailTooltip
                 label="Atalhos"
                 enterIndex={menuItems.length + 1 + railFavoritosVisiveis.length}
@@ -2673,6 +2716,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   <NotificationCountBadge count={atalhosBadgeOculto} rail />
                 </button>
               </SidebarRailTooltip>
+              ) : null}
             </div>
             {menuAtalhosRail && (
               <ActionMenuOverlay

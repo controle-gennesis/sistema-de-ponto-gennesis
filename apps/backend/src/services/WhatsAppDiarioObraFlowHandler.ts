@@ -20,6 +20,7 @@ export type WhatsAppDiarioObraFlowStatus =
   | 'RDO_SELECT_CONTRATO'
   | 'RDO_SELECT_OBRA'
   | 'RDO_ASK_DATE'
+  | 'RDO_ASK_MODE'
   | 'RDO_HUB'
   | 'RDO_ACT_TITLE'
   | 'RDO_ACT_PHOTOS'
@@ -82,6 +83,8 @@ const ID = {
   changeContrato: 'rdo_change_ctr',
   contratoPrefix: 'rdo_ctr_',
   otherDate: 'rdo_other_date',
+  modeGuided: 'rdo_mode_guided',
+  modePart: 'rdo_mode_part',
   direct: 'rdo_direct',
   indirect: 'rdo_indirect',
   sunny: 'rdo_sky_sun',
@@ -552,10 +555,15 @@ export async function processWhatsAppDiarioObraFlow(params: {
 
   const userId = String(p.userId || '');
   const isAdmin = p.isAdmin === true;
-  const stay = (sendAction: SendAction, np = p): Result => ({ sendAction, newStatus: status, newPayload: np });
+  /** No modo passo a passo, o botão "Voltar ao RDO" passa a ser "Próxima etapa". */
+  const decorate = (a: SendAction): SendAction =>
+    p.guided === true && a.type === 'buttons'
+      ? { ...a, buttons: a.buttons.map((b) => (b.id === ID.hub ? { ...b, title: 'Próxima etapa' } : b)) }
+      : a;
+  const stay = (sendAction: SendAction, np = p): Result => ({ sendAction: decorate(sendAction), newStatus: status, newPayload: np });
   const deferred = (r: Result): Result => ({ ...r, ackDebounceMs: ACK_DEBOUNCE_MS });
   const go = (sendAction: SendAction, newStatus: WhatsAppDiarioObraFlowStatus, np = p): Result => ({
-    sendAction,
+    sendAction: decorate(sendAction),
     newStatus,
     newPayload: np,
   });
@@ -575,11 +583,95 @@ export async function processWhatsAppDiarioObraFlow(params: {
   const date = String(p.date || '');
 
   const hubWith = async (intro?: string): Promise<Result> => {
+    if (p.guided === true) return guideNext(intro);
     const { content: c } = await loadRdo(obraId, date);
     delete p.actId;
     delete p.laborType;
     delete p.pendingPhotos;
     return go(hubAction(p, c, intro), 'RDO_HUB');
+  };
+
+  /** Abre uma seção do RDO (atividade, mão de obra, equipamentos…). Usado pelo menu e pelo passo a passo. */
+  const sectionPrompt = (id: string): Result | null => {
+    switch (id) {
+      case ID.act:
+        return go(waButtons('Qual a *atividade* realizada? (ex.: “Alvenaria no subsolo”)', backToHub()), 'RDO_ACT_TITLE');
+      case ID.labor:
+        return go(
+          waButtons('A mão de obra é *direta* (própria da obra) ou *indireta* (apoio/administração)?', [
+            { id: ID.direct, title: 'Direta' },
+            { id: ID.indirect, title: 'Indireta' },
+            { id: ID.hub, title: 'Voltar ao RDO' },
+          ]),
+          'RDO_LABOR_TYPE',
+        );
+      case ID.equip:
+        return go(
+          waButtons('Quais *equipamentos* foram usados? Mande no formato “2 retroescavadeira”. Pode mandar vários, um por linha.', backToHub()),
+          'RDO_EQUIP_TEXT',
+        );
+      case ID.mat:
+        return go(
+          waButtons('Quais *materiais* chegaram/foram usados? Ex.: “10 sacos cimento”, “50 kg areia”. Um por linha.', backToHub()),
+          'RDO_MAT_TEXT',
+        );
+      case ID.occ:
+        return go(waButtons('Descreva a *ocorrência* (o que aconteceu):', backToHub()), 'RDO_OCC_TEXT');
+      case ID.note:
+        return go(waButtons('Escreva a *observação* do dia:', backToHub()), 'RDO_NOTE_TEXT');
+      case ID.weather:
+        return go(
+          waButtons('Como foi o *clima* no dia?', [
+            { id: ID.sunny, title: '☀️ Sol' },
+            { id: ID.partly, title: '⛅ Nublado' },
+            { id: ID.rain, title: '🌧️ Chuva' },
+          ]),
+          'RDO_WEATHER_SKY',
+        );
+      default:
+        return null;
+    }
+  };
+
+  const GUIDE_STEPS: Array<{ id: string; label: string }> = [
+    { id: ID.act, label: 'Atividades e fotos' },
+    { id: ID.labor, label: 'Mão de obra' },
+    { id: ID.equip, label: 'Equipamentos' },
+    { id: ID.mat, label: 'Materiais' },
+    { id: ID.occ, label: 'Ocorrências' },
+    { id: ID.note, label: 'Observações' },
+    { id: ID.weather, label: 'Clima' },
+  ];
+
+  /** Passo a passo: vai para a próxima etapa (ou fecha com o resumo ao acabar). */
+  const guideNext = async (intro?: string): Promise<Result> => {
+    delete p.actId;
+    delete p.laborType;
+    delete p.pendingPhotos;
+    delete p.sky;
+    const idx = Number(p.guideIdx ?? -1) + 1;
+    const lead = intro ? `${intro}\n\n` : '';
+    if (idx >= GUIDE_STEPS.length) {
+      p.guided = false;
+      delete p.guideIdx;
+      const { content: c } = await loadRdo(obraId, date);
+      return go(
+        waButtons(`${lead}🎉 *Passo a passo concluído!*\n\n${buildSummary(p, c)}`, [
+          { id: ID.finalize, title: 'Finalizar RDO' },
+          { id: ID.hub, title: 'Voltar ao RDO' },
+        ]),
+        'RDO_HUB',
+      );
+    }
+    p.guideIdx = idx;
+    const step = GUIDE_STEPS[idx];
+    const res = sectionPrompt(step.id)!;
+    const a = res.sendAction;
+    if (a.type === 'buttons' || a.type === 'list') {
+      const hasSkip = a.type === 'buttons' && a.buttons.some((b) => b.id === ID.hub);
+      a.body = `${lead}*Etapa ${idx + 1} de ${GUIDE_STEPS.length} — ${step.label}*\n\n${a.body}${hasSkip ? '' : '\n\n_Para pular esta etapa, escreva *pular*._'}`;
+    }
+    return res;
   };
 
   const guard = async <T>(fn: () => Promise<T>): Promise<T | Result> => {
@@ -592,6 +684,15 @@ export async function processWhatsAppDiarioObraFlow(params: {
     }
   };
   const isResult = (v: unknown): v is Result => !!v && typeof v === 'object' && 'sendAction' in (v as object);
+
+  // Passo a passo: "pular" (ou "próxima") em qualquer etapa de lançamento avança para a seguinte.
+  const SECTION_STATUSES: string[] = [
+    'RDO_ACT_TITLE', 'RDO_ACT_PHOTOS', 'RDO_PHOTO_SELECT', 'RDO_LABOR_TYPE', 'RDO_LABOR_TEXT', 'RDO_EQUIP_TEXT',
+    'RDO_MAT_TEXT', 'RDO_OCC_TEXT', 'RDO_NOTE_TEXT', 'RDO_WEATHER_SKY', 'RDO_WEATHER_PRACT',
+  ];
+  if (p.guided === true && SECTION_STATUSES.includes(status) && /^\s*(pular|pr[oó]xim[ao]( etapa)?)\s*$/i.test(textRaw)) {
+    return hubWith();
+  }
 
   /** Anexa fotos pendentes (ou a foto atual) à atividade. */
   const attachPhotos = async (actId: string, photos: Photo[]) =>
@@ -774,7 +875,38 @@ export async function processWhatsAppDiarioObraFlow(params: {
       if (row?.finalizedAt) {
         return stay(waButtons(FINALIZED_TEXT, [{ id: ID.otherDate, title: 'Outro dia' }, { id: 'MENU', title: 'Menu' }]));
       }
-      return hubWith(row ? 'Esse dia já tem RDO em andamento — vou somar ao que já existe.' : 'RDO aberto para esse dia. 👷');
+      delete p.guided;
+      delete p.guideIdx;
+      return go(
+        waButtons(
+          `${row ? 'Esse dia já tem RDO em andamento — vou somar ao que já existe.' : 'RDO aberto para esse dia. 👷'}\n\nComo você quer preencher?\n• *Passo a passo*: eu te guio por todas as partes (atividades, mão de obra, equipamentos, materiais, ocorrências, observações e clima).\n• *Só uma parte*: você escolhe o que lançar.`,
+          [
+            { id: ID.modeGuided, title: 'Passo a passo' },
+            { id: ID.modePart, title: 'Só uma parte' },
+            { id: 'MENU', title: 'Menu' },
+          ],
+        ),
+        'RDO_ASK_MODE',
+      );
+    }
+
+    case 'RDO_ASK_MODE': {
+      if (content === ID.modeGuided) {
+        p.guided = true;
+        p.guideIdx = -1;
+        return guideNext();
+      }
+      if (content === ID.modePart) {
+        p.guided = false;
+        return hubWith();
+      }
+      return stay(
+        waButtons('Escolha como quer preencher o RDO:', [
+          { id: ID.modeGuided, title: 'Passo a passo' },
+          { id: ID.modePart, title: 'Só uma parte' },
+          { id: 'MENU', title: 'Menu' },
+        ]),
+      );
     }
 
     case 'RDO_HUB': {
@@ -791,41 +923,9 @@ export async function processWhatsAppDiarioObraFlow(params: {
           return deferred(go(await photoSelectAction(), 'RDO_PHOTO_SELECT'));
         }
       }
+      const section = sectionPrompt(content);
+      if (section) return section;
       switch (content) {
-        case ID.act:
-          return go(waButtons('Qual a *atividade* realizada? (ex.: “Alvenaria no subsolo”)', backToHub()), 'RDO_ACT_TITLE');
-        case ID.labor:
-          return go(
-            waButtons('A mão de obra é *direta* (própria da obra) ou *indireta* (apoio/administração)?', [
-              { id: ID.direct, title: 'Direta' },
-              { id: ID.indirect, title: 'Indireta' },
-              { id: ID.hub, title: 'Voltar ao RDO' },
-            ]),
-            'RDO_LABOR_TYPE',
-          );
-        case ID.equip:
-          return go(
-            waButtons('Quais *equipamentos* foram usados? Mande no formato “2 retroescavadeira”. Pode mandar vários, um por linha.', backToHub()),
-            'RDO_EQUIP_TEXT',
-          );
-        case ID.mat:
-          return go(
-            waButtons('Quais *materiais* chegaram/foram usados? Ex.: “10 sacos cimento”, “50 kg areia”. Um por linha.', backToHub()),
-            'RDO_MAT_TEXT',
-          );
-        case ID.occ:
-          return go(waButtons('Descreva a *ocorrência* (o que aconteceu):', backToHub()), 'RDO_OCC_TEXT');
-        case ID.note:
-          return go(waButtons('Escreva a *observação* do dia:', backToHub()), 'RDO_NOTE_TEXT');
-        case ID.weather:
-          return go(
-            waButtons('Como foi o *clima* no dia?', [
-              { id: ID.sunny, title: '☀️ Sol' },
-              { id: ID.partly, title: '⛅ Nublado' },
-              { id: ID.rain, title: '🌧️ Chuva' },
-            ]),
-            'RDO_WEATHER_SKY',
-          );
         case ID.summary: {
           const { content: c } = await loadRdo(obraId, date);
           return go(waButtons(buildSummary(p, c), [{ id: ID.hub, title: 'Voltar ao RDO' }, { id: ID.finalize, title: 'Finalizar RDO' }]), 'RDO_HUB');

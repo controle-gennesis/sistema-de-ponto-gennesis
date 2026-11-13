@@ -60,7 +60,6 @@ export default function HomeAprovacoesCard() {
       >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <View style={styles.headerDot} />
             <Text style={styles.kicker}>Aprovações</Text>
           </View>
           <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
@@ -138,18 +137,11 @@ const getStyles = (colors: any, isDark: boolean) =>
       alignItems: 'center',
       gap: 8,
     },
-    headerDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
-      backgroundColor: colors.primary,
-    },
     kicker: {
-      fontSize: 12,
+      fontSize: 17,
       fontWeight: '700',
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
-      color: colors.textSecondary,
+      color: colors.text,
+      letterSpacing: -0.3,
     },
     loadingText: {
       fontSize: 15,

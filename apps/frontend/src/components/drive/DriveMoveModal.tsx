@@ -10,6 +10,8 @@ export type DriveMoveTarget = {
   type: 'folder' | 'file';
   id: string;
   name: string;
+  /** Várias pastas movidas juntas: nenhuma delas pode ser o destino. */
+  blockedIds?: string[];
 };
 
 type PastaResumo = { id: string; name: string };
@@ -115,7 +117,7 @@ export function DriveMoveModal({
               <ul className="divide-y divide-gray-100 dark:divide-gray-700/70">
                 {pastas.map((p) => {
                   // A própria pasta não pode ser destino (nem as subpastas dela, que só se alcança por ela).
-                  const bloqueada = item.type === 'folder' && p.id === item.id;
+                  const bloqueada = (item.type === 'folder' && p.id === item.id) || !!item.blockedIds?.includes(p.id);
                   return (
                     <li key={p.id}>
                       <button

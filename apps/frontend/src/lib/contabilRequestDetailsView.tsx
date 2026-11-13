@@ -4,6 +4,7 @@ import React from 'react';
 import { Paperclip } from 'lucide-react';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { formatDateBr } from '@/lib/dateTimeBr';
+import { DetailInfoSection, type DetailInfoField } from '@/components/ui/DetailInfoLayout';
 
 /** Tipos criados direto para a Contabilidade (mesma lista do backend). */
 const CONTABIL_DIRECT_TYPES = [
@@ -13,6 +14,12 @@ const CONTABIL_DIRECT_TYPES = [
   'REALOCACAO_COLABORADOR',
   'RETIFICACAO_RECALCULO',
   'SOLICITACAO_GERAL',
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
 ] as const;
 
 export function isContabilDirectRequestType(requestType: string | null | undefined): boolean {
@@ -68,6 +75,62 @@ const FIELDS_BY_TYPE: Record<string, FieldDef[]> = {
     { key: 'informacaoCorreta', label: 'Informação correta', kind: 'long' },
     { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
   ],
+  CONTAB_ADMISSAO: [
+    { key: 'nomeCompleto', label: 'Nome completo' },
+    { key: 'dataAdmissao', label: 'Data de admissão', kind: 'date' },
+    { key: 'tomadorLocal', label: 'Tomador / local de prestação' },
+    { key: 'funcao', label: 'Função' },
+    { key: 'salario', label: 'Salário' },
+    { key: 'cargaHoraria', label: 'Carga horária semanal / jornada' },
+    { key: 'pis', label: 'Nº do PIS' },
+    { key: 'optanteVt', label: 'Optante por vale-transporte (VT)', kind: 'simnao' },
+    { key: 'insalubridade', label: 'Possui insalubridade', kind: 'simnao' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
+  CONTAB_AFASTAMENTO: [
+    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
+    { key: 'tipoMotivo', label: 'Tipo / motivo do afastamento' },
+    { key: 'dataInicio', label: 'Data de início do afastamento', kind: 'date' },
+    { key: 'dataPrevistaTermino', label: 'Data prevista de término', kind: 'date' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
+  CONTAB_ALTERACAO_FUNCAO: [
+    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
+    { key: 'funcaoAtual', label: 'Função atual' },
+    { key: 'novaFuncao', label: 'Nova função' },
+    { key: 'dataInicio', label: 'Data de início da nova função', kind: 'date' },
+    { key: 'alteracaoSalarial', label: 'Haverá alteração salarial?', kind: 'simnao' },
+    { key: 'novoSalario', label: 'Novo salário' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
+  CONTAB_ALTERACAO_SALARIAL: [
+    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
+    { key: 'salarioAtual', label: 'Salário atual' },
+    { key: 'novoSalario', label: 'Novo salário' },
+    { key: 'dataVigencia', label: 'Data de vigência do novo salário', kind: 'date' },
+    { key: 'motivo', label: 'Motivo da alteração', kind: 'long' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
+  CONTAB_FERIAS: [
+    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
+    { key: 'dataInicio', label: 'Data de início das férias', kind: 'date' },
+    { key: 'quantidadeDias', label: 'Quantidade de dias de férias' },
+    { key: 'abonoPecuniario', label: 'Abono pecuniário', kind: 'simnao' },
+    { key: 'quantidadeDiasAbono', label: 'Quantidade de dias de abono' },
+    { key: 'adiantamento13', label: 'Adiantamento de 13º salário', kind: 'simnao' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
+  CONTAB_RESCISAO: [
+    { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
+    { key: 'tipoRescisao', label: 'Tipo de rescisão' },
+    { key: 'tipoAvisoPrevio', label: 'Tipo de aviso prévio' },
+    { key: 'dataDemissao', label: 'Data da demissão / desligamento', kind: 'date' },
+    { key: 'ultimoDiaTrabalhado', label: 'Último dia trabalhado', kind: 'date' },
+    { key: 'possuiProventoDesconto', label: 'Possui provento ou desconto?', kind: 'simnao' },
+    { key: 'proventoDesconto', label: 'Provento / desconto' },
+    { key: 'valor', label: 'Valor' },
+    { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
+  ],
   SOLICITACAO_GERAL: [
     { key: 'assunto', label: 'Assunto' },
     { key: 'colaboradorEmployeeId', label: 'Colaborador relacionado', kind: 'employee' },
@@ -90,10 +153,17 @@ type Props = {
   requestType: string;
   details: unknown;
   employeeNameById?: Map<string, string>;
+  /** Título da seção (mesmo padrão das "Informações gerais"). */
+  title?: string;
 };
 
 /** Campos preenchidos de uma solicitação criada direto para a Contabilidade + anexos. */
-export function ContabilRequestDetailsView({ requestType, details, employeeNameById }: Props) {
+export function ContabilRequestDetailsView({
+  requestType,
+  details,
+  employeeNameById,
+  title = 'Dados da solicitação',
+}: Props) {
   const d = (details && typeof details === 'object' ? details : null) as Record<string, unknown> | null;
   const defs = FIELDS_BY_TYPE[requestType];
   if (!d || !defs) return null;
@@ -112,29 +182,27 @@ export function ContabilRequestDetailsView({ requestType, details, employeeNameB
 
   const anexos = (Array.isArray(d.anexos) ? d.anexos : []) as StoredAnexo[];
 
+  // Mesmo layout das "Informações gerais": linhas com divisor, rótulo à esquerda e valor à direita
+  // (textos longos ficam em bloco abaixo do rótulo).
+  const fields: DetailInfoField[] = rows.map((row) => ({
+    label: row.label,
+    value: <span className="whitespace-pre-wrap break-words">{row.value}</span>,
+    stacked: row.kind === 'long',
+  }));
+
   return (
-    <div className="space-y-4 rounded-lg border border-gray-200 px-4 py-3 text-sm dark:border-gray-700">
-      <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-        {rows.map((row) => (
-          <div key={row.key} className={`space-y-0.5 ${row.kind === 'long' ? 'sm:col-span-2' : ''}`}>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{row.label}</p>
-            <p className="whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100">
-              {row.value}
-            </p>
-          </div>
-        ))}
-      </div>
+    <div className="space-y-5">
+      <DetailInfoSection title={title} fields={fields} />
 
       {anexos.length > 0 ? (
-        <div className="space-y-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Anexos</p>
+        <DetailInfoSection title="Anexos">
           <ul className="space-y-2">
             {anexos.map((anexo, index) => {
               const href = resolveApiMediaUrl(anexo.url);
               return (
                 <li
                   key={`${anexo.url ?? anexo.fileName ?? 'anexo'}-${index}`}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-800/50"
+                  className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-800/50"
                 >
                   <Paperclip className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
                   {href ? (
@@ -163,7 +231,7 @@ export function ContabilRequestDetailsView({ requestType, details, employeeNameB
               );
             })}
           </ul>
-        </div>
+        </DetailInfoSection>
       ) : null}
     </div>
   );

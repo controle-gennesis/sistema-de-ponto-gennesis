@@ -24,6 +24,7 @@ import {
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { resolveBreadcrumbs, appendBreadcrumbEntity } from '@/lib/pageTitle';
+import { isDriveItemDrag, readDriveItemDrag } from '@/components/drive/driveItemDrag';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTheme } from '@/context/ThemeContext';
 import { usePageTitleOverride } from '@/context/PageTitleContext';
@@ -149,6 +150,8 @@ export function TopNavbar({
     usePermissions();
   const { isDark, toggleTheme } = useTheme();
   const { breadcrumbEntities } = usePageTitleOverride();
+  /** Crumb que está recebendo um item arrastado por cima (Drive). */
+  const [crumbDropOver, setCrumbDropOver] = useState<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -296,7 +299,8 @@ export function TopNavbar({
             </Link>
           ) : null}
           <nav aria-label="Breadcrumb" className="min-w-0 max-w-full flex-1">
-            <ol className="flex min-w-0 items-center gap-1 overflow-hidden text-sm">
+            {/* px/py + margens negativas: folga para o crumb "crescer" ao receber um item arrastado sem ser cortado */}
+            <ol className="-mx-2 -my-1.5 flex min-w-0 items-center gap-1 overflow-hidden px-2 py-1.5 text-sm">
               {breadcrumbs.length === 0 ? (
                 <li className="truncate font-semibold text-gray-900 dark:text-gray-100">Gennesis</li>
               ) : (
@@ -357,6 +361,26 @@ export function TopNavbar({
                           onClick={crumb.onClick}
                           className="whitespace-nowrap text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                           title={crumb.label}
+                          {...(crumb.onDropItems
+                            ? {
+                                'data-drop-crumb': '',
+                                ...(crumbDropOver === index ? { 'data-drop-over': '' } : {}),
+                                onDragOver: (e: React.DragEvent) => {
+                                  if (!isDriveItemDrag(e)) return;
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  setCrumbDropOver(index);
+                                },
+                                onDragLeave: () => setCrumbDropOver((v) => (v === index ? null : v)),
+                                onDrop: (e: React.DragEvent) => {
+                                  if (!isDriveItemDrag(e)) return;
+                                  e.preventDefault();
+                                  setCrumbDropOver(null);
+                                  const items = readDriveItemDrag(e);
+                                  if (items.length) crumb.onDropItems?.(items);
+                                },
+                              }
+                            : {})}
                         >
                           {crumb.label}
                         </button>

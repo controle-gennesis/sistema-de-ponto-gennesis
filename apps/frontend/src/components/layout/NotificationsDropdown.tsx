@@ -66,6 +66,7 @@ const OPERATION_IDS = new Set([
   'fuel-supplies',
   'vehicle-supplies',
   'entrega-logistica',
+  'contabilidade-para-encerrar',
 ]);
 
 function notificationGroupOf(id: string): NotificationGroup {
@@ -141,8 +142,10 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     isAdministrator || can(pathToModuleKey('/ponto/entrega-logistica'));
   const canSeeFdAprovadas = isAdministrator || can(pathToModuleKey('/ponto/fds-aprovadas'));
   const canSeeAtendimentoContabil =
-    isAdministrator ||
+    isAdministrator ||
     can(pathToModuleKey('/ponto/dp-contabilidade'));
+  const canSeeSolicitacoesContabilidade =
+    isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-contabilidade'));
 
   const canSeeGestaoOs =
     isAdministrator ||
@@ -187,6 +190,20 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     staleTime: 20_000,
   });
 
+  // Pedidos que a Contabilidade já concluiu e o DP ainda precisa finalizar ("Aguardando Encerramento").
+  const { data: paraEncerrarCount = 0 } = useQuery({
+    queryKey: ['dp-para-encerrar-count'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/contabilidade/para-encerrar-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeSolicitacoesContabilidade && !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   // Mensagens novas nas conversas das solicitações (DP, Administração e Contabilidade).
   const { data: dpMessagesUnread } = useQuery({
     queryKey: ['dp-request-unread-messages'],
@@ -194,7 +211,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
       const res = await api.get('/solicitacoes-dp/mensagens/nao-lidas');
       return (res.data?.data ?? { count: 0, items: [] }) as {
         count: number;
-        items: Array<{ requestId: string; displayNumber: number; title: string; unread: number; area: 'dp' | 'adm' | 'contabilidade' }>;
+        items: Array<{ requestId: string; displayNumber: number; title: string; unread: number; area: 'dp' | 'adm' | 'contabilidade' | 'acct'; accounting?: boolean }>;
       };
     },
     enabled: !permissionsLoading,
@@ -444,8 +461,14 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     }
     if (dpMessagesUnread && dpMessagesUnread.count > 0) {
       const first = dpMessagesUnread.items[0];
-      const areaHref = (a: 'dp' | 'adm' | 'contabilidade') =>
-        a === 'adm' ? '/ponto/gerenciar-solicitacoes-adm-tst' : a === 'dp' ? '/ponto/gerenciar-solicitacoes-gerais' : '/ponto/dp-contabilidade';
+      const areaHref = (a: 'dp' | 'adm' | 'contabilidade' | 'acct') =>
+        a === 'adm'
+          ? '/ponto/gerenciar-solicitacoes-adm-tst'
+          : a === 'dp'
+            ? '/ponto/gerenciar-solicitacoes-gerais'
+            : a === 'acct'
+              ? '/ponto/solicitacoes-contabilidade'
+              : '/ponto/dp-contabilidade';
       list.push({
         id: 'dp-mensagens',
         title: 'Mensagens nas solicitações',
@@ -456,6 +479,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         count: dpMessagesUnread.count,
         href: first ? areaHref(first.area) : '/ponto/gerenciar-solicitacoes-gerais',
         Icon: MessageSquare,
+      });
+    }
+    if (canSeeSolicitacoesContabilidade && paraEncerrarCount > 0) {
+      list.push({
+        id: 'contabilidade-para-encerrar',
+        title: 'Solicitações Contábeis',
+        description: paraEncerrarCount === 1 ? '1 pedido para encerrar' : `${paraEncerrarCount} pedidos para encerrar`,
+        count: paraEncerrarCount,
+        href: '/ponto/solicitacoes-contabilidade',
+        Icon: Calculator,
       });
     }
     if (canSeeAtendimentoContabil && atendimentoContabilPendingCount > 0) {
@@ -610,6 +643,8 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     entregaLogisticaPendingCount,
     canSeeAtendimentoContabil,
     atendimentoContabilPendingCount,
+    canSeeSolicitacoesContabilidade,
+    paraEncerrarCount,
     canSeeMyDpRequests,
     dpReturnPendingCount,
     dpMessagesUnread,

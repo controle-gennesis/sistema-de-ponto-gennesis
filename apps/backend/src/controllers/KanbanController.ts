@@ -90,6 +90,23 @@ export class KanbanController {
     }
   }
 
+  async duplicateBoard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { boardId } = req.params;
+      const name = typeof req.body?.name === 'string' ? req.body.name : undefined;
+      const board = await kanbanService.duplicateBoard(userId, boardId, name);
+      res.status(201).json({ success: true, data: board });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg && msg !== KANBAN_FORBIDDEN) {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async updateBoard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

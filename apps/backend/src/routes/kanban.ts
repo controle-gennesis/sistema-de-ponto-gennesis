@@ -13,6 +13,7 @@ router.use(authenticate);
 router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
 router.post('/boards', (req, res, next) => controller.createBoard(req, res, next));
 router.patch('/boards/:boardId', (req, res, next) => controller.updateBoard(req, res, next));
+router.post('/boards/:boardId/duplicate', (req, res, next) => controller.duplicateBoard(req, res, next));
 router.delete('/boards/:boardId', (req, res, next) => controller.deleteBoard(req, res, next));
 router.post('/boards/:boardId/archive', (req, res, next) => controller.archiveBoard(req, res, next));
 router.post('/boards/:boardId/unarchive', (req, res, next) => controller.unarchiveBoard(req, res, next));

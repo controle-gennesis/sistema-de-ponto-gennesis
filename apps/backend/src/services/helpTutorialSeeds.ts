@@ -955,6 +955,167 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
     ],
   },
 
+  // ——— Financeiro: Controle de Boletos ———
+  {
+    slug: 'usar-controle-de-boletos',
+    title: 'Usar o Controle de Boletos',
+    summary:
+      'Acompanhe boletos por fornecedor, vencimento e confirmação de pagamento: lista, filtros, dashboard, gestores e importação de planilha.',
+    setor: 'Financeiro',
+    keywords: ['boletos', 'boleto', 'pagamento', 'vencimento', 'fornecedor', 'dashboard', 'planilha', 'importar', 'exportar', 'OC', 'NF', 'gestor', 'centro de custo'],
+    href: '/ponto/financeiro/controle-boletos',
+    steps: [
+      {
+        title: 'Abra o Controle de Boletos',
+        body: 'No menu Financeiro, acesse Controle de Boletos. No topo ficam 4 cartões: Todos, Pagos, À vencer e Vencidos, cada um com a quantidade e o valor. Clique em um cartão para filtrar a lista por aquela situação.',
+      },
+      {
+        title: 'Encontre um boleto',
+        body: 'Use a busca (fornecedor, OC, NF ou ID) ou o botão de funil para filtrar por polo, centro de custo, gestor, pagamento confirmado e período de vencimento (de / até).',
+        hint: 'O que a planilha antiga fazia com os campos amarelos (polo, centro de custo e período) agora é feito pelos filtros.',
+      },
+      {
+        title: 'Entenda as colunas e o status',
+        body: 'Cada linha é um boleto, com polo, fornecedor, centro de custo, OC, ID, valor, NF, emissão, condição, vencimento, status, observações e gestor. O status é automático: confirmado = Pago; senão, Vencido se a data de vencimento já passou, ou À vencer. Ninguém precisa digitar o status.',
+        hint: 'O gestor vem sozinho do centro de custo do boleto.',
+      },
+      {
+        title: 'Lance ou corrija um boleto',
+        body: 'Use Novo boleto para cadastrar. Ao escolher o polo (DF, GO, CONFEA), a lista de centros de custo mostra só os desse polo. Para corrigir, abra o menu da linha e edite.',
+        hint: 'Escreva o centro de custo exatamente como no cadastro, senão o boleto fica sem ligação com o centro e some dos filtros.',
+      },
+      {
+        title: 'Confirme o pagamento',
+        body: 'Na coluna Pgto. confirmado, clique no check do boleto para confirmar que ele foi pago. Ele passa a Pago na hora. Clique de novo para desfazer uma confirmação feita por engano.',
+      },
+      {
+        title: 'Veja os gráficos no Dashboard',
+        body: 'Clique no ícone de gráfico, no canto superior direito da tela. O Dashboard mostra o valor total, pago, à vencer e vencido, o resumo mensal por polo, as condições de pagamento e o valor por gestor, centro de custo e fornecedor. Os filtros são polo, centro de custo, gestor e vencimento.',
+      },
+      {
+        title: 'Defina o gestor de cada centro de custo',
+        body: 'No menu de três pontinhos, acima da lista, abra Gestores por centro de custo. Defina o gestor uma vez e ele vale para todos os boletos daquele centro. Se o gestor mudar, é só trocar ali.',
+      },
+      {
+        title: 'Exportar e importar planilha (administrador)',
+        body: 'No mesmo menu de três pontinhos ficam Exportar planilha (gera o Excel com o filtro da tela) e Importar planilha (traz lotes novos). Esses dois itens aparecem só para administradores. Importar o mesmo arquivo de novo não duplica boletos: o sistema mostra quantas linhas foram lidas, quantas são novas, os centros de custo ajustados e os que não existem no cadastro.',
+        hint: 'A partir de agora o sistema é a fonte dos dados. A planilha serve só como exportação para consulta.',
+      },
+    ],
+  },
+
+  // ——— Departamento Pessoal: comunicação com a Contabilidade ———
+  {
+    slug: 'comunicacao-dp-contabilidade',
+    title: 'Comunicação entre DP e Contabilidade',
+    summary:
+      'Como o DP e a Contabilidade conversam, anexam documentos e acompanham cada pedido dentro do sistema, sem WhatsApp nem e-mail.',
+    setor: 'Departamento Pessoal',
+    keywords: ['contabilidade', 'dp', 'atendimento contábil', 'solicitações à contabilidade', 'comentários', 'conversa', 'documentos', 'concluir', 'finalizar', 'para encerrar', 'reenviar'],
+    href: '/ponto/solicitacoes-contabilidade',
+    steps: [
+      {
+        title: 'Entenda como funciona',
+        body: 'O DP e a Contabilidade conversam e acompanham os pedidos dentro do sistema: cada pedido tem seu status, seus documentos e sua própria conversa. O DP usa Gerenciar Solicitações e Solicitações Contábeis; a Contabilidade usa Atendimento Contábil. Um pedido chega à Contabilidade de duas formas: (1) solicitação interna enviada pelo DP, como Admissão, Férias, Rescisão, Alteração de função/salário e Retificação de alocação; (2) pedido direto criado em Solicitações Contábeis, como Convenção coletiva/CCT, Fechamento da folha, Impostos/encargos, Realocação de colaborador, Retificação/recálculo e Solicitação geral.',
+        hint: 'O que muda é só o começo. Depois que chega, o atendimento é o mesmo nos dois caminhos.',
+      },
+      {
+        title: 'DP: enviar uma solicitação interna à Contabilidade',
+        body: 'Em Gerenciar Solicitações, abra a solicitação pelo menu da linha. Em "Registrar feedback", escreva as observações e, no campo Feedback, escolha Enviar à Contabilidade. Clique em Salvar, leia o aviso que aparece e confirme em "Entendi, enviar" (se não quiser ver o aviso de novo, marque "Não mostrar esta mensagem novamente"). A solicitação fica em Finalizadas em Gerenciar Solicitações e passa a aparecer como Na Contabilidade em Solicitações Contábeis.',
+        hint: 'Depois de enviada, o acompanhamento, a conversa e o encerramento são feitos só em Solicitações Contábeis.',
+      },
+      {
+        title: 'DP: criar um pedido direto',
+        body: 'Abra Solicitações Contábeis no menu do Departamento Pessoal e clique em + Nova Solicitação (o botão aparece para quem é do DP e para administradores). Escolha o tipo de pedido e a unidade, preencha os campos que aparecem, anexe os documentos necessários e clique em Enviar solicitação. O pedido vai direto para a Contabilidade e fica como Na Contabilidade.',
+      },
+      {
+        title: 'DP: acompanhar os pedidos',
+        body: 'Em Solicitações Contábeis há abas por etapa, cada uma com a quantidade de pedidos: Todas, Na Contabilidade, Aguardando Encerramento, Finalizadas e Canceladas. Abra um pedido pelo menu da linha para ver as abas Detalhes, Timeline e Comentários.',
+      },
+      {
+        title: 'DP: finalizar quando a Contabilidade concluir',
+        body: 'Quando a Contabilidade conclui o atendimento, o pedido fica em Aguardando Encerramento. Abra o pedido, confira a conversa e os documentos e clique em Finalizar (botão verde, ao lado de Fechar). Confirme, e o pedido vai para Finalizadas.',
+        hint: 'Nos pedidos diretos, o Finalizar só aparece depois que a Contabilidade conclui. Nas solicitações internas enviadas pelo DP ele aparece desde o início; use antes da conclusão só se não houver mais nada a tratar com a Contabilidade.',
+      },
+      {
+        title: 'DP: se o envio falhar',
+        body: 'Se o sistema avisar que o pedido não chegou à Contabilidade, abra o pedido em Solicitações Contábeis e clique em Reenviar à Contabilidade.',
+        hint: 'Enquanto o pedido não chega à Contabilidade, a conversa só fica disponível depois do reenvio.',
+      },
+      {
+        title: 'Contabilidade: atender o pedido',
+        body: 'Abra Atendimento Contábil. As abas são Todas, Pendentes, Concluídas e Canceladas; os pedidos novos ficam em Pendentes, com a etiqueta amarela. Abra o pedido pelo menu da linha: em Detalhes estão os dados e os documentos anexados; em Timeline, o histórico; em Comentários, a conversa com o DP. Se faltar informação, peça na aba Comentários. Para enviar um documento, use o botão + em "Documentos anexados", na aba Detalhes.',
+      },
+      {
+        title: 'Contabilidade: concluir ou cancelar',
+        body: 'Terminou o atendimento? Clique em Concluir (botão verde, no rodapé). Nos pedidos que vieram do DP, o sistema pede confirmação e avisa o DP. O pedido vai para Concluídas para a Contabilidade e para Aguardando Encerramento para o DP. Nos pedidos diretos criados pelo DP também existe o botão Cancelar: informe o motivo, que fica registrado e o DP vê. Depois de concluída ou cancelada, a solicitação fica disponível só para consulta.',
+      },
+      {
+        title: 'Etapas e status: o que significa e quem age',
+        body: 'Na Contabilidade (para a Contabilidade aparece como Pendente): o pedido chegou e a Contabilidade está atendendo; quem age é a Contabilidade. Aguardando Encerramento (aparece como Concluída para a Contabilidade): a Contabilidade terminou e falta o DP finalizar; quem age é o DP. Finalizadas (Concluída): o DP finalizou e o atendimento está encerrado; só consulta. Canceladas (Cancelada): o pedido foi cancelado, com o motivo no detalhe; só consulta.',
+        hint: 'O caminho normal é: Na Contabilidade, depois Aguardando Encerramento, depois Finalizadas. Em Gerenciar Solicitações, o que foi enviado à Contabilidade conta como Finalizadas desde o envio, porque o trabalho do DP naquela tela terminou.',
+      },
+      {
+        title: 'Comentários e documentos anexados',
+        body: 'Cada pedido tem uma única conversa, e o DP e a Contabilidade veem as mesmas mensagens, na aba Comentários. Para escrever, digite na caixa embaixo e clique em Comentar (Ctrl+Enter também envia). Quando um lado escreve, o outro recebe aviso no sininho e, no celular, uma notificação; ao abrir a aba, as mensagens são marcadas como lidas. Para anexar, use o botão + em "Documentos anexados", na aba Detalhes: aceita PDF, imagens (JPG, PNG, WEBP), Word e Excel, e cada anexo entra no histórico e avisa a outra parte. Só quem anexou um documento pode removê-lo.',
+        hint: 'Para a conversa render, seja objetivo: diga o que falta, para qual pedido e até quando, e anexe o documento no próprio pedido em vez de mandar por outro canal.',
+      },
+      {
+        title: 'Dúvidas frequentes',
+        body: 'Qual a diferença entre Concluir e Finalizar? Concluir é da Contabilidade (o atendimento terminou); Finalizar é do DP (encerra o pedido depois da conclusão). A Contabilidade já concluiu, mas o pedido ainda aparece para mim: ele está em Aguardando Encerramento, falta o DP abrir e clicar em Finalizar. Enviei à Contabilidade e a solicitação sumiu de Pendentes em Gerenciar Solicitações: está em Finalizadas nessa tela e é acompanhada em Solicitações Contábeis, na etapa Na Contabilidade. Não vejo o botão Nova Solicitação: ele aparece só para quem é do DP e para administradores. Não consigo abrir a tela ou ver os comentários: é falta de permissão, peça à gestão de acessos para liberar Solicitações Contábeis (DP) ou Atendimento Contábil (Contabilidade). Preciso cancelar um pedido: nos pedidos diretos quem cancela é a Contabilidade, informando o motivo; nas solicitações internas o DP cancela em Gerenciar Solicitações, antes de enviar à Contabilidade.',
+      },
+    ],
+  },
+
+  // ——— Financeiro: Atendimento Contábil (guia da Contabilidade) ———
+  {
+    slug: 'contabilidade-atender-pedidos-do-dp',
+    title: 'Contabilidade: atender os pedidos do DP',
+    summary:
+      'Guia da Contabilidade: onde ver os pedidos novos do DP, como pedir informações, anexar documentos, concluir e quando cancelar.',
+    setor: 'Financeiro',
+    keywords: ['contabilidade', 'atendimento contábil', 'pedidos do dp', 'pendentes', 'concluir', 'cancelar', 'comentários', 'documentos', 'conversa'],
+    href: '/ponto/dp-contabilidade',
+    steps: [
+      {
+        title: 'O que mudou para você',
+        body: 'Os pedidos do DP chegam direto no sistema, na tela Atendimento Contábil, sem WhatsApp nem e-mail. Cada pedido tem o seu status, os seus documentos e a sua própria conversa com o DP, tudo no mesmo lugar. Eles chegam de duas formas e você atende do mesmo jeito: (1) solicitação interna que o DP enviou (Admissão, Férias, Rescisão, Alteração de função/salário, Retificação de alocação), em que você pode conversar, anexar documentos e Concluir; (2) pedido criado direto pelo DP (Convenção coletiva/CCT, Fechamento da folha, Impostos/encargos, Realocação de colaborador, Retificação/recálculo, Solicitação geral), em que você pode conversar, anexar documentos, Concluir ou Cancelar (com o motivo).',
+      },
+      {
+        title: 'Onde ver os pedidos',
+        body: 'Abra Atendimento Contábil no menu. No topo há abas por situação, cada uma com a quantidade de pedidos: Todas (todos os pedidos), Pendentes (os que ainda precisam de atendimento; os novos aparecem aqui, com a etiqueta amarela), Concluídas (os que você já atendeu) e Canceladas (os cancelados, com o motivo). O número no ícone do menu mostra quantos estão pendentes.',
+        hint: 'Confira a aba Pendentes todos os dias.',
+      },
+      {
+        title: 'Atenda um pedido, passo a passo',
+        body: '1) Na aba Pendentes, abra o pedido pelo menu da linha. 2) Em Detalhes, leia os dados do pedido e veja os documentos anexados pelo DP; em Timeline você vê o histórico. 3) Se faltar alguma informação, peça ao DP na aba Comentários: escreva na caixa embaixo e clique em Comentar (Ctrl+Enter também envia); o DP recebe um aviso. 4) Se precisar enviar um documento ao DP, use o botão + em "Documentos anexados", na aba Detalhes (PDF, imagem, Word ou Excel). 5) Quando o atendimento terminar, clique em Concluir (botão verde, no rodapé do pedido) e confirme.',
+      },
+      {
+        title: 'Concluir',
+        body: 'Use quando o pedido foi atendido. Em pedidos que vieram do DP, o sistema pede uma confirmação e avisa o DP. Em pedidos diretos, você pode deixar uma mensagem final, se quiser. Depois de concluir, o pedido vai para Concluídas na sua tela. Para o DP, ele passa a Aguardando Encerramento, e o DP faz a finalização do lado dele. Você não precisa fazer mais nada.',
+        hint: 'Concluído não volta: confira antes de clicar. Se precisar de algo a mais depois, avise o DP para abrir um novo pedido.',
+      },
+      {
+        title: 'Cancelar (só nos pedidos diretos)',
+        body: 'Use quando o pedido não puder ser atendido. O motivo é obrigatório e fica visível para o DP. O pedido vai para Canceladas. Nas solicitações internas enviadas pelo DP o botão Cancelar não existe: você só pode concluir.',
+        hint: 'Depois de concluído ou cancelado, o pedido não pode ser reaberto. Ele fica só para consulta.',
+      },
+      {
+        title: 'Conversa e documentos',
+        body: 'A conversa do pedido é única: você e o DP veem as mesmas mensagens, na aba Comentários. Quando o DP escreve ou anexa algo, você recebe aviso no sininho e, no celular, uma notificação; ao abrir a aba Comentários, as mensagens são marcadas como lidas. Cada documento anexado entra no histórico do pedido e avisa a outra parte, e só quem anexou pode remover o documento.',
+        hint: 'Seja objetivo: diga o que falta e até quando precisa. Prefira sempre o próprio pedido em vez de mandar por WhatsApp ou e-mail, para tudo ficar registrado.',
+      },
+      {
+        title: 'Dúvidas frequentes',
+        body: 'O pedido sumiu de Pendentes: se você concluiu, está em Concluídas; se foi cancelado, está em Canceladas; use a aba Todas para achar qualquer um. Concluí um pedido sem querer, dá para voltar? Não: avise o DP pela conversa para que ele abra um novo pedido, se for o caso. Como sei que o DP respondeu? Pelo aviso no sininho (e no celular) e pelas mensagens novas na aba Comentários. Não vejo o botão Cancelar: ele existe só nos pedidos diretos. Não consigo abrir a tela Atendimento Contábil: é falta de permissão, peça à gestão de acessos para liberar a tela. Preciso de um documento que o DP não mandou: peça na aba Comentários, dizendo qual documento falta; quando o DP anexar, você recebe o aviso.',
+      },
+      {
+        title: 'Resumo rápido',
+        body: 'Atender em Atendimento Contábil, aba Pendentes, todos os dias. Ler os Detalhes e os documentos; pedir o que faltar em Comentários. Terminou: Concluir. Pedido direto que não dá para atender: Cancelar, com o motivo. Concluído ou cancelado não volta: confira antes de clicar.',
+      },
+    ],
+  },
+
   // ——— Segurança do Trabalho ———
   {
     slug: 'usar-seguranca-do-trabalho',

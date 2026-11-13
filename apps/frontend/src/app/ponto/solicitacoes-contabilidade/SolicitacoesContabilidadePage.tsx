@@ -7,10 +7,12 @@ import { toast } from 'react-hot-toast';
 import {
   Calculator,
   CheckCircle,
+  ClipboardCheck,
   ClipboardList,
   FileText,
   Plus,
   Search,
+  Undo2,
   X,
   XCircle,
   type LucideIcon,
@@ -23,7 +25,8 @@ import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/Cadastro
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
@@ -41,10 +44,13 @@ import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
 import { ContabilRequestDetailsView, isContabilDirectRequestType } from '@/lib/contabilRequestDetailsView';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
+import { DpRequestMessages } from '@/components/dp/DpRequestMessages';
+import { DpRequestAttachments } from '@/components/dp/DpRequestAttachments';
 import { DP_SENT_TO_ACCOUNTING_LABEL, dpRequestIsSentToAccounting } from '@/lib/dpRequestDpUi';
 import {
   DpRequestHistoryMetaCard,
   DpRequestHistoryModalFooter,
+  DpRequestHistoryModalBody,
   DpRequestHistoryModalTabs,
   DpRequestHistorySectionCard,
   DpRequestHistoryTimeline,
@@ -84,16 +90,30 @@ type ContabilRequest = {
   details?: Record<string, unknown> | null;
   statusHistory?: unknown;
   contabilidadePendente?: boolean;
+  /** Pedido ligado na Contabilidade (só nas solicitações internas enviadas pelo DP). */
+  contabilidade?: {
+    id: string;
+    status: string;
+    accountingDoneAt?: string | null;
+    dpClosedAt?: string | null;
+  } | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
   IN_ACCOUNTING: 'Na Contabilidade',
+  WAITING_RETURN_ACCOUNTING: 'Devolvida para Ajuste',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
 
+/** A Contabilidade concluiu o atendimento; falta o DP encerrar. */
+const AWAITING_CLOSE_LABEL = 'Aguardando Encerramento';
+const AWAITING_CLOSE_BADGE =
+  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+
 const STATUS_BADGE: Record<string, string> = {
   IN_ACCOUNTING: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+  WAITING_RETURN_ACCOUNTING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
@@ -116,10 +136,24 @@ function isInScope(r: { requestType: string; status: string }): boolean {
 }
 
 /** Etapa para os cards: o que veio de Solicitações Internas já está com a Contabilidade. */
-function stageOf(r: { requestType: string; status: string }): Exclude<StageFilter, 'all'> {
-  if (!isContabilDirectRequestType(r.requestType)) return 'IN_ACCOUNTING';
+function stageOf(r: {
+  requestType: string;
+  status: string;
+  contabilidade?: ContabilRequest['contabilidade'];
+}): Exclude<StageFilter, 'all'> {
+  if (!isContabilDirectRequestType(r.requestType)) {
+    // Enviada pelo DP: fica na Contabilidade até o DP encerrar o atendimento (aqui mesmo).
+    if (r.contabilidade?.status === 'CANCELLED') return 'CANCELLED';
+    if (r.contabilidade?.dpClosedAt) return 'CONCLUDED';
+    if (r.contabilidade?.status === 'CONCLUDED' || r.contabilidade?.accountingDoneAt) return 'AWAITING_CLOSE';
+    return 'IN_ACCOUNTING';
+  }
   if (r.status === 'CONCLUDED') return 'CONCLUDED';
   if (r.status === 'CANCELLED') return 'CANCELLED';
+  // A Contabilidade devolveu: o solicitante precisa corrigir e reenviar.
+  if (r.status === 'WAITING_RETURN_ACCOUNTING') return 'RETURNED';
+  // Criada aqui: a Contabilidade concluiu, falta o DP finalizar.
+  if (r.contabilidade?.status === 'CONCLUDED' && !r.contabilidade.dpClosedAt) return 'AWAITING_CLOSE';
   return 'IN_ACCOUNTING';
 }
 
@@ -131,14 +165,21 @@ function typeLabel(requestType: string): string {
   );
 }
 
-function statusLabel(r: { requestType: string; status: string }): string {
+function statusLabel(r: {
+  requestType: string;
+  status: string;
+  contabilidade?: ContabilRequest['contabilidade'];
+}): string {
+  if (stageOf(r) === 'AWAITING_CLOSE') return AWAITING_CLOSE_LABEL;
   if (!isContabilDirectRequestType(r.requestType) && r.status === 'CONCLUDED') {
+    if (r.contabilidade?.status === 'CANCELLED') return STATUS_LABELS.CANCELLED;
+    if (r.contabilidade?.dpClosedAt) return STATUS_LABELS.CONCLUDED;
     return DP_SENT_TO_ACCOUNTING_LABEL;
   }
   return STATUS_LABELS[r.status] ?? r.status;
 }
 
-type StageFilter = 'all' | 'IN_ACCOUNTING' | 'CONCLUDED' | 'CANCELLED';
+type StageFilter = 'all' | 'IN_ACCOUNTING' | 'RETURNED' | 'AWAITING_CLOSE' | 'CONCLUDED' | 'CANCELLED';
 
 const STAGE_CARDS: {
   filter: StageFilter;
@@ -149,7 +190,7 @@ const STAGE_CARDS: {
 }[] = [
   {
     filter: 'all',
-    label: 'Todos',
+    label: 'Todas',
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
     Icon: ClipboardList,
@@ -160,6 +201,20 @@ const STAGE_CARDS: {
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
     iconColor: 'text-indigo-600 dark:text-indigo-400',
     Icon: Calculator,
+  },
+  {
+    filter: 'RETURNED',
+    label: 'Correção',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: Undo2,
+  },
+  {
+    filter: 'AWAITING_CLOSE',
+    label: 'Aguardando Encerramento',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: ClipboardCheck,
   },
   {
     filter: 'CONCLUDED',
@@ -195,6 +250,20 @@ const STAGE_LIST_CONFIG: Record<
     Icon: Calculator,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
     iconColor: 'text-indigo-600 dark:text-indigo-400',
+  },
+  RETURNED: {
+    title: 'Solicitações Devolvidas para Ajuste',
+    subtitle: 'A Contabilidade devolveu o pedido. Abra, corrija os dados ou anexe o que falta e reenvie.',
+    Icon: Undo2,
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+  },
+  AWAITING_CLOSE: {
+    title: 'Aguardando Encerramento',
+    subtitle: 'A Contabilidade já concluiu o atendimento. Abra a solicitação e encerre para finalizar.',
+    Icon: ClipboardCheck,
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
   },
   CONCLUDED: {
     title: 'Solicitações Finalizadas',
@@ -305,7 +374,19 @@ export function SolicitacoesContabilidadePage() {
   const [details, setDetails] = useState<Record<string, unknown>>({});
   const [anexos, setAnexos] = useState<ContabilAnexoDraft[]>([]);
   const [historyRequest, setHistoryRequest] = useState<ContabilRequest | null>(null);
-  const [historyTab, setHistoryTab] = useState<'detalhes' | 'timeline'>('detalhes');
+  const [historyTab, setHistoryTab] = useState<'detalhes' | 'timeline' | 'comentarios'>('detalhes');
+  const [cancelTarget, setCancelTarget] = useState<ContabilRequest | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [adjustTarget, setAdjustTarget] = useState<ContabilRequest | null>(null);
+  const [adjustDetails, setAdjustDetails] = useState<Record<string, unknown>>({});
+  const [adjustAnexos, setAdjustAnexos] = useState<ContabilAnexoDraft[]>([]);
+  const [adjustNote, setAdjustNote] = useState('');
+
+  const { data: meData } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => (await api.get('/auth/me')).data,
+  });
+  const currentUserId = (meData?.data as { id?: string } | undefined)?.id ?? null;
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -339,6 +420,8 @@ export function SolicitacoesContabilidadePage() {
     const c: Record<StageFilter, number> = {
       all: requests.length,
       IN_ACCOUNTING: 0,
+      RETURNED: 0,
+      AWAITING_CLOSE: 0,
       CONCLUDED: 0,
       CANCELLED: 0,
     };
@@ -459,11 +542,14 @@ export function SolicitacoesContabilidadePage() {
 
   const typeOptions = React.useMemo<MultiSelectSearchOption[]>(
     () =>
-      (Object.entries(CONTABIL_TYPE_LABELS) as [ContabilFormRequestType, string][]).map(([value, label]) => ({
-        value,
-        label,
-        searchText: label,
-      })),
+      (Object.entries(CONTABIL_TYPE_LABELS) as [ContabilFormRequestType, string][])
+        .map(([value, label]) => ({
+          value,
+          label,
+          searchText: label,
+        }))
+        // Ordem alfabética (ignora acentos e maiúsculas).
+        .sort((x, y) => x.label.localeCompare(y.label, 'pt-BR', { sensitivity: 'base' })),
     []
   );
 
@@ -543,20 +629,127 @@ export function SolicitacoesContabilidadePage() {
       toast.error(err?.response?.data?.error || err?.message || 'Não foi possível reenviar.'),
   });
 
+  const concludeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.post(`/solicitacoes-dp/${id}/concluir-contabilidade`, {});
+    },
+    onSuccess: async () => {
+      toast.success('Solicitação finalizada.');
+      setHistoryRequest(null);
+      await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+      toast.error(d?.message || d?.error || 'Não foi possível finalizar a solicitação.');
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async ({ id, comment }: { id: string; comment: string }) => {
+      await api.post(`/solicitacoes-dp/${id}/cancelar-contabilidade`, { comment });
+    },
+    onSuccess: async () => {
+      toast.success('Solicitação cancelada.');
+      setCancelTarget(null);
+      setCancelReason('');
+      setHistoryRequest(null);
+      await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+      toast.error(d?.message || d?.error || 'Não foi possível cancelar a solicitação.');
+    },
+  });
+
+  const closeAdjust = () => {
+    setAdjustTarget(null);
+    setAdjustDetails({});
+    setAdjustAnexos([]);
+    setAdjustNote('');
+  };
+
+  const openAdjust = (r: ContabilRequest) => {
+    const { anexos: _keep, ...rest } = (r.details ?? {}) as Record<string, unknown>;
+    setAdjustDetails(rest);
+    setAdjustAnexos([]);
+    setAdjustNote('');
+    setAdjustTarget(r);
+  };
+
+  const adjustMutation = useMutation({
+    mutationFn: async () => {
+      if (!adjustTarget) return;
+      const anexosPayload: Record<string, unknown>[] = [];
+      for (let i = 0; i < adjustAnexos.length; i++) {
+        const anexo = adjustAnexos[i];
+        if (!anexo.file) throw new Error(`Selecione o arquivo do anexo ${i + 1}`);
+        if (!anexo.tipoArquivo) throw new Error(`Informe o tipo do arquivo do anexo ${i + 1}`);
+        anexosPayload.push({
+          ...(await fileToAttachment(anexo.file)),
+          tipoArquivo: anexo.tipoArquivo,
+          ...(anexo.dataValidade ? { dataValidade: anexo.dataValidade } : {}),
+        });
+      }
+      await api.put(`/solicitacoes-dp/${adjustTarget.id}/ajustar-contabilidade`, {
+        details: { ...adjustDetails, anexos: anexosPayload },
+        note: adjustNote.trim() || undefined,
+      });
+    },
+    onSuccess: async () => {
+      toast.success('Solicitação ajustada e reenviada à Contabilidade.');
+      closeAdjust();
+      setHistoryRequest(null);
+      await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade'] });
+      void queryClient.invalidateQueries({ queryKey: ['dp-contabilidade-pending-count'] });
+    },
+    onError: (e: unknown) => {
+      const err = e as { message?: string; response?: { data?: { message?: string; error?: string } } };
+      toast.error(err.response?.data?.message || err.response?.data?.error || err.message || 'Não foi possível reenviar.');
+    },
+  });
+
+  /** Motivo informado pela Contabilidade na última devolução (vem do histórico de etapas). */
+  const returnReason = (r: ContabilRequest): string => {
+    const hist = Array.isArray(r.statusHistory) ? (r.statusHistory as Array<{ status?: string; note?: string }>) : [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      if (hist[i]?.status === 'WAITING_RETURN_ACCOUNTING') {
+        return (hist[i].note ?? '').replace(/^Devolvida para ajuste:\s*/i, '').trim();
+      }
+    }
+    return '';
+  };
+
+  /** Só dá para cancelar o que foi aberto aqui e ainda está com a Contabilidade (não concluída). */
+  const canCancel = (r: ContabilRequest) =>
+    isContabilDirectRequestType(r.requestType) && (stageOf(r) === 'IN_ACCOUNTING' || stageOf(r) === 'RETURNED');
+
   const openHistory = (r: ContabilRequest) => {
     setHistoryTab('detalhes');
     setHistoryRequest(r);
   };
 
   const statusBadge = (r: ContabilRequest) => (
-    <span
-      className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
-        isContabilDirectRequestType(r.requestType)
-          ? (STATUS_BADGE[r.status] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300')
-          : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300'
-      }`}
-    >
-      {statusLabel(r)}
+    <span className="inline-flex flex-col items-center gap-1">
+      <span
+        className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
+          isContabilDirectRequestType(r.requestType) && stageOf(r) !== 'AWAITING_CLOSE'
+            ? (STATUS_BADGE[r.status] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300')
+            : stageOf(r) === 'CONCLUDED'
+              ? STATUS_BADGE.CONCLUDED
+              : stageOf(r) === 'CANCELLED'
+                ? STATUS_BADGE.CANCELLED
+                : stageOf(r) === 'AWAITING_CLOSE'
+                  ? AWAITING_CLOSE_BADGE
+                  : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300'
+        }`}
+      >
+        {statusLabel(r)}
+      </span>
     </span>
   );
 
@@ -603,24 +796,41 @@ export function SolicitacoesContabilidadePage() {
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Solicitações à Contabilidade"
+            title="Solicitações Contábeis"
             description="Crie pedidos diretos à Contabilidade e acompanhe o andamento de cada um"
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
-            {STAGE_CARDS.map((card) => (
-              <FilterStatCard
-                key={card.filter}
-                label={card.label}
-                count={counts[card.filter]}
-                icon={card.Icon}
-                iconBg={card.iconBg}
-                iconColor={card.iconColor}
-                isActive={stageFilter === card.filter}
-                loading={loadingList}
-                onClick={() => setStageFilter(card.filter)}
-              />
-            ))}
+          <div id="secao-etapas-solicitacoes" className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas das solicitações"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGE_CARDS.map((card) => {
+                const active = stageFilter === card.filter;
+                return (
+                  <React.Fragment key={card.filter}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStageFilter(card.filter)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {card.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={loadingList ? 0 : counts[card.filter]} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {card.filter === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
           </div>
 
           <Card className="w-full">
@@ -791,7 +1001,7 @@ export function SolicitacoesContabilidadePage() {
             }}
           >
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium">Tipo de solicitação *</label>
+              <label className="mb-1 block text-sm font-medium">Tipo de solicitação <span className="text-red-600">*</span></label>
               <SingleSelectSearchDropdown
                 value={form.requestType}
                 onChange={(rt) => {
@@ -816,7 +1026,7 @@ export function SolicitacoesContabilidadePage() {
               }`}
             >
               <div className="min-w-0">
-                <label className="mb-1 block text-sm font-medium">Unidade *</label>
+                <label className="mb-1 block text-sm font-medium">Unidade <span className="text-red-600">*</span></label>
                 <SingleSelectSearchDropdown
                   value={form.costCenterId}
                   onChange={handleCostCenterChange}
@@ -871,8 +1081,12 @@ export function SolicitacoesContabilidadePage() {
               <Button type="button" variant="outline" onClick={closeCreate}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
+              <Button
+                type="submit"
+                disabled={createMutation.isPending}
+                className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+              >
+                {createMutation.isPending ? 'Enviando...' : 'Enviar Solicitação'}
               </Button>
             </div>
           </form>
@@ -884,11 +1098,13 @@ export function SolicitacoesContabilidadePage() {
           onClose={() => setHistoryRequest(null)}
           title="Histórico da solicitação"
           size="lg"
+          headerClassName="border-b-0 pb-2 sm:pb-2"
+          contentClassName="!p-0"
+          scrollContent={false}
+          panelClassName={historyTab === 'comentarios' ? 'h-[min(92dvh,calc(100dvh-2rem))]' : undefined}
         >
           {historyRequest && (
-            <div className="space-y-5">
-              <DpRequestHistoryModalTabs activeTab={historyTab} onTabChange={setHistoryTab} />
-
+            <DpRequestHistoryModalBody fill={historyTab === 'comentarios'} tabs={<DpRequestHistoryModalTabs activeTab={historyTab} onTabChange={setHistoryTab} showComments />}>
               {historyTab === 'detalhes' ? (
                 <div className="space-y-4">
                   <DpRequestHistoryMetaCard fields={metaFields(historyRequest)} />
@@ -915,6 +1131,24 @@ export function SolicitacoesContabilidadePage() {
                     </DpRequestHistorySectionCard>
                   ) : null}
 
+                  {stageOf(historyRequest) === 'RETURNED' ? (
+                    <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900 dark:border-orange-800/60 dark:bg-orange-950/30 dark:text-orange-200">
+                      <p className="font-semibold">A Contabilidade devolveu este pedido para ajuste.</p>
+                      {returnReason(historyRequest) ? (
+                        <p className="whitespace-pre-wrap break-words">{returnReason(historyRequest)}</p>
+                      ) : null}
+                      <Button
+                        type="button"
+                        className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+                        onClick={() => openAdjust(historyRequest)}
+                      >
+                        Corrigir e reenviar
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  <DpRequestAttachments requestId={historyRequest.id} currentUserId={currentUserId} />
+
                   {historyRequest.contabilidadePendente ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
                       <p>Esta solicitação ainda não chegou à Contabilidade.</p>
@@ -933,7 +1167,48 @@ export function SolicitacoesContabilidadePage() {
                     <Button type="button" variant="outline" onClick={() => setHistoryRequest(null)}>
                       Fechar
                     </Button>
+                    {canCancel(historyRequest) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="!border-red-300 !text-red-700 hover:!bg-red-50 dark:!border-red-800 dark:!text-red-300 dark:hover:!bg-red-950/30"
+                        onClick={() => {
+                          setCancelReason('');
+                          setCancelTarget(historyRequest);
+                        }}
+                      >
+                        Cancelar solicitação
+                      </Button>
+                    ) : null}
+                    {historyRequest.contabilidade &&
+                    historyRequest.contabilidade.status !== 'CANCELLED' &&
+                    !historyRequest.contabilidade.dpClosedAt &&
+                    (!isContabilDirectRequestType(historyRequest.requestType) ||
+                      stageOf(historyRequest) === 'AWAITING_CLOSE') ? (
+                      <Button
+                        type="button"
+                        variant="success"
+                        disabled={concludeMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm('Finalizar esta solicitação? O atendimento da Contabilidade será encerrado.')) {
+                            concludeMutation.mutate(historyRequest.id);
+                          }
+                        }}
+                      >
+                        {concludeMutation.isPending ? 'Finalizando...' : 'Finalizar'}
+                      </Button>
+                    ) : null}
                   </DpRequestHistoryModalFooter>
+                </div>
+              ) : historyTab === 'comentarios' ? (
+                <div className="min-h-0 flex-1">
+                  {historyRequest.contabilidadePendente ? (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+                      A conversa fica disponível depois que a solicitação chegar à Contabilidade.
+                    </p>
+                  ) : (
+                    <DpRequestMessages requestId={historyRequest.id} variant="chat" />
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -954,8 +1229,122 @@ export function SolicitacoesContabilidadePage() {
                   </DpRequestHistoryModalFooter>
                 </div>
               )}
-            </div>
+            </DpRequestHistoryModalBody>
           )}
+        </Modal>
+
+        {/* Corrigir e reenviar (devolvida pela Contabilidade) */}
+        <Modal
+          isOpen={!!adjustTarget}
+          onClose={() => (adjustMutation.isPending ? undefined : closeAdjust())}
+          title="Corrigir e reenviar"
+          size="xl"
+        >
+          {adjustTarget ? (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                adjustMutation.mutate();
+              }}
+            >
+              {returnReason(adjustTarget) ? (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900 dark:border-orange-800/60 dark:bg-orange-950/30 dark:text-orange-200">
+                  <p className="font-semibold">O que a Contabilidade pediu:</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words">{returnReason(adjustTarget)}</p>
+                </div>
+              ) : null}
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Tipo: <strong>{typeLabel(adjustTarget.requestType)}</strong>. Os documentos já enviados continuam na
+                solicitação; adicione abaixo só o que faltar.
+              </p>
+              <ContabilSolicitacaoTypeFields
+                requestType={adjustTarget.requestType as ContabilFormRequestType}
+                details={adjustDetails}
+                patchDetails={(p) => setAdjustDetails((d) => ({ ...d, ...p }))}
+                employees={payrollEmployees}
+                anexos={adjustAnexos}
+                onAnexosChange={setAdjustAnexos}
+              />
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Observação para a Contabilidade (opcional)
+                </label>
+                <textarea
+                  value={adjustNote}
+                  onChange={(e) => setAdjustNote(e.target.value)}
+                  rows={3}
+                  maxLength={4000}
+                  placeholder="Ex.: corrigi a data e anexei o documento que faltava."
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="outline" disabled={adjustMutation.isPending} onClick={closeAdjust}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={adjustMutation.isPending}
+                  className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+                >
+                  {adjustMutation.isPending ? 'Reenviando...' : 'Reenviar à Contabilidade'}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+        </Modal>
+
+        {/* Cancelar solicitação (enviada errada) */}
+        <Modal
+          isOpen={!!cancelTarget}
+          onClose={() => (cancelMutation.isPending ? undefined : setCancelTarget(null))}
+          title="Cancelar solicitação"
+          size="md"
+        >
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!cancelTarget) return;
+              if (cancelReason.trim().length < 3) {
+                toast.error('Informe o motivo do cancelamento.');
+                return;
+              }
+              cancelMutation.mutate({ id: cancelTarget.id, comment: cancelReason.trim() });
+            }}
+          >
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              A Contabilidade será avisada e o atendimento será encerrado. Se precisar, abra uma nova solicitação com os
+              dados corretos.
+            </p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Motivo do cancelamento <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={4}
+                maxLength={4000}
+                autoFocus
+                placeholder="Ex.: enviei com o colaborador errado."
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="outline" disabled={cancelMutation.isPending} onClick={() => setCancelTarget(null)}>
+                Voltar
+              </Button>
+              <Button
+                type="submit"
+                disabled={cancelMutation.isPending}
+                className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+              >
+                {cancelMutation.isPending ? 'Cancelando...' : 'Cancelar solicitação'}
+              </Button>
+            </div>
+          </form>
         </Modal>
       </MainLayout>
     </ProtectedRoute>

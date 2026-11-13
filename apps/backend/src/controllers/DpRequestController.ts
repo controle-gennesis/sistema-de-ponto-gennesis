@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
@@ -69,6 +70,12 @@ const DP_REQUEST_TYPES = [
   'REALOCACAO_COLABORADOR',
   'RETIFICACAO_RECALCULO',
   'SOLICITACAO_GERAL',
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
 ] as const;
 
 const createDpRequestSchema = z.object({
@@ -114,6 +121,7 @@ const rejectDpRequestSchema = z
 const DP_FEEDBACK_NEXT_STATUSES = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
+  'IN_ACCOUNTING',
   'WAITING_RETURN',
   'WAITING_RETURN_ADM_TST',
   'WAITING_RETURN_ENGINEERING',
@@ -539,7 +547,7 @@ export class DpRequestController {
   }
 
   /**
-   * Visão da página Solicitações à Contabilidade: todos os pedidos diretos à Contabilidade e as solicitações
+   * Visão da página Solicitações Contábeis: todos os pedidos diretos à Contabilidade e as solicitações
    * internas finalizadas que seguiram para lá, de qualquer solicitante (o acesso é controlado por permissão).
    */
   async getAccountingRequests(req: AuthRequest, res: Response) {
@@ -547,17 +555,9 @@ export class DpRequestController {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
       const requests = await prisma.dpRequest.findMany({
-        where: {
-          OR: [
-            { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
-            {
-              requestType: {
-                in: ['ADMISSAO', 'FERIAS', 'RESCISAO', 'ALTERACAO_FUNCAO_SALARIO', 'RETIFICACAO_ALOCACAO'],
-              },
-              status: 'CONCLUDED',
-            },
-          ],
-        },
+        // Só os pedidos criados direto para a Contabilidade. As solicitações do fluxo do DP que eram enviadas
+        // automaticamente ao finalizar não aparecem mais aqui.
+        where: { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
         orderBy: { createdAt: 'desc' },
       });
 
@@ -567,11 +567,65 @@ export class DpRequestController {
       );
       const linked = await findDpRequestIdsLinkedToAccounting(directInQueue.map((r) => r.id));
       const notSent = new Set(directInQueue.filter((r) => !linked.has(r.id)).map((r) => r.id));
-      const data = summarized.map((r) => ({ ...r, contabilidadePendente: notSent.has(r.id) }));
+
+      // Solicitações internas finalizadas pelo DP: situação do pedido ligado na Contabilidade (encerrar / reenviar).
+      const sentCandidates = requests.filter(
+        (r) =>
+          isAccountingDirectRequestType(r.requestType) ||
+          (r.status === 'CONCLUDED' && dpRequestGoesToAccounting(r))
+      );
+      const linkedRows = sentCandidates.length
+        ? await prisma.dpContabilidadeRequest.findMany({
+            where: { sourceDpRequestId: { in: sentCandidates.map((c) => c.id) } },
+            select: { id: true, status: true, accountingDoneAt: true, dpClosedAt: true, sourceDpRequestId: true },
+          })
+        : [];
+      const linkByDp = new Map(
+        linkedRows.map((l) => [
+          l.sourceDpRequestId,
+          {
+            id: l.id,
+            status: l.status,
+            accountingDoneAt: l.accountingDoneAt ? l.accountingDoneAt.toISOString() : null,
+            dpClosedAt: l.dpClosedAt ? l.dpClosedAt.toISOString() : null,
+          },
+        ])
+      );
+      const sentIds = new Set(sentCandidates.map((c) => c.id));
+      const data = (summarized as Array<(typeof summarized)[number] & { id: string; requestType: string }>).map((r) => ({
+        ...r,
+        // Pedido direto: "pendente de envio" só enquanto está na fila sem pedido ligado (regra de antes).
+        contabilidadePendente: isAccountingDirectRequestType(r.requestType)
+          ? notSent.has(r.id)
+          : sentIds.has(r.id)
+            ? !linkByDp.has(r.id)
+            : false,
+        contabilidade: sentIds.has(r.id) ? (linkByDp.get(r.id) ?? null) : null,
+      }));
 
       return res.json({ success: true, data });
     } catch (e) {
       return res.status(500).json({ error: 'Erro ao buscar solicitações à Contabilidade' });
+    }
+  }
+
+  /** Quantos pedidos a Contabilidade já concluiu e o DP ainda precisa finalizar (badge do menu e do sino). */
+  async getAccountingToCloseCount(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      // Só conta pedidos criados direto para a Contabilidade (os antigos enviados pelo DP não aparecem mais).
+      const diretos = await prisma.dpRequest.findMany({
+        where: { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
+        select: { id: true },
+      });
+      const count = diretos.length
+        ? await prisma.dpContabilidadeRequest.count({
+            where: { status: 'CONCLUDED', dpClosedAt: null, sourceDpRequestId: { in: diretos.map((d) => d.id) } },
+          })
+        : 0;
+      return res.json({ success: true, data: { count } });
+    } catch (e) {
+      return res.status(500).json({ error: 'Erro ao contar pedidos para encerrar' });
     }
   }
 
@@ -601,7 +655,7 @@ export class DpRequestController {
         !req.user.isAdmin &&
         !isDepartamentoPessoalSector(employee.department)
       ) {
-        throw createError('Solicitações à Contabilidade disponíveis apenas para o setor Departamento Pessoal', 403);
+        throw createError('Solicitações Contábeis disponíveis apenas para o setor Departamento Pessoal', 403);
       }
 
       let parsedDetails: Record<string, unknown>;
@@ -700,12 +754,18 @@ export class DpRequestController {
         ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
         ADM_ASOS: "ASO's",
         ADM_OUTROS: 'Outros',
-        CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
-        FECHAMENTO_FOLHA: 'Fechamento da folha',
-        IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
-        REALOCACAO_COLABORADOR: 'Realocação de colaborador',
-        RETIFICACAO_RECALCULO: 'Retificação / recálculo',
-        SOLICITACAO_GERAL: 'Solicitação geral',
+        CONVENCAO_COLETIVA: 'Convenção Coletiva / CCT',
+        FECHAMENTO_FOLHA: 'Fechamento da Folha',
+        IMPOSTOS_ENCARGOS: 'Impostos / Encargos da Folha',
+        REALOCACAO_COLABORADOR: 'Realocação de Colaborador',
+        RETIFICACAO_RECALCULO: 'Retificação / Recálculo',
+        SOLICITACAO_GERAL: 'Solicitação Geral',
+        CONTAB_ADMISSAO: 'Admissão',
+        CONTAB_AFASTAMENTO: 'Afastamento',
+        CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
+        CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
+        CONTAB_FERIAS: 'Férias',
+        CONTAB_RESCISAO: 'Rescisão',
       };
       const isAdmRequest = isAdmTstDpRequestType(validated.requestType);
       const titlePrefix = isAccountingDirect
@@ -1328,6 +1388,7 @@ export class DpRequestController {
         const dpMayAct: string[] = [
           'IN_REVIEW_DP',
           'IN_FINANCEIRO',
+          'IN_ACCOUNTING',
           'WAITING_RETURN',
           'WAITING_RETURN_ACCOUNTING',
           'WAITING_RETURN_ADM_TST',
@@ -1454,7 +1515,21 @@ export class DpRequestController {
         return res.json({ success: true, contabilidadeCreated });
       }
 
-      await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+      try {
+        await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+      } catch (permErr) {
+        // Também pode reenviar quem usa a tela Solicitações Contábeis.
+        const hasAccountingPage = await prisma.userPermission.findFirst({
+          where: {
+            userId: req.user.id,
+            module: pathToModuleKey('/ponto/solicitacoes-contabilidade'),
+            action: PERMISSION_ACCESS_ACTION,
+            allowed: true,
+          },
+          select: { id: true },
+        });
+        if (!hasAccountingPage) throw permErr;
+      }
 
       if (dpRequest.status !== 'CONCLUDED') {
         throw createError('Só é possível reenviar solicitações já finalizadas.', 400);

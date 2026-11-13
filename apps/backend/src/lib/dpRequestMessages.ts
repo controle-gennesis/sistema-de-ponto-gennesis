@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { isAdmTstDpRequestType } from './dpRequestAdmTst';
 import { dpRequestGoesToAccounting } from './dpContabilidadeFromInterna';
+import { isAccountingDirectRequestType } from './dpRequestDetails';
 import { DP_CONTABILIDADE_MODULE_KEY } from './dpContabilidadeAccess';
 import { sendPushToUsers } from '../services/PushNotificationService';
 import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
@@ -19,24 +20,32 @@ import { fixMulterOriginalName } from './fixUploadFileName';
 
 const DP_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-dp');
 const ADM_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst');
+/** Tela Solicitações Contábeis (onde o DP acompanha o que enviou). */
+const ACCOUNTING_PAGE_KEY = pathToModuleKey('/ponto/solicitacoes-contabilidade');
 
 const bodySchema = z.object({ body: z.string().trim().min(1, 'Escreva a mensagem.').max(4000) });
 
-type Modules = { admin: boolean; dp: boolean; adm: boolean; contab: boolean };
+type Modules = { admin: boolean; dp: boolean; adm: boolean; contab: boolean; acctPage: boolean };
 
 async function loadModules(userId: string, isAdmin: boolean): Promise<Modules> {
-  if (isAdmin) return { admin: true, dp: true, adm: true, contab: true };
+  if (isAdmin) return { admin: true, dp: true, adm: true, contab: true, acctPage: true };
   const rows = await prisma.userPermission.findMany({
     where: {
       userId,
       allowed: true,
       action: PERMISSION_ACCESS_ACTION,
-      module: { in: [DP_MANAGE_KEY, ADM_MANAGE_KEY, DP_CONTABILIDADE_MODULE_KEY] },
+      module: { in: [DP_MANAGE_KEY, ADM_MANAGE_KEY, DP_CONTABILIDADE_MODULE_KEY, ACCOUNTING_PAGE_KEY] },
     },
     select: { module: true },
   });
   const has = (k: string) => rows.some((r) => r.module === k);
-  return { admin: false, dp: has(DP_MANAGE_KEY), adm: has(ADM_MANAGE_KEY), contab: has(DP_CONTABILIDADE_MODULE_KEY) };
+  return {
+    admin: false,
+    dp: has(DP_MANAGE_KEY),
+    adm: has(ADM_MANAGE_KEY),
+    contab: has(DP_CONTABILIDADE_MODULE_KEY),
+    acctPage: has(ACCOUNTING_PAGE_KEY),
+  };
 }
 
 /** Quem tem o módulo liberado + administradores. */
@@ -58,10 +67,15 @@ function isAdmRow(row: { requestType: string }): boolean {
   return isAdmTstDpRequestType(row.requestType as never);
 }
 
+/** Vai à Contabilidade (interna finalizada) ou é um pedido criado direto para ela. */
+function involvesAccounting(row: Parameters<typeof dpRequestGoesToAccounting>[0]): boolean {
+  return dpRequestGoesToAccounting(row) || isAccountingDirectRequestType((row as { requestType: string }).requestType);
+}
+
 function canAccess(mods: Modules, row: Parameters<typeof dpRequestGoesToAccounting>[0]): boolean {
   if (mods.admin) return true;
   if (isAdmRow(row as { requestType: string })) return mods.adm;
-  return mods.dp || (mods.contab && dpRequestGoesToAccounting(row));
+  return mods.dp || ((mods.contab || mods.acctPage) && involvesAccounting(row));
 }
 
 /** Avisa as outras pessoas da conversa (push no celular; o sininho usa a contagem de não lidas). */
@@ -76,7 +90,9 @@ function notifyParticipants(
       ? [await userIdsWithModule(ADM_MANAGE_KEY)]
       : [
           await userIdsWithModule(DP_MANAGE_KEY),
-          ...(dpRequestGoesToAccounting(row) ? [await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY)] : []),
+          ...(involvesAccounting(row)
+            ? [await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY), await userIdsWithModule(ACCOUNTING_PAGE_KEY)]
+            : []),
         ];
     const recipients = [...new Set(groups.flat())].filter((id) => id !== authorId);
     await sendPushToUsers(recipients, { title, body: bodyText, data: { type: 'dp-request-message', id: (row as { id: string }).id } });
@@ -171,12 +187,97 @@ export async function announceAccountingDone(dpRequestId: string, actorUserId: s
   );
 }
 
+/** A Contabilidade cancelou o pedido: mensagem automática com o motivo + aviso para o DP. */
+export async function announceAccountingCancelled(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  reason?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const motivo = (reason ?? '').trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: motivo ? `Contabilidade cancelou o pedido. Motivo: ${motivo}` : 'Contabilidade cancelou o pedido.',
+    },
+  });
+  await markRead(row.id, actorUserId);
+  notifyParticipants(
+    row,
+    actorUserId,
+    `Pedido cancelado - solicitação nº ${row.displayNumber}`,
+    `${authorName} cancelou o pedido${motivo ? `: ${motivo.slice(0, 120)}` : '.'}`
+  );
+}
+
+/** A Contabilidade devolveu o pedido para ajuste: mensagem com o motivo + aviso para quem abriu. */
+export async function announceAccountingReturned(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  reason: string,
+  requesterUserId?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const motivo = reason.trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: `Contabilidade devolveu o pedido para ajuste. Motivo: ${motivo}`,
+    },
+  });
+  await markRead(row.id, actorUserId);
+  if (requesterUserId && requesterUserId !== actorUserId) {
+    void sendPushToUsers([requesterUserId], {
+      title: `Pedido devolvido para ajuste - solicitação nº ${row.displayNumber}`,
+      body: `${authorName}: ${motivo.slice(0, 120)}`,
+      data: { type: 'dp-request-message', id: row.id },
+    }).catch(() => undefined);
+  }
+}
+
+/** O solicitante corrigiu e reenviou o pedido devolvido: aviso para a Contabilidade e o DP. */
+export async function announceRequesterAdjusted(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  note?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const extra = (note ?? '').trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: extra
+        ? `Solicitação ajustada e reenviada à Contabilidade. Observação: ${extra}`
+        : 'Solicitação ajustada e reenviada à Contabilidade.',
+    },
+  });
+  await markRead(row.id, actorUserId);
+  notifyParticipants(
+    row,
+    actorUserId,
+    `Solicitação ajustada - nº ${row.displayNumber}`,
+    `${authorName} corrigiu e reenviou o pedido à Contabilidade.`
+  );
+}
+
 export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     if (!req.user) throw createError('Usuário não autenticado', 401);
     const userId = req.user.id;
     const mods = await loadModules(userId, req.user.isAdmin);
-    if (!mods.admin && !mods.dp && !mods.adm && !mods.contab) {
+    if (!mods.admin && !mods.dp && !mods.adm && !mods.contab && !mods.acctPage) {
       res.json({ success: true, data: { count: 0, items: [] } });
       return;
     }
@@ -199,12 +300,18 @@ export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response
       .filter((r) => canAccess(mods, r))
       .map((r) => {
         const unread = Number(grouped.find((g) => g.requestId === r.id)?.unread ?? 0);
-        const area: 'adm' | 'dp' | 'contabilidade' = isAdmRow(r)
+        const accounting = !isAdmRow(r) && involvesAccounting(r);
+        // Onde abrir: pedidos da Contabilidade vão para a tela de quem acompanha (DP) ou de quem atende.
+        const area: 'adm' | 'dp' | 'contabilidade' | 'acct' = isAdmRow(r)
           ? 'adm'
-          : mods.dp
-            ? 'dp'
-            : 'contabilidade';
-        return { requestId: r.id, displayNumber: r.displayNumber, title: r.title, unread, area };
+          : accounting && mods.acctPage
+            ? 'acct'
+            : accounting && mods.contab
+              ? 'contabilidade'
+              : mods.dp
+                ? 'dp'
+                : 'contabilidade';
+        return { requestId: r.id, displayNumber: r.displayNumber, title: r.title, unread, area, accounting };
       })
       .sort((a, b) => b.displayNumber - a.displayNumber);
     res.json({

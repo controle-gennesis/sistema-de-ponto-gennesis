@@ -783,6 +783,193 @@ body::-webkit-scrollbar:vertical {
   animation: sidebar-rail-icon-pop 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
+/* Drive — ao arrastar sobre uma pasta do breadcrumb, ela fica vermelha (o :hover não dispara durante o arrasto) */
+[data-drop-crumb] {
+  transition: color 0.15s ease;
+}
+
+[data-drop-crumb][data-drop-over] {
+  color: #dc2626;
+}
+
+.dark [data-drop-crumb][data-drop-over] {
+  color: #fca5a5;
+}
+
+/* Gráficos (Recharts): o gráfico é focável e mostrava um contorno preto ao clicar nele */
+.recharts-wrapper,
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none !important;
+}
+
+/* Drive — foco por teclado (Tab) na lateral: contorno vermelho em vez do preto padrão */
+.drive-sidebar :focus-visible {
+  outline: 2px solid #ef4444 !important;
+  outline-offset: 2px;
+}
+
+.dark .drive-sidebar :focus-visible {
+  outline-color: #f87171 !important;
+}
+
+/* Drive — cartões e linhas: mesmo pulinho elástico dos módulos da barra lateral */
+.drive-item-card {
+  transition:
+    transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1),
+    background-color 0.2s ease,
+    box-shadow 0.22s ease,
+    border-color 0.2s ease;
+  /* camada própria: evita serrilhado/corte nas bordas arredondadas durante a escala */
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.drive-item-card:hover {
+  transform: scale(1.03);
+  box-shadow: 0 10px 22px -10px rgba(15, 23, 42, 0.22);
+}
+
+.drive-item-card:active {
+  /* clique discreto e rápido (sem a curva elástica, que dava efeito de travada) */
+  transform: scale(1.01);
+  transition-duration: 0.1s;
+  transition-timing-function: ease-out;
+}
+
+.drive-item-card .drive-item-card__icon,
+.drive-item-row .drive-item-card__icon {
+  transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.drive-item-card:hover .drive-item-card__icon,
+.drive-item-row:hover .drive-item-card__icon {
+  transform: scale(1.14) rotate(-4deg);
+}
+
+.dark .drive-item-card:hover {
+  box-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drive-item-card,
+  .drive-item-card .drive-item-card__icon,
+  .drive-item-row .drive-item-card__icon {
+    transition-duration: 0.01ms !important;
+  }
+
+  .drive-item-card:hover,
+  .drive-item-card:active,
+  .drive-item-card:hover .drive-item-card__icon,
+  .drive-item-row:hover .drive-item-card__icon {
+    transform: none;
+  }
+}
+
+/* Drive (lista) — a entrada em cascata move as linhas para baixo; sem isso aparece uma barra de rolagem que some */
+.table-scroll:has(> .drive-stagger) {
+  overflow-y: hidden;
+}
+
+/* Drive — esqueleto de carregamento: um brilho suave atravessa os blocos (sem piscar) */
+@keyframes drive-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.drive-bone {
+  background-color: rgb(229 231 235 / 0.85);
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.75) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: drive-shimmer 1.7s ease-in-out infinite;
+}
+
+.dark .drive-bone {
+  background-color: rgb(55 65 81 / 0.7);
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.09) 50%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drive-bone {
+    animation: none;
+  }
+}
+
+/* Drive — ao abrir uma pasta, os itens entram em cascata (um depois do outro) */
+@keyframes drive-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.drive-stagger > * {
+  animation: drive-item-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.drive-stagger > *:nth-child(2) {
+  animation-delay: 35ms;
+}
+
+.drive-stagger > *:nth-child(3) {
+  animation-delay: 70ms;
+}
+
+.drive-stagger > *:nth-child(4) {
+  animation-delay: 105ms;
+}
+
+.drive-stagger > *:nth-child(5) {
+  animation-delay: 140ms;
+}
+
+.drive-stagger > *:nth-child(6) {
+  animation-delay: 175ms;
+}
+
+.drive-stagger > *:nth-child(7) {
+  animation-delay: 210ms;
+}
+
+.drive-stagger > *:nth-child(8) {
+  animation-delay: 245ms;
+}
+
+.drive-stagger > *:nth-child(9) {
+  animation-delay: 280ms;
+}
+
+.drive-stagger > *:nth-child(10) {
+  animation-delay: 315ms;
+}
+
+.drive-stagger > *:nth-child(11) {
+  animation-delay: 350ms;
+}
+
+.drive-stagger > *:nth-child(12) {
+  animation-delay: 385ms;
+}
+
+.drive-stagger > *:nth-child(n + 13) {
+  animation-delay: 385ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drive-stagger > * {
+    animation: none;
+  }
+}
+
 /* Rail — entrada em stagger (igual às páginas do painel) */
 @keyframes sidebar-rail-item-in {
   from {

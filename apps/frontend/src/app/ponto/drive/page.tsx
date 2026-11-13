@@ -28,7 +28,7 @@ import {
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { DriveSkeleton, useDelayedFlag } from '@/components/drive/DriveSkeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
@@ -46,6 +46,17 @@ import {
 } from '@/components/drive/DriveSidebar';
 import { DriveListView } from '@/components/drive/DriveListView';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
+import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
+import {
+  DriveFilters,
+  DRIVE_FILTERS_EMPTY,
+  driveFileCategory,
+  driveFiltersActive,
+  driveMatchesModified,
+  type DriveFiltersState,
+} from '@/components/drive/DriveFilters';
+import { computeSelection, fileKey, folderKey, type SelectMods } from '@/components/drive/driveSelection';
 import {
   folderDropProps,
   isDriveItemDrag,
@@ -318,6 +329,11 @@ function DrivePageContent() {
     },
     enabled: !!user && !searchQuery && isMyDriveView,
     retry: 1,
+    // Outras pessoas criam pastas/arquivos nas pastas compartilhadas: atualiza sozinho (aba visível), ao voltar para a aba e ao abrir.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: () => visibleTabRefetchInterval(15_000),
   });
 
   const { data: viewContents, isLoading: loadingView } = useQuery<{
@@ -339,6 +355,10 @@ function DrivePageContent() {
     },
     enabled: !!user && !searchQuery && !isMyDriveView,
     retry: 1,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: () => visibleTabRefetchInterval(15_000),
   });
 
   const { data: storageInfo, isLoading: loadingStorage } = useQuery({
@@ -363,16 +383,40 @@ function DrivePageContent() {
     enabled: !!user && !!searchQuery.trim(),
   });
 
-  const folders = searchQuery
+  const rawFolders = searchQuery
     ? (searchResults?.folders ?? [])
     : isMyDriveView
       ? (contents?.folders ?? [])
       : (viewContents?.folders ?? []);
-  const files = searchQuery
+  const rawFiles = searchQuery
     ? (searchResults?.files ?? [])
     : isMyDriveView
       ? (contents?.files ?? [])
       : (viewContents?.files ?? []);
+
+  // ── Filtros (tipo / data de modificação / proprietário) ───────────────────
+  const [filters, setFilters] = useState<DriveFiltersState>(DRIVE_FILTERS_EMPTY);
+  const filtersActive = driveFiltersActive(filters);
+  const ownerOk = (ownerId: string) =>
+    filters.owner === 'all' || (filters.owner === 'me' ? ownerId === user?.id : ownerId !== user?.id);
+  const folders = useMemo(() => {
+    if (!filtersActive) return rawFolders;
+    // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
+    if (filters.type !== 'all' && filters.type !== 'folders') return [];
+    return rawFolders.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFolders, filters, user?.id]);
+  const files = useMemo(() => {
+    if (!filtersActive) return rawFiles;
+    if (filters.type === 'folders') return [];
+    return rawFiles.filter(
+      (f) =>
+        (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
+        ownerOk(f.ownerId) &&
+        driveMatchesModified(f.updatedAt, filters.modified),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawFiles, filters, user?.id]);
   /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -381,6 +425,8 @@ function DrivePageContent() {
   /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
   const nomePastaAtual = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1]!.name : 'Meu Drive';
   const isLoading = loadingContents || loadingSearch || loadingView;
+  /** Esqueleto só depois de um instante: pastas que abrem rápido não "piscam" a tela de carregamento. */
+  const showDriveSkeleton = useDelayedFlag(isLoading, 150);
   const isEmpty = !isLoading && folders.length === 0 && files.length === 0;
   /** Raiz: sempre pode; dentro de pasta: `canWrite === false` = só leitura (não exibir upload/nova pasta). */
   const canWriteInCurrentFolder =
@@ -388,6 +434,99 @@ function DrivePageContent() {
       ? false
       : !currentFolderId || currentFolderMeta?.canWrite !== false;
   const isTrashView = driveView === 'trash';
+  /** Dentro de uma pasta onde tenho edição: posso mover também o que outras pessoas criaram ali. */
+  const canMoveOthers =
+    isMyDriveView && !isTrashView && !searchQuery && !!currentFolderId && currentFolderMeta?.canWrite !== false;
+
+  // ── Seleção múltipla (Ctrl/Shift + clique) ────────────────────────────────
+  const [selection, setSelection] = useState<string[]>([]);
+  const selectionAnchor = useRef<string | null>(null);
+  const orderedKeys = useMemo(
+    () => [...folders.map((f) => folderKey(f.id)), ...files.map((f) => fileKey(f.id))],
+    [folders, files],
+  );
+  const selectedSet = useMemo(() => new Set(selection), [selection]);
+  const clearSelection = useCallback(() => {
+    setSelection([]);
+    selectionAnchor.current = null;
+  }, []);
+  const handleSelect = useCallback(
+    (key: string, mods: SelectMods) => {
+      const r = computeSelection(selection, selectionAnchor.current, key, mods, orderedKeys);
+      selectionAnchor.current = r.anchor;
+      setSelection(r.selection);
+    },
+    [selection, orderedKeys],
+  );
+  /** Itens selecionados que ainda estão na tela (a seleção some ao trocar de pasta/visão/busca). */
+  const selectedItems = useMemo(() => {
+    const out: Array<{ type: 'folder' | 'file'; id: string; name: string; ownerId: string }> = [];
+    for (const f of folders) if (selectedSet.has(folderKey(f.id))) out.push({ type: 'folder', id: f.id, name: f.name, ownerId: f.ownerId });
+    for (const f of files) if (selectedSet.has(fileKey(f.id))) out.push({ type: 'file', id: f.id, name: f.name, ownerId: f.ownerId });
+    return out;
+  }, [folders, files, selectedSet]);
+
+  useEffect(() => {
+    clearSelection();
+  }, [currentFolderId, driveView, searchQuery, clearSelection]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement | null)?.isContentEditable;
+      if (typing || document.querySelector('[role="dialog"]')) return;
+      if (e.key === 'Escape') clearSelection();
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && orderedKeys.length > 0) {
+        e.preventDefault();
+        selectionAnchor.current = orderedKeys[0] ?? null;
+        setSelection(orderedKeys);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [orderedKeys, clearSelection]);
+
+  // Clique fora dos itens (e da barra de ações, dos menus e das janelas) desmarca tudo.
+  useEffect(() => {
+    if (selection.length === 0) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest('[data-drive-item], [role="toolbar"], [role="dialog"], [role="menu"], [data-drive-menu], [data-drive-menu-btn]')) return;
+      clearSelection();
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [selection.length, clearSelection]);
+
+  /** Itens sendo arrastados agora (ficam esmaecidos até soltar). */
+  const [draggingKeys, setDraggingKeys] = useState<Set<string>>(new Set());
+  const onDragStateChange = useCallback((keys: string[] | null) => {
+    setDraggingKeys(new Set(keys ?? []));
+    // Arrastar um item que não estava selecionado: ele passa a ficar selecionado (e volta assim se o arrasto for cancelado).
+    if (keys && keys.length === 1) {
+      const only = keys[0]!;
+      setSelection((prev) => (prev.includes(only) ? prev : [only]));
+      selectionAnchor.current = only;
+    }
+  }, []);
+
+  /** Ao arrastar um item selecionado, leva a seleção toda (só o que é seu pode ser movido). */
+  const dragItemsFor = (item: DriveDragItem): DriveDragItem[] => {
+    if (selectedSet.has(`${item.type}-${item.id}`) && selectedItems.length > 1) {
+      return selectedItems
+        .filter((i) => canMoveOthers || i.ownerId === user?.id)
+        .map(({ type, id }) => ({ type, id }));
+    }
+    return [item];
+  };
+
+  // Enquanto arrasta, o breadcrumb do topo "acende" (as pastas de cima viram alvos de soltar).
+  useEffect(() => {
+    if (draggingKeys.size === 0) return;
+    document.documentElement.setAttribute('data-drive-drag', '');
+    return () => document.documentElement.removeAttribute('data-drive-drag');
+  }, [draggingKeys]);
 
   const topBreadcrumbTrail = useMemo(() => {
     if (!isMyDriveView) {
@@ -402,12 +541,21 @@ function DrivePageContent() {
     if (breadcrumb.length === 0) return null;
     const podeCompartilhar = !!currentFolderId && !!currentFolderMeta?.canManageShares;
     return [
-      { label: 'Meu Drive', onClick: () => goToFolder(undefined) },
+      {
+        label: 'Meu Drive',
+        onClick: () => goToFolder(undefined),
+        onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, null),
+      },
       ...breadcrumb.map((crumb, i) => {
         const ultima = i === breadcrumb.length - 1;
         return {
           label: crumb.name,
-          ...(ultima ? {} : { onClick: () => goToFolder(crumb.id) }),
+          ...(ultima
+            ? {}
+            : {
+                onClick: () => goToFolder(crumb.id),
+                onDropItems: (items: DriveDragItem[]) => soltarEmPasta(items, crumb.id),
+              }),
           ...(ultima && podeCompartilhar
             ? {
                 action: {
@@ -685,8 +833,39 @@ function DrivePageContent() {
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || 'Não foi possível mover'),
   });
-  const soltarEmPasta = (item: DriveDragItem, targetFolderId: string) => {
-    moveItemMut.mutate({ type: item.type, id: item.id, destinoId: targetFolderId });
+  /** Move vários itens de uma vez (um por um, para relatar o que falhou). */
+  const [bulkMoveItems, setBulkMoveItems] = useState<DriveDragItem[] | null>(null);
+  const bulkMoveMut = useMutation({
+    mutationFn: async ({ items, destinoId }: { items: DriveDragItem[]; destinoId: string | null }) => {
+      let ok = 0;
+      for (const it of items) {
+        try {
+          await (it.type === 'folder'
+            ? api.patch(`/drive/folders/${it.id}/move`, { parentId: destinoId })
+            : api.patch(`/drive/files/${it.id}/move`, { folderId: destinoId }));
+          ok += 1;
+        } catch {
+          /* conta como falha */
+        }
+      }
+      return { ok, failed: items.length - ok };
+    },
+    onSuccess: ({ ok, failed }) => {
+      if (ok > 0) toast.success(ok === 1 ? '1 item movido.' : `${ok} itens movidos.`);
+      if (failed > 0) toast.error(failed === 1 ? '1 item não pôde ser movido.' : `${failed} itens não puderam ser movidos.`);
+      setBulkMoveItems(null);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['drive'] });
+      queryClient.invalidateQueries({ queryKey: ['drive-view'] });
+      queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
+    },
+  });
+  const soltarEmPasta = (items: DriveDragItem[], targetFolderId: string | null) => {
+    if (items.length === 1) {
+      moveItemMut.mutate({ type: items[0]!.type, id: items[0]!.id, destinoId: targetFolderId });
+      return;
+    }
+    bulkMoveMut.mutate({ items, destinoId: targetFolderId });
   };
 
   const renameFolderMut = useMutation({
@@ -789,6 +968,57 @@ function DrivePageContent() {
       toast.success('Arquivo excluído permanentemente');
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || 'Erro ao excluir'),
+  });
+
+  /** Excluir (lixeira ou definitivo) e restaurar vários itens de uma vez. */
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const bulkDeleteMut = useMutation({
+    mutationFn: async ({ items, permanent }: { items: DriveDragItem[]; permanent: boolean }) => {
+      let ok = 0;
+      for (const it of items) {
+        try {
+          const base = it.type === 'folder' ? `/drive/folders/${it.id}` : `/drive/files/${it.id}`;
+          await api.delete(permanent ? `${base}/permanent` : base);
+          ok += 1;
+        } catch {
+          /* conta como falha */
+        }
+      }
+      return { ok, failed: items.length - ok, permanent };
+    },
+    onSuccess: ({ ok, failed, permanent }) => {
+      if (ok > 0) {
+        toast.success(
+          permanent
+            ? ok === 1 ? '1 item excluído permanentemente.' : `${ok} itens excluídos permanentemente.`
+            : ok === 1 ? '1 item movido para a lixeira.' : `${ok} itens movidos para a lixeira.`,
+        );
+      }
+      if (failed > 0) toast.error(failed === 1 ? '1 item não pôde ser excluído.' : `${failed} itens não puderam ser excluídos.`);
+      setBulkDeleteOpen(false);
+      clearSelection();
+      invalidateDrive();
+    },
+  });
+  const bulkRestoreMut = useMutation({
+    mutationFn: async (items: DriveDragItem[]) => {
+      let ok = 0;
+      for (const it of items) {
+        try {
+          await api.post(it.type === 'folder' ? `/drive/folders/${it.id}/restore` : `/drive/files/${it.id}/restore`);
+          ok += 1;
+        } catch {
+          /* conta como falha */
+        }
+      }
+      return { ok, failed: items.length - ok };
+    },
+    onSuccess: ({ ok, failed }) => {
+      if (ok > 0) toast.success(ok === 1 ? '1 item restaurado.' : `${ok} itens restaurados.`);
+      if (failed > 0) toast.error(failed === 1 ? '1 item não pôde ser restaurado.' : `${failed} itens não puderam ser restaurados.`);
+      clearSelection();
+      invalidateDrive();
+    },
   });
 
   // ── Upload ─────────────────────────────────────────────────────────────────
@@ -1235,6 +1465,7 @@ function DrivePageContent() {
 
           <div className="min-w-0 flex-1">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
             <div className="group relative min-w-0 flex-1 sm:max-w-md">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
               <input
@@ -1261,6 +1492,19 @@ function DrivePageContent() {
               )}
             </div>
 
+            <DriveFilters filters={filters} onChange={setFilters} />
+
+            <DriveSelectionBar
+              count={draggingKeys.size > 0 ? 0 : selectedItems.length}
+              trashMode={isTrashView}
+              busy={bulkMoveMut.isPending || bulkDeleteMut.isPending || bulkRestoreMut.isPending}
+              onMove={() => setBulkMoveItems(selectedItems.map(({ type, id }) => ({ type, id })))}
+              onDelete={() => setBulkDeleteOpen(true)}
+              onRestore={() => bulkRestoreMut.mutate(selectedItems.map(({ type, id }) => ({ type, id })))}
+              onClear={clearSelection}
+            />
+            </div>
+
             <div className="flex h-9 items-center gap-2">
               {!isLoading && !contentsError && !isEmpty && (
                 <DriveViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
@@ -1280,9 +1524,7 @@ function DrivePageContent() {
 
         {/* ── Conteúdo ───────────────────────────────────────────────────── */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-24">
-            <CadastroListLoading message="Carregando arquivos..." />
-          </div>
+          showDriveSkeleton ? <DriveSkeleton viewMode={viewMode} /> : <div className="min-h-[18rem]" aria-hidden />
         ) : contentsError ? (
           <Card>
             <CardContent className="py-10 text-center">
@@ -1317,7 +1559,9 @@ function DrivePageContent() {
               )}
             </div>
             <p className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">
-              {searchQuery
+              {filtersActive
+                ? 'Nenhum item com esses filtros'
+                : searchQuery
                 ? 'Nenhum resultado encontrado'
                 : driveView === 'shared'
                   ? 'Nada compartilhado com você'
@@ -1330,7 +1574,9 @@ function DrivePageContent() {
                         : 'Pasta vazia'}
             </p>
             <p className="mx-auto mb-6 max-w-sm text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery
+              {filtersActive
+                ? 'Mude ou limpe os filtros para ver os outros itens.'
+                : searchQuery
                 ? 'Tente uma busca diferente'
                 : driveView === 'shared'
                   ? 'Quando alguém compartilhar uma pasta com você, ela aparecerá aqui.'
@@ -1344,7 +1590,7 @@ function DrivePageContent() {
                           ? 'Faça upload de arquivos ou crie uma nova pasta para começar.'
                           : 'Esta pasta foi compartilhada com acesso somente leitura.'}
             </p>
-            {!searchQuery && isMyDriveView && canWriteInCurrentFolder && (
+            {!searchQuery && !filtersActive && isMyDriveView && canWriteInCurrentFolder && (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -1387,6 +1633,13 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            selectedKeys={selectedSet}
+            onSelect={handleSelect}
+            onClearSelection={clearSelection}
+            dragItemsFor={dragItemsFor}
+            draggingKeys={draggingKeys}
+            onDragStateChange={onDragStateChange}
+            canMoveOthers={canMoveOthers}
             trashMode={isTrashView}
             currentUserId={user?.id}
           />
@@ -1411,6 +1664,13 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            selectedKeys={selectedSet}
+            onSelect={handleSelect}
+            onClearSelection={clearSelection}
+            dragItemsFor={dragItemsFor}
+            draggingKeys={draggingKeys}
+            onDragStateChange={onDragStateChange}
+            canMoveOthers={canMoveOthers}
             trashMode={isTrashView}
             currentUserId={user?.id}
           />
@@ -1419,6 +1679,83 @@ function DrivePageContent() {
         </div>
 
         {/* ── Modais ─────────────────────────────────────────────────────── */}
+
+        <DriveMoveModal
+          item={
+            bulkMoveItems
+              ? {
+                  type: 'file',
+                  id: '__bulk__',
+                  name: `${bulkMoveItems.length} itens`,
+                  blockedIds: bulkMoveItems.filter((i) => i.type === 'folder').map((i) => i.id),
+                }
+              : null
+          }
+          onClose={() => setBulkMoveItems(null)}
+          moving={bulkMoveMut.isPending}
+          onConfirm={(_item, destinoId) => bulkMoveItems && bulkMoveMut.mutate({ items: bulkMoveItems, destinoId })}
+        />
+
+        <Modal
+          isOpen={bulkDeleteOpen}
+          onClose={() => setBulkDeleteOpen(false)}
+          confirmBeforeClose={false}
+          title={isTrashView ? 'Excluir permanentemente' : 'Mover para a lixeira'}
+          size="sm"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30">
+                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {isTrashView ? (
+                    <>
+                      Tem certeza que deseja excluir permanentemente{' '}
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedItems.length} itens</span>?
+                      Esta ação não pode ser desfeita.
+                    </>
+                  ) : (
+                    <>
+                      Mover{' '}
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedItems.length} itens</span>{' '}
+                      para a lixeira?
+                    </>
+                  )}
+                </p>
+                {selectedItems.some((i) => i.type === 'folder') ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    {isTrashView
+                      ? 'Todo o conteúdo das pastas selecionadas será excluído permanentemente.'
+                      : 'As pastas selecionadas e todo o conteúdo delas serão movidos para a lixeira.'}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setBulkDeleteOpen(false)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={bulkDeleteMut.isPending}
+                onClick={() =>
+                  bulkDeleteMut.mutate({
+                    items: selectedItems.map(({ type, id }) => ({ type, id })),
+                    permanent: isTrashView,
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:bg-red-400"
+              >
+                {bulkDeleteMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {isTrashView ? 'Excluir permanentemente' : 'Mover para lixeira'}
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         <DriveMoveModal
           item={moveTarget}
@@ -1804,6 +2141,13 @@ function GridView({
   onRestore,
   onMove,
   onDropInto,
+  selectedKeys,
+  onSelect,
+  onClearSelection,
+  dragItemsFor,
+  draggingKeys,
+  onDragStateChange,
+  canMoveOthers = false,
   trashMode,
   currentUserId,
 }: {
@@ -1819,7 +2163,15 @@ function GridView({
   onToggleStar?: (type: 'folder' | 'file', id: string, starred: boolean) => void;
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
-  onDropInto?: (item: DriveDragItem, targetFolderId: string) => void;
+  onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  selectedKeys: Set<string>;
+  onSelect: (key: string, mods: SelectMods) => void;
+  onClearSelection: () => void;
+  dragItemsFor: (item: DriveDragItem) => DriveDragItem[];
+  draggingKeys: Set<string>;
+  onDragStateChange: (keys: string[] | null) => void;
+  /** Pode mover também itens de outras pessoas (pasta onde tenho edição). */
+  canMoveOthers?: boolean;
   trashMode?: boolean;
   currentUserId?: string;
 }) {
@@ -1835,43 +2187,66 @@ function GridView({
   return (
     <div
       className="space-y-6"
-      onClick={() => setOpenMenuId(null)}
+      onClick={() => {
+        setOpenMenuId(null);
+        onClearSelection();
+      }}
     >
       {folders.length > 0 && (
         <div>
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             Pastas
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="drive-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {folders.map((folder) => {
               const shared = folder.isOwner === false;
+              const sel = selectedKeys.has(`folder-${folder.id}`);
               return (
                 <div key={folder.id} className="relative min-w-0">
                   <div
                     role="button"
                     tabIndex={0}
-                    draggable={!trashMode && !!onMove && folder.ownerId === currentUserId}
-                    onDragStart={(e) => startDriveItemDrag(e, { type: 'folder', id: folder.id })}
+                    draggable={!trashMode && !!onMove && (canMoveOthers || folder.ownerId === currentUserId)}
+                    data-drive-item
+                    data-drive-key={`folder-${folder.id}`}
+style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
+                    onDragStart={(e) => {
+                      const items = dragItemsFor({ type: 'folder', id: folder.id });
+                      startDriveItemDrag(e, items);
+                      onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
+                    }}
+                    onDragEnd={() => onDragStateChange(null)}
                     {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenMenuId(null);
+                      onSelect(`folder-${folder.id}`, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+                    }}
+                    onDoubleClick={() => {
                       setOpenMenuId(null);
                       if (!trashMode) onOpenFolder(folder.id);
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
                         setOpenMenuId(null);
                         if (!trashMode) onOpenFolder(folder.id);
+                      } else if (e.key === ' ') {
+                        e.preventDefault();
+                        onSelect(`folder-${folder.id}`, { ctrl: true, shift: false });
                       }
                     }}
-                    className={`group flex w-full select-none items-center gap-2.5 rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800 dark:hover:bg-[#2b1518] ${
+                    className={`group flex w-full select-none items-center gap-2.5 rounded-xl outline-none drive-item-card border border-gray-200 bg-white p-3 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800/60 ${
                       trashMode ? 'cursor-default' : 'cursor-pointer'
-                    } ${dropAlvo === folder.id ? 'border-red-400 bg-red-50 ring-2 ring-red-400 dark:bg-red-950/30' : ''}`}
+                    } ${dropAlvo === folder.id ? '!border-red-300 !bg-red-50 scale-[1.03] shadow-lg dark:!border-red-800 dark:!bg-[#2b1518]' : ''} ${
+                      sel ? '!border-red-300 !bg-red-50 dark:!border-red-800 dark:!bg-[#2b1518]' : ''
+                    }`}
                   >
                     <FolderIconTile
                       iconKey={folder.iconKey}
                       color={folder.iconColor}
                       shared={shared}
+                      className="drive-item-card__icon h-8 w-8 rounded-lg"
                     />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
                       {folder.name}
@@ -1930,7 +2305,7 @@ function GridView({
                               {folder.starred ? 'Remover estrela' : 'Com estrela'}
                             </button>
                           )}
-                          {onMove && folder.ownerId === currentUserId && (
+                          {onMove && (canMoveOthers || folder.ownerId === currentUserId) && (
                             <button
                               onClick={() => {
                                 setOpenMenuId(null);
@@ -1984,29 +2359,54 @@ function GridView({
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             Arquivos
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="drive-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {files.map((file) => {
+              const sel = selectedKeys.has(`file-${file.id}`);
               return (
                 <div key={file.id} className="relative">
                   <div
                     role="button"
                     tabIndex={0}
-                    draggable={!trashMode && !!onMove && isOwnerFile(file)}
-                    onDragStart={(e) => startDriveItemDrag(e, { type: 'file', id: file.id })}
-                    onClick={() => {
+                    draggable={!trashMode && !!onMove && (canMoveOthers || isOwnerFile(file))}
+                    data-drive-item
+                    data-drive-key={`file-${file.id}`}
+style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
+                    onDragStart={(e) => {
+                      const items = dragItemsFor({ type: 'file', id: file.id });
+                      startDriveItemDrag(e, items);
+                      onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
+                    }}
+                    onDragEnd={() => onDragStateChange(null)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenMenuId(null);
+                      onSelect(`file-${file.id}`, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+                    }}
+                    onDoubleClick={() => {
                       setOpenMenuId(null);
                       if (!trashMode) onPreview(file);
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
                         setOpenMenuId(null);
                         if (!trashMode) onPreview(file);
+                      } else if (e.key === ' ') {
+                        e.preventDefault();
+                        onSelect(`file-${file.id}`, { ctrl: true, shift: false });
                       }
                     }}
-                    className="group flex cursor-pointer select-none flex-col overflow-hidden rounded-xl border border-gray-200 bg-white transition-colors hover:border-red-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800"
+                    className={`group flex cursor-pointer select-none flex-col overflow-hidden rounded-xl outline-none drive-item-card border border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800/60 ${
+                      sel ? '!border-red-300 !bg-red-50 dark:!border-red-800 dark:!bg-[#2b1518]' : ''
+                    }`}
                   >
-                    <div className="relative flex h-28 items-center justify-center border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-950/40">
+                    <div
+                      className={`relative flex h-28 items-center justify-center border-b ${
+                        sel
+                          ? 'border-red-200 bg-red-100/50 dark:border-red-900/50 dark:bg-red-950/30'
+                          : 'border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-950/40'
+                      }`}
+                    >
                       <DriveFileThumb
                         file={file}
                         className="absolute inset-0"
@@ -2034,7 +2434,7 @@ function GridView({
                       <DriveMimeIcon
                         mimeType={file.mimeType}
                         fileName={file.name}
-                        className="h-5 w-5"
+                        className="drive-item-card__icon h-5 w-5"
                       />
                       <p className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
                         {file.name}
@@ -2090,7 +2490,7 @@ function GridView({
                               {file.starred ? 'Remover estrela' : 'Com estrela'}
                             </button>
                           )}
-                          {onMove && isOwnerFile(file) && (
+                          {onMove && (canMoveOthers || isOwnerFile(file)) && (
                             <button
                               onClick={() => {
                                 setOpenMenuId(null);

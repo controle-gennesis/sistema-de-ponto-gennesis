@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import { productionWeekDate } from '@/lib/contractWeeklyProduction';
@@ -330,7 +329,14 @@ function parseBudgetToNumberSafe(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export function ContratoControleGeralMensalCard({ contractId }: { contractId: string }) {
+export function ContratoControleGeralMensalCard({
+  contractId,
+  acoesTopo,
+}: {
+  contractId: string;
+  /** Botões à direita do seletor de ano (ex.: Nova Produção Semanal / Nova Ordem de Serviço / Novo Faturamento). */
+  acoesTopo?: React.ReactNode;
+}) {
   const { canAccessContractOrdemServicoTab, canAccessContractProducaoSemanalTab } = usePermissions();
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
@@ -736,7 +742,7 @@ export function ContratoControleGeralMensalCard({ contractId }: { contractId: st
     <>
       <Card className="w-full !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-gray-900/70">
         <CardHeader className="border-b-0 pb-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center space-x-3">
               <div className="shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
                 <BarChart3 className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
@@ -748,6 +754,7 @@ export function ContratoControleGeralMensalCard({ contractId }: { contractId: st
                 <p className="text-sm text-gray-600 dark:text-gray-400">Indicadores mensais do contrato</p>
               </div>
             </div>
+            <div className="flex flex-wrap items-center justify-end gap-3">
             {availableYears.length > 0 ? (
               <div className="flex shrink-0 items-center gap-1">
                 <button
@@ -762,17 +769,9 @@ export function ContratoControleGeralMensalCard({ contractId }: { contractId: st
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <StringSingleSelectDropdown
-                  value={String(safeSelectedYear)}
-                  onChange={(v) => setSelectedYear(Number(v))}
-                  options={yearSelectOptions}
-                  allowEmpty={false}
-                  disableSearch
-                  menuAlign="end"
-                  matchTriggerWidth
-                  menuMinWidth={152}
-                  className="min-w-[5.25rem]"
-                />
+                <span className="min-w-[3.5rem] text-center text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                  {safeSelectedYear}
+                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -787,6 +786,8 @@ export function ContratoControleGeralMensalCard({ contractId }: { contractId: st
                 </button>
               </div>
             ) : null}
+            {acoesTopo}
+            </div>
           </div>
           {!gastosOperacionaisCarregando && gastosOperacionaisNaoConfigurado ? (
             <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">

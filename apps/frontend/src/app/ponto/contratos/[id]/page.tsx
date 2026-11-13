@@ -46,6 +46,11 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
 import { ContratoObrasTab } from './ContratoObrasTab';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
+import { ContratoAcompanhamentoListPage } from '@/components/contract/ContratoAcompanhamentoListPage';
+import type { ContratoVisaoGeral } from '@/components/contract/ContratoResumoVisaoGeral';
+import { ContratoResumoModulos } from '@/components/contract/ContratoResumoModulos';
+import { REUNIOES_CONFIG, RELATORIO_MENSAL_CONFIG } from '@/components/contract/contratoReunioesConfigs';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Button } from '@/components/ui/Button';
@@ -1137,7 +1142,7 @@ export default function ContractDetailPage() {
     setPeriodTo(to);
   }, []);
   const [mainTab, setMainTab] = useState<
-    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'dados'
+    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'reunioes' | 'dados'
   >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
@@ -2051,6 +2056,8 @@ export default function ContractDetailPage() {
     if (canAccessPleitosModulo) tabs.push('pleitos');
     if (canAccessFaturamentoModulo) tabs.push('faturamento');
     if (canAccessFluigModulo) tabs.push('fluig');
+    // Reuniões: só para o gestor do contrato (junto com Controle Geral e Dados).
+    if (canAccessGestorTabs) tabs.push('reunioes');
     if (canAccessGestorTabs) tabs.push('dados');
     return tabs;
   }, [
@@ -3012,41 +3019,8 @@ export default function ContractDetailPage() {
     return itens;
   }, [contractId, canAccessCronogramasModulo, canAccessOrcamento, isAdministrator, can]);
 
-  const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
-    const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
-    const reunioesLoading = loadingMensalCount || (canAccessReunioesAba && loadingSemanalCount);
-
-    return [
-      {
-        title: 'Reuniões',
-        value: '',
-        variant: 'atalho',
-        description: 'Acompanhe as reuniões e os relatórios deste contrato.',
-        actionLabel: 'Abrir reuniões',
-        atalhos: atalhosContrato,
-        subtitle: canAccessReunioesDeContrato ? undefined : 'Sem acesso',
-        loading: false,
-        badgeCount: canAccessReunioesDeContrato ? mensalReportPendingForContract : 0,
-        href: canAccessReunioesDeContrato
-          ? mensalReportPendingForContract > 0
-            ? `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
-            : canAccessReunioesAba
-              ? `/ponto/contratos/${contractId}/reunioes`
-              : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
-          : undefined,
-      },
-    ];
-  }, [
-    contractId,
-    canAccessReunioesDeContrato,
-    canAccessReunioesAba,
-    mensalCount,
-    semanalCount,
-    loadingMensalCount,
-    loadingSemanalCount,
-    mensalReportPendingForContract,
-    atalhosContrato,
-  ]);
+  // Os atalhos (Cronogramas, Orçamentos, Fichas de Demanda...) saíram do Resumo; Reuniões virou uma aba.
+  const resumoModulosKpis: ContratoResumoKpi[] = [];
 
   const faturamentoChartsYear = isAllYears
     ? availableYears.includes(currentYear)
@@ -3621,6 +3595,60 @@ export default function ContractDetailPage() {
     valorAnualPorAno,
     valorAnualAjustado,
     faturamentoTotalTodosAnos,
+    valorMaisAditivosTotal,
+  ]);
+
+  /** Visão geral do topo do Resumo: valor, faturado, saldo, a empenhar, OS e faturamento mensal x meta. */
+  const resumoVisaoGeral = useMemo((): ContratoVisaoGeral => {
+    const osRows = allPleitos.filter((p) => !isPleitoHistorico(p));
+    const vistas = new Set<string>();
+    let empenhado = 0;
+    let osAtivas = 0;
+    let osFinalizadas = 0;
+    for (const p of osRows) {
+      const chave = (p.divSe || '').trim().toLowerCase() || p.id;
+      if (vistas.has(chave)) continue;
+      vistas.add(chave);
+      empenhado += parseBudgetToNumberSafe(p.budget);
+      osAtivas += 1;
+      if (isOsConcluida(p, billingsForOs)) osFinalizadas += 1;
+    }
+    const hoje = new Date();
+    const anoAtual = hoje.getFullYear();
+    const mesAtual = hoje.getMonth();
+    const meses = MESES.map((label, i) => {
+      const meta = metaRealPorMes[i] ?? metaSchedule.get(toYearMonthKey(safeSelectedYear, i + 1)) ?? 0;
+      const decorrido = safeSelectedYear < anoAtual || (safeSelectedYear === anoAtual && i <= mesAtual);
+      const faturadoMes = faturamentoPorMes[i] || 0;
+      const eMesAtual = safeSelectedYear === anoAtual && i === mesAtual;
+      return {
+        label,
+        faturado: faturadoMes,
+        meta: Number(meta) || 0,
+        // Previsão (produção do mês) ainda não faturada, só no mês corrente.
+        previsao: eMesAtual ? Math.max(0, (producaoPorMes[i] || 0) - faturadoMes) : 0,
+        decorrido,
+      };
+    });
+    return {
+      valorContratual: valorMaisAditivosTotal,
+      faturado: faturamentoTotalTodosAnos,
+      empenhado,
+      osFinalizadas,
+      osAtivas,
+      ano: safeSelectedYear,
+      meses,
+    };
+  }, [
+    allPleitos,
+    billingsForOs,
+    contract,
+    faturamentoPorMes,
+    faturamentoTotalTodosAnos,
+    metaRealPorMes,
+    metaSchedule,
+    producaoPorMes,
+    safeSelectedYear,
     valorMaisAditivosTotal,
   ]);
 
@@ -4979,6 +5007,18 @@ export default function ContractDetailPage() {
             ) : null}
             {canAccessGestorTabs ? (
               <AppUnderlineTabButton
+                active={mainTab === 'reunioes'}
+                onClick={() => setMainTab('reunioes')}
+                className="inline-flex items-center gap-2 whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Reuniões
+                {mensalReportPendingForContract > 0 ? (
+                  <NotificationCountBadge count={mensalReportPendingForContract} inline />
+                ) : null}
+              </AppUnderlineTabButton>
+            ) : null}
+            {canAccessGestorTabs ? (
+              <AppUnderlineTabButton
                 active={mainTab === 'dados'}
                 onClick={() => setMainTab('dados')}
                 className="whitespace-nowrap px-3 py-2.5 text-sm"
@@ -4987,6 +5027,15 @@ export default function ContractDetailPage() {
               </AppUnderlineTabButton>
             ) : null}
           </AppUnderlineTabList>
+
+          {mainTab === 'reunioes' && canAccessGestorTabs ? (
+            <ContratoAcompanhamentoListPage
+              config={REUNIOES_CONFIG}
+              splitWith={RELATORIO_MENSAL_CONFIG}
+              showMonthlyControleGeral
+              embedded
+            />
+          ) : null}
 
           {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} canManage={canAccessObrasModulo} /> : null}
 
@@ -4999,6 +5048,21 @@ export default function ContractDetailPage() {
             progressoTotal={resumoProgresso.total}
             osTotais={osResumoTotals}
             resumoKpis={resumoModulosKpis}
+            visaoGeral={resumoVisaoGeral}
+            modulos={
+              <ContratoResumoModulos
+                contractId={contractId}
+                costCenterId={contract?.costCenterId}
+                acesso={{
+                  orcamentos: canAccessOrcamento,
+                  cronogramas: canAccessCronogramasModulo,
+                  diarios: isAdministrator || can(pathToModuleKey('/ponto/diario-obra')),
+                  obras: canAccessObrasModulo,
+                  fichasDemanda: isAdministrator || can(pathToModuleKey('/ponto/aprovacao-fds')),
+                  ferramentas: isAdministrator || can(pathToModuleKey('/ponto/solicitar-ferramentas')),
+                }}
+              />
+            }
             metaVsReal={resumoMetaVsReal}
             people={contratoPeople}
             peopleLoading={loadingContratoPeople}
@@ -6288,13 +6352,19 @@ export default function ContractDetailPage() {
           <FluigSolicitacoesPage
             config={{
               embedded: true,
-              datasets: [G5_RELATORIO_DATASET_ID],
-              datasetTabLabels: { [G5_RELATORIO_DATASET_ID]: 'G5' },
+              // Processos G3, G4 e G5 do centro de custo do contrato (seletor no topo, como em Fluig - Processos).
+              datasets: ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', G5_RELATORIO_DATASET_ID],
+              datasetTabLabels: {
+                DataSet_G3FollowUp: 'G3',
+                DataSet_G4FollowUp: 'G4',
+                [G5_RELATORIO_DATASET_ID]: 'G5',
+              },
               g5TitleDatasets: [G5_RELATORIO_DATASET_ID],
               allowedFiliais: null,
+              allowedFiliaisDatasets: ['DataSet_G3FollowUp'],
               excludedFiliais: ['FILIAL PB'],
               hideFilialFilter: true,
-              showProcessCard: false,
+              showProcessCard: true,
               useEmployeeListLayout: true,
               leadTimeColumn: 'Início Data',
               fixedCostCenter: {
