@@ -44,8 +44,15 @@ import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   materialRequestOcListRows,
+  sortMaterialRequestPurchaseOrders,
   type MaterialRequestOcListPurchaseOrder,
 } from '@/components/oc/materialRequestOcListRows';
+import {
+  buildLatestOcMovementByOrderNumber,
+  normalizeOcNumberKey,
+  OcListDeliveryStatusCellContent,
+  type StockMovementForOcTag,
+} from '@/components/oc/ocDeliveryStatus';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
@@ -1583,6 +1590,22 @@ function SolicitarMateriaisPage() {
   const listTotalPages = Math.max(1, Math.ceil(listTotal / LIST_ITEMS_PER_PAGE));
   const listStartIndex = (listCurrentPage - 1) * LIST_ITEMS_PER_PAGE;
   const paginatedRequests = filteredRequests.slice(listStartIndex, listStartIndex + LIST_ITEMS_PER_PAGE);
+
+  // Status de entrega das OCs (mesma fonte da lista de RMs de Suprimentos).
+  const { data: stockMovementsData } = useQuery({
+    queryKey: ['stock-movements-oc-tags'],
+    queryFn: async () => {
+      const res = await api.get('/stock/movements', { params: { limit: 1000 } });
+      return res.data;
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const latestOcMovementByOrderNumber = useMemo(() => {
+    const movements: StockMovementForOcTag[] = stockMovementsData?.data || [];
+    return buildLatestOcMovementByOrderNumber(movements);
+  }, [stockMovementsData]);
   const listStartItem = listTotal === 0 ? 0 : listStartIndex + 1;
   const listEndItem = Math.min(listStartIndex + LIST_ITEMS_PER_PAGE, listTotal);
 
@@ -2266,10 +2289,10 @@ function SolicitarMateriaisPage() {
                     </span>
                   </div>
                   <div className="table-scroll">
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[88rem] text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="w-[4%] min-w-[3rem] max-w-[4.5rem] px-2 sm:px-3 py-4 !pl-2 sm:!pl-3 !pr-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="min-w-[8rem] px-2 sm:px-3 py-4 !pl-2 sm:!pl-3 !pr-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             RM
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
@@ -2284,6 +2307,9 @@ function SolicitarMateriaisPage() {
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Obra
                           </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Cód. FD</th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Solicitante</th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Prioridade</th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap min-w-[100px]">
                             Status
                           </th>
@@ -2293,12 +2319,13 @@ function SolicitarMateriaisPage() {
                           <th className="w-[9%] min-w-[5.5rem] px-2 sm:px-3 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Tipo
                           </th>
-                          <th className="w-[4%] min-w-[3rem] max-w-[4.5rem] px-2 sm:px-3 py-4 !pl-2 sm:!pl-3 !pr-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="min-w-[8rem] px-2 sm:px-3 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             OC
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap min-w-[120px]">
                             Status OC
                           </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Status entrega</th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Ação
                           </th>
@@ -2350,6 +2377,14 @@ function SolicitarMateriaisPage() {
                               itemCancelled > 0 &&
                               (itemPending == null || itemPending === 0);
                             const tipoLabel = formatRmItemProductKinds(request.itemProductKinds);
+                            const solicitanteNome = String(
+                              (request as { requester?: { name?: string } }).requester?.name ||
+                                ((request as { requestedBy?: unknown }).requestedBy &&
+                                typeof (request as { requestedBy?: unknown }).requestedBy === 'object'
+                                  ? ((request as { requestedBy?: { name?: string } }).requestedBy?.name ?? '')
+                                  : '')
+                            ).trim();
+                            const prioridade = getPriorityInfo(String(request.priority || 'MEDIUM'));
                             return (
                             <tr
                               key={request.id}
@@ -2360,13 +2395,12 @@ function SolicitarMateriaisPage() {
                               className={getListTableRowClassName(true)}
                             >
                               <td
-                                className={`${cadastroListClasses.tdMono} w-[4%] min-w-[3rem] max-w-[4.5rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3`}
+                                className={`${cadastroListClasses.tdMono} min-w-[8rem] whitespace-nowrap text-center !pl-2 sm:!pl-3 !pr-1 py-3`}
                                 title={request.requestNumber ? String(request.requestNumber) : undefined}
                               >
                                 <ListRowNavigableLabel className="font-medium">
-                                  {formatRmListDisplayId(
-                                    request.requestNumber ? String(request.requestNumber) : null
-                                  )}
+                                  {String(request.requestNumber || '').trim() ||
+                                    formatRmListDisplayId(request.requestNumber ? String(request.requestNumber) : null)}
                                 </ListRowNavigableLabel>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -2393,6 +2427,17 @@ function SolicitarMateriaisPage() {
                                 title={String(request.obra || '')}
                               >
                                 {request.obra ? String(request.obra) : '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap" title={String(request.demandSheet || '') || undefined}>
+                                {String(request.demandSheet || '').trim() || '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[160px] truncate" title={solicitanteNome || undefined}>
+                                {solicitanteNome || '—'}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300">
+                                <span className={`text-xs font-medium whitespace-nowrap ${prioridade.color}`}>
+                                  {prioridade.label}
+                                </span>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-center align-middle">
                                 <span className={rmFase.badgeClassName} title={rmFase.text}>
@@ -2441,7 +2486,7 @@ function SolicitarMateriaisPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className={`${cadastroListClasses.tdMono} w-[4%] min-w-[3rem] max-w-[4.5rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3 align-middle`}>
+                              <td className={`${cadastroListClasses.tdMono} min-w-[8rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3 align-middle`}>
                                 {ocRows.length === 0 ? (
                                   <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
                                 ) : (
@@ -2452,7 +2497,7 @@ function SolicitarMateriaisPage() {
                                         className="font-medium whitespace-nowrap"
                                         title={row.idTitle}
                                       >
-                                        {row.id}
+                                        {row.idTitle || row.id}
                                       </span>
                                     ))}
                                   </div>
@@ -2471,6 +2516,25 @@ function SolicitarMateriaisPage() {
                                       >
                                         {row.status}
                                       </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 sm:px-6 py-3 text-center align-middle">
+                                {pos.length === 0 ? (
+                                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center gap-1">
+                                    {sortMaterialRequestPurchaseOrders(pos).map((po) => (
+                                      <OcListDeliveryStatusCellContent
+                                        key={po.id}
+                                        movement={
+                                          po.orderNumber
+                                            ? latestOcMovementByOrderNumber.get(normalizeOcNumberKey(po.orderNumber))
+                                            : undefined
+                                        }
+                                        orderStatus={po.status}
+                                      />
                                     ))}
                                   </div>
                                 )}

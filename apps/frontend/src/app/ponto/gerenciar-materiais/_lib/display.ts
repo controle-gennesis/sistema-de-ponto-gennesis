@@ -109,6 +109,11 @@ export function rmOsDisplay(r: MaterialRequest): string {
   return '—';
 }
 
+/** Obra da RM (vazio quando não informada). */
+export function rmObra(r: MaterialRequest): string {
+  return String(r.obra || '').trim();
+}
+
 export function rmContractDisplay(r: MaterialRequest): string {
   const contract = rmLinkedContract(r);
   if (contract?.name?.trim()) return contract.name.trim();

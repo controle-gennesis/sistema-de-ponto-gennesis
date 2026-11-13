@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSeguirAncora } from './useSeguirAncora';
 import { Search, X } from 'lucide-react';
 import {
   SINGLE_SELECT_PANEL_CLS,
@@ -563,6 +564,8 @@ export function MultiSelectSearchDropdown({
     if (!triggerRef.current) return;
     setFloatingPos(computeFloatingPos(triggerRef.current, estimatedListMax, menuMinWidth));
   }, [estimatedListMax, menuMinWidth]);
+  // Menu lateral recolhendo/abrindo desloca o campo: a lista acompanha.
+  useSeguirAncora(open && !menuInline, triggerRef, syncFloatingPos);
 
   useEffect(() => setMounted(true), []);
 

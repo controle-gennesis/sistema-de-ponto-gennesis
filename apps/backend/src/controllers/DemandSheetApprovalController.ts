@@ -144,6 +144,38 @@ async function podeCancelarFd(userId: string, isAdmin: boolean, contratoId: stri
   return !!gestor;
 }
 
+/**
+ * Próximo código da FD de uma OS: FD-<OS e pasta>-NN, contado no mesmo contrato para a mesma OS e pasta
+ * (a mesma OS em outro contrato começa no 01). FD antiga com o código sem número conta como a 01.
+ */
+async function proximoCodigoFd(contratoId: string, base: string): Promise<string> {
+  const limpo = String(base || '').replace(/\s+/g, '').trim();
+  const prefixo = `FD-${limpo}`;
+  const rows = await prisma.demandSheetApproval.findMany({
+    where: {
+      contratoId,
+      OR: [
+        { codFichaDemanda: { equals: prefixo, mode: 'insensitive' } },
+        { codFichaDemanda: { startsWith: `${prefixo}-`, mode: 'insensitive' } },
+      ],
+    },
+    select: { codFichaDemanda: true },
+  });
+  const escapado = prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${escapado}-(\\d+)$`, 'i');
+  let maior = 0;
+  for (const r of rows) {
+    const cod = String(r.codFichaDemanda || '').replace(/\s+/g, '').trim();
+    if (cod.toLowerCase() === prefixo.toLowerCase()) {
+      maior = Math.max(maior, 1);
+      continue;
+    }
+    const m = cod.match(re);
+    if (m) maior = Math.max(maior, Number(m[1]) || 0);
+  }
+  return `${prefixo}-${String(maior + 1).padStart(2, '0')}`;
+}
+
 function clampFichaDemandaPct(value: unknown): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -203,6 +235,32 @@ function custoRealEspelhado(anexos: unknown): number | null {
   return null;
 }
 
+/** Custo estimado (40%) por insumo da FD (chave do insumo → valor), espelhado da aba Ficha de demanda. */
+function custoEstimado40PorItemEspelhado(anexos: unknown): Record<string, number> | null {
+  if (!Array.isArray(anexos)) return null;
+  for (const a of anexos) {
+    if (!isOrcamentoRefAnexo(a)) continue;
+    const raw = (a as { custoEstimado40PorItem?: unknown }).custoEstimado40PorItem;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const n = Number(v);
+      if (Number.isFinite(n)) out[k] = n;
+    }
+    return out;
+  }
+  return null;
+}
+
+function anexosComCustoEstimado40PorItem(anexos: unknown, itens: Record<string, number>): Prisma.InputJsonValue {
+  const list = Array.isArray(anexos) ? anexos : [];
+  return list.map((a) =>
+    isOrcamentoRefAnexo(a) && a && typeof a === 'object'
+      ? { ...(a as Record<string, unknown>), custoEstimado40PorItem: itens }
+      : a
+  ) as Prisma.InputJsonValue;
+}
+
 function publicAnexos(anexos: unknown): unknown[] {
   if (!Array.isArray(anexos)) return [];
   return anexos.filter((a) => !isOrcamentoRefAnexo(a));
@@ -228,6 +286,8 @@ type FdItemPedido = {
   materiais: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
   /** Motivos de atenção para o gestor: '1:N' (vários materiais) e/ou 'unidade' (unidade diferente da FD). */
   alertas: string[];
+  /** "Custo estimado (40%)" do item na FD no momento do pedido (coluna da aba Ficha de demanda). */
+  custoEstimado40?: number | null;
 };
 
 const FD_QTD_EPS = 1e-6;
@@ -237,6 +297,9 @@ function parseItensPedidos(raw: unknown): FdItemPedido[] {
   return raw
     .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
     .map((r) => ({
+      ...(r.custoEstimado40 != null && Number.isFinite(Number(r.custoEstimado40))
+        ? { custoEstimado40: Number(r.custoEstimado40) }
+        : {}),
       fdItemKey: String(r.fdItemKey || ''),
       fdItem: String(r.fdItem || ''),
       descricao: String(r.descricao || ''),
@@ -1135,9 +1198,8 @@ export class DemandSheetApprovalController {
       const arquivo = await orcamentoService.readOrcamentoFile(centroRef, orcRef);
       if (!arquivo) throw createError('Orçamento não encontrado', 404);
       const statusOrc = statusDaSessao(arquivo.sessaoOrcamento);
-      if (orcamentoTrancado(statusOrc)) throw createError('Este orçamento já está trancado.', 400);
-      if (!orcamentoPodeTrancar(statusOrc)) {
-        throw createError('Finalize o orçamento antes de lançar a ficha de demanda.', 400);
+      if (!orcamentoTrancado(statusOrc)) {
+        throw createError('Tranque o orçamento antes de lançar a ficha de demanda.', 400);
       }
 
       // FD que já existe: a da revisão anterior (informada pela tela) ou a já ligada a este orçamento.
@@ -1184,13 +1246,21 @@ export class DemandSheetApprovalController {
 
       // RMs já pedidas por esta FD continuam nela: o Nº Mov. (REQs) não é sobrescrito pelo formulário.
       const temPedidos = !!existing && parseItensPedidos(existing.itensPedidos).length > 0;
+      // Código da FD: a FD que já existe mantém o seu; FD nova recebe o próximo da sequência da OS
+      // (conferido agora, para duas pessoas lançando juntas não repetirem o número).
+      const baseCodigoOs = String(raw.codigoFdBaseOs || '').trim();
+      const codFichaDemanda = existing
+        ? existing.codFichaDemanda
+        : baseCodigoOs
+          ? await proximoCodigoFd(body.contratoId, baseCodigoOs)
+          : body.codFichaDemanda.trim();
       const dados = {
         numMovRm: temPedidos ? existing!.numMovRm : body.numMovRm.trim(),
         idMovRm: temPedidos ? existing!.idMovRm : body.idMovRm.trim(),
         codigoPedido: body.codigoPedido.trim(),
         contratoId: body.contratoId,
         obra: body.obra.trim(),
-        codFichaDemanda: body.codFichaDemanda.trim(),
+        codFichaDemanda,
         faturamentoEstimado: parseMoney(body.faturamentoEstimado),
         custoEstimado: parseMoney(body.custoEstimado),
         observacao: body.observacao.trim(),
@@ -1224,11 +1294,6 @@ export class DemandSheetApprovalController {
             },
             include: includeDefault,
           });
-
-      await orcamentoService.updateStatusAprovacao(centroRef, orcRef, STATUS_ORCAMENTO_TRANCADO, row.id, {
-        tipo: 'trancamento',
-        usuario: await resolveActorName(req.user.id),
-      });
 
       return res.status(existing ? 200 : 201).json({ success: true, data: serializeRow(row) });
     } catch (e: unknown) {
@@ -1996,6 +2061,54 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Espelho do "Custo estimado (40%)" de cada insumo da FD (aba Ficha de demanda → mapa de cotação). */
+  async updateCustoEstimadoItens(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const raw = (req.body as { itens?: unknown })?.itens;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw createError('Itens inválidos', 400);
+      const itens: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        const key = String(k).trim();
+        const n = Number(v);
+        if (!key || !Number.isFinite(n) || n < 0) continue;
+        itens[key] = Math.round(n * 100) / 100;
+      }
+
+      const row = await prisma.demandSheetApproval.findUnique({ where: { id }, select: { anexos: true, status: true } });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+
+      const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!(canFdsAprovadas && row.status === 'APPROVED')) {
+        const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
+        const allowed = await prisma.demandSheetApproval.findFirst({ where: { id, ...scope }, select: { id: true } });
+        if (!allowed) throw createError('Sem permissão para atualizar esta ficha de demanda', 403);
+      }
+
+      if (!extractOrcamentoRefFromAnexos(row.anexos)) return res.json({ success: true });
+      const atual = custoEstimado40PorItemEspelhado(row.anexos);
+      // JSONB não preserva a ordem das chaves: compara entrada a entrada.
+      const igual =
+        !!atual &&
+        Object.keys(atual).length === Object.keys(itens).length &&
+        Object.entries(itens).every(([k, v]) => atual[k] === v);
+      if (igual) return res.json({ success: true });
+
+      await prisma.demandSheetApproval.update({
+        where: { id },
+        data: { anexos: anexosComCustoEstimado40PorItem(row.anexos, itens) },
+      });
+      return res.json({ success: true });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao atualizar custo estimado dos itens da ficha' });
+    }
+  }
+
   async encerrarPedidos(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -2395,6 +2508,8 @@ export class DemandSheetApprovalController {
           fdDescricao: z.string().default(''),
           fdQuantidade: z.number().nonnegative().optional(),
           fdUnidade: z.string().default(''),
+          /** "Custo estimado (40%)" do item na FD (mesmo valor da coluna da aba Ficha de demanda). */
+          fdCustoEstimado40: z.number().finite().nonnegative().optional(),
           materialId: z.string().min(1),
           materialLabel: z.string().default(''),
           quantity: z.number().positive(),
@@ -2432,6 +2547,7 @@ export class DemandSheetApprovalController {
         descricao: string;
         fdQuantidade?: number;
         fdUnidade: string;
+        fdCustoEstimado40?: number;
         materiais: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
       };
       const porItemFd = new Map<string, ItemFd>();
@@ -2441,6 +2557,7 @@ export class DemandSheetApprovalController {
           descricao: item.fdDescricao,
           fdQuantidade: item.fdQuantidade,
           fdUnidade: item.fdUnidade.trim(),
+          fdCustoEstimado40: item.fdCustoEstimado40,
           materiais: [],
         };
         atual.materiais.push({
@@ -2557,6 +2674,7 @@ export class DemandSheetApprovalController {
             .reduce((acc, m) => acc + m.quantity, 0),
           materiais: it.materiais,
           alertas: alertasPorItem.get(key) ?? [],
+          ...(it.fdCustoEstimado40 != null ? { custoEstimado40: Math.round(it.fdCustoEstimado40 * 100) / 100 } : {}),
         });
       }
       const itensAtualizados = [...itensPedidos, ...novos];
@@ -2628,28 +2746,82 @@ export class DemandSheetApprovalController {
 
       const itens = parseItensPedidos(fd.itensPedidos).filter((i) => i.materialRequestId === rmId);
       const orcRef = extractOrcamentoRefFromAnexos(fd.anexos);
-      // Alerta ao aprovador: cotação de empreita do orçamento da FD não finalizada (não bloqueia a RM).
       let cotacaoEmpreitaPreenchida: boolean | null = null;
+      // Mapa chave → { etapa, custoOrcamento } extraído do orçamento para enriquecer os itens.
+      const insumoInfo = new Map<string, { etapa: string; custoOrcamento: number }>();
       if (orcRef?.centroCustoId && orcRef?.orcamentoId) {
         try {
           const arquivo = await orcamentoService.readOrcamentoFile(orcRef.centroCustoId, orcRef.orcamentoId);
           cotacaoEmpreitaPreenchida = arquivo ? cotacaoEmpreitaPreenchida_(arquivo.sessaoOrcamento) : null;
+          if (arquivo) {
+            const sessao = arquivo.sessaoOrcamento && typeof arquivo.sessaoOrcamento === 'object'
+              ? arquivo.sessaoOrcamento as Record<string, unknown>
+              : null;
+            const quantidades = sessao?.quantidadesPorItem && typeof sessao.quantidadesPorItem === 'object'
+              ? sessao.quantidadesPorItem as Record<string, number>
+              : {};
+            const servicos = Array.isArray(arquivo.servicos) ? arquivo.servicos : [];
+            for (const svc of servicos) {
+              const s = svc as { nome?: string; subtitulos?: unknown[] };
+              const etapa = String(s.nome || '').trim();
+              for (const sub of Array.isArray(s.subtitulos) ? s.subtitulos : []) {
+                const sb = sub as { itens?: unknown[] };
+                for (const it of Array.isArray(sb.itens) ? sb.itens : []) {
+                  const item = it as { chave?: string; precoUnitario?: number; analiticoLinhas?: unknown[] };
+                  const chave = String(item.chave || '').trim();
+                  if (!chave) continue;
+                  const qtdComp = Number(quantidades[chave]) || 0;
+                  // Composição em si (fdItemKey pode ser a chave da composição).
+                  const puComp = Number(item.precoUnitario) || 0;
+                  insumoInfo.set(chave, { etapa, custoOrcamento: qtdComp * puComp });
+                  // Insumos do analítico: fdItemKey = "${chave}|insumo|${i}".
+                  // Usa ln.total (contribuição unitária já salva) quando disponível — mesmo
+                  // cálculo de contribuicoesLinhasAnalitico no frontend.
+                  const linhas = Array.isArray(item.analiticoLinhas) ? item.analiticoLinhas : [];
+                  for (let i = 0; i < linhas.length; i++) {
+                    const ln = linhas[i] as { precoUnitario?: number; quantidade?: number; total?: number; oficial?: boolean };
+                    const totalSalvo = Number(ln.total) || 0;
+                    const quantBase = Number(ln.quantidade) || 0;
+                    const precoSalvo = Number(ln.precoUnitario) || 0;
+                    const totalUnitario = totalSalvo > 0 ? totalSalvo : (quantBase > 0 ? precoSalvo * quantBase : 0);
+                    const insumoKey = `${chave}|insumo|${i}`;
+                    insumoInfo.set(insumoKey, { etapa, custoOrcamento: totalUnitario * qtdComp });
+                  }
+                }
+              }
+            }
+          }
         } catch {
           cotacaoEmpreitaPreenchida = null;
         }
       }
+      const pct = orcRef?.fichaDemandaPct || 40;
+      // "Custo estimado (40%)" do item = valor exibido na aba Ficha de demanda (espelhado por insumo).
+      const custo40PorItem = custoEstimado40PorItemEspelhado(fd.anexos) ?? {};
+      const itensEnriquecidos = itens.map((it) => {
+        const info = insumoInfo.get(it.fdItemKey);
+        // Prioriza o espelho atual da FD; senão, o valor gravado no item quando a RM foi criada.
+        const espelho = custo40PorItem[it.fdItemKey];
+        const custo40 = Number.isFinite(espelho) ? espelho : it.custoEstimado40;
+        return {
+          ...it,
+          etapa: info?.etapa || '',
+          custoEstimado40: custo40 != null && Number.isFinite(custo40) ? custo40 : null,
+        };
+      });
       return res.json({
         success: true,
         data: {
           fdId: fd.id,
           codFichaDemanda: fd.codFichaDemanda,
           obra: fd.obra,
-          itens,
+          itens: itensEnriquecidos,
           orcamentoId: orcRef?.orcamentoId || null,
           contratoId: fd.contratoId || null,
           contratoNome: fd.contrato?.name || null,
           centroCustoId: orcRef?.centroCustoId || fd.contrato?.costCenterId || null,
           cotacaoEmpreitaPreenchida,
+          fichaDemandaPct: pct,
         },
       });
     } catch (e: unknown) {
@@ -2905,6 +3077,32 @@ export class DemandSheetApprovalController {
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       return res.status(500).json({ error: 'Erro ao listar RMs da FD' });
+    }
+  }
+
+  /** Código que a FD do orçamento vai receber (prévia do formulário de lançamento). Só leitura. */
+  async getProximoCodigo(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const contratoId = String(req.query.contratoId || '').trim();
+      const base = String(req.query.base || '').trim();
+      const fdId = String(req.query.fdId || '').trim();
+      if (fdId) {
+        const fd = await prisma.demandSheetApproval.findUnique({
+          where: { id: fdId },
+          select: { codFichaDemanda: true, status: true },
+        });
+        if (fd && fd.status !== 'CANCELLED') {
+          return res.json({ success: true, data: { codigo: fd.codFichaDemanda, existente: true } });
+        }
+      }
+      if (!contratoId || !base) throw createError('Informe o contrato e a OS', 400);
+      const codigo = await proximoCodigoFd(contratoId, base);
+      return res.json({ success: true, data: { codigo, existente: false } });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      return res.status(500).json({ error: 'Erro ao gerar o código da FD' });
     }
   }
 

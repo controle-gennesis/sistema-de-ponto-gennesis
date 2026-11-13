@@ -6291,3 +6291,17 @@ model ContratoSocioSubitem {
   @@index([contrato, ano, mes])
   @@map("contrato_socio_subitens")
 }
+
+/// Rascunho do Mapa de Cotação: um por RM, compartilhado por todos os compradores (separado do QuoteMap da OC).
+model QuoteMapDraft {
+  id                String   @id @default(cuid())
+  materialRequestId String   @unique
+  /// Estado da tela: fornecedores, preços, frete, desconto, quantidades e detalhamentos.
+  data              Json
+  updatedById       String
+  updatedByName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("quote_map_drafts")
+}

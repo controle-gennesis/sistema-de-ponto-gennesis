@@ -50,6 +50,8 @@ export interface FdInsumoLine {
   custoOrcamento?: number;
   descontoOrcamento?: number;
   bdiOrcamento?: number;
+  /** "Custo estimado (40%)" do insumo — mesmo valor da coluna da aba Ficha de demanda. */
+  custoEstimado40?: number;
 }
 
 /** Material do cadastro associado a um item da FD (1 item → N materiais). */
@@ -435,6 +437,7 @@ export function FdPedidoMaterialModal({
         fdDescricao: ins.descricao,
         fdQuantidade: ins.quantidade,
         fdUnidade: ins.unidade,
+        fdCustoEstimado40: ins.custoEstimado40,
         materialId: r.materialId,
         materialLabel: r.materialLabel,
         quantity: r.quantity,

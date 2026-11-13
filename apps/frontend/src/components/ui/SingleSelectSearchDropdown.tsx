@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSeguirAncora } from './useSeguirAncora';
 import { Check, Search, X } from 'lucide-react';
 import {
   SINGLE_SELECT_LIST_MAX,
@@ -359,6 +360,8 @@ export function SingleSelectSearchDropdown({
     listCap,
     preferOpenDown,
   ]);
+  // Menu lateral recolhendo/abrindo desloca o campo: a lista acompanha.
+  useSeguirAncora(open && !menuInline, triggerRef, syncFloatingPos);
 
   useEffect(() => setMounted(true), []);
 

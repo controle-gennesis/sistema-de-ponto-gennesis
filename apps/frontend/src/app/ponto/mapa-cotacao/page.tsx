@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Download, FileSpreadsheet, RotateCcw, Truck, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Download, ExternalLink, FileSpreadsheet, FileText, RotateCcw, Save, Truck, Wrench, X } from 'lucide-react';
 import { exportarMapaCotacao } from '@/lib/exportMapaCotacao';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
@@ -61,6 +61,7 @@ import {
   rmHasOpenItemsForProcurement,
 } from '@/lib/rmProcurementCoverage';
 import { buildSupplierPaymentPrefill } from '@/lib/supplierPaymentPrefill';
+import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';
 import {
   ocDestinationLabel,
   resolveOcDestinationFromCostCenter,
@@ -776,14 +777,36 @@ export default function MapaCotacaoPage() {
         .filter(Boolean)
         .join(' - ');
 
+      // OS (código e pasta do pleito, como no contrato), obra e código da FD de origem.
+      const pleitoOs = r.service_orders?.pleitos?.find((p) => (p.divSe || '').trim());
+      // Só a OS de verdade (código e pasta do pleito). O texto livre da RM pode ter o nome da obra
+      // (RM pela FD sem OS encontrada), então não serve como OS.
+      const osTexto = pleitoOs
+        ? [pleitoOs.divSe?.trim(), pleitoOs.folderNumber?.trim() ? `Nº${pleitoOs.folderNumber.trim()}` : '']
+            .filter(Boolean)
+            .join(' - ')
+        : '';
+      const obraTexto = String((r as MaterialRequest & { obra?: string | null }).obra || '').trim();
+      const fdTexto = String(r.demandSheet || '').trim();
+      const origemLine = [
+        osTexto ? `OS ${osTexto}` : null,
+        obraTexto ? `Obra ${obraTexto}` : null,
+        fdTexto ? `FD ${fdTexto}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
       return {
         value: r.id,
         label: contract !== '—' ? `RM ${rm} - ${contract}` : `RM ${rm}`,
         description:
-          [qtyText, peopleDateLine || null].filter(Boolean).join('\n') || undefined,
+          [origemLine || null, qtyText, peopleDateLine || null].filter(Boolean).join('\n') || undefined,
         searchText: [
           rm,
           os,
+          osTexto,
+          obraTexto,
+          fdTexto,
           contract,
           solicitante,
           costCenter,
@@ -869,10 +892,11 @@ export default function MapaCotacaoPage() {
   const supplierOptions = useMemo(
     () =>
       suppliers.map((s) => {
-        const label = getOcSupplierLabel(s) || s.name;
+        // Só o nome do fornecedor (o código continua valendo na busca).
+        const label = s.tradeName?.trim() || s.name?.trim() || s.code;
         return {
           value: s.id,
-          label: s.code ? `${s.code} - ${label}` : label,
+          label,
           searchText: `${s.code ?? ''} ${s.name} ${s.tradeName ?? ''} ${s.cnpj ?? ''}`,
         };
       }),
@@ -892,6 +916,37 @@ export default function MapaCotacaoPage() {
 
   const selectedRequestRaw =
     selectedRequestFull?.id === selectedRequestId ? selectedRequestFull : null;
+
+  // FD associada à RM selecionada (para o botão "Itens solicitados da FD").
+  const { data: fdAssociation } = useQuery({
+    queryKey: ['fd-association-by-rm', selectedRequestId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${selectedRequestId}`);
+      return res.data?.data as {
+        fdId: string;
+        codFichaDemanda: string;
+        orcamentoId?: string | null;
+        contratoId?: string | null;
+        fichaDemandaPct?: number | null;
+        itens?: {
+          fdItemKey: string;
+          fdItem: string;
+          descricao: string;
+          quantidadeFd: number | null;
+          unidadeFd: string;
+          etapa: string;
+          custoEstimado40: number | null;
+          materiais: { materialId: string; materialLabel: string; quantity: number; unit: string }[];
+          alertas: string[];
+        }[];
+      } | null;
+    },
+    enabled: !!selectedRequestId,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const [fdResumoOpen, setFdResumoOpen] = useState(false);
+  useEffect(() => { setFdResumoOpen(false); }, [selectedRequestId]);
 
   const coveredItemIdsForSelected = useMemo(() => {
     if (!selectedRequestId) return new Set<string>();
@@ -927,8 +982,11 @@ export default function MapaCotacaoPage() {
     return { ...selectedRequestRaw, items: openItems };
   }, [selectedRequestRaw, coveredItemIdsForSelected]);
 
+  /** Enquanto houver vencedor sem OC (ou o modal da OC aberto), a RM escolhida não é limpa. */
+  const manterRmSelecionadaRef = useRef(false);
   useEffect(() => {
     if (!selectedRequestId) return;
+    if (manterRmSelecionadaRef.current) return;
     if (!approvedRequests.some((r) => r.id === selectedRequestId)) {
       setSelectedRequestId('');
     }
@@ -963,6 +1021,166 @@ export default function MapaCotacaoPage() {
     setOcModalSupplierId(null);
     setGeneratedOcSupplierIds(new Set());
   }, [selectedRequestId]);
+
+  // --- Rascunho do mapa (um por RM, para todos os compradores) ---
+  type RascunhoMapaDados = {
+    supplierIds: string[];
+    suppliers: Record<string, Supplier>;
+    unitPriceBySupplierItem: Record<string, string>;
+    freightBySupplier: Record<string, string>;
+    discountBySupplier: Record<string, string>;
+    ocItemQtyByItemId: Record<string, number>;
+    supplierItemDetailByKey: Record<string, string>;
+  };
+  const [rascunhoInfo, setRascunhoInfo] = useState<{ updatedByName: string | null; updatedAt: string } | null>(null);
+  const [rascunhoUltimoSalvo, setRascunhoUltimoSalvo] = useState<string | null>(null);
+  const [rascunhoBaselinePendente, setRascunhoBaselinePendente] = useState(false);
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false);
+  const rascunhoAplicadoParaRef = React.useRef<string>('');
+
+  const { data: rascunhoServidor, isFetched: rascunhoBuscado } = useQuery({
+    queryKey: ['quote-map-rascunho', selectedRequestId],
+    queryFn: async () => {
+      const res = await api.get(`/quote-maps/rascunho/${selectedRequestId}`);
+      return (res.data?.data ?? null) as
+        | { data: RascunhoMapaDados; updatedByName: string | null; updatedAt: string }
+        | null;
+    },
+    enabled: !!selectedRequestId,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  const fotografiaRascunho = useMemo(
+    () =>
+      JSON.stringify({
+        s: Array.from(selectedSupplierIds).sort(),
+        p: unitPriceBySupplierItem,
+        f: freightBySupplier,
+        d: discountBySupplier,
+        q: ocItemQtyByItemId,
+        t: supplierItemDetailByKey,
+      }),
+    [selectedSupplierIds, unitPriceBySupplierItem, freightBySupplier, discountBySupplier, ocItemQtyByItemId, supplierItemDetailByKey]
+  );
+
+  useEffect(() => {
+    rascunhoAplicadoParaRef.current = '';
+    setRascunhoInfo(null);
+    setRascunhoUltimoSalvo(null);
+  }, [selectedRequestId]);
+
+  // Ao abrir a RM: carrega o rascunho salvo (depois que os itens da RM chegaram e a tela foi zerada).
+  useEffect(() => {
+    if (!selectedRequestId || !rascunhoBuscado) return;
+    if (!selectedRequest || selectedRequest.id !== selectedRequestId) return;
+    if (rascunhoAplicadoParaRef.current === selectedRequestId) return;
+    rascunhoAplicadoParaRef.current = selectedRequestId;
+    const r = rascunhoServidor?.data;
+    if (r) {
+      const ids = (r.supplierIds || []).filter(Boolean);
+      setSelectedSupplierIds(new Set(ids));
+      setSelectedSuppliersById(r.suppliers || {});
+      setUnitPriceBySupplierItem(r.unitPriceBySupplierItem || {});
+      setFreightBySupplier(r.freightBySupplier || {});
+      setDiscountBySupplier(r.discountBySupplier || {});
+      setSupplierItemDetailByKey(r.supplierItemDetailByKey || {});
+      // Quantidade só dos itens ainda abertos, limitada à quantidade da RM.
+      setOcItemQtyByItemId((prev) => {
+        const next = { ...prev };
+        for (const it of selectedRequest.items ?? []) {
+          const salvo = Number(r.ocItemQtyByItemId?.[it.id]);
+          if (Number.isFinite(salvo) && salvo > 0) next[it.id] = Math.min(salvo, Number(it.quantity));
+        }
+        return next;
+      });
+      setRascunhoInfo({ updatedByName: rascunhoServidor?.updatedByName ?? null, updatedAt: rascunhoServidor!.updatedAt });
+    }
+    setRascunhoBaselinePendente(true);
+  }, [selectedRequestId, rascunhoBuscado, rascunhoServidor, selectedRequest]);
+
+  // Ponto de partida para saber se há alterações não salvas.
+  useEffect(() => {
+    if (!rascunhoBaselinePendente) return;
+    setRascunhoBaselinePendente(false);
+    setRascunhoUltimoSalvo(fotografiaRascunho);
+  }, [rascunhoBaselinePendente, fotografiaRascunho]);
+
+  const rascunhoAlterado =
+    !!selectedRequestId && rascunhoUltimoSalvo !== null && fotografiaRascunho !== rascunhoUltimoSalvo;
+
+  // Avisa ao sair da página com alterações não salvas.
+  useEffect(() => {
+    if (!rascunhoAlterado) return;
+    const aviso = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', aviso);
+    return () => window.removeEventListener('beforeunload', aviso);
+  }, [rascunhoAlterado]);
+
+  const salvarRascunho = async () => {
+    if (!selectedRequestId) return;
+    setSalvandoRascunho(true);
+    try {
+      const ids = Array.from(selectedSupplierIds);
+      const suppliersSalvos: Record<string, Supplier> = {};
+      for (const id of ids) {
+        const s = selectedSuppliersById[id] || suppliers.find((x) => x.id === id);
+        if (s) suppliersSalvos[id] = s;
+      }
+      const dados: RascunhoMapaDados = {
+        supplierIds: ids,
+        suppliers: suppliersSalvos,
+        unitPriceBySupplierItem,
+        freightBySupplier,
+        discountBySupplier,
+        ocItemQtyByItemId,
+        supplierItemDetailByKey,
+      };
+      const res = await api.put(`/quote-maps/rascunho/${selectedRequestId}`, { data: dados });
+      const info = res.data?.data as { updatedByName: string | null; updatedAt: string } | undefined;
+      setRascunhoInfo(info ? { updatedByName: info.updatedByName ?? null, updatedAt: info.updatedAt } : null);
+      setRascunhoUltimoSalvo(fotografiaRascunho);
+      queryClient.setQueryData(['quote-map-rascunho', selectedRequestId], {
+        data: dados,
+        updatedByName: info?.updatedByName ?? null,
+        updatedAt: info?.updatedAt ?? new Date().toISOString(),
+      });
+      toast.success('Rascunho salvo.');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+      toast.error(msg?.error || msg?.message || 'Não foi possível salvar o rascunho.');
+    } finally {
+      setSalvandoRascunho(false);
+    }
+  };
+
+  const descartarRascunho = async () => {
+    if (!selectedRequestId) return;
+    if (!window.confirm('Descartar o rascunho desta RM? Os preços, fretes e fornecedores salvos serão apagados.')) return;
+    try {
+      await api.delete(`/quote-maps/rascunho/${selectedRequestId}`);
+      queryClient.setQueryData(['quote-map-rascunho', selectedRequestId], null);
+      setSelectedSupplierIds(new Set());
+      setSelectedSuppliersById({});
+      setFreightBySupplier({});
+      setDiscountBySupplier({});
+      setUnitPriceBySupplierItem({});
+      setSupplierItemDetailByKey({});
+      if (selectedRequest) {
+        setOcItemQtyByItemId(
+          Object.fromEntries((selectedRequest.items ?? []).map((i) => [i.id, Number(i.quantity)]))
+        );
+      }
+      setRascunhoInfo(null);
+      setRascunhoBaselinePendente(true);
+      toast.success('Rascunho descartado.');
+    } catch {
+      toast.error('Não foi possível descartar o rascunho.');
+    }
+  };
 
   /** Se a cobertura mudou (ex.: item devolvido à RM), libera gerar OC de novo para o fornecedor. */
   const openItemIdsKey = useMemo(
@@ -1140,6 +1358,50 @@ export default function MapaCotacaoPage() {
   }, [selectedSupplierIds, wonItemsBySupplier, freightBySupplier, discountBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  /** "Gerar todas as OCs": vencedores em abas no mesmo modal, gerados um a um. */
+  const [ocFila, setOcFila] = useState<string[] | null>(null);
+  /** OCs já geradas nesta fila (a marcação "OC gerada" da tabela é zerada quando os itens da RM recarregam). */
+  const [ocFilaGeradas, setOcFilaGeradas] = useState<Set<string>>(new Set());
+
+  /** Vencedores (com itens ganhos) que ainda não têm OC. */
+  const vencedoresSemOc = useMemo(
+    () =>
+      Array.from(selectedSupplierIds).filter(
+        (id) => (wonItemsBySupplier[id] ?? []).length > 0 && !generatedOcSupplierIds.has(id)
+      ),
+    [selectedSupplierIds, wonItemsBySupplier, generatedOcSupplierIds]
+  );
+  manterRmSelecionadaRef.current =
+    Boolean(ocModalSupplierId) || isGenerating || ocFila !== null || vencedoresSemOc.length > 0;
+
+  /** Pagamento inicial do fornecedor (valor sugerido e dados bancários), sem sobrescrever o que já foi digitado. */
+  const prepararPagamentoOc = (supplierId: string) => {
+    setPaymentDraftBySupplier((prev) => {
+      if (prev[supplierId]) return prev;
+      const totals = computedSupplierTotals[supplierId];
+      const suggested = totals ? formatCurrencyBR(totals.amountToPay) : '';
+      const bankPrefill = buildSupplierPaymentPrefill(suppliers.find((s) => s.id === supplierId) ?? {});
+      return {
+        ...prev,
+        [supplierId]: {
+          ...emptyPaymentDraft(suggestedTotvsFilial),
+          amountToPayStr: suggested,
+          paymentDetails: bankPrefill.paymentDetails,
+          pixKeyType: bankPrefill.pixKeyType,
+          pixKey: bankPrefill.pixKey,
+        },
+      };
+    });
+  };
+
+  const abrirTodasAsOcs = () => {
+    const fila = [...vencedoresSemOc];
+    if (fila.length === 0) return;
+    fila.forEach(prepararPagamentoOc);
+    setOcFilaGeradas(new Set());
+    setOcFila(fila);
+    setOcModalSupplierId(fila[0]!);
+  };
 
   // --- Exportar o mapa (PDF/Excel, retrato/paisagem): exatamente o que está na tela ---
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -1154,7 +1416,8 @@ export default function MapaCotacaoPage() {
       const fornecedorIds = Array.from(selectedSupplierIds);
       const nomeFornecedor = (id: string) => {
         const sup = suppliers.find((x) => x.id === id);
-        return sup ? (sup.code ? `${sup.code} - ${sup.name}` : sup.name) : id;
+        // Só o nome (sem o código) para a coluna do fornecedor não ficar larga.
+        return sup ? sup.tradeName?.trim() || sup.name : id;
       };
       const itens = ocItems.map((item) => {
         const qtdOc = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
@@ -1464,12 +1727,38 @@ export default function MapaCotacaoPage() {
       }
     },
     onSuccess: (_data, supplierId) => {
-      setOcModalSupplierId(null);
+      const geradas = new Set([...generatedOcSupplierIds, ...ocFilaGeradas]);
+      geradas.add(supplierId);
+      setOcFilaGeradas((prev) => new Set(prev).add(supplierId));
+      const proxima = (ocFila ?? []).find((id) => !geradas.has(id));
+      if (ocFila && proxima) {
+        setOcModalSupplierId(proxima);
+      } else {
+        setOcModalSupplierId(null);
+        setOcFila(null);
+      }
       setGeneratedOcSupplierIds((prev) => {
         const next = new Set(prev);
         next.add(supplierId);
         return next;
       });
+      // Todos os itens com vencedor e todos os vencedores com OC: o rascunho da RM não serve mais.
+      const restantes = vencedoresSemOc.filter((id) => id !== supplierId);
+      const itensComVencedor = new Set(
+        Object.values(wonItemsBySupplier).flatMap((lista) => (lista ?? []).map((it) => it.id))
+      );
+      const todosItensComVencedor = (selectedRequest?.items ?? []).every((it) => itensComVencedor.has(it.id));
+      if (selectedRequestId && restantes.length === 0 && todosItensComVencedor) {
+        const rmId = selectedRequestId;
+        void api
+          .delete(`/quote-maps/rascunho/${rmId}`)
+          .then(() => {
+            queryClient.setQueryData(['quote-map-rascunho', rmId], null);
+            setRascunhoInfo(null);
+            setRascunhoBaselinePendente(true);
+          })
+          .catch(() => undefined);
+      }
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
@@ -1615,7 +1904,13 @@ export default function MapaCotacaoPage() {
                     </div>
                     <SingleSelectSearchDropdown
                       value={selectedRequestId}
-                      onChange={setSelectedRequestId}
+                      onChange={(id: string) => {
+                        if (id && id !== selectedRequestId) {
+                          queryClient.invalidateQueries({ queryKey: ['material-request-detail', id] });
+                          queryClient.invalidateQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+                        }
+                        setSelectedRequestId(id);
+                      }}
                       options={materialRequestOptions}
                       allowEmpty={false}
                       placeholder="Selecione uma requisição (RMs Aprovadas)"
@@ -1637,10 +1932,39 @@ export default function MapaCotacaoPage() {
                       }
                       return (
                         <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800">
-                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{opt.label}</p>
-                          {opt.description ? (
-                            <p className="mt-0.5 whitespace-pre-line text-xs text-gray-600 dark:text-gray-300">{opt.description}</p>
-                          ) : null}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{opt.label}</p>
+                              {opt.description ? (
+                                <p className="mt-0.5 whitespace-pre-line text-xs text-gray-600 dark:text-gray-300">{opt.description}</p>
+                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {fdAssociation?.orcamentoId && fdAssociation?.contratoId ? (
+                                <a
+                                  href={`/ponto/orcamentos/${fdAssociation.contratoId}/${fdAssociation.orcamentoId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                                  title="Abrir orçamento da FD"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  Orçamento
+                                </a>
+                              ) : null}
+                              {fdAssociation?.fdId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setFdResumoOpen(true)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                  title={`Ver itens já solicitados da FD ${fdAssociation.codFichaDemanda || ''}`}
+                                >
+                                  <ClipboardList className="h-3.5 w-3.5" />
+                                  Itens da FD
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                       );
                     })()}
@@ -1692,14 +2016,13 @@ export default function MapaCotacaoPage() {
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {Array.from(selectedSupplierIds).map((id) => {
                           const s = selectedSuppliersById[id] || suppliers.find((x) => x.id === id);
-                          const nome = s ? getOcSupplierLabel(s) || s.name : id;
+                          const nome = s ? s.tradeName?.trim() || s.name?.trim() || s.code || id : id;
                           return (
                             <span
                               key={id}
                               className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-white py-0.5 pl-2.5 pr-1 text-xs font-medium text-gray-800 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                             >
                               <span className="truncate">
-                                {s?.code ? `${s.code} - ` : ''}
                                 {nome}
                                 {s?.state ? ` (${s.state})` : ''}
                               </span>
@@ -1736,6 +2059,99 @@ export default function MapaCotacaoPage() {
             </CardContent>
           </Card>
 
+          {fdAssociation?.itens && fdAssociation.itens.length > 0 && selectedRequestId ? (
+            <Card className={cadastroListClasses.card}>
+              <CardHeader className={cadastroListClasses.cardHeader}>
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+                      <FileText className="h-5 w-5 text-amber-700 sm:h-6 sm:w-6 dark:text-amber-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Itens da FD
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {fdAssociation.codFichaDemanda || 'Ficha de Demanda'}
+                        {' · Custo estimado 40%'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[700px] text-left text-xs">
+                    <thead className="text-gray-500 dark:text-gray-400">
+                      <tr className="border-b border-gray-200 dark:border-gray-700">
+                        <th className="px-3 py-2 font-medium">Etapa</th>
+                        <th className="px-3 py-2 font-medium">Item da FD</th>
+                        <th className="whitespace-nowrap px-3 py-2 font-medium">Qtd. FD</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Custo est. 40%</th>
+                        <th className="px-3 py-2 font-medium">Material</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Qtd. pedida</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fdAssociation.itens.map((it) => {
+                        const atencao = it.alertas.length > 0;
+                        const linhas = it.materiais.length > 0 ? it.materiais : [null];
+                        return linhas.map((m, idx) => (
+                          <tr
+                            key={`${it.fdItemKey}-${idx}`}
+                            className={`border-b border-gray-100 align-top last:border-0 dark:border-gray-800 ${
+                              atencao ? 'bg-red-50/70 dark:bg-red-950/25' : ''
+                            }`}
+                          >
+                            {idx === 0 && (
+                              <>
+                                <td className="px-3 py-2 text-[11px] uppercase text-gray-500 dark:text-gray-400" rowSpan={linhas.length}>
+                                  {it.etapa}
+                                </td>
+                                <td className="px-3 py-2" rowSpan={linhas.length}>
+                                  <p className={`font-medium ${atencao ? 'text-red-800 dark:text-red-200' : 'text-gray-900 dark:text-gray-100'}`}>
+                                    <span className="mr-1.5 tabular-nums opacity-70">{it.fdItem}</span>
+                                    {it.descricao}
+                                  </p>
+                                  {atencao && (
+                                    <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-red-700 dark:text-red-300">
+                                      <AlertTriangle className="h-3 w-3" aria-hidden />
+                                      {it.alertas.map((a) => a === '1:N' ? 'vários materiais' : a === 'unidade' ? 'unidade diferente da FD' : a).join(' e ')}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300" rowSpan={linhas.length}>
+                                  {it.quantidadeFd != null
+                                    ? `${Number(it.quantidadeFd).toLocaleString('pt-BR', { maximumFractionDigits: 4 })} ${it.unidadeFd}`
+                                    : '—'}
+                                </td>
+                                <td
+                                  className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900 dark:text-gray-100"
+                                  rowSpan={linhas.length}
+                                  title={it.custoEstimado40 == null ? 'Abra a FD no orçamento para registrar o custo estimado do item.' : undefined}
+                                >
+                                  {it.custoEstimado40 != null
+                                    ? Number(it.custoEstimado40).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
+                                    : '—'}
+                                </td>
+                              </>
+                            )}
+                            <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                              {m?.materialLabel || '—'}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900 dark:text-gray-100">
+                              {m ? `${Number(m.quantity).toLocaleString('pt-BR', { maximumFractionDigits: 4 })} ${m.unit}` : '—'}
+                            </td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
               <Card className={cadastroListClasses.card}>
                 <CardHeader className={cadastroListClasses.cardHeader}>
                   <div className={cadastroListClasses.cardHeaderRow}>
@@ -1752,6 +2168,41 @@ export default function MapaCotacaoPage() {
                         </p>
                       </div>
                     </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    {selectedRequestId ? (
+                      <div className="flex flex-col items-end text-xs leading-tight">
+                        {rascunhoAlterado ? (
+                          <span className="font-medium text-amber-600 dark:text-amber-400">Alterações não salvas</span>
+                        ) : null}
+                        {rascunhoInfo ? (
+                          <span className="text-gray-500 dark:text-gray-400">
+                            Rascunho{rascunhoInfo.updatedByName ? ` de ${rascunhoInfo.updatedByName.split(' ')[0]}` : ''},{' '}
+                            {formatDateTimeBR(rascunhoInfo.updatedAt)} ·{' '}
+                            <button
+                              type="button"
+                              onClick={() => void descartarRascunho()}
+                              className="font-medium text-red-600 hover:underline dark:text-red-400"
+                            >
+                              Descartar rascunho
+                            </button>
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void salvarRascunho()}
+                      disabled={!selectedRequestId || !selectedRequest || salvandoRascunho || selectedSupplierIds.size === 0}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      title={
+                        selectedSupplierIds.size === 0
+                          ? 'Escolha a RM e os fornecedores para salvar o rascunho'
+                          : 'Salvar o mapa para continuar depois'
+                      }
+                    >
+                      <Save className="h-4 w-4" aria-hidden />
+                      {salvandoRascunho ? 'Salvando…' : 'Salvar rascunho'}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setExportModalOpen(true)}
@@ -1762,6 +2213,7 @@ export default function MapaCotacaoPage() {
                       <Download className="h-4 w-4" aria-hidden />
                       Exportar
                     </button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -1783,7 +2235,7 @@ export default function MapaCotacaoPage() {
                               <tr>
                                 <th className={`${cadastroListClasses.thCenter} w-12`}>Item</th>
                                 <th className={`${cadastroListClasses.th} whitespace-nowrap`}>Código</th>
-                                <th className={cadastroListClasses.th}>Material</th>
+                                <th className={`${cadastroListClasses.th} min-w-[18rem]`}>Material</th>
                                 <th className={cadastroListClasses.thCenter}>Unidade</th>
                                 <th className={cadastroListClasses.thCenter}>Qtd. RM</th>
                                 <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
@@ -1798,15 +2250,16 @@ export default function MapaCotacaoPage() {
                                   return (
                                     <th
                                       key={supplierId}
-                                      className={`${cadastroListClasses.thCenter} min-w-[8.5rem] normal-case tracking-normal border-l border-gray-200 dark:border-gray-700 ${
+                                      // Largura fixa: nome longo quebra em até 2 linhas (completo ao passar o mouse).
+                                      className={`${cadastroListClasses.thCenter} w-[10rem] min-w-[10rem] max-w-[10rem] normal-case tracking-normal border-l border-gray-200 dark:border-gray-700 ${
                                         supplierIndex === supplierIds.length - 1
                                           ? 'border-r border-gray-200 dark:border-gray-700'
                                           : ''
                                       }`}
-                                      title={sup?.name ?? supplierId}
+                                      title={sup ? `${sup.code ? `${sup.code} - ` : ''}${sup.tradeName?.trim() || sup.name}` : supplierId}
                                     >
-                                      <span className="block truncate text-gray-800 dark:text-gray-200">
-                                        {sup ? (sup.code ? `${sup.code} - ${sup.name}` : sup.name) : supplierId}
+                                      <span className="line-clamp-2 whitespace-normal break-words text-xs leading-snug text-gray-800 dark:text-gray-200">
+                                        {sup ? sup.tradeName?.trim() || sup.name : supplierId}
                                       </span>
                                     </th>
                                   );
@@ -2035,7 +2488,18 @@ export default function MapaCotacaoPage() {
                                     colSpan={7}
                                     className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
                                   >
-                                    Ordem de compra
+                                    <div className="flex flex-wrap items-center gap-3">
+                                      <span>Ordem de compra</span>
+                                      {vencedoresSemOc.length >= 2 ? (
+                                        <button
+                                          type="button"
+                                          onClick={abrirTodasAsOcs}
+                                          className="inline-flex h-8 items-center rounded-lg bg-red-600 px-3 text-xs font-semibold normal-case tracking-normal text-white transition-colors hover:bg-red-700"
+                                        >
+                                          Gerar todas as OCs ({vencedoresSemOc.length})
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </td>
                                   {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
                                     const wonCount = (wonItemsBySupplier[supplierId] ?? []).length;
@@ -2059,25 +2523,8 @@ export default function MapaCotacaoPage() {
                                           <button
                                             type="button"
                                             onClick={() => {
-                                              setPaymentDraftBySupplier((prev) => {
-                                                if (prev[supplierId]) return prev;
-                                                const suggested = totals
-                                                  ? formatCurrencyBR(totals.amountToPay)
-                                                  : '';
-                                                const bankPrefill = buildSupplierPaymentPrefill(
-                                                  suppliers.find((s) => s.id === supplierId) ?? {}
-                                                );
-                                                return {
-                                                  ...prev,
-                                                  [supplierId]: {
-                                                    ...emptyPaymentDraft(suggestedTotvsFilial),
-                                                    amountToPayStr: suggested,
-                                                    paymentDetails: bankPrefill.paymentDetails,
-                                                    pixKeyType: bankPrefill.pixKeyType,
-                                                    pixKey: bankPrefill.pixKey,
-                                                  },
-                                                };
-                                              });
+                                              prepararPagamentoOc(supplierId);
+                                              setOcFila(null);
                                               setOcModalSupplierId(supplierId);
                                             }}
                                             className="inline-flex h-8 items-center rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
@@ -2115,6 +2562,7 @@ export default function MapaCotacaoPage() {
           const closeOcModal = () => {
             if (isGenerating) return;
             setOcModalSupplierId(null);
+            setOcFila(null);
           };
 
           return (
@@ -2124,7 +2572,9 @@ export default function MapaCotacaoPage() {
               title={
                 <div className="min-w-0">
                   <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {`Gerar OC - ${sup?.name ?? 'Fornecedor'}`}
+                    {ocFila && ocFila.length > 1 && ocFila.includes(sid)
+                      ? `Gerar OC ${ocFila.indexOf(sid) + 1} de ${ocFila.length} - ${sup?.tradeName?.trim() || sup?.name || 'Fornecedor'}`
+                      : `Gerar OC - ${sup?.tradeName?.trim() || sup?.name || 'Fornecedor'}`}
                   </h3>
                   {totals ? (
                     <p className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -2160,6 +2610,69 @@ export default function MapaCotacaoPage() {
               contentOverflowVisible
             >
               <div className="space-y-5">
+                {ocFila && ocFila.length > 1 ? (
+                  <div className="-mt-1 space-y-3 border-b-2 border-gray-200 pb-4 dark:border-gray-700">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        {ocFila.length} OCs para gerar · uma por fornecedor
+                      </p>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        {ocFila.filter((id) => ocFilaGeradas.has(id) || generatedOcSupplierIds.has(id)).length} de{' '}
+                        {ocFila.length} gerada(s)
+                      </p>
+                    </div>
+                    <div
+                      className="grid gap-2"
+                      style={{ gridTemplateColumns: `repeat(${Math.min(ocFila.length, 4)}, minmax(0, 1fr))` }}
+                      role="tablist"
+                      aria-label="OCs a gerar"
+                    >
+                      {ocFila.map((id, idx) => {
+                        const ativo = id === sid;
+                        const feita = ocFilaGeradas.has(id) || generatedOcSupplierIds.has(id);
+                        const s = suppliers.find((x) => x.id === id);
+                        const t = computedSupplierTotals[id];
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            role="tab"
+                            aria-selected={ativo}
+                            disabled={isGenerating || feita}
+                            onClick={() => setOcModalSupplierId(id)}
+                            className={`relative flex min-w-0 flex-col items-start gap-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed ${
+                              feita
+                                ? 'border-emerald-400 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/40'
+                                : ativo
+                                  ? 'border-red-600 bg-red-50 shadow-sm dark:border-red-500 dark:bg-red-950/40'
+                                  : 'border-gray-200 bg-white hover:border-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-gray-500'
+                            }`}
+                          >
+                            <span
+                              className={`text-[11px] font-bold uppercase tracking-wider ${
+                                feita
+                                  ? 'text-emerald-700 dark:text-emerald-300'
+                                  : ativo
+                                    ? 'text-red-700 dark:text-red-300'
+                                    : 'text-gray-500 dark:text-gray-400'
+                              }`}
+                            >
+                              OC {idx + 1} de {ocFila.length} · {feita ? '✓ Gerada' : ativo ? 'Preenchendo' : 'Pendente'}
+                            </span>
+                            <span className="w-full truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              {s ? s.tradeName?.trim() || s.name : id}
+                            </span>
+                            {t ? (
+                              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">
+                                {formatCurrencyBR(t.amountToPay)}
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <span className={mapLabelCls}>
                     Destino da OC{ocDestinoLivre ? <span className="text-red-600"> *</span> : null}
@@ -2398,16 +2911,12 @@ export default function MapaCotacaoPage() {
                     >
                       À vista
                     </button>
+                    {/* OC TOTVS não tem pagamento no cartão: a opção nem aparece. */}
+                    {destinoOcDoFornecedor(draft.destino) !== 'TOTVS' ? (
                     <button
                       type="button"
                       role="radio"
                       aria-checked={payType === OC_TYPE_CARTAO}
-                      disabled={destinoOcDoFornecedor(draft.destino) === 'TOTVS'}
-                      title={
-                        destinoOcDoFornecedor(draft.destino) === 'TOTVS'
-                          ? 'Disponível só para OC CONECTA. OC TOTVS não tem pagamento no cartão.'
-                          : undefined
-                      }
                       onClick={() => {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
@@ -2420,10 +2929,11 @@ export default function MapaCotacaoPage() {
                           },
                         }));
                       }}
-                      className={`${mapPaymentSegmentCls(payType === OC_TYPE_CARTAO)} disabled:cursor-not-allowed disabled:opacity-40`}
+                      className={mapPaymentSegmentCls(payType === OC_TYPE_CARTAO)}
                     >
                       Cartão
                     </button>
+                    ) : null}
                     <button
                       type="button"
                       role="radio"
@@ -2894,6 +3404,15 @@ export default function MapaCotacaoPage() {
               </button>
             </div>
           </Modal>
+
+          {fdAssociation?.fdId ? (
+            <FdPedidosResumoModal
+              isOpen={fdResumoOpen}
+              onClose={() => setFdResumoOpen(false)}
+              fdApprovalId={fdAssociation.fdId}
+              insumos={[]}
+            />
+          ) : null}
       </MainLayout>
     </ProtectedRoute>
   );

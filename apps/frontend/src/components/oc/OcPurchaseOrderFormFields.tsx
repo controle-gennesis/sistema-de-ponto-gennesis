@@ -183,11 +183,11 @@ export function OcStockLocationField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filialCode, locations, selected, value]);
 
-  // Locais do centro de custo da OC + locais ainda sem centro de custo. Local associado a outro centro de
-  // custo nunca aparece. O local já escolhido (OC em edição) continua visível para não ser apagado.
+  // Só os locais associados ao centro de custo da OC (local sem centro de custo ou de outro centro de custo
+  // não aparece). O local já escolhido (OC em edição) continua visível para não ser apagado.
   const ccId = String(costCenterId || '').trim();
   const visiveis = useMemo(() => {
-    const base = locations.filter((row) => !row.costCenterId || (!!ccId && row.costCenterId === ccId));
+    const base = locations.filter((row) => !!ccId && row.costCenterId === ccId);
     return selected && !base.some((row) => row.id === selected.id) ? [selected, ...base] : base;
   }, [ccId, locations, selected]);
   const semLocalDisponivel = locations.length > 0 && visiveis.length === 0;

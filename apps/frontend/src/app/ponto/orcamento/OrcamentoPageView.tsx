@@ -3442,6 +3442,24 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
   }
 }
 
+/** Polo da FD pelo cadastro do centro de custo (campo Polo; sem ele, o Estado). */
+function poloFdDoCentroCusto(cc: { polo?: string | null; state?: string | null } | null | undefined): PoloFd | '' {
+  const norm = (v: unknown) =>
+    String(v ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toUpperCase();
+  const polo = norm(cc?.polo);
+  if (polo) {
+    if (polo.includes('GOIAS') || /\bGO\b/.test(polo)) return 'GO';
+    if (polo.includes('BRASILIA') || polo.includes('DISTRITO') || /\bDF\b/.test(polo)) return 'DF';
+  }
+  const uf = norm(cc?.state);
+  if (uf === 'GO' || uf === 'DF') return uf;
+  return '';
+}
+
 function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
   const t = texto.toUpperCase();
   if (/\bDF\b/.test(t) || t.includes('- DF') || t.endsWith(' DF')) return 'DF';
@@ -9377,6 +9395,10 @@ export function OrcamentoPageView({
   const [fdAprovacaoInitialForm, setFdAprovacaoInitialForm] =
     useState<Partial<FichaDemandaApprovalFormState> | null>(null);
   const [fdAprovacaoPreparando, setFdAprovacaoPreparando] = useState(false);
+  /** Polo da FD veio do centro de custo: o campo fica travado no formulário. */
+  const [fdPoloDoCentroCusto, setFdPoloDoCentroCusto] = useState(false);
+  /** OS e pasta usadas na sequência do código da FD (o servidor confere o número ao lançar). */
+  const fdCodigoBaseOsRef = useRef('');
   const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
   const [finalizandoOrcamento, setFinalizandoOrcamento] = useState(false);
   const [confirmFinalizarOrcamento, setConfirmFinalizarOrcamento] = useState(false);
@@ -15363,6 +15385,8 @@ export function OrcamentoPageView({
         etapa,
         subetapa,
         composicao,
+        // Mesmo valor da coluna "Custo estimado (40%)" da aba Ficha de demanda (sem o ajuste de fechamento).
+        custoEstimado40: Math.round((Number(l.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100,
         ...(() => {
           const custo = (Number(l.total) || 0) * fatorCusto;
           const desconto = detalhado
@@ -15722,6 +15746,34 @@ export function OrcamentoPageView({
     }, 1500);
     return () => window.clearTimeout(t);
   }, [fdIdEspelhoCusto, loadingFromApi, custoRealTotalFd]);
+
+  // Espelha na FD aprovada o "Custo estimado (40%)" de cada insumo (mesmo valor da coluna da FD),
+  // para o mapa de cotação mostrar o valor do item sem recalcular.
+  const custoEstimado40PorItem = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const row of linhasAnaliticoOrcamento) {
+      if (row.kind !== 'insumo') continue;
+      m[row.key] = Math.round((Number(row.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100;
+    }
+    return m;
+  }, [linhasAnaliticoOrcamento]);
+  const custoEstimadoItensEspelhadoRef = useRef<{ fdId: string; assinatura: string } | null>(null);
+  useEffect(() => {
+    if (!fdIdEspelhoCusto || loadingFromApi) return;
+    if (Object.keys(custoEstimado40PorItem).length === 0) return;
+    const assinatura = JSON.stringify(custoEstimado40PorItem);
+    const ultimo = custoEstimadoItensEspelhadoRef.current;
+    if (ultimo && ultimo.fdId === fdIdEspelhoCusto && ultimo.assinatura === assinatura) return;
+    const t = window.setTimeout(() => {
+      custoEstimadoItensEspelhadoRef.current = { fdId: fdIdEspelhoCusto, assinatura };
+      void api
+        .patch(`/demand-sheet-approvals/${fdIdEspelhoCusto}/custo-estimado-itens`, { itens: custoEstimado40PorItem })
+        .catch(() => {
+          custoEstimadoItensEspelhadoRef.current = null;
+        });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [fdIdEspelhoCusto, loadingFromApi, custoEstimado40PorItem]);
 
   // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
   useEffect(() => {
@@ -18846,9 +18898,35 @@ export function OrcamentoPageView({
       }
 
       const codigoFdBase = (codigoOrcamentoAtivo || orcamentoAtivoId.slice(0, 8)).replace(/\s+/g, '');
-      const poloInferido = inferirPoloFdDeTexto(
-        `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
-      );
+      // Código da FD: FD-<OS e pasta>-NN, definido pelo servidor (a FD já lançada mantém o seu).
+      let codigoFd = `FD-${codigoFdBase}`;
+      try {
+        const codRes = await api.get('/demand-sheet-approvals/proximo-codigo', {
+          params: {
+            contratoId: embeddedContractId || undefined,
+            base: codigoFdBase,
+            fdId: (meta.fichaDemandaApprovalId || '').trim() || undefined,
+          },
+        });
+        codigoFd = String(codRes.data?.data?.codigo || codigoFd);
+      } catch {
+        /* sem prévia: o servidor define o número ao lançar */
+      }
+      fdCodigoBaseOsRef.current = codigoFdBase;
+      // Polo: o do centro de custo (travado); sem cadastro, o adivinhado pelo nome (editável).
+      let poloCc: PoloFd | '' = '';
+      try {
+        const ccRes = await api.get(`/cost-centers/${centroCustoId}`);
+        poloCc = poloFdDoCentroCusto(ccRes.data?.data ?? ccRes.data);
+      } catch {
+        poloCc = '';
+      }
+      setFdPoloDoCentroCusto(Boolean(poloCc));
+      const poloInferido =
+        poloCc ||
+        inferirPoloFdDeTexto(
+          `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
+        );
       const custo = resumoFinanceiro.totalComDescontoEBdi * 0.4;
       const fat = resumoFinanceiro.totalComDescontoEBdi;
 
@@ -18856,7 +18934,7 @@ export function OrcamentoPageView({
         contratoId: embeddedContractId || '',
         obra: meta.obra?.trim() || nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || '',
         codigoPedido: meta.osNumeroPasta.trim() || codigoFdBase,
-        codFichaDemanda: `FD-${codigoFdBase}`,
+        codFichaDemanda: codigoFd,
         faturamentoEstimado: formatCurrencyInput(fat),
         custoEstimado: formatCurrencyInput(custo),
         observacao:
@@ -18897,6 +18975,7 @@ export function OrcamentoPageView({
         orcamentoCentroCustoId: centroCustoId,
         orcamentoId: orcamentoAtivoId,
         fichaDemandaApprovalId: (meta.fichaDemandaApprovalId || '').trim() || undefined,
+        codigoFdBaseOs: fdCodigoBaseOsRef.current || undefined,
       });
       const fdId = String(res.data?.data?.id || '').trim() || undefined;
       const recarregou = await recarregarDoServidor();
@@ -23661,6 +23740,8 @@ export function OrcamentoPageView({
         initialForm={fdAprovacaoInitialForm}
         hideContractField={Boolean(embeddedContractId)}
         obraBloqueada={Boolean(meta.obra?.trim())}
+        poloBloqueado={fdPoloDoCentroCusto}
+        codigoFdBloqueado
         onSave={(form) => {
           void confirmarEnvioFichaDemandaAprovacao(form);
         }}

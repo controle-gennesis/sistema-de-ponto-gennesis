@@ -3,11 +3,81 @@ import { authenticate } from '../middleware/auth';
 import { AuthRequest } from '../middleware/auth';
 import { QuoteMapService } from '../services/QuoteMapService';
 import { createError } from '../middleware/errorHandler';
+import { prisma } from '../lib/prisma';
 
 const router = Router();
 const service = new QuoteMapService();
 
 router.use(authenticate);
+
+/** Rascunho do mapa (um por RM, para todos). Some quando a RM sai de Aprovada ou alguém descarta. */
+const RASCUNHO_MAX_BYTES = 2 * 1024 * 1024;
+
+router.get('/rascunho/:materialRequestId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const materialRequestId = String(req.params.materialRequestId || '').trim();
+    const draft = await prisma.quoteMapDraft.findUnique({ where: { materialRequestId } });
+    if (!draft) return res.json({ success: true, data: null });
+    const rm = await prisma.materialRequest.findUnique({
+      where: { id: materialRequestId },
+      select: { status: true },
+    });
+    if (!rm || rm.status !== 'APPROVED') {
+      await prisma.quoteMapDraft.delete({ where: { materialRequestId } }).catch(() => undefined);
+      return res.json({ success: true, data: null });
+    }
+    return res.json({
+      success: true,
+      data: { data: draft.data, updatedByName: draft.updatedByName, updatedAt: draft.updatedAt },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.put('/rascunho/:materialRequestId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const materialRequestId = String(req.params.materialRequestId || '').trim();
+    const data = (req.body as { data?: unknown })?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw createError('Rascunho inválido', 400);
+    }
+    if (JSON.stringify(data).length > RASCUNHO_MAX_BYTES) {
+      throw createError('Rascunho grande demais', 400);
+    }
+    const rm = await prisma.materialRequest.findUnique({
+      where: { id: materialRequestId },
+      select: { status: true },
+    });
+    if (!rm) throw createError('Requisição não encontrada', 404);
+    if (rm.status !== 'APPROVED') throw createError('Só RMs aprovadas têm rascunho de cotação', 400);
+    const autor = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
+    const draft = await prisma.quoteMapDraft.upsert({
+      where: { materialRequestId },
+      create: {
+        materialRequestId,
+        data: data as object,
+        updatedById: req.user.id,
+        updatedByName: autor?.name ?? null,
+      },
+      update: { data: data as object, updatedById: req.user.id, updatedByName: autor?.name ?? null },
+    });
+    res.json({ success: true, data: { updatedByName: draft.updatedByName, updatedAt: draft.updatedAt } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/rascunho/:materialRequestId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const materialRequestId = String(req.params.materialRequestId || '').trim();
+    await prisma.quoteMapDraft.deleteMany({ where: { materialRequestId } });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Criar mapa de cotação a partir de SC aprovada
 router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {

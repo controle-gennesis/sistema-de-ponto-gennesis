@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSeguirAncora } from './useSeguirAncora';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Search, X } from 'lucide-react';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
@@ -178,6 +179,8 @@ export function AsyncSearchSelectDropdown<T>({
     if (!triggerRef.current) return;
     setFloatingPos(computeFloatingPos(triggerRef.current, listMax, openDownOnly));
   }, [listMax, openDownOnly]);
+  // Menu lateral recolhendo/abrindo desloca o campo: a lista acompanha.
+  useSeguirAncora(open, triggerRef, syncFloatingPos);
 
   // Rolagem volta ao topo só ao abrir a lista, não a cada atualização das opções.
   useLayoutEffect(() => {
