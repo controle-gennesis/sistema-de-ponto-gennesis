@@ -94,7 +94,7 @@ const createDpRequestSchema = z.object({
   polo: z.string().min(1).optional(),
 
   details: z.unknown().optional(),
-}).refine((data) => Boolean(data.costCenterId || data.contractId), {
+}).refine((data) => Boolean(data.costCenterId || data.contractId || data.requestType === 'CONTAB_ATESTADO'), {
   message: 'Selecione o contrato',
   path: ['costCenterId'],
 });
@@ -712,14 +712,16 @@ export class DpRequestController {
         costCenter = found.costCenter;
       }
 
-      if (!costCenter) throw createError('Selecione o contrato', 400);
+      // Atestados são enviados por empresa: não exigem unidade/contrato.
+      if (!costCenter && validated.requestType !== 'CONTAB_ATESTADO') throw createError('Selecione o contrato', 400);
+      if (!costCenter && !validated.company) throw createError('Selecione a empresa', 400);
 
       if (isSensitiveDpRequestType(validated.requestType)) {
         const ok = await userMayCreateSensitiveDpRequest(
           actorUserId,
           req.user.isAdmin,
           contract?.id ?? null,
-          costCenter.id
+          costCenter!.id
         );
         if (!ok) {
           throw createError(
@@ -729,8 +731,8 @@ export class DpRequestController {
         }
       }
 
-      const company = validated.company ?? costCenter.company ?? '';
-      const polo = validated.polo ?? costCenter.polo ?? '';
+      const company = validated.company ?? costCenter?.company ?? '';
+      const polo = validated.polo ?? costCenter?.polo ?? '';
       const sectorSolicitante = (employee.department ?? '').trim();
       if (!sectorSolicitante) {
         throw createError('Setor do solicitante não cadastrado no perfil do funcionário', 400);
@@ -824,7 +826,7 @@ export class DpRequestController {
             prazoFim,
             details: parsedDetails as Prisma.InputJsonValue,
             contractId: contract?.id ?? null,
-            costCenterId: costCenter.id,
+            costCenterId: costCenter?.id ?? null,
             company: company || null,
             polo: polo || null,
             status: initialStatus,
@@ -867,7 +869,7 @@ export class DpRequestController {
       if (initialStatus === 'WAITING_MANAGER') {
         const approverIds = await getDpApprovalNotifyUserIds({
           contractId: contract?.id ?? null,
-          costCenterId: costCenter.id,
+          costCenterId: costCenter!.id,
           isSensitive: isSensitiveDpRequestType(validated.requestType),
           sectorSolicitante,
         });

@@ -569,7 +569,7 @@ export function SolicitacoesContabilidadePage() {
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!form.requestType) throw new Error('Selecione o tipo de solicitação');
-      if (!form.costCenterId) throw new Error('Selecione a unidade');
+      if (form.requestType !== 'CONTAB_ATESTADO' && !form.costCenterId) throw new Error('Selecione a unidade');
       if (form.requestType === 'CONTAB_ATESTADO' && !form.company) throw new Error('Selecione a empresa (o atestado é enviado por empresa)');
 
       const anexosPayload: Record<string, unknown>[] = [];
@@ -586,7 +586,7 @@ export function SolicitacoesContabilidadePage() {
 
       const res = await api.post('/solicitacoes-dp', {
         requestType: form.requestType,
-        costCenterId: form.costCenterId,
+        costCenterId: form.costCenterId || undefined,
         company: form.company || undefined,
         polo: form.polo || undefined,
         details: { ...details, anexos: anexosPayload },
@@ -1023,9 +1023,10 @@ export function SolicitacoesContabilidadePage() {
               <>
             <div
               className={`grid grid-cols-1 gap-4 md:col-span-2 ${
-                costCenterPolo ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+                form.requestType === 'CONTAB_ATESTADO' ? 'sm:grid-cols-1' : costCenterPolo ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
               }`}
             >
+              {form.requestType === 'CONTAB_ATESTADO' ? null : (
               <div className="min-w-0">
                 <label className="mb-1 block text-sm font-medium">Unidade <span className="text-red-600">*</span></label>
                 <SingleSelectSearchDropdown
@@ -1038,6 +1039,7 @@ export function SolicitacoesContabilidadePage() {
                   noFocusRing
                 />
               </div>
+              )}
               <div className="min-w-0">
                 <label className="mb-1 block text-sm font-medium">
                   Empresa{form.requestType === 'CONTAB_ATESTADO' ? <span className="text-red-600"> *</span> : null}
@@ -1052,7 +1054,7 @@ export function SolicitacoesContabilidadePage() {
                   noFocusRing
                 />
               </div>
-              {costCenterPolo ? (
+              {costCenterPolo && form.requestType !== 'CONTAB_ATESTADO' ? (
                 <div className="min-w-0">
                   <label className="mb-1 block text-sm font-medium">Polo</label>
                   <SingleSelectSearchDropdown
