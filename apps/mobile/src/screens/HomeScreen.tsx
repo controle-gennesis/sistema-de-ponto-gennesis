@@ -13,6 +13,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { syncPunchReminders } from '../notifications/punchReminders';
 import { useTheme } from '../context/ThemeContext';
 import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
@@ -70,6 +71,13 @@ export default function HomeScreen() {
     useCallback(() => {
       void queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
     }, [queryClient]),
+  );
+
+  // Renova os lembretes de ponto sempre que a tela inicial ganha foco (ex.: depois de bater o ponto).
+  useFocusEffect(
+    useCallback(() => {
+      void syncPunchReminders(user);
+    }, [user]),
   );
 
   return (
