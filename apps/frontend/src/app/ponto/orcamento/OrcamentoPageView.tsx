@@ -176,6 +176,7 @@ import {
   type EtapaFd,
 } from './CotacaoEmpreitaPainel';
 import { OrcamentoDetalhadoPainel, type LinhaOrcamentoDetalhado } from './OrcamentoDetalhadoPainel';
+import { OrcamentoSelecaoSoma } from './OrcamentoSelecaoSoma';
 import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
 import {
   downloadCronogramaExcel,
@@ -23119,6 +23120,8 @@ export function OrcamentoPageView({
                         </tbody>
                       </table>
                     </div>
+
+                    <OrcamentoSelecaoSoma rootRef={montagemOrcamentoTableRef} />
 
                     {destaqueCalculoOrc?.balao ? (
                       <DicaFormulaCompleta

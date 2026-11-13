@@ -28,7 +28,7 @@ import {
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { DriveSkeleton, useDelayedFlag } from '@/components/drive/DriveSkeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
@@ -425,6 +425,8 @@ function DrivePageContent() {
   /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
   const nomePastaAtual = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1]!.name : 'Meu Drive';
   const isLoading = loadingContents || loadingSearch || loadingView;
+  /** Esqueleto só depois de um instante: pastas que abrem rápido não "piscam" a tela de carregamento. */
+  const showDriveSkeleton = useDelayedFlag(isLoading, 150);
   const isEmpty = !isLoading && folders.length === 0 && files.length === 0;
   /** Raiz: sempre pode; dentro de pasta: `canWrite === false` = só leitura (não exibir upload/nova pasta). */
   const canWriteInCurrentFolder =
@@ -1522,9 +1524,7 @@ function DrivePageContent() {
 
         {/* ── Conteúdo ───────────────────────────────────────────────────── */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-24">
-            <CadastroListLoading message="Carregando arquivos..." />
-          </div>
+          showDriveSkeleton ? <DriveSkeleton viewMode={viewMode} /> : <div className="min-h-[18rem]" aria-hidden />
         ) : contentsError ? (
           <Card>
             <CardContent className="py-10 text-center">
