@@ -104,7 +104,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 /** A Contabilidade concluiu o atendimento; falta o DP encerrar. */
-const AWAITING_CLOSE_LABEL = 'Para Encerrar';
+const AWAITING_CLOSE_LABEL = 'Aguardando Encerramento';
 const AWAITING_CLOSE_BADGE =
   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
 
@@ -198,7 +198,7 @@ const STAGE_CARDS: {
   },
   {
     filter: 'AWAITING_CLOSE',
-    label: 'Para Encerrar',
+    label: 'Aguardando Encerramento',
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: ClipboardCheck,
@@ -239,7 +239,7 @@ const STAGE_LIST_CONFIG: Record<
     iconColor: 'text-indigo-600 dark:text-indigo-400',
   },
   AWAITING_CLOSE: {
-    title: 'Para Encerrar',
+    title: 'Aguardando Encerramento',
     subtitle: 'A Contabilidade já concluiu o atendimento. Abra a solicitação e encerre para finalizar.',
     Icon: ClipboardCheck,
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
@@ -509,11 +509,14 @@ export function SolicitacoesContabilidadePage() {
 
   const typeOptions = React.useMemo<MultiSelectSearchOption[]>(
     () =>
-      (Object.entries(CONTABIL_TYPE_LABELS) as [ContabilFormRequestType, string][]).map(([value, label]) => ({
-        value,
-        label,
-        searchText: label,
-      })),
+      (Object.entries(CONTABIL_TYPE_LABELS) as [ContabilFormRequestType, string][])
+        .map(([value, label]) => ({
+          value,
+          label,
+          searchText: label,
+        }))
+        // Ordem alfabética (ignora acentos e maiúsculas).
+        .sort((x, y) => x.label.localeCompare(y.label, 'pt-BR', { sensitivity: 'base' })),
     []
   );
 
@@ -678,7 +681,7 @@ export function SolicitacoesContabilidadePage() {
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
         <PageStack>
           <ListPageHeader
-            title="Solicitações à Contabilidade"
+            title="Solicitações Contábeis"
             description="Crie pedidos diretos à Contabilidade e acompanhe o andamento de cada um"
           />
 
@@ -883,7 +886,7 @@ export function SolicitacoesContabilidadePage() {
             }}
           >
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium">Tipo de solicitação *</label>
+              <label className="mb-1 block text-sm font-medium">Tipo de solicitação <span className="text-red-600">*</span></label>
               <SingleSelectSearchDropdown
                 value={form.requestType}
                 onChange={(rt) => {
@@ -908,7 +911,7 @@ export function SolicitacoesContabilidadePage() {
               }`}
             >
               <div className="min-w-0">
-                <label className="mb-1 block text-sm font-medium">Unidade *</label>
+                <label className="mb-1 block text-sm font-medium">Unidade <span className="text-red-600">*</span></label>
                 <SingleSelectSearchDropdown
                   value={form.costCenterId}
                   onChange={handleCostCenterChange}
@@ -963,8 +966,12 @@ export function SolicitacoesContabilidadePage() {
               <Button type="button" variant="outline" onClick={closeCreate}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
+              <Button
+                type="submit"
+                disabled={createMutation.isPending}
+                className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800"
+              >
+                {createMutation.isPending ? 'Enviando...' : 'Enviar Solicitação'}
               </Button>
             </div>
           </form>

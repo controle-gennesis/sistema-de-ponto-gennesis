@@ -1000,7 +1000,10 @@ export function ContratoAcompanhamentoListPage({
   tabs,
   splitWith,
   showMonthlyControleGeral = false,
+  embedded = false,
 }: {
+  /** Dentro da aba Reuniões do contrato: sem layout/título próprios (só o conteúdo). */
+  embedded?: boolean;
   config: ContratoAcompanhamentoListConfig;
   tabs?: ContratoAcompanhamentoTabs;
   /** Quando informado, exibe este bloco ao lado de `config` (reunião + relatório). */
@@ -1045,7 +1048,7 @@ export function ContratoAcompanhamentoListPage({
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const contract = contractData?.data as Contract | undefined;
 
-  if (!contractId || loadingUser) {
+  if (!contractId || (!embedded && loadingUser)) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
   }
 
@@ -1064,10 +1067,9 @@ export function ContratoAcompanhamentoListPage({
     />
   );
 
-  return (
-    <ProtectedRoute route={protectedRoute} contractId={contractId}>
-      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+  const conteudo = (
         <div className="space-y-6">
+          {embedded ? null : (
           <div className="text-center">
             <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
               {loadingContract ? 'Carregando contrato…' : contract?.name || pageTitle}
@@ -1076,6 +1078,7 @@ export function ContratoAcompanhamentoListPage({
               {pageTitle}
             </p>
           </div>
+          )}
 
           {tabs && !isSplit ? (
             <AppUnderlineTabList aria-label="Seções de reuniões de contrato">
@@ -1096,10 +1099,10 @@ export function ContratoAcompanhamentoListPage({
           ) : null}
 
           {showMonthlyControleGeral ? (
-            <div className="flex flex-col gap-3">
-              <ContratoReunioesLancamentosBar contractId={contractId} />
-              <ContratoControleGeralMensalCard contractId={contractId} />
-            </div>
+            <ContratoControleGeralMensalCard
+              contractId={contractId}
+              acoesTopo={<ContratoReunioesLancamentosBar contractId={contractId} />}
+            />
           ) : null}
 
           {isSplit && splitWith ? (
@@ -1124,6 +1127,14 @@ export function ContratoAcompanhamentoListPage({
             renderPanel(config, { compact: false, formVariant: 'modal', consumeOpenQuery: true })
           )}
         </div>
+  );
+
+  if (embedded) return conteudo;
+
+  return (
+    <ProtectedRoute route={protectedRoute} contractId={contractId}>
+      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+        {conteudo}
       </MainLayout>
     </ProtectedRoute>
   );

@@ -20,7 +20,7 @@ import { fixMulterOriginalName } from './fixUploadFileName';
 
 const DP_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-dp');
 const ADM_MANAGE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst');
-/** Tela Solicitações à Contabilidade (onde o DP acompanha o que enviou). */
+/** Tela Solicitações Contábeis (onde o DP acompanha o que enviou). */
 const ACCOUNTING_PAGE_KEY = pathToModuleKey('/ponto/solicitacoes-contabilidade');
 
 const bodySchema = z.object({ body: z.string().trim().min(1, 'Escreva a mensagem.').max(4000) });

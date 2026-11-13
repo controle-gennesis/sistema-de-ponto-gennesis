@@ -203,6 +203,24 @@ async function loadSources(rows: RequestRow[]): Promise<Map<string, SourceInfo>>
   return map;
 }
 
+/**
+ * Os pedidos que o DP mandava direto à Contabilidade ao finalizar (cards com origem numa solicitação do fluxo do DP)
+ * não aparecem mais no Atendimento Contábil. Só ficam os criados pela própria Contabilidade/Solicitações Contábeis
+ * e os de tipos diretos. Não apaga nada: é só um filtro.
+ */
+async function foraDoEnvioDiretoDoDp(): Promise<Prisma.DpContabilidadeRequestWhereInput> {
+  const ligados = await prisma.dpContabilidadeRequest.findMany({
+    where: { sourceDpRequestId: { not: null } },
+    select: { sourceDpRequestId: true },
+  });
+  const ids = ligados.map((l) => l.sourceDpRequestId).filter((id): id is string => !!id);
+  if (ids.length === 0) return {};
+  const origens = await prisma.dpRequest.findMany({ where: { id: { in: ids } }, select: { id: true, requestType: true } });
+  const doFluxoDoDp = origens.filter((o) => !isAccountingDirectRequestType(o.requestType)).map((o) => o.id);
+  if (doFluxoDoDp.length === 0) return {};
+  return { OR: [{ sourceDpRequestId: null }, { sourceDpRequestId: { notIn: doFluxoDoDp } }] };
+}
+
 async function serializeWithSources(rows: RequestRow[]) {
   const sources = await loadSources(rows);
   return rows.map((row) => {
@@ -259,7 +277,7 @@ export class DpContabilidadeController {
       const to = asString(req.query.to);
       const contractId = asString(req.query.contractId);
 
-      const where: Prisma.DpContabilidadeRequestWhereInput = {};
+      const where: Prisma.DpContabilidadeRequestWhereInput = { AND: [await foraDoEnvioDiretoDoDp()] };
       if (type && REQUEST_TYPES.includes(type as (typeof REQUEST_TYPES)[number])) {
         where.requestType = type as (typeof REQUEST_TYPES)[number];
       }
@@ -350,7 +368,9 @@ export class DpContabilidadeController {
   async pendingCount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const count = await prisma.dpContabilidadeRequest.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] } } });
+      const count = await prisma.dpContabilidadeRequest.count({
+        where: { status: { in: ['OPEN', 'IN_PROGRESS'] }, AND: [await foraDoEnvioDiretoDoDp()] },
+      });
       res.json({ success: true, data: { count } });
     } catch (err) {
       next(err);
@@ -486,7 +506,7 @@ export class DpContabilidadeController {
           source.status === 'IN_ACCOUNTING' &&
           waitsForDp
         ) {
-          // Só registra no histórico; o DP finaliza depois (Solicitações à Contabilidade → Finalizar).
+          // Só registra no histórico; o DP finaliza depois (Solicitações Contábeis → Finalizar).
           await appendSourceHistoryNote(tx, sourceId, actor, resumo || 'A Contabilidade concluiu o atendimento.');
         } else if (
           source &&

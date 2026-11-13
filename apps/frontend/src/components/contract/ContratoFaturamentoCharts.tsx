@@ -21,16 +21,22 @@ import type { ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ChevronRight,
+  ClipboardCheck,
   ExternalLink,
+  Gauge,
   Loader2,
   TrendingDown,
   TrendingUp,
+  Users,
+  type LucideIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
+import { ContratoResumoGraficoMeta, visaoGeralKpis, type ContratoVisaoGeral } from './ContratoResumoVisaoGeral';
 import { formatCpfInput } from '@/lib/cpf';
 import api from '@/lib/api';
 
@@ -121,12 +127,19 @@ function CardHeading({
   extra,
   compact = false,
   tone = 'default',
+  icon: Icon,
+  iconBg,
+  iconColor,
 }: {
   title: string;
   subtitle?: React.ReactNode;
   extra?: React.ReactNode;
   compact?: boolean;
   tone?: 'default' | 'brand';
+  /** Ícone num quadradinho colorido ao lado do título (mesmo padrão dos blocos dos módulos). */
+  icon?: LucideIcon;
+  iconBg?: string;
+  iconColor?: string;
 }) {
   const isBrand = tone === 'brand';
   return (
@@ -136,15 +149,22 @@ function CardHeading({
       }`}
     >
       <div className={cadastroListClasses.cardHeaderRow}>
-        <div className="min-w-0">
-          <h3
-            className={`font-semibold ${
-              isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
-            } ${compact && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
-          >
-            {title}
-          </h3>
-          {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+        <div className={`min-w-0 ${Icon ? 'flex items-center gap-3' : ''}`}>
+          {Icon ? (
+            <div className={`rounded-lg p-2 sm:p-3 ${iconBg ?? ''}`}>
+              <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${iconColor ?? ''}`} />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <h3
+              className={`font-semibold ${
+                isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+              } ${compact && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+            >
+              {title}
+            </h3>
+            {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+          </div>
         </div>
         {extra ? <div className={`${cadastroListClasses.cardToolbar} self-start`}>{extra}</div> : null}
       </div>
@@ -177,7 +197,12 @@ function ProgressoGaugeCard({
 
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
-      <CardHeading title={title} />
+      <CardHeading
+        title={title}
+        icon={Gauge}
+        iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+        iconColor="text-emerald-600 dark:text-emerald-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
         {/* flex-1 + items-center: arco no meio do espaço entre título e blocos */}
         <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -507,7 +532,12 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
 
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
-      <CardHeading title="Ordem de serviço" />
+      <CardHeading
+        title="Ordem de serviço"
+        icon={ClipboardCheck}
+        iconBg="bg-sky-100 dark:bg-sky-900/30"
+        iconColor="text-sky-600 dark:text-sky-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
         <div className="min-h-[200px] flex-1 w-full">
               <ResponsiveContainer width="100%" height="100%">
@@ -893,10 +923,6 @@ function AbastecimentoQuotaCard({ data }: { data: ContratoResumoAbastecimento })
                         {formatCurrency(used)}
                       </p>
                     </div>
-                    <ExternalLink
-                      className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500"
-                      aria-hidden
-                    />
                   </button>
                 ) : (
                   <div className={usedBlockClass}>
@@ -1130,7 +1156,12 @@ function PessoasContratoCard({
 }) {
   return (
     <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col`}>
-      <CardHeading title="Colaboradores" />
+      <CardHeading
+        title="Colaboradores"
+        icon={Users}
+        iconBg="bg-violet-100 dark:bg-violet-900/30"
+        iconColor="text-violet-600 dark:text-violet-400"
+      />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-2`}>
         {loading ? (
           <div className="flex h-[280px] items-center justify-center">
@@ -1290,8 +1321,38 @@ function AtalhoKpiCard({
 }
 
 /** Blocos de atalho (só ícone e nome), à direita do card de Reuniões. */
-function AtalhoBlocos({ atalhos }: { atalhos: NonNullable<ContratoResumoKpi['atalhos']> }) {
+function AtalhoBlocos({
+  atalhos,
+  cheio = false,
+}: {
+  atalhos: NonNullable<ContratoResumoKpi['atalhos']>;
+  /** Ocupa a linha toda, com os blocos lado a lado (sem o cartão ao lado). */
+  cheio?: boolean;
+}) {
   if (atalhos.length === 0) return null;
+  if (cheio) {
+    return (
+      <div
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--atalho-cols),minmax(0,1fr))]"
+        style={{ '--atalho-cols': atalhos.length } as React.CSSProperties}
+      >
+        {atalhos.map(({ label, href: to, icon: Icon }) => (
+          <Link
+            key={label}
+            href={to}
+            className={`${cadastroListClasses.card} group flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-3 text-center transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800`}
+          >
+            {Icon ? (
+              <span className="rounded-lg bg-red-100 p-2 text-red-600 transition-colors group-hover:bg-red-600 group-hover:text-white dark:bg-red-900/30 dark:text-red-400">
+                <Icon className="h-5 w-5" aria-hidden />
+              </span>
+            ) : null}
+            <span className="text-xs font-semibold leading-tight text-gray-800 dark:text-gray-100">{label}</span>
+          </Link>
+        ))}
+      </div>
+    );
+  }
   return (
     <div
       className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-4 lg:[grid-template-columns:repeat(var(--atalho-cols),9rem)]"
@@ -1427,7 +1488,13 @@ export function ContratoFaturamentoCharts({
   peopleLoading = false,
   peopleError = false,
   abastecimento,
+  visaoGeral,
+  modulos,
 }: {
+  /** Blocos dos módulos do contrato (Orçamentos, Cronogramas, Diários de Obra...). */
+  modulos?: React.ReactNode;
+  /** Indicadores e gráfico "Faturamento por mês x meta" no topo do Resumo. */
+  visaoGeral?: ContratoVisaoGeral;
   faturamentoInsight: ContratoFaturamentoInsight;
   progressoTitle: string;
   progressoBilled?: number;
@@ -1444,15 +1511,24 @@ export function ContratoFaturamentoCharts({
 
   return (
     <div className="space-y-4">
+      {visaoGeral ? (
+        <>
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {visaoGeralKpis(visaoGeral).map((kpi) => (
+              <FilterStatCard key={kpi.label} {...kpi} />
+            ))}
+          </div>
+          <ContratoResumoGraficoMeta data={visaoGeral} />
+          {modulos}
+        </>
+      ) : null}
       {resumoKpis.length > 0 ? (
         <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {resumoKpis.map((kpi) =>
             kpi.variant === 'atalho' ? (
-              <div key={kpi.title} className="col-span-full flex flex-col gap-4 lg:flex-row lg:items-stretch">
-                <div className="min-w-0 flex-1 [&>*]:h-full">
-                  <AtalhoKpiCard {...kpi} />
-                </div>
-                <AtalhoBlocos atalhos={kpi.atalhos ?? []} />
+              // Só os blocos de atalho (o cartão "Reuniões" virou uma aba do contrato).
+              <div key={kpi.title} className="col-span-full">
+                <AtalhoBlocos atalhos={kpi.atalhos ?? []} cheio />
               </div>
             ) : (
               <KpiStatCard key={kpi.title} {...kpi} />

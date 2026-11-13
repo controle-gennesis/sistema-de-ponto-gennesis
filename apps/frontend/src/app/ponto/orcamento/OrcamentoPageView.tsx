@@ -4699,6 +4699,12 @@ function parseColunasOcultasMontagem(raw: unknown): string[] {
   return out;
 }
 
+/** Ids das colunas da grade do orçamento, na mesma ordem das colunas da planilha exportada. */
+const ORC_COLUNAS_EXPORT = [
+  'item', 'codigo', 'banco', 'descricao', 'und', 'qtd', 'mo', 'mat',
+  'pu', 'puBdi', 'subMo', 'subMat', 'total', 'totalBdi', 'peso', 'obs',
+] as const;
+
 function chaveCelulaOrc(rowKey: string, colId: string): string {
   return `${rowKey}|${colId}`;
 }
@@ -14328,6 +14334,19 @@ export function OrcamentoPageView({
     ? embeddedOrcamentoIdFromRoute ?? null
     : orcamentoAtivoId;
 
+  /** Nome do orçamento no breadcrumb = o mesmo nome do arquivo baixado (sem a extensão). */
+  const nomeBreadcrumbOrcamento = useMemo(
+    () =>
+      montarNomeArquivoOrcamento({
+        tipo: 'Orcamento',
+        semTipo: true,
+        codigo: codigoOrcamentoAtivo,
+        descricao: nomeOrcamentoSemCodigo,
+        ext: 'xlsx',
+      }).replace(/\.xlsx$/i, ''),
+    [codigoOrcamentoAtivo, nomeOrcamentoSemCodigo]
+  );
+
   const breadcrumbOrcamentoTrail = useMemo(() => {
     if (fichaDemandaOnly) {
       const codigo = fichaDemandaRecord?.codFichaDemanda?.trim();
@@ -14368,7 +14387,7 @@ export function OrcamentoPageView({
       // Não usar fallback genérico — colide com o crumb da rota e some do breadcrumb.
       if (orcamentoIdNaRota && nomeOrcamentoSemCodigo) {
         crumbs.push({
-          label: nomeOrcamentoSemCodigo,
+          label: nomeBreadcrumbOrcamento,
           ...(revisaoBadge ? { badge: revisaoBadge } : {}),
           ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
             ? { badgeMenu: revisaoBadgeMenu }
@@ -14385,7 +14404,7 @@ export function OrcamentoPageView({
     crumbs.push({ label: 'Orçamentos', href: listHref });
     if (orcamentoIdNaRota) {
       crumbs.push({
-        label: nomeOrcamentoSemCodigo || 'Orçamento',
+        label: nomeBreadcrumbOrcamento || 'Orçamento',
         ...(revisaoBadge ? { badge: revisaoBadge } : {}),
         ...(revisaoBadgeMenu && revisaoBadgeMenu.length > 1
           ? { badgeMenu: revisaoBadgeMenu }
@@ -14399,6 +14418,7 @@ export function OrcamentoPageView({
     orcamentoIdNaRota,
     nomeContratoBreadcrumb,
     nomeOrcamentoSemCodigo,
+    nomeBreadcrumbOrcamento,
     cronogramaOnly,
     listaGlobalEntry,
     fichaDemandaOnly,
@@ -16232,7 +16252,7 @@ export function OrcamentoPageView({
         const limparA = campo === 'aManual' && campoVazio;
         const limparV = campo === 'vManual' && campoVazio;
         const limparCampoManual = limparSubtotal || limparValorManual || limparA || limparV;
-        const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
+        const v = campo === 'descricao' || campo === 'detalhes' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
         const updated: LinhaMedicao = limparCampoManual
           ? { ...novaLinhas[idx] }
           : ({ ...novaLinhas[idx], [campo]: v } as LinhaMedicao);
@@ -16637,6 +16657,35 @@ export function OrcamentoPageView({
     }
   };
 
+  /**
+   * Mescla linhas da memória numa só, de uma vez (um único setState): a primeira recebe `dados` e as demais saem.
+   * (Chamar atualizar + remover em sequência perdia a atualização, porque remover parte do estado antigo.)
+   */
+  const mesclarLinhasMedicao = (itemKey: string, idxs: number[], dados: Partial<LinhaMedicao>) => {
+    if (gradeTravadaRef.current || idxs.length < 2) return;
+    const ordenados = [...idxs].sort((a, b) => a - b);
+    const primeira = ordenados[0]!;
+    const sair = new Set(ordenados.slice(1));
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey];
+      if (!base) return prev;
+      const atual = dimensoesComLinhasEfetivas(base, 'un');
+      if (!atual.linhas[primeira]) return prev;
+      const linhas = atual.linhas
+        .map((ln, i) => {
+          if (i !== primeira) return ln;
+          const unida: LinhaMedicao = { ...ln, ...dados };
+          delete unida.formulas;
+          delete unida.valorManual;
+          return unida;
+        })
+        .filter((_, i) => !sair.has(i));
+      const nextDim = { ...atual, linhas };
+      queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
+      return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+    });
+  };
+
   const limparLinhasVaziasTodasMemorias = () => {
     if (gradeTravadaRef.current) return;
     const meta = metaMemoriaIncluidaRef.current;
@@ -17018,9 +17067,16 @@ export function OrcamentoPageView({
         if (formulas[12] && bate(r2(totSem * fatorBdi), totCom)) {
           formulas[13] = `M{r}*${fatorBdiTxt}`;
         }
+        // Cores que o usuário pintou na grade (célula ou linha inteira) vão junto para o Excel.
+        const coresPintura: NonNullable<OrcamentoExcelRow['cores']> = {};
+        ORC_COLUNAS_EXPORT.forEach((colId, idx) => {
+          const bg = coresCelulaPorKey[chaveCelulaOrc(row.key, colId)] || coresLinhaPorKey[row.key];
+          if (bg) coresPintura[idx] = { bg };
+        });
         rows.push({
           kind: 'item',
           formulas,
+          ...(Object.keys(coresPintura).length ? { cores: coresPintura } : {}),
           values: [
             `${main}.${subIdx}.${itemIdx + 1}`,
             row.item.codigo,
@@ -17204,6 +17260,7 @@ export function OrcamentoPageView({
           : 'NÃO DESONERADO: encargos sociais embutidos nos preços unitários dos insumos de mão de obra, de acordo com as bases.';
     return {
       name: 'Orçamento',
+      semZebra: true,
       aparencia: aparenciaMontagem,
       tamanhos: { item: 11, header: 12 },
       title: 'Orçamento',
@@ -18105,7 +18162,7 @@ export function OrcamentoPageView({
           rows.push({
             kind: 'item',
             values: [
-              '',
+              ln.detalhes?.trim() || '',
               descLinha,
               celula(ln.C || 0),
               celula(ln.L || 0),
@@ -22202,6 +22259,7 @@ export function OrcamentoPageView({
                                                 addLinhaCabecalhoSecaoMedicao
                                               }
                                               removeLinhaMedicao={removeLinhaMedicao}
+                                              mesclarLinhasMedicao={mesclarLinhasMedicao}
                                               estiloTitulo={estiloLinhaItemOrc(
                                                 aparenciaMemorial,
                                                 isDark

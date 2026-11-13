@@ -70,6 +70,12 @@ const DP_REQUEST_TYPES = [
   'REALOCACAO_COLABORADOR',
   'RETIFICACAO_RECALCULO',
   'SOLICITACAO_GERAL',
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
 ] as const;
 
 const createDpRequestSchema = z.object({
@@ -115,6 +121,7 @@ const rejectDpRequestSchema = z
 const DP_FEEDBACK_NEXT_STATUSES = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
+  'IN_ACCOUNTING',
   'WAITING_RETURN',
   'WAITING_RETURN_ADM_TST',
   'WAITING_RETURN_ENGINEERING',
@@ -540,7 +547,7 @@ export class DpRequestController {
   }
 
   /**
-   * Visão da página Solicitações à Contabilidade: todos os pedidos diretos à Contabilidade e as solicitações
+   * Visão da página Solicitações Contábeis: todos os pedidos diretos à Contabilidade e as solicitações
    * internas finalizadas que seguiram para lá, de qualquer solicitante (o acesso é controlado por permissão).
    */
   async getAccountingRequests(req: AuthRequest, res: Response) {
@@ -548,17 +555,9 @@ export class DpRequestController {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
       const requests = await prisma.dpRequest.findMany({
-        where: {
-          OR: [
-            { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
-            {
-              requestType: {
-                in: ['ADMISSAO', 'FERIAS', 'RESCISAO', 'ALTERACAO_FUNCAO_SALARIO', 'RETIFICACAO_ALOCACAO'],
-              },
-              status: 'CONCLUDED',
-            },
-          ],
-        },
+        // Só os pedidos criados direto para a Contabilidade. As solicitações do fluxo do DP que eram enviadas
+        // automaticamente ao finalizar não aparecem mais aqui.
+        where: { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
         orderBy: { createdAt: 'desc' },
       });
 
@@ -614,9 +613,16 @@ export class DpRequestController {
   async getAccountingToCloseCount(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const count = await prisma.dpContabilidadeRequest.count({
-        where: { status: 'CONCLUDED', dpClosedAt: null, sourceDpRequestId: { not: null } },
+      // Só conta pedidos criados direto para a Contabilidade (os antigos enviados pelo DP não aparecem mais).
+      const diretos = await prisma.dpRequest.findMany({
+        where: { requestType: { in: [...ACCOUNTING_DIRECT_REQUEST_TYPES] } },
+        select: { id: true },
       });
+      const count = diretos.length
+        ? await prisma.dpContabilidadeRequest.count({
+            where: { status: 'CONCLUDED', dpClosedAt: null, sourceDpRequestId: { in: diretos.map((d) => d.id) } },
+          })
+        : 0;
       return res.json({ success: true, data: { count } });
     } catch (e) {
       return res.status(500).json({ error: 'Erro ao contar pedidos para encerrar' });
@@ -649,7 +655,7 @@ export class DpRequestController {
         !req.user.isAdmin &&
         !isDepartamentoPessoalSector(employee.department)
       ) {
-        throw createError('Solicitações à Contabilidade disponíveis apenas para o setor Departamento Pessoal', 403);
+        throw createError('Solicitações Contábeis disponíveis apenas para o setor Departamento Pessoal', 403);
       }
 
       let parsedDetails: Record<string, unknown>;
@@ -748,12 +754,18 @@ export class DpRequestController {
         ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
         ADM_ASOS: "ASO's",
         ADM_OUTROS: 'Outros',
-        CONVENCAO_COLETIVA: 'Convenção coletiva / CCT',
-        FECHAMENTO_FOLHA: 'Fechamento da folha',
-        IMPOSTOS_ENCARGOS: 'Impostos / encargos da folha',
-        REALOCACAO_COLABORADOR: 'Realocação de colaborador',
-        RETIFICACAO_RECALCULO: 'Retificação / recálculo',
-        SOLICITACAO_GERAL: 'Solicitação geral',
+        CONVENCAO_COLETIVA: 'Convenção Coletiva / CCT',
+        FECHAMENTO_FOLHA: 'Fechamento da Folha',
+        IMPOSTOS_ENCARGOS: 'Impostos / Encargos da Folha',
+        REALOCACAO_COLABORADOR: 'Realocação de Colaborador',
+        RETIFICACAO_RECALCULO: 'Retificação / Recálculo',
+        SOLICITACAO_GERAL: 'Solicitação Geral',
+        CONTAB_ADMISSAO: 'Admissão',
+        CONTAB_AFASTAMENTO: 'Afastamento',
+        CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
+        CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
+        CONTAB_FERIAS: 'Férias',
+        CONTAB_RESCISAO: 'Rescisão',
       };
       const isAdmRequest = isAdmTstDpRequestType(validated.requestType);
       const titlePrefix = isAccountingDirect
@@ -1376,6 +1388,7 @@ export class DpRequestController {
         const dpMayAct: string[] = [
           'IN_REVIEW_DP',
           'IN_FINANCEIRO',
+          'IN_ACCOUNTING',
           'WAITING_RETURN',
           'WAITING_RETURN_ACCOUNTING',
           'WAITING_RETURN_ADM_TST',
@@ -1505,7 +1518,7 @@ export class DpRequestController {
       try {
         await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
       } catch (permErr) {
-        // Também pode reenviar quem usa a tela Solicitações à Contabilidade.
+        // Também pode reenviar quem usa a tela Solicitações Contábeis.
         const hasAccountingPage = await prisma.userPermission.findFirst({
           where: {
             userId: req.user.id,

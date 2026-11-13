@@ -98,7 +98,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/solicitacoes'), name: 'Alterações de Ponto', href: '/ponto/solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes'), name: 'Gerenciar Alterações de Ponto', href: '/ponto/gerenciar-solicitacoes', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes-dp'), name: 'Gerenciar Solicitações', href: '/ponto/gerenciar-solicitacoes-dp', category: 'Departamento Pessoal' },
-  { key: pathToModuleKey('/ponto/solicitacoes-contabilidade'), name: 'Solicitações à Contabilidade', href: '/ponto/solicitacoes-contabilidade', category: 'Departamento Pessoal' },
+  { key: pathToModuleKey('/ponto/solicitacoes-contabilidade'), name: 'Solicitações Contábeis', href: '/ponto/solicitacoes-contabilidade', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/dp-contabilidade'), name: 'Atendimento Contábil', href: '/ponto/dp-contabilidade', category: 'Contabilidade' },
   {
     key: pathToModuleKey('/ponto/conversas-whatsapp'),

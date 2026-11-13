@@ -1016,30 +1016,30 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
     steps: [
       {
         title: 'Entenda como funciona',
-        body: 'O DP e a Contabilidade conversam e acompanham os pedidos dentro do sistema: cada pedido tem seu status, seus documentos e sua própria conversa. O DP usa Gerenciar Solicitações e Solicitações à Contabilidade; a Contabilidade usa Atendimento Contábil. Um pedido chega à Contabilidade de duas formas: (1) solicitação interna enviada pelo DP, como Admissão, Férias, Rescisão, Alteração de função/salário e Retificação de alocação; (2) pedido direto criado em Solicitações à Contabilidade, como Convenção coletiva/CCT, Fechamento da folha, Impostos/encargos, Realocação de colaborador, Retificação/recálculo e Solicitação geral.',
+        body: 'O DP e a Contabilidade conversam e acompanham os pedidos dentro do sistema: cada pedido tem seu status, seus documentos e sua própria conversa. O DP usa Gerenciar Solicitações e Solicitações Contábeis; a Contabilidade usa Atendimento Contábil. Um pedido chega à Contabilidade de duas formas: (1) solicitação interna enviada pelo DP, como Admissão, Férias, Rescisão, Alteração de função/salário e Retificação de alocação; (2) pedido direto criado em Solicitações Contábeis, como Convenção coletiva/CCT, Fechamento da folha, Impostos/encargos, Realocação de colaborador, Retificação/recálculo e Solicitação geral.',
         hint: 'O que muda é só o começo. Depois que chega, o atendimento é o mesmo nos dois caminhos.',
       },
       {
         title: 'DP: enviar uma solicitação interna à Contabilidade',
-        body: 'Em Gerenciar Solicitações, abra a solicitação pelo menu da linha. Em "Registrar feedback", escreva as observações e, no campo Feedback, escolha Enviar à Contabilidade. Clique em Salvar, leia o aviso que aparece e confirme em "Entendi, enviar" (se não quiser ver o aviso de novo, marque "Não mostrar esta mensagem novamente"). A solicitação fica em Finalizadas em Gerenciar Solicitações e passa a aparecer como Na Contabilidade em Solicitações à Contabilidade.',
-        hint: 'Depois de enviada, o acompanhamento, a conversa e o encerramento são feitos só em Solicitações à Contabilidade.',
+        body: 'Em Gerenciar Solicitações, abra a solicitação pelo menu da linha. Em "Registrar feedback", escreva as observações e, no campo Feedback, escolha Enviar à Contabilidade. Clique em Salvar, leia o aviso que aparece e confirme em "Entendi, enviar" (se não quiser ver o aviso de novo, marque "Não mostrar esta mensagem novamente"). A solicitação fica em Finalizadas em Gerenciar Solicitações e passa a aparecer como Na Contabilidade em Solicitações Contábeis.',
+        hint: 'Depois de enviada, o acompanhamento, a conversa e o encerramento são feitos só em Solicitações Contábeis.',
       },
       {
         title: 'DP: criar um pedido direto',
-        body: 'Abra Solicitações à Contabilidade no menu do Departamento Pessoal e clique em + Nova Solicitação (o botão aparece para quem é do DP e para administradores). Escolha o tipo de pedido e a unidade, preencha os campos que aparecem, anexe os documentos necessários e clique em Enviar solicitação. O pedido vai direto para a Contabilidade e fica como Na Contabilidade.',
+        body: 'Abra Solicitações Contábeis no menu do Departamento Pessoal e clique em + Nova Solicitação (o botão aparece para quem é do DP e para administradores). Escolha o tipo de pedido e a unidade, preencha os campos que aparecem, anexe os documentos necessários e clique em Enviar solicitação. O pedido vai direto para a Contabilidade e fica como Na Contabilidade.',
       },
       {
         title: 'DP: acompanhar os pedidos',
-        body: 'Em Solicitações à Contabilidade há abas por etapa, cada uma com a quantidade de pedidos: Todas, Na Contabilidade, Para Encerrar, Finalizadas e Canceladas. Abra um pedido pelo menu da linha para ver as abas Detalhes, Timeline e Comentários.',
+        body: 'Em Solicitações Contábeis há abas por etapa, cada uma com a quantidade de pedidos: Todas, Na Contabilidade, Aguardando Encerramento, Finalizadas e Canceladas. Abra um pedido pelo menu da linha para ver as abas Detalhes, Timeline e Comentários.',
       },
       {
         title: 'DP: finalizar quando a Contabilidade concluir',
-        body: 'Quando a Contabilidade conclui o atendimento, o pedido vai para Para Encerrar. Abra o pedido, confira a conversa e os documentos e clique em Finalizar (botão verde, ao lado de Fechar). Confirme, e o pedido vai para Finalizadas.',
+        body: 'Quando a Contabilidade conclui o atendimento, o pedido fica em Aguardando Encerramento. Abra o pedido, confira a conversa e os documentos e clique em Finalizar (botão verde, ao lado de Fechar). Confirme, e o pedido vai para Finalizadas.',
         hint: 'Nos pedidos diretos, o Finalizar só aparece depois que a Contabilidade conclui. Nas solicitações internas enviadas pelo DP ele aparece desde o início; use antes da conclusão só se não houver mais nada a tratar com a Contabilidade.',
       },
       {
         title: 'DP: se o envio falhar',
-        body: 'Se o sistema avisar que o pedido não chegou à Contabilidade, abra o pedido em Solicitações à Contabilidade e clique em Reenviar à Contabilidade.',
+        body: 'Se o sistema avisar que o pedido não chegou à Contabilidade, abra o pedido em Solicitações Contábeis e clique em Reenviar à Contabilidade.',
         hint: 'Enquanto o pedido não chega à Contabilidade, a conversa só fica disponível depois do reenvio.',
       },
       {
@@ -1048,12 +1048,12 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
       },
       {
         title: 'Contabilidade: concluir ou cancelar',
-        body: 'Terminou o atendimento? Clique em Concluir (botão verde, no rodapé). Nos pedidos que vieram do DP, o sistema pede confirmação e avisa o DP. O pedido vai para Concluídas para a Contabilidade e para Para Encerrar para o DP. Nos pedidos diretos criados pelo DP também existe o botão Cancelar: informe o motivo, que fica registrado e o DP vê. Depois de concluída ou cancelada, a solicitação fica disponível só para consulta.',
+        body: 'Terminou o atendimento? Clique em Concluir (botão verde, no rodapé). Nos pedidos que vieram do DP, o sistema pede confirmação e avisa o DP. O pedido vai para Concluídas para a Contabilidade e para Aguardando Encerramento para o DP. Nos pedidos diretos criados pelo DP também existe o botão Cancelar: informe o motivo, que fica registrado e o DP vê. Depois de concluída ou cancelada, a solicitação fica disponível só para consulta.',
       },
       {
         title: 'Etapas e status: o que significa e quem age',
-        body: 'Na Contabilidade (para a Contabilidade aparece como Pendente): o pedido chegou e a Contabilidade está atendendo; quem age é a Contabilidade. Para Encerrar (aparece como Concluída para a Contabilidade): a Contabilidade terminou e falta o DP finalizar; quem age é o DP. Finalizadas (Concluída): o DP finalizou e o atendimento está encerrado; só consulta. Canceladas (Cancelada): o pedido foi cancelado, com o motivo no detalhe; só consulta.',
-        hint: 'O caminho normal é: Na Contabilidade, depois Para Encerrar, depois Finalizadas. Em Gerenciar Solicitações, o que foi enviado à Contabilidade conta como Finalizadas desde o envio, porque o trabalho do DP naquela tela terminou.',
+        body: 'Na Contabilidade (para a Contabilidade aparece como Pendente): o pedido chegou e a Contabilidade está atendendo; quem age é a Contabilidade. Aguardando Encerramento (aparece como Concluída para a Contabilidade): a Contabilidade terminou e falta o DP finalizar; quem age é o DP. Finalizadas (Concluída): o DP finalizou e o atendimento está encerrado; só consulta. Canceladas (Cancelada): o pedido foi cancelado, com o motivo no detalhe; só consulta.',
+        hint: 'O caminho normal é: Na Contabilidade, depois Aguardando Encerramento, depois Finalizadas. Em Gerenciar Solicitações, o que foi enviado à Contabilidade conta como Finalizadas desde o envio, porque o trabalho do DP naquela tela terminou.',
       },
       {
         title: 'Comentários e documentos anexados',
@@ -1062,7 +1062,7 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
       },
       {
         title: 'Dúvidas frequentes',
-        body: 'Qual a diferença entre Concluir e Finalizar? Concluir é da Contabilidade (o atendimento terminou); Finalizar é do DP (encerra o pedido depois da conclusão). A Contabilidade já concluiu, mas o pedido ainda aparece para mim: ele está em Para Encerrar, falta o DP abrir e clicar em Finalizar. Enviei à Contabilidade e a solicitação sumiu de Pendentes em Gerenciar Solicitações: está em Finalizadas nessa tela e é acompanhada em Solicitações à Contabilidade, na etapa Na Contabilidade. Não vejo o botão Nova Solicitação: ele aparece só para quem é do DP e para administradores. Não consigo abrir a tela ou ver os comentários: é falta de permissão, peça à gestão de acessos para liberar Solicitações à Contabilidade (DP) ou Atendimento Contábil (Contabilidade). Preciso cancelar um pedido: nos pedidos diretos quem cancela é a Contabilidade, informando o motivo; nas solicitações internas o DP cancela em Gerenciar Solicitações, antes de enviar à Contabilidade.',
+        body: 'Qual a diferença entre Concluir e Finalizar? Concluir é da Contabilidade (o atendimento terminou); Finalizar é do DP (encerra o pedido depois da conclusão). A Contabilidade já concluiu, mas o pedido ainda aparece para mim: ele está em Aguardando Encerramento, falta o DP abrir e clicar em Finalizar. Enviei à Contabilidade e a solicitação sumiu de Pendentes em Gerenciar Solicitações: está em Finalizadas nessa tela e é acompanhada em Solicitações Contábeis, na etapa Na Contabilidade. Não vejo o botão Nova Solicitação: ele aparece só para quem é do DP e para administradores. Não consigo abrir a tela ou ver os comentários: é falta de permissão, peça à gestão de acessos para liberar Solicitações Contábeis (DP) ou Atendimento Contábil (Contabilidade). Preciso cancelar um pedido: nos pedidos diretos quem cancela é a Contabilidade, informando o motivo; nas solicitações internas o DP cancela em Gerenciar Solicitações, antes de enviar à Contabilidade.',
       },
     ],
   },
@@ -1092,7 +1092,7 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
       },
       {
         title: 'Concluir',
-        body: 'Use quando o pedido foi atendido. Em pedidos que vieram do DP, o sistema pede uma confirmação e avisa o DP. Em pedidos diretos, você pode deixar uma mensagem final, se quiser. Depois de concluir, o pedido vai para Concluídas na sua tela. Para o DP, ele passa a Para Encerrar, e o DP faz a finalização do lado dele. Você não precisa fazer mais nada.',
+        body: 'Use quando o pedido foi atendido. Em pedidos que vieram do DP, o sistema pede uma confirmação e avisa o DP. Em pedidos diretos, você pode deixar uma mensagem final, se quiser. Depois de concluir, o pedido vai para Concluídas na sua tela. Para o DP, ele passa a Aguardando Encerramento, e o DP faz a finalização do lado dele. Você não precisa fazer mais nada.',
         hint: 'Concluído não volta: confira antes de clicar. Se precisar de algo a mais depois, avise o DP para abrir um novo pedido.',
       },
       {

@@ -796,6 +796,14 @@ body::-webkit-scrollbar:vertical {
   color: #fca5a5;
 }
 
+/* Gráficos (Recharts): o gráfico é focável e mostrava um contorno preto ao clicar nele */
+.recharts-wrapper,
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none !important;
+}
+
 /* Drive — foco por teclado (Tab) na lateral: contorno vermelho em vez do preto padrão */
 .drive-sidebar :focus-visible {
   outline: 2px solid #ef4444 !important;
