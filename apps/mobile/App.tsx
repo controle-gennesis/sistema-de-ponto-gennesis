@@ -17,6 +17,8 @@ import FuelRequestsScreen from './src/screens/FuelRequestsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import PncpLicitacoesScreen from './src/screens/PncpLicitacoesScreen';
 import AgendaScreen from './src/screens/AgendaScreen';
+import DiarioObraListScreen from './src/screens/diarioObra/DiarioObraListScreen';
+import DiarioObraEditorScreen from './src/screens/diarioObra/DiarioObraEditorScreen';
 import KanbanBoardsScreen from './src/screens/kanban/KanbanBoardsScreen';
 import KanbanBoardScreen from './src/screens/kanban/KanbanBoardScreen';
 import KanbanCardScreen from './src/screens/kanban/KanbanCardScreen';
@@ -49,6 +51,8 @@ export type RootStackParamList = {
   Profile: undefined;
   Pncp: undefined;
   Agenda: { mode?: 'agenda' | 'tasks' } | undefined;
+  DiarioObra: undefined;
+  DiarioObraEditor: { obraId: string; date: string; obraName?: string; contratoName?: string };
   KanbanBoards: undefined;
   KanbanBoard: { departmentKey?: string; title?: string };
   KanbanCard: { cardId: string; departmentKey?: string };
@@ -188,6 +192,8 @@ function AppNavigator() {
               <Stack.Screen name="Profile" component={ProfileScreen} />
               <Stack.Screen name="Pncp" component={PncpLicitacoesScreen} />
               <Stack.Screen name="Agenda" component={AgendaScreen} />
+              <Stack.Screen name="DiarioObra" component={DiarioObraListScreen} />
+              <Stack.Screen name="DiarioObraEditor" component={DiarioObraEditorScreen} />
               <Stack.Screen name="KanbanBoards" component={KanbanBoardsScreen} />
               <Stack.Screen name="KanbanBoard" component={KanbanBoardScreen} />
               <Stack.Screen name="KanbanCard" component={KanbanCardScreen} />

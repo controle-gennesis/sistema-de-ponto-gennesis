@@ -233,7 +233,7 @@ function resolveBreadcrumbsBase(pathname: string): BreadcrumbItem[] {
         const raw = segments[i]!;
         const segment = decodePathSegment(raw);
         built += `/${raw}`;
-        // Diário de Obra dentro do contrato (.../obras/:obra/diario/AAAA-MM-DD): mostra «RDO - dd/mm/aaaa»
+        // Diário de Obra dentro do contrato (.../obras/:obra/diario/AAAA-MM-DD): mostra «dd/mm/aaaa»
         // enquanto a página ainda não publicou o nome da obra, em vez de «Obras › Diario».
         if (module.href === '/ponto/contratos') {
           if (segment === 'obras') {
@@ -248,7 +248,7 @@ function resolveBreadcrumbsBase(pathname: string): BreadcrumbItem[] {
           }
           if (/^\d{4}-\d{2}-\d{2}$/.test(segment) && decodePathSegment(segments[i - 1] ?? '') === 'diario') {
             const [y, m, d] = segment.split('-');
-            crumbs.push({ label: `RDO - ${d}/${m}/${y}`, href: built });
+            crumbs.push({ label: `${d}/${m}/${y}`, href: built });
             continue;
           }
         }

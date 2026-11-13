@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
+  BookOpen,
   CalendarDays,
   CarFront,
   Clock,
@@ -36,7 +37,7 @@ export default function HomeQuickAccess() {
   const navigation = useNavigation<any>();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-  const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs, canSeePonto } =
+  const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs, canSeePonto, can } =
     usePermissions();
   const badges = useTabBadges();
 
@@ -56,6 +57,9 @@ export default function HomeQuickAccess() {
       icon: ListChecks,
       onPress: () => navigation.navigate('Agenda', { mode: 'tasks' }),
     },
+    ...(can('ponto_diario-obra')
+      ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => navigation.navigate('DiarioObra') }]
+      : []),
     ...(canSeePonto
       ? [{ key: 'registros', label: 'Registros de ponto', icon: Clock, onPress: () => navigation.navigate('TimeRecords') }]
       : []),

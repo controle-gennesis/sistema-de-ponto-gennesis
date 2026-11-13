@@ -103,55 +103,93 @@ async function assertObra(obraId: string) {
   if (!obra) throw createError('Obra não encontrada', 404);
 }
 
-/** Lista de diários (um por obra/dia), com filtros por contrato, obra, período e busca. */
+/** Etapa do RDO: finalizado vem primeiro; "sem atividade" e "em preenchimento" são os não finalizados. */
+const STAGE_WHERE: Record<string, Record<string, unknown>> = {
+  final: { finalizedAt: { not: null } },
+  none: { finalizedAt: null, noActivity: true },
+  draft: { finalizedAt: null, noActivity: false },
+};
+
+/**
+ * Filtro comum da lista e dos totais por etapa: contrato, obra, período e busca, sempre dentro dos contratos
+ * Liberados para o usuário. Devolve `null` quando a pessoa não enxerga nenhum contrato.
+ */
+async function buildListWhere(req: AuthRequest): Promise<any | null> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  const contratoId = str(req.query.contratoId, 40);
+  const obraId = str(req.query.obraId, 40);
+  const from = str(req.query.from, 10);
+  const to = str(req.query.to, 10);
+  const search = str(req.query.search, 100);
+
+  const dateFilter: Record<string, string> = {};
+  if (DATE_RE.test(from)) dateFilter.gte = from;
+  if (DATE_RE.test(to)) dateFilter.lte = to;
+
+  // Só diários de obras de contratos Liberados (administradores veem tudo).
+  const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+  const allowedIds = access.filter === 'ids' ? access.ids : null;
+  if (access.filter === 'none' || (contratoId && allowedIds && !allowedIds.includes(contratoId))) return null;
+  const contratoFilter = contratoId
+    ? { contratoId }
+    : allowedIds
+      ? { contratoId: { in: allowedIds } }
+      : {};
+
+  return {
+    ...(obraId ? { obraId } : {}),
+    ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+    ...(Object.keys(contratoFilter).length || search
+      ? {
+          obra: {
+            ...contratoFilter,
+            ...(search
+              ? {
+                  OR: [
+                    { name: { contains: search, mode: 'insensitive' } },
+                    { contrato: { name: { contains: search, mode: 'insensitive' } } },
+                    { contrato: { number: { contains: search, mode: 'insensitive' } } },
+                  ],
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Totais por etapa (todos, em preenchimento, finalizados, sem atividade), com os mesmos filtros da lista. */
+router.get('/stats', async (req: AuthRequest, res, next) => {
+  try {
+    const base = await buildListWhere(req);
+    if (!base) {
+      res.json({ success: true, data: { all: 0, draft: 0, final: 0, none: 0 } });
+      return;
+    }
+    const [all, draft, final, none] = await Promise.all([
+      prisma.diarioObra.count({ where: base }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.draft } }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.final } }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.none } }),
+    ]);
+    res.json({ success: true, data: { all, draft, final, none } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Lista de diários (um por obra/dia), com filtros por contrato, obra, período, etapa e busca. */
 router.get('/', async (req: AuthRequest, res, next) => {
   try {
-    if (!req.user) throw createError('Usuário não autenticado', 401);
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
-    const contratoId = str(req.query.contratoId, 40);
-    const obraId = str(req.query.obraId, 40);
-    const from = str(req.query.from, 10);
-    const to = str(req.query.to, 10);
-    const search = str(req.query.search, 100);
-
-    const dateFilter: Record<string, string> = {};
-    if (DATE_RE.test(from)) dateFilter.gte = from;
-    if (DATE_RE.test(to)) dateFilter.lte = to;
-
-    // Só diários de obras de contratos Liberados (administradores veem tudo).
-    const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
-    const allowedIds = access.filter === 'ids' ? access.ids : null;
-    if (access.filter === 'none' || (contratoId && allowedIds && !allowedIds.includes(contratoId))) {
+    const base = await buildListWhere(req);
+    if (!base) {
       res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 1 } });
       return;
     }
-    const contratoFilter = contratoId
-      ? { contratoId }
-      : allowedIds
-        ? { contratoId: { in: allowedIds } }
-        : {};
-
-    const where: any = {
-      ...(obraId ? { obraId } : {}),
-      ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
-      ...(Object.keys(contratoFilter).length || search
-        ? {
-            obra: {
-              ...contratoFilter,
-              ...(search
-                ? {
-                    OR: [
-                      { name: { contains: search, mode: 'insensitive' } },
-                      { contrato: { name: { contains: search, mode: 'insensitive' } } },
-                      { contrato: { number: { contains: search, mode: 'insensitive' } } },
-                    ],
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    };
+    const stage = STAGE_WHERE[str(req.query.status, 10)];
+    const where: any = stage ? { ...base, ...stage } : base;
 
     const [total, rows] = await Promise.all([
       prisma.diarioObra.count({ where }),
