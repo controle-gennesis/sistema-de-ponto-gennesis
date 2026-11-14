@@ -664,8 +664,23 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
   );
 
+  // RMs do próprio usuário enviadas para correção — número em "Solicitação de Materiais" (mesma consulta do sininho).
+  const { data: rmCorrecaoCount = 0 } = useQuery({
+    queryKey: ['rm-minhas-correcao-count'],
+    queryFn: async () => {
+      const res = await api.get('/material-requests/minhas/correcao-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: !isLoading && (isAdministrator || can(pk('/ponto/solicitar-materiais'))),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const navBadgeCountForHref = (href: string): number => {
     if (href === '/ponto/aprovacoes') return approvalCounts.total;
+    if (href === '/ponto/solicitar-materiais') return rmCorrecaoCount;
     // RM já entra no badge de Aprovações — não somar de novo em Suprimentos
     if (href === '/ponto/gerenciar-materiais' && canApproveMaterialRequests) {
       const aprovacoesVisible =

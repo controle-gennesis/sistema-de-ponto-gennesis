@@ -4,7 +4,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ClipboardList, Download, ExternalLink, FileSpreadsheet, FileText, RotateCcw, Save, Truck, Wrench, X } from 'lucide-react';
-import { exportarMapaCotacao } from '@/lib/exportMapaCotacao';
+import {
+  exportarMapaCotacao,
+  type MapaCotacaoExportFd,
+  type MapaCotacaoExportFdSolicitado,
+} from '@/lib/exportMapaCotacao';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
@@ -61,7 +65,14 @@ import {
   rmHasOpenItemsForProcurement,
 } from '@/lib/rmProcurementCoverage';
 import { buildSupplierPaymentPrefill } from '@/lib/supplierPaymentPrefill';
-import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';
+import {
+  FdPedidosResumoModal,
+  OC_STATUS,
+  RM_STATUS,
+  fmtMoeda,
+  type ItemResumo,
+  type OcPagaResumo,
+} from '@/components/engenharia/FdPedidosResumoModal';
 import {
   ocDestinationLabel,
   resolveOcDestinationFromCostCenter,
@@ -918,6 +929,23 @@ export default function MapaCotacaoPage() {
     selectedRequestFull?.id === selectedRequestId ? selectedRequestFull : null;
 
   // FD associada à RM selecionada (para o botão "Itens solicitados da FD").
+  // O custo estimado 40% é gravado quando alguém abre a FD no orçamento (outra aba): ao voltar
+  // para o mapa a consulta é refeita e, enquanto faltar valor, confere a cada 5 s por até 2 min.
+  const fdAssocDesdeRef = useRef<{ rmId: string | null; desde: number }>({ rmId: null, desde: 0 });
+  if (fdAssocDesdeRef.current.rmId !== selectedRequestId) {
+    fdAssocDesdeRef.current = { rmId: selectedRequestId, desde: Date.now() };
+  }
+  useEffect(() => {
+    const recomecar = () => {
+      if (document.visibilityState === 'visible') fdAssocDesdeRef.current.desde = Date.now();
+    };
+    window.addEventListener('focus', recomecar);
+    document.addEventListener('visibilitychange', recomecar);
+    return () => {
+      window.removeEventListener('focus', recomecar);
+      document.removeEventListener('visibilitychange', recomecar);
+    };
+  }, []);
   const { data: fdAssociation } = useQuery({
     queryKey: ['fd-association-by-rm', selectedRequestId],
     queryFn: async () => {
@@ -942,8 +970,14 @@ export default function MapaCotacaoPage() {
       } | null;
     },
     enabled: !!selectedRequestId,
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) => {
+      const itens = query.state.data?.itens;
+      const faltaCusto = !!itens?.some((it) => it.custoEstimado40 == null);
+      if (!faltaCusto) return false;
+      return Date.now() - fdAssocDesdeRef.current.desde < 120_000 ? 5_000 : false;
+    },
   });
   const [fdResumoOpen, setFdResumoOpen] = useState(false);
   useEffect(() => { setFdResumoOpen(false); }, [selectedRequestId]);
@@ -1452,7 +1486,79 @@ export default function MapaCotacaoPage() {
           ordemCompra: generatedOcSupplierIds.has(sid) ? 'OC gerada' : won > 0 ? 'Pendente' : '—',
         };
       });
+      // PDF: itens da FD (painel do mapa) e o que já foi solicitado da FD (modal "Itens já solicitados").
+      let fd: MapaCotacaoExportFd | null = null;
+      if (exportFormato === 'pdf' && fdAssociation?.fdId) {
+        const codigo = fdAssociation.codFichaDemanda || 'Ficha de Demanda';
+        let solicitados: MapaCotacaoExportFd['solicitados'];
+        try {
+          const res = await api.get(`/demand-sheet-approvals/${fdAssociation.fdId}/pedidos-resumo`);
+          const resumo = res.data?.data as
+            | { itens: ItemResumo[]; ocsPagas?: OcPagaResumo[]; totalOcsPagas?: number }
+            | undefined;
+          const itensResumo = resumo?.itens ?? [];
+          const porRm = new Map<string, MapaCotacaoExportFdSolicitado>();
+          for (const it of itensResumo) {
+            if (!porRm.has(it.rm.id)) {
+              porRm.set(it.rm.id, {
+                rm: {
+                  requestNumber: it.rm.requestNumber,
+                  status: it.rm.status ? RM_STATUS[it.rm.status] ?? it.rm.status : '',
+                },
+                itens: [],
+              });
+            }
+            porRm.get(it.rm.id)!.itens.push({
+              fdItem: it.fdItem,
+              descricao: it.descricao,
+              quantidadeFd: it.quantidadeFd,
+              unidadeFd: it.unidadeFd,
+              alertas: it.alertas,
+              materiais: it.materiais.map((m) => ({
+                materialLabel: m.materialLabel,
+                quantity: m.quantity,
+                unit: m.unit,
+                detalhamento: m.detalhamento,
+                ocs: m.ocs.map((oc) => ({
+                  orderNumber: oc.orderNumber,
+                  status: OC_STATUS[oc.status] ?? oc.status,
+                  totvsIdMov: oc.totvsIdMov,
+                  valorPago:
+                    oc.pago && oc.valorPago != null
+                      ? fmtMoeda(oc.valorPago)
+                      : oc.totvsIdMov != null
+                        ? 'Aguardando validação'
+                        : '—',
+                })),
+              })),
+            });
+          }
+          solicitados = {
+            grupos: Array.from(porRm.values()),
+            totalItens: itensResumo.length,
+            comOc: itensResumo.filter((i) => i.materiais.some((m) => m.ocs.length > 0)).length,
+            ocsPagas: resumo?.ocsPagas?.length ?? 0,
+            totalPago: resumo?.totalOcsPagas ?? 0,
+          };
+        } catch {
+          toast.error('Não foi possível carregar os itens já solicitados da FD; o PDF sai sem essa parte.');
+        }
+        fd = {
+          codigo,
+          itens: (fdAssociation.itens ?? []).map((it) => ({
+            fdItem: it.fdItem,
+            descricao: it.descricao,
+            quantidadeFd: it.quantidadeFd,
+            unidadeFd: it.unidadeFd,
+            custoEstimado40: it.custoEstimado40,
+            alertas: it.alertas,
+            materiais: it.materiais,
+          })),
+          solicitados,
+        };
+      }
       await exportarMapaCotacao({
+        fd,
         formato: exportFormato,
         orientacao: exportOrientacao,
         titulo: `Mapa de cotação · ${selectedRequestLabel}`,
@@ -2606,7 +2712,7 @@ export default function MapaCotacaoPage() {
                   ) : null}
                 </div>
               }
-              size="xl"
+              size="5xl"
               contentOverflowVisible
             >
               <div className="space-y-5">

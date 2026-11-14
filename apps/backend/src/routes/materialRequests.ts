@@ -130,6 +130,22 @@ router.post("/upload-item-attachment", (req: AuthRequest, res: Response, next: N
   }
 });
 
+// RMs do próprio usuário enviadas para correção (RM inteira ou itens em correção) — sininho e menu. Só leitura.
+router.get('/minhas/correcao-count', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const count = await prisma.materialRequest.count({
+      where: {
+        requestedBy: req.user.id,
+        OR: [{ status: 'IN_REVIEW' }, { status: 'APPROVED', items: { some: { status: 'IN_REVIEW' } } }],
+      },
+    });
+    return res.json({ success: true, data: { count } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 // Listar requisições
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

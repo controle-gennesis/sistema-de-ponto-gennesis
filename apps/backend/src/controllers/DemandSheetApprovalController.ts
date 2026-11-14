@@ -561,6 +561,54 @@ async function calcularCustosReaisFd(
   return itens;
 }
 
+/**
+ * Itens da FD cujo pedido está em correção: a RM inteira em correção, ou todos os materiais
+ * do item na RM em correção (RM aprovada com OC: só os itens que voltaram ao mapa).
+ * Esses itens ficam livres para um novo pedido pela FD; a RM em correção continua como está.
+ * Retorna os índices (em `itens`) dos pedidos em correção.
+ */
+async function indicesPedidosEmCorrecao(itens: FdItemPedido[]): Promise<Set<number>> {
+  const out = new Set<number>();
+  const rmIds = [...new Set(itens.map((i) => i.materialRequestId).filter(Boolean))];
+  if (rmIds.length === 0) return out;
+  const rms = await prisma.materialRequest.findMany({
+    where: { id: { in: rmIds }, OR: [{ status: 'IN_REVIEW' }, { items: { some: { status: 'IN_REVIEW' } } }] },
+    select: { id: true, status: true, items: { select: { materialId: true, status: true } } },
+  });
+  if (rms.length === 0) return out;
+  const porId = new Map(rms.map((r) => [r.id, r]));
+  itens.forEach((it, idx) => {
+    const rm = porId.get(it.materialRequestId);
+    if (!rm) return;
+    if (rm.status === 'IN_REVIEW') {
+      out.add(idx);
+      return;
+    }
+    const mats = it.materiais.map((m) => m.materialId).filter(Boolean);
+    if (mats.length === 0) return;
+    const todosEmCorrecao = mats.every((mid) => {
+      const doMaterial = rm.items.filter((ri) => ri.materialId === mid);
+      return doMaterial.length > 0 && doMaterial.every((ri) => ri.status === 'IN_REVIEW');
+    });
+    if (todosEmCorrecao) out.add(idx);
+  });
+  return out;
+}
+
+/** `itensPedidos` com `emCorrecao: true` nos pedidos cuja RM foi enviada para correção (para a tela). */
+async function itensPedidosComCorrecao(raw: unknown): Promise<unknown> {
+  if (!Array.isArray(raw) || raw.length === 0) return raw;
+  const parsed = parseItensPedidos(raw);
+  let emCorrecao: Set<number>;
+  try {
+    emCorrecao = await indicesPedidosEmCorrecao(parsed);
+  } catch {
+    return raw;
+  }
+  if (emCorrecao.size === 0) return raw;
+  return parsed.map((p, idx) => (emCorrecao.has(idx) ? { ...p, emCorrecao: true } : p));
+}
+
 /** RM preenchida à mão no formulário da FD (import usa "-" como vazio). */
 /**
  * RM cancelada (ou reprovada, que vira cancelada) libera os itens da FD: tira da FD os itens pedidos
@@ -1195,8 +1243,10 @@ export class DemandSheetApprovalController {
       const arquivo = await orcamentoService.readOrcamentoFile(centroRef, orcRef);
       if (!arquivo) throw createError('Orçamento não encontrado', 404);
       const statusOrc = statusDaSessao(arquivo.sessaoOrcamento);
-      if (!orcamentoTrancado(statusOrc)) {
-        throw createError('Tranque o orçamento antes de lançar a ficha de demanda.', 400);
+      // Passo anterior: o orçamento finalizado. Lançar a FD tranca orçamento + FD (libera o pedido de material).
+      if (orcamentoTrancado(statusOrc)) throw createError('Este orçamento já está trancado.', 400);
+      if (!orcamentoPodeTrancar(statusOrc)) {
+        throw createError('Finalize o orçamento antes de lançar a ficha de demanda.', 400);
       }
 
       // FD que já existe: a da revisão anterior (informada pela tela) ou a já ligada a este orçamento.
@@ -1291,6 +1341,11 @@ export class DemandSheetApprovalController {
             },
             include: includeDefault,
           });
+
+      await orcamentoService.updateStatusAprovacao(centroRef, orcRef, STATUS_ORCAMENTO_TRANCADO, row.id, {
+        tipo: 'trancamento',
+        usuario: await resolveActorName(req.user.id),
+      });
 
       return res.status(existing ? 200 : 201).json({ success: true, data: serializeRow(row) });
     } catch (e: unknown) {
@@ -1701,8 +1756,12 @@ export class DemandSheetApprovalController {
       }
 
       const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      // Pedidos de RM em correção vão marcados (`emCorrecao`): o item fica livre para um novo pedido.
       if (canFdsAprovadas && row.status === 'APPROVED') {
-        return res.json({ success: true, data: serializeRow(row) });
+        return res.json({
+          success: true,
+          data: { ...serializeRow(row), itensPedidos: await itensPedidosComCorrecao(row.itensPedidos) },
+        });
       }
 
       const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
@@ -1712,7 +1771,10 @@ export class DemandSheetApprovalController {
       });
       if (!allowed) throw createError('Sem permissão para ver esta ficha de demanda', 403);
 
-      return res.json({ success: true, data: serializeRow(row) });
+      return res.json({
+        success: true,
+        data: { ...serializeRow(row), itensPedidos: await itensPedidosComCorrecao(row.itensPedidos) },
+      });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) {
@@ -2568,7 +2630,9 @@ export class DemandSheetApprovalController {
       }
 
       // A FD pode ser pedida em partes, mas cada item é pedido de forma integral, uma única vez.
-      const jaPedidos = new Set(itensPedidos.map((p) => p.fdItemKey));
+      // Pedido de RM enviada para correção não conta: o item pode ser pedido de novo pela FD.
+      const emCorrecao = await indicesPedidosEmCorrecao(itensPedidos);
+      const jaPedidos = new Set(itensPedidos.filter((_, idx) => !emCorrecao.has(idx)).map((p) => p.fdItemKey));
       const repetidos = [...porItemFd.entries()].filter(([key]) => jaPedidos.has(key)).map(([, it]) => it.fdItem);
       if (repetidos.length > 0) {
         throw createError(`Itens da FD já solicitados em pedido anterior: ${repetidos.join(', ')}`, 409);
@@ -2688,7 +2752,11 @@ export class DemandSheetApprovalController {
 
       return res.json({
         success: true,
-        data: { requestNumber: rm.requestNumber, materialRequestId: rm.id, itensPedidos: itensAtualizados },
+        data: {
+          requestNumber: rm.requestNumber,
+          materialRequestId: rm.id,
+          itensPedidos: await itensPedidosComCorrecao(itensAtualizados),
+        },
       });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };

@@ -40,6 +40,17 @@ export type ExportBrandedPdfOptions = {
   logoMode?: 'dual' | 'gennesis';
   /** Orientação da folha A4 (padrão: paisagem). */
   orientation?: 'landscape' | 'portrait';
+  /** Tabelas extras depois da principal, cada uma com título próprio (sem linhas = só o título). */
+  sections?: BrandedPdfSection[];
+};
+
+export type BrandedPdfSection = {
+  title: string;
+  subtitle?: string;
+  /** 'heading' = título de bloco (maior); 'group' = faixa de grupo (ex.: uma RM dentro do bloco). */
+  kind?: 'heading' | 'group';
+  columns?: BrandedPdfColumn[];
+  rows?: Record<string, string>[];
 };
 
 /** Largura útil da folha A4 (mm), descontadas as margens — para ajustar colunas à orientação. */
@@ -219,8 +230,62 @@ function drawFooter(doc: jsPDF, footerLabel: string) {
   }
 }
 
+/** Desenha uma tabela extra (título + cabeçalho + linhas), quebrando página quando precisa. */
+function drawSection(
+  doc: jsPDF,
+  yIn: number,
+  section: BrandedPdfSection,
+  novaPagina: () => number
+): number {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const columns = section.columns ?? [];
+  const rows = section.rows ?? [];
+  const heading = section.kind !== 'group';
+  const tituloH = heading ? (section.subtitle ? 14 : 9) : 8;
+  let y = yIn + (heading ? 6 : 3);
+  // Título não fica sozinho no pé da página: precisa caber com o cabeçalho e uma linha.
+  if (y + tituloH + (rows.length ? 18 : 0) > getPageBottom(doc)) y = novaPagina();
+
+  if (heading) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...TEXT_BLACK);
+    doc.text(section.title, MARGIN, y + 4);
+    if (section.subtitle) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...TEXT_MUTED);
+      doc.text(section.subtitle, MARGIN, y + 9);
+    }
+    doc.setFillColor(...BRAND_RED);
+    doc.rect(MARGIN, y + tituloH - 1.5, pageWidth - MARGIN * 2, 0.5, 'F');
+    y += tituloH + 1;
+  } else {
+    doc.setFillColor(...SECTION_BG);
+    doc.setDrawColor(...BORDER);
+    doc.rect(MARGIN, y, pageWidth - MARGIN * 2, tituloH, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...TEXT_BLACK);
+    const sub = section.subtitle ? `   ${section.subtitle}` : '';
+    doc.text(`${section.title}${sub}`, MARGIN + 2, y + 5.3);
+    y += tituloH;
+  }
+
+  if (!rows.length || !columns.length) return y;
+  y = drawTableHeader(doc, y, columns);
+  rows.forEach((row, idx) => {
+    if (y + 10 > getPageBottom(doc)) {
+      y = novaPagina();
+      y = drawTableHeader(doc, y, columns);
+    }
+    y = drawRow(doc, y, columns, row, idx % 2 === 1);
+  });
+  return y;
+}
+
 export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): Promise<void> {
-  const { title, subtitle, filename, columns, rows, footerLabel, note, logoMode = 'dual', orientation = 'landscape' } = options;
+  const { title, subtitle, filename, columns, rows, footerLabel, note, logoMode = 'dual', orientation = 'landscape', sections } = options;
   if (!rows.length) throw new Error('Nenhum registro para exportar');
 
   const generatedAt = new Date();
@@ -270,6 +335,16 @@ export async function exportBrandedPdfTable(options: ExportBrandedPdfOptions): P
     for (const t of linhasNota) {
       doc.text(t, MARGIN, y);
       y += 4;
+    }
+  }
+
+  if (sections?.length) {
+    const novaPagina = () => {
+      doc.addPage();
+      return drawHeader(doc, pageWidth, logo, title, generatedAt, rows.length);
+    };
+    for (const section of sections) {
+      y = drawSection(doc, y, section, novaPagina);
     }
   }
 

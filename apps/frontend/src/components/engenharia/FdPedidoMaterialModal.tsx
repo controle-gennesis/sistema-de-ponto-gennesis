@@ -94,6 +94,8 @@ export interface FdItemPedido {
   materiais?: { materialId: string; materialLabel: string; quantity: number; unit: string; detalhamento?: string }[];
   /** '1:N' e/ou 'unidade' — itens destacados para o gestor. */
   alertas?: string[];
+  /** RM enviada para correção: o item fica livre para um novo pedido pela FD. */
+  emCorrecao?: boolean;
 }
 
 /** Opção da busca de material: código, nome com as palavras buscadas em destaque, unidade e tipo. */
@@ -270,9 +272,21 @@ export function FdPedidoMaterialModal({
   }, [isOpen]);
 
   /** RM em que cada item da FD já entrou — item pedido fica travado (pedido integral, uma vez só). */
+  // Pedido de RM em correção não trava o item (pode ser pedido de novo); fica só como aviso.
   const pedidoPorKey = useMemo(() => {
     const m = new Map<string, FdItemPedido[]>();
-    for (const p of itensPedidos) m.set(p.fdItemKey, [...(m.get(p.fdItemKey) || []), p]);
+    for (const p of itensPedidos) {
+      if (p.emCorrecao) continue;
+      m.set(p.fdItemKey, [...(m.get(p.fdItemKey) || []), p]);
+    }
+    return m;
+  }, [itensPedidos]);
+  const correcaoPorKey = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const p of itensPedidos) {
+      if (!p.emCorrecao || !p.requestNumber) continue;
+      m.set(p.fdItemKey, [...new Set([...(m.get(p.fdItemKey) || []), p.requestNumber])]);
+    }
     return m;
   }, [itensPedidos]);
 
@@ -474,6 +488,7 @@ export function FdPedidoMaterialModal({
   const renderItem = (ins: FdInsumoLine) => {
     const pedidos = pedidoPorKey.get(ins.key) ?? [];
     const rmsDoItem = [...new Set(pedidos.map((p) => p.requestNumber).filter(Boolean))];
+    const rmsEmCorrecao = correcaoPorKey.get(ins.key) ?? [];
     const materiaisPedidos = pedidos.flatMap((p) => p.materiais ?? []);
     const rows = mappings[ins.key] || [];
     const pronto = itemPronto(ins.key);
@@ -529,6 +544,14 @@ export function FdPedidoMaterialModal({
                 title={`Já solicitado em: ${rmsDoItem.join(', ')}`}
               >
                 Solicitado · {rmsDoItem.join(', ')}
+              </span>
+            )}
+            {rmsDoItem.length === 0 && rmsEmCorrecao.length > 0 && (
+              <span
+                className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                title={`A RM ${rmsEmCorrecao.join(', ')} foi enviada para correção: o item está liberado para um novo pedido.`}
+              >
+                Em correção · {rmsEmCorrecao.join(', ')}
               </span>
             )}
             {!analise.travado && (

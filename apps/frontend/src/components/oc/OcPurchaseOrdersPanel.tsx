@@ -5820,8 +5820,9 @@ export function OcPurchaseOrdersPanel({
           <div className="absolute inset-0 bg-black/50" onClick={requestCloseSelectedOrder} />
           <div
             className={`relative my-auto flex w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800 ${
-              selectedOrder.status !== 'IN_REVIEW' && ocDetailTab === 'comentarios'
-                ? 'h-[min(92dvh,calc(100dvh-2rem))]'
+              // Com abas: altura fixa, para o modal não mudar de tamanho ao trocar de aba (o conteúdo rola dentro).
+              selectedOrder.status !== 'IN_REVIEW'
+                ? 'h-[min(85dvh,calc(100dvh-2rem))]'
                 : 'max-h-[min(92dvh,calc(100dvh-2rem))]'
             } ${selectedOrder.status === 'IN_REVIEW' ? 'max-w-2xl' : 'max-w-4xl'}`}
             role="dialog"

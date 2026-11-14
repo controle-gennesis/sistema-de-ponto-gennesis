@@ -15517,7 +15517,10 @@ export function OrcamentoPageView({
 
   /** Quantos itens da FD atual já entraram em alguma RM. */
   const fdItensSolicitados = useMemo(() => {
-    const pedidos = new Set((fdAprovadaRecord?.itensPedidos ?? []).map((p) => p.fdItemKey));
+    // Pedido de RM em correção não conta: o item está liberado para um novo pedido.
+    const pedidos = new Set(
+      (fdAprovadaRecord?.itensPedidos ?? []).filter((p) => !p.emCorrecao).map((p) => p.fdItemKey)
+    );
     return insumosParaPedido.filter((ins) => pedidos.has(ins.key)).length;
   }, [fdAprovadaRecord, insumosParaPedido]);
 
@@ -23762,10 +23765,10 @@ export function OrcamentoPageView({
                         statusAprovacaoAtivo === 'aprovado'
                           ? 'Orçamento e FD já trancados'
                           : podeEnviarFdAprovacao
-                            ? 'Lançar FD e trancar orçamento'
+                            ? 'Lançar FD'
                             : 'Finalize o orçamento antes de lançar a FD'
                       }
-                      aria-label="Lançar FD e trancar orçamento"
+                      aria-label="Lançar FD"
                     >
                       {fdAprovacaoPreparando ? (
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
@@ -23892,7 +23895,7 @@ export function OrcamentoPageView({
         isSaving={fdAprovacaoEnviando}
         title="Lançar ficha de demanda"
         aviso="Ao lançar, o orçamento e a FD ficam trancados: ninguém altera mais. Só o administrador ou quem tem autorização no centro de custo pode destrancar. O pedido de material é liberado logo após o lançamento."
-        textoSalvar="Lançar e trancar"
+        textoSalvar="Lançar"
       />
 
       <FdResultadoPorOcModal
