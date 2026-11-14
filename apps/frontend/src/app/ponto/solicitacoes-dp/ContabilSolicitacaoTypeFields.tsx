@@ -20,6 +20,7 @@ export type ContabilFormRequestType =
   | 'SOLICITACAO_GERAL'
   | 'CONTAB_ADMISSAO'
   | 'CONTAB_AFASTAMENTO'
+  | 'CONTAB_ATESTADO'
   | 'CONTAB_ALTERACAO_FUNCAO'
   | 'CONTAB_ALTERACAO_SALARIAL'
   | 'CONTAB_FERIAS'
@@ -34,6 +35,7 @@ export const CONTABIL_TYPE_LABELS: Record<ContabilFormRequestType, string> = {
   SOLICITACAO_GERAL: 'Solicitação Geral',
   CONTAB_ADMISSAO: 'Admissão',
   CONTAB_AFASTAMENTO: 'Afastamento',
+  CONTAB_ATESTADO: 'Atestados',
   CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
   CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
   CONTAB_FERIAS: 'Férias',
@@ -487,6 +489,12 @@ export function ContabilSolicitacaoTypeFields({
           <DateField label="Data prevista de término" value={text('dataPrevistaTermino')} onChange={set('dataPrevistaTermino')} />
           <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />
         </>
+      );
+      break;
+
+    case 'CONTAB_ATESTADO':
+      fields = (
+        <TextAreaField label="Observações" value={text('observacoes')} onChange={set('observacoes')} placeholder="Informações adicionais (opcional)" />
       );
       break;
 

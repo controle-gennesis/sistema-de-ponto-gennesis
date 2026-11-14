@@ -16,6 +16,7 @@ const CONTABIL_DIRECT_TYPES = [
   'SOLICITACAO_GERAL',
   'CONTAB_ADMISSAO',
   'CONTAB_AFASTAMENTO',
+  'CONTAB_ATESTADO',
   'CONTAB_ALTERACAO_FUNCAO',
   'CONTAB_ALTERACAO_SALARIAL',
   'CONTAB_FERIAS',
@@ -94,6 +95,7 @@ const FIELDS_BY_TYPE: Record<string, FieldDef[]> = {
     { key: 'dataPrevistaTermino', label: 'Data prevista de término', kind: 'date' },
     { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
   ],
+  CONTAB_ATESTADO: [{ key: 'observacoes', label: 'Observações', kind: 'long' }],
   CONTAB_ALTERACAO_FUNCAO: [
     { key: 'employeeId', label: 'Colaborador', kind: 'employee' },
     { key: 'funcaoAtual', label: 'Função atual' },
