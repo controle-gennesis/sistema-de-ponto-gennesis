@@ -31,6 +31,7 @@ import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { DiarioDayStrip } from './DiarioDayStrip';
 
 const PAGE_SIZE = 20;
 
@@ -93,6 +94,12 @@ export default function DiarioObraListPage() {
   const [filterContratoId, setFilterContratoId] = useState('');
   const [filterObraId, setFilterObraId] = useState('');
   const [stage, setStage] = useState<Stage>('all');
+  /** Dia escolhido na faixa de dias ('' = todos). */
+  const [dayFilter, setDayFilter] = useState('');
+  const [monthRef, setMonthRef] = useState(() => {
+    const n = new Date();
+    return { y: n.getFullYear(), m0: n.getMonth() };
+  });
   const [page, setPage] = useState(1);
 
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -155,10 +162,10 @@ export default function DiarioObraListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterContratoId, filterObraId, stage]);
+  }, [debouncedSearch, filterContratoId, filterObraId, stage, dayFilter]);
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, stage, page],
+    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, stage, dayFilter, page],
     queryFn: async () =>
       (
         await api.get('/diario-obra', {
@@ -166,6 +173,8 @@ export default function DiarioObraListPage() {
             search: debouncedSearch || undefined,
             contratoId: filterContratoId || undefined,
             obraId: filterObraId || undefined,
+            from: dayFilter || undefined,
+            to: dayFilter || undefined,
             status: stage === 'all' ? undefined : stage,
             page,
             limit: PAGE_SIZE,
@@ -176,7 +185,7 @@ export default function DiarioObraListPage() {
 
   // Totais de cada etapa, com a busca e os filtros aplicados.
   const { data: statsData, isLoading: loadingStats } = useQuery({
-    queryKey: ['diario-obra-list', 'stats', debouncedSearch, filterContratoId, filterObraId],
+    queryKey: ['diario-obra-list', 'stats', debouncedSearch, filterContratoId, filterObraId, dayFilter],
     queryFn: async () =>
       (
         await api.get('/diario-obra/stats', {
@@ -184,10 +193,18 @@ export default function DiarioObraListPage() {
             search: debouncedSearch || undefined,
             contratoId: filterContratoId || undefined,
             obraId: filterObraId || undefined,
+            from: dayFilter || undefined,
+            to: dayFilter || undefined,
           },
         })
       ).data?.data as Record<Stage, number> | undefined,
   });
+
+  const shiftMonth = (delta: number) =>
+    setMonthRef((m) => {
+      const d = new Date(m.y, m.m0 + delta, 1);
+      return { y: d.getFullYear(), m0: d.getMonth() };
+    });
   const items: DiarioRow[] = listData?.data ?? [];
   const total: number = listData?.pagination?.total ?? 0;
   const totalPages: number = listData?.pagination?.totalPages ?? 1;
@@ -296,6 +313,15 @@ export default function DiarioObraListPage() {
               })}
             </nav>
           </div>
+
+          <DiarioDayStrip
+            year={monthRef.y}
+            month0={monthRef.m0}
+            onShiftMonth={shiftMonth}
+            selected={dayFilter}
+            onSelect={setDayFilter}
+            today={todayIso()}
+          />
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>

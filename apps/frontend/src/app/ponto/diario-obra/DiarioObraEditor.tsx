@@ -844,7 +844,10 @@ function PillToggle<T extends string>({
         {idx >= 0 ? (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 rounded-md bg-white shadow-sm transition-[left] duration-300 ease-out dark:bg-gray-600"
+            className={`pointer-events-none absolute inset-y-0 rounded-md shadow-sm transition-[left] duration-300 ease-out ${
+              // Dia finalizado (somente leitura): a escolha fica em destaque, não "apagada".
+              disabled ? 'bg-red-600 dark:bg-red-500' : 'bg-white dark:bg-gray-600'
+            }`}
             style={{ width: `${100 / n}%`, left: `${(idx * 100) / n}%` }}
           />
         ) : null}
@@ -859,10 +862,14 @@ function PillToggle<T extends string>({
               aria-pressed={active}
               disabled={disabled}
               onClick={() => onChange(o.value)}
-              className={`relative z-10 inline-flex h-9 items-center justify-center rounded-md px-2.5 text-sm outline-none transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
-                active
-                  ? 'font-medium text-red-600 dark:text-red-400'
-                  : 'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              className={`relative z-10 inline-flex h-9 items-center justify-center rounded-md px-2.5 text-sm outline-none transition-colors duration-200 disabled:cursor-default ${
+                disabled
+                  ? active
+                    ? 'font-semibold text-white'
+                    : 'font-normal text-gray-400 dark:text-gray-500'
+                  : active
+                    ? 'font-medium text-red-600 dark:text-red-400'
+                    : 'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               }`}
             >
               {o.label}
@@ -895,7 +902,13 @@ function WeatherPeriod({
         onChange={(v) => onChange({ ...value, sky: v === value.sky ? null : v })}
         options={SKY_OPTIONS.map(({ value: v, Icon: SkyIcon, label }) => ({
           value: v,
-          label: <SkyIcon className="h-5 w-5" aria-hidden />,
+          // Ícone + nome, para a escolha ficar clara sem precisar adivinhar o ícone.
+          label: (
+            <span className="inline-flex items-center gap-1.5">
+              <SkyIcon className="h-5 w-5" aria-hidden />
+              <span>{label}</span>
+            </span>
+          ),
           title: label,
           ariaLabel: `${title}: ${label}`,
         }))}
