@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FluigListSkeleton } from './FluigListSkeleton';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
@@ -2818,16 +2819,7 @@ export function FluigSolicitacoesPage({
           </Card>
         )}
 
-        {loadingData && (
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex flex-col items-center justify-center py-12 gap-4">
-                <Loader2 className="w-12 h-12 animate-spin text-red-600" />
-                <p className="text-gray-500 dark:text-gray-400">Carregando processos...</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {loadingData && <FluigListSkeleton />}
 
         {!loadingData && (
           <>
