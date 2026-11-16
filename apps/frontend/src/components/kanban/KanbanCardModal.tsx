@@ -273,6 +273,11 @@ function describeCardActivity(
       };
     case 'CHECKLIST_REMOVED':
       return { text: `removeu a tarefa “${str('title')}”`, icon: 'trash' };
+    case 'ATTACHMENT_ADDED':
+      return {
+        text: d.isLink ? `adicionou o link “${str('fileName')}”` : `adicionou o anexo “${str('fileName')}”`,
+        icon: 'attachment',
+      };
     case 'ATTACHMENT_REMOVED':
       return {
         text: d.isLink ? `removeu o link “${str('fileName')}”` : `excluiu o anexo “${str('fileName')}”`,
