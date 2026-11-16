@@ -282,6 +282,19 @@ export class DriveController {
     }
   }
 
+  /** Baixa a pasta inteira como .zip. */
+  static async downloadFolder(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { buffer, name } = await driveService.buildFolderZip(req.params.id, req.user!.id);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}.zip`);
+      res.send(buffer);
+    } catch (err: any) {
+      console.error('[drive] erro ao baixar pasta:', err);
+      res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
   static async previewFile(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;

@@ -15,7 +15,10 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { DriveFile, DriveFolder, DriveFolderSharePermission } from '@prisma/client';
+import type JSZipType from 'jszip';
 import { prisma } from '../lib/prisma';
+
+type JSZipFolder = InstanceType<typeof JSZipType>;
 import { s3BodyToBuffer } from '../lib/awsS3Compat';
 
 /** Limite padrão: 5 GB (vídeos longos). Override via DRIVE_MAX_FILE_SIZE (bytes). */
@@ -713,6 +716,49 @@ export class DriveService {
       name: file.name || file.originalName,
       size: file.size,
     };
+  }
+
+  /** Monta um .zip com a pasta inteira (subpastas e arquivos, sem itens da lixeira). */
+  async buildFolderZip(
+    folderId: string,
+    userId: string,
+    maxBytes = 500 * 1024 * 1024,
+  ): Promise<{ buffer: Buffer; name: string }> {
+    if (!(await this.canUserAccessFolder(userId, folderId))) {
+      throw new Error('Pasta não encontrada ou sem permissão');
+    }
+    const root = await prisma.driveFolder.findUnique({ where: { id: folderId } });
+    if (!root || root.trashedAt) throw new Error('Pasta não encontrada');
+
+    const safe = (n: string) => n.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sem-nome';
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    let total = 0;
+
+    const walk = async (id: string, dir: JSZipFolder) => {
+      const files = await prisma.driveFile.findMany({ where: { folderId: id, trashedAt: null } });
+      const usados = new Set<string>();
+      for (const f of files) {
+        total += Number(f.size);
+        if (total > maxBytes) {
+          throw new Error('Pasta grande demais para baixar de uma vez (limite de 500 MB)');
+        }
+        const result = await this.s3.send(
+          new GetObjectCommand({ Bucket: this.bucketName, Key: f.s3Key }),
+        );
+        if (!result.Body) continue;
+        let nome = safe(f.name || f.originalName);
+        for (let i = 2; usados.has(nome); i++) nome = `${i}-${safe(f.name || f.originalName)}`;
+        usados.add(nome);
+        dir.file(nome, await s3BodyToBuffer(result.Body));
+      }
+      const subs = await prisma.driveFolder.findMany({ where: { parentId: id, trashedAt: null } });
+      for (const s of subs) await walk(s.id, dir.folder(safe(s.name))!);
+    };
+
+    await walk(folderId, zip.folder(safe(root.name))!);
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+    return { buffer, name: safe(root.name) };
   }
 
   private async assertUserCanAccessFile(fileId: string, userId: string): Promise<DriveFile> {

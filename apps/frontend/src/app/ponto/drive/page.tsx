@@ -234,6 +234,8 @@ function DrivePageContent() {
 
   // Modais
   const [showNewFolder, setShowNewFolder] = useState(false);
+  /** Download de pasta em andamento (faixa fixa na tela). */
+  const [baixandoPasta, setBaixandoPasta] = useState<{ nome: string; texto: string; pct?: number } | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
 
   const [renameTarget, setRenameTarget] = useState<{
@@ -1335,6 +1337,47 @@ function DrivePageContent() {
     }
   };
 
+  const downloadFolder = async (folder: DriveFolder) => {
+    if (baixandoPasta) {
+      toast('Já existe um download de pasta em andamento');
+      return;
+    }
+    setBaixandoPasta({ nome: folder.name, texto: 'Compactando arquivos… pode demorar um pouco' });
+    try {
+      const res = await api.get(`/drive/folders/${folder.id}/download`, {
+        responseType: 'blob',
+        timeout: 0,
+        onDownloadProgress: (ev) => {
+          const mb = (ev.loaded / (1024 * 1024)).toFixed(1);
+          const p = ev.total ? Math.round((ev.loaded / ev.total) * 100) : undefined;
+          setBaixandoPasta({
+            nome: folder.name,
+            texto: `Recebendo arquivo · ${mb} MB${p !== undefined ? ` · ${p}%` : ''}`,
+            pct: p,
+          });
+        },
+      });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${folder.name}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast.success('Download concluído');
+    } catch (e: any) {
+      let msg = 'Erro ao baixar a pasta';
+      try {
+        const txt = await (e?.response?.data as Blob | undefined)?.text?.();
+        if (txt) msg = JSON.parse(txt).error || msg;
+      } catch {
+        /* mantém mensagem padrão */
+      }
+      toast.error(msg);
+    } finally {
+      setBaixandoPasta(null);
+    }
+  };
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const openFolder = (id: string) => {
@@ -1393,6 +1436,43 @@ function DrivePageContent() {
 
   return (
     <MainLayout userRole={user?.role} userName={user?.name} onLogout={handleLogout}>
+      {baixandoPasta && (
+        <div className="pointer-events-auto fixed bottom-4 right-4 z-50 w-[min(100vw-2rem,340px)] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-900">
+          <style>{`@keyframes drive-dl-slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
+          <div className="px-3 py-2.5">
+            <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+              Baixando pasta
+            </p>
+          </div>
+          <div className="border-t border-gray-100 px-3 pb-3 pt-2 dark:border-gray-800">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Folder className="h-7 w-7 shrink-0 text-gray-400" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-gray-700 dark:text-gray-200" title={baixandoPasta.nome}>
+                  {baixandoPasta.nome}
+                </p>
+                <p className="truncate text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                  {baixandoPasta.texto}
+                </p>
+              </div>
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-red-500" />
+            </div>
+            <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+              {baixandoPasta.pct !== undefined ? (
+                <div
+                  className="h-full rounded-full bg-red-500 transition-all duration-300"
+                  style={{ width: `${baixandoPasta.pct}%` }}
+                />
+              ) : (
+                <div
+                  className="h-full w-1/3 rounded-full bg-red-500"
+                  style={{ animation: 'drive-dl-slide 1.2s ease-in-out infinite' }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Zona de drag-and-drop global */}
       <div
         className="min-h-full"
@@ -1618,6 +1698,7 @@ function DrivePageContent() {
             files={files}
             onOpenFolder={openFolder}
             onDownload={downloadFile}
+            onDownloadFolder={downloadFolder}
             onPreview={setPreviewFile}
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
@@ -1649,6 +1730,7 @@ function DrivePageContent() {
             files={files}
             onOpenFolder={openFolder}
             onDownload={downloadFile}
+            onDownloadFolder={downloadFolder}
             onPreview={setPreviewFile}
             onRename={openRename}
             onDelete={(type, id, name) => setDeleteTarget({ type, id, name })}
@@ -2132,6 +2214,7 @@ function GridView({
   files,
   onOpenFolder,
   onDownload,
+  onDownloadFolder,
   onPreview,
   onRename,
   onDelete,
@@ -2155,6 +2238,7 @@ function GridView({
   files: DriveFile[];
   onOpenFolder: (id: string) => void;
   onDownload: (f: DriveFile) => void;
+  onDownloadFolder?: (f: DriveFolder) => void;
   onPreview: (f: DriveFile) => void;
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
@@ -2293,6 +2377,14 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                           >
                             <Folder className="h-4 w-4" /> Abrir
                           </button>
+                          {onDownloadFolder && (
+                            <button
+                              onClick={() => { setOpenMenuId(null); onDownloadFolder(folder); }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <Download className="h-4 w-4" /> Baixar
+                            </button>
+                          )}
                           {canManage(folder) && onToggleStar && (
                             <button
                               onClick={() => {

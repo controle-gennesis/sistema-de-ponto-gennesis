@@ -710,7 +710,6 @@ export function FichaDemandaDetailModal({
             {formatCurrencyDisplay(record.faturamentoEstimado)}
           </Field>
           <Field label="Custo estimado">{formatCurrencyDisplay(record.custoEstimado)}</Field>
-          <Field label="Data/hora">{formatDateTime(record.dataHora)}</Field>
           <Field label="Status">{fdStatusLabel(record)}</Field>
           <Field label="Status compras">{purchaseStatusLabel(record.purchaseStatus)}</Field>
           {record.purchaseStatus === 'CANCELLED' && record.purchaseStatusUpdaterNome ? (
@@ -727,6 +726,9 @@ export function FichaDemandaDetailModal({
           <Field label="Criada em">{formatDateTime(record.createdAt)}</Field>
           {record.managerApproverNome ? (
             <Field label="Aprovado por">{record.managerApproverNome}</Field>
+          ) : null}
+          {record.managerApprovedAt ? (
+            <Field label="Aprovada em">{formatDateTime(record.managerApprovedAt)}</Field>
           ) : null}
           {record.managerApprovalComment ? (
             <Field label="Comentário da aprovação">{record.managerApprovalComment}</Field>

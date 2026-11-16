@@ -65,6 +65,7 @@ type Props = {
   files: DriveFile[];
   onOpenFolder: (id: string) => void;
   onDownload: (f: DriveFile) => void | Promise<void>;
+  onDownloadFolder?: (f: DriveFolder) => void | Promise<void>;
   onPreview: (f: DriveFile) => void;
   onRename: (type: 'folder' | 'file', id: string, name: string) => void;
   onDelete: (type: 'folder' | 'file', id: string, name: string) => void;
@@ -241,6 +242,7 @@ export function DriveListView({
   files,
   onOpenFolder,
   onDownload,
+  onDownloadFolder,
   onPreview,
   onRename,
   onDelete,
@@ -422,6 +424,16 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                       >
                         <Folder className="h-4 w-4" /> Abrir
                       </MenuItem>
+                      {onDownloadFolder && (
+                        <MenuItem
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            onDownloadFolder(folder);
+                          }}
+                        >
+                          <Download className="h-4 w-4" /> Baixar
+                        </MenuItem>
+                      )}
                       {canManage(folder) && onToggleStar && (
                         <MenuItem
                           onClick={() => {
