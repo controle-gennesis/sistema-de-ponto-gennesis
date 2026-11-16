@@ -346,6 +346,44 @@ router.put('/:obraId/:date', async (req: AuthRequest, res, next) => {
   }
 });
 
+/**
+ * Define ou troca só a OS do diário (SE e Pasta). Vale também para diário finalizado: é dado de identificação,
+ * não muda o conteúdo do relatório. A OS precisa ser uma das OS do contrato da obra.
+ */
+router.patch('/:obraId/:date/os', async (req: AuthRequest, res, next) => {
+  try {
+    const { obraId, date } = req.params;
+    if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+    const row = await prisma.diarioObra.findUnique({
+      where: { obraId_date: { obraId, date } },
+      select: { id: true, obra: { select: { contratoId: true } } },
+    });
+    if (!row) throw createError('Diário não encontrado', 404);
+    const divSe = str(req.body?.osDivSe, 80);
+    const folder = str(req.body?.osFolder, 80);
+    if (divSe || folder) {
+      const exists = await prisma.pleito.findFirst({
+        where: {
+          updatedContractId: row.obra.contratoId,
+          divSe: { equals: divSe, mode: 'insensitive' },
+          ...(folder
+            ? { folderNumber: { equals: folder, mode: 'insensitive' as const } }
+            : { OR: [{ folderNumber: null }, { folderNumber: '' }] }),
+        },
+        select: { id: true },
+      });
+      if (!exists) throw createError('OS não encontrada neste contrato', 400);
+    }
+    const updated = await prisma.diarioObra.update({
+      where: { id: row.id },
+      data: { osDivSe: divSe || null, osFolder: folder || null, updatedById: req.user?.id ?? null },
+    });
+    res.json({ success: true, data: updated });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** Finaliza o RDO: depois disso ele só pode ser alterado se for reaberto. */
 router.post('/:obraId/:date/finalize', async (req: AuthRequest, res, next) => {
   try {
