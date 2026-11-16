@@ -1103,6 +1103,7 @@ export function DiarioObraEditor({
       await exportDiarioObraPdf({
         obraName: obra?.name ?? '',
         contratoName: contratoLabel,
+        osLabel,
         dateIso: selected,
         weekday: WEEKDAY_FULL[new Date(parseIso(selected).y, parseIso(selected).m0, parseIso(selected).d).getDay()],
         finalized: locked,

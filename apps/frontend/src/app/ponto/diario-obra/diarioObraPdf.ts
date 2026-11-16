@@ -10,6 +10,8 @@ type PhotoRef = { url?: string; key?: string; name?: string };
 export type DiarioObraPdfInput = {
   obraName: string;
   contratoName: string;
+  /** OS escolhida ao criar o diário (ex.: "AD-725 - 1"); vazia em diários antigos. */
+  osLabel?: string;
   dateIso: string;
   weekday: string;
   finalized: boolean;
@@ -193,7 +195,8 @@ export async function exportDiarioObraPdf(input: DiarioObraPdfInput): Promise<vo
       ? { text: 'Finalizado', color: GREEN }
       : { text: 'Em andamento', color: AMBER };
 
-  const infoH = 28;
+  // Com OS, o quadro ganha uma terceira linha na coluna da esquerda.
+  const infoH = input.osLabel ? 35 : 28;
   doc.setFillColor(...SOFT);
   doc.setDrawColor(...BORDER);
   doc.roundedRect(MARGIN, y, contentW, infoH, 2.5, 2.5, 'FD');
@@ -208,6 +211,11 @@ export async function exportDiarioObraPdf(input: DiarioObraPdfInput): Promise<vo
   label('Contrato', MARGIN + 5, y + 18);
   setText(9.5, false, TEXT);
   doc.text(input.contratoName || '—', MARGIN + 5, y + 22.2, { maxWidth: colW - 10 });
+  if (input.osLabel) {
+    label('OS', MARGIN + 5, y + 28);
+    setText(9.5, false, TEXT);
+    doc.text(input.osLabel, MARGIN + 5, y + 32.2, { maxWidth: colW - 10 });
+  }
   label('Data', MARGIN + colW + 5, y + 6.5);
   setText(11.5, true, TEXT);
   doc.text(brDate(input.dateIso), MARGIN + colW + 5, y + 12.5);
