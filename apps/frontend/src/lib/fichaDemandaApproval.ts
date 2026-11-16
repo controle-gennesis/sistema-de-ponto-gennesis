@@ -197,6 +197,8 @@ export interface FichaDemandaApprovalRecord {
   managerRejectionReason?: string | null;
   managerRejectionComment?: string | null;
   managerApproverNome?: string | null;
+  /** Momento em que o gestor aprovou (ISO). */
+  managerApprovedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   orcamentoId?: string | null;
