@@ -52,7 +52,15 @@ export type RootStackParamList = {
   Pncp: undefined;
   Agenda: { mode?: 'agenda' | 'tasks' } | undefined;
   DiarioObra: undefined;
-  DiarioObraEditor: { obraId: string; date: string; obraName?: string; contratoName?: string };
+  DiarioObraEditor: {
+    obraId: string;
+    date: string;
+    obraName?: string;
+    contratoName?: string;
+    /** OS escolhida na criação (só vale se o diário ainda não existir). */
+    osDivSe?: string;
+    osFolder?: string;
+  };
   KanbanBoards: undefined;
   KanbanBoard: { departmentKey?: string; title?: string };
   KanbanCard: { cardId: string; departmentKey?: string };

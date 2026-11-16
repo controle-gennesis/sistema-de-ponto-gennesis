@@ -69,6 +69,7 @@ import {
   todayIso,
   uploadRdoPhoto,
   fetchRdo,
+  osLabelOf,
   type Period,
   type Photo,
   type Rdo,
@@ -156,7 +157,13 @@ export default function DiarioObraEditorScreen() {
     fetchRdo(obraId, date)
       .then((row) => {
         if (cancelled) return;
-        setRdo(fromApi(row));
+        const loaded = fromApi(row);
+        // Diário novo (ainda não existe no servidor): leva a OS escolhida na criação.
+        if (!row && route.params.osDivSe !== undefined) {
+          loaded.osDivSe = route.params.osDivSe;
+          loaded.osFolder = route.params.osFolder ?? '';
+        }
+        setRdo(loaded);
         setFinalizedAt(row?.finalizedAt ?? null);
         setLoadedKey(`${obraId}|${date}`);
       })
@@ -167,7 +174,7 @@ export default function DiarioObraEditorScreen() {
     return () => {
       cancelled = true;
     };
-  }, [obraId, date]);
+  }, [obraId, date, route.params.osDivSe, route.params.osFolder]);
 
   useEffect(() => load(), [load]);
 
@@ -697,6 +704,11 @@ export default function DiarioObraEditorScreen() {
                 {contratoName ? (
                   <Text style={styles.obraSub} numberOfLines={1}>
                     {contratoName}
+                  </Text>
+                ) : null}
+                {osLabelOf(rdo.osDivSe, rdo.osFolder) ? (
+                  <Text style={[styles.obraSub, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
+                    OS {osLabelOf(rdo.osDivSe, rdo.osFolder)}
                   </Text>
                 ) : null}
               </View>

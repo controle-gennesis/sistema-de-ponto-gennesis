@@ -2210,6 +2210,16 @@ async function ensureOcsBoletoPixExtrasTable(prisma: PrismaClient): Promise<void
   `);
 }
 
+/** OS (SE e Pasta) do diário de obra: a tabela vem das migrations; aqui só garante as colunas novas. */
+async function ensureDiarioObraOsColumns(prisma: PrismaClient): Promise<void> {
+  await prisma
+    .$executeRawUnsafe(`ALTER TABLE "diarios_obra" ADD COLUMN IF NOT EXISTS "osDivSe" TEXT;`)
+    .catch(() => undefined);
+  await prisma
+    .$executeRawUnsafe(`ALTER TABLE "diarios_obra" ADD COLUMN IF NOT EXISTS "osFolder" TEXT;`)
+    .catch(() => undefined);
+}
+
 async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "obras" (
@@ -3570,6 +3580,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureJuridicoProcessoAdvogadoColumns(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);
     await ensureObrasTable(prisma);
+    await ensureDiarioObraOsColumns(prisma);
     await ensureEmpreiteirosTable(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);

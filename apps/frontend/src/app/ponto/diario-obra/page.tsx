@@ -58,9 +58,16 @@ type DiarioRow = {
   activities: number;
   workers: number;
   occurrences: number;
+  /** OS escolhida ao criar o diário ('' = diário antigo, sem OS). */
+  osDivSe?: string;
+  osFolder?: string;
+  osLabel?: string;
   updatedAt: string;
   updatedByName: string;
 };
+
+type OsOption = { divSe: string; folderNumber: string; label: string; description: string };
+const osKeyOf = (o: { divSe: string; folderNumber: string }) => `${o.divSe}|${o.folderNumber}`;
 
 type ContractOption = { id: string; name: string; number?: string };
 type ObraOption = { id: string; name: string; contratoId: string; isActive?: boolean };
@@ -106,6 +113,7 @@ export default function DiarioObraListPage() {
   const [showForm, setShowForm] = useState(false);
   const [formContratoId, setFormContratoId] = useState('');
   const [formObraId, setFormObraId] = useState('');
+  const [formOsKey, setFormOsKey] = useState('');
   const [formDate, setFormDate] = useState(todayIso());
   const [creating, setCreating] = useState(false);
   const [deleteRow, setDeleteRow] = useState<DiarioRow | null>(null);
@@ -222,9 +230,32 @@ export default function DiarioObraListPage() {
     onError: () => toast.error('Não foi possível excluir o diário de obra.'),
   });
 
+  // OS do contrato escolhido (SE e Pasta dos pleitos), para a pessoa escolher ao criar o diário.
+  const { data: osOptionsData, isLoading: loadingOs } = useQuery({
+    queryKey: ['diario-obra-os', formContratoId],
+    enabled: showForm && !!formContratoId,
+    queryFn: async () =>
+      (await api.get('/diario-obra/os-options', { params: { contratoId: formContratoId } })).data?.data as
+        | OsOption[]
+        | undefined,
+  });
+  const osOptions: OsOption[] = osOptionsData ?? [];
+  const osSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        osOptions.map((o) => ({
+          value: osKeyOf(o),
+          label: o.description ? `${o.label} - ${o.description}` : o.label,
+          searchText: `${o.label} ${o.description}`,
+        })),
+      ),
+    [osOptions],
+  );
+
   const openForm = () => {
     setFormContratoId(filterContratoId);
     setFormObraId(filterObraId);
+    setFormOsKey('');
     setFormDate(todayIso());
     setCreating(false);
     setShowForm(true);
@@ -233,6 +264,12 @@ export default function DiarioObraListPage() {
   const submitForm = async () => {
     if (!formContratoId || !formObraId || !formDate) {
       toast.error('Selecione o contrato, a obra e a data.');
+      return;
+    }
+    // Contrato com OS cadastradas: a OS é obrigatória.
+    const osEscolhida = osOptions.find((o) => osKeyOf(o) === formOsKey);
+    if (osOptions.length > 0 && !osEscolhida) {
+      toast.error('Selecione a OS do diário.');
       return;
     }
     setCreating(true);
@@ -244,7 +281,11 @@ export default function DiarioObraListPage() {
         setCreating(false);
         return;
       }
-      await api.put(`/diario-obra/${formObraId}/${formDate}`, { noActivity: false });
+      await api.put(`/diario-obra/${formObraId}/${formDate}`, {
+        noActivity: false,
+        osDivSe: osEscolhida?.divSe ?? '',
+        osFolder: osEscolhida?.folderNumber ?? '',
+      });
       toast.success('Diário de obra criado.');
       setShowForm(false);
       setCreating(false);
@@ -440,6 +481,11 @@ export default function DiarioObraListPage() {
                               <span className="block text-xs text-gray-500 dark:text-gray-400">
                                 {it.contratoName || '—'}
                               </span>
+                              {it.osLabel ? (
+                                <span className="mt-0.5 block text-xs font-medium text-red-600 dark:text-red-400">
+                                  OS {it.osLabel}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
                               <span
@@ -598,6 +644,7 @@ export default function DiarioObraListPage() {
                   onChange={(v) => {
                     setFormContratoId(v);
                     setFormObraId('');
+                    setFormOsKey('');
                   }}
                   options={contractOptions}
                   placeholder="Selecione o contrato"
@@ -615,6 +662,29 @@ export default function DiarioObraListPage() {
                   emptyOptionLabel="Selecione a obra"
                   emptyOptionsMessage="Nenhuma obra cadastrada neste contrato"
                   disabled={!formContratoId}
+                  matchTriggerWidth
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS{osOptions.length > 0 ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
+                </label>
+                <StringSingleSelectDropdown
+                  value={formOsKey}
+                  onChange={setFormOsKey}
+                  options={osSelectOptions}
+                  placeholder={
+                    !formContratoId
+                      ? 'Selecione primeiro o contrato'
+                      : loadingOs
+                        ? 'Carregando OS...'
+                        : osOptions.length === 0
+                          ? 'Nenhuma OS cadastrada neste contrato'
+                          : 'Selecione a OS'
+                  }
+                  emptyOptionLabel="Selecione a OS"
+                  emptyOptionsMessage="Nenhuma OS cadastrada neste contrato"
+                  disabled={!formContratoId || osOptions.length === 0}
                   matchTriggerWidth
                 />
               </div>

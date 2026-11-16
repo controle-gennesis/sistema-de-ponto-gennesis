@@ -959,6 +959,8 @@ export function DiarioObraEditor({
   const [modal, setModal] = useState<{ section: SectionKey; row: Row | null } | null>(null);
   const [noActivityOpen, setNoActivityOpen] = useState(false);
   const [finalizedAt, setFinalizedAt] = useState<string | null>(null);
+  /** OS escolhida ao criar o diário (SE e Pasta), só para mostrar. */
+  const [osLabel, setOsLabel] = useState('');
   const [confirm, setConfirm] = useState<null | 'delete' | 'finalize' | 'reopen'>(null);
   const [busy, setBusy] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -1044,6 +1046,11 @@ export function DiarioObraEditor({
         if (cancelled) return;
         setRdo(fromApi(res.data?.data));
         setFinalizedAt(res.data?.data?.finalizedAt ?? null);
+        {
+          const d = String(res.data?.data?.osDivSe ?? '').replace(/^(OS|SE)\s+/i, '').trim();
+          const f = String(res.data?.data?.osFolder ?? '').trim();
+          setOsLabel(d ? (f ? `${d} - ${f}` : d) : '');
+        }
         setLoadedKey(`${obraId}|${selected}`);
       })
       .catch(() => {
@@ -1442,6 +1449,7 @@ export function DiarioObraEditor({
                         </h3>
                         <p className="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
                           {brDate(selected)} · {WEEKDAY_FULL[selWeekday]}
+                          {osLabel ? ` · OS ${osLabel}` : ''}
                           {locked ? ' · Finalizado' : saveState === 'error' ? ' · Erro ao salvar' : ''}
                         </p>
                       </div>

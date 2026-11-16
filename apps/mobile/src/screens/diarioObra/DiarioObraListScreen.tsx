@@ -39,6 +39,7 @@ import {
   shiftIso,
   todayIso,
   type ObraOption,
+  type OsOption,
   type RdoListItem,
 } from '../../services/diarioObra';
 
@@ -147,16 +148,23 @@ export default function DiarioObraListScreen() {
   const pickDay = (iso: string) => setFilters((f) => ({ ...f, from: iso, to: iso }));
   const clearDay = () => setFilters((f) => ({ ...f, from: '', to: '' }));
 
-  const openEditor = (p: { obraId: string; date: string; obraName?: string; contratoName?: string }) =>
-    navigation.navigate('DiarioObraEditor', p);
+  const openEditor = (p: {
+    obraId: string;
+    date: string;
+    obraName?: string;
+    contratoName?: string;
+    osDivSe?: string;
+    osFolder?: string;
+  }) => navigation.navigate('DiarioObraEditor', p);
 
-  const onNew = (obra: ObraOption, date: string) => {
+  const onNew = (obra: ObraOption, date: string, os: OsOption | null) => {
     setNewOpen(false);
     openEditor({
       obraId: obra.id,
       date,
       obraName: obra.name,
       contratoName: obra.contratoNome ?? obra.contrato?.name ?? '',
+      ...(os ? { osDivSe: os.divSe, osFolder: os.folderNumber } : {}),
     });
   };
 
@@ -207,6 +215,11 @@ export default function DiarioObraListScreen() {
             {item.contratoName ? (
               <Text style={styles.cardSub} numberOfLines={1}>
                 {item.contratoName}
+              </Text>
+            ) : null}
+            {item.osLabel ? (
+              <Text style={[styles.cardSub, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
+                OS {item.osLabel}
               </Text>
             ) : null}
           </View>

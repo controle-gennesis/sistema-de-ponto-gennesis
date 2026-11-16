@@ -23,6 +23,9 @@ export type Rdo = {
   materials: Row[];
   occurrences: Row[];
   notes: Row[];
+  /** OS escolhida ao criar o diário (SE e Pasta); vazia em diários antigos. */
+  osDivSe?: string;
+  osFolder?: string;
 };
 
 export type SectionKey =
@@ -72,9 +75,22 @@ export type RdoListItem = {
   activities: number;
   workers: number;
   occurrences: number;
+  osDivSe?: string;
+  osFolder?: string;
+  osLabel?: string;
   updatedAt: string;
   updatedByName: string;
 };
+
+export type OsOption = { divSe: string; folderNumber: string; label: string; description: string };
+
+/** Rótulo da OS como no sistema: "AD-725 - 1" (SE sem o prefixo OS/SE, mais a Pasta, se houver). */
+export function osLabelOf(divSe?: string | null, folder?: string | null): string {
+  const d = String(divSe ?? '').replace(/^(OS|SE)\s+/i, '').trim();
+  if (!d) return '';
+  const f = String(folder ?? '').trim();
+  return f ? `${d} - ${f}` : d;
+}
 
 export type ObraOption = {
   id: string;
@@ -347,6 +363,8 @@ export function fromApi(row: any): Rdo {
     materials: withId(c.materials).map((m) => (m.unit === 'unidade' ? { ...m, unit: 'un' } : m)),
     occurrences: withId(c.occurrences),
     notes: withId(c.notes),
+    osDivSe: String(row.osDivSe ?? ''),
+    osFolder: String(row.osFolder ?? ''),
   };
 }
 
@@ -362,6 +380,8 @@ export function toApi(r: Rdo) {
     materials: r.materials,
     occurrences: r.occurrences,
     notes: r.notes,
+    // A OS só vai no corpo quando conhecida (diário novo ou carregado do servidor).
+    ...(r.osDivSe !== undefined ? { osDivSe: r.osDivSe, osFolder: r.osFolder ?? '' } : {}),
   };
 }
 
@@ -394,6 +414,12 @@ export async function fetchRdoList(params: {
     totalPages: Number(json?.pagination?.totalPages ?? 1),
     total: Number(json?.pagination?.total ?? 0),
   };
+}
+
+/** OS (SE e Pasta) de um contrato, para escolher ao criar o diário. */
+export async function fetchOsOptions(contratoId: string): Promise<OsOption[]> {
+  const json = await readJson(await api.get(`/api/diario-obra/os-options?contratoId=${encodeURIComponent(contratoId)}`));
+  return (json?.data ?? []) as OsOption[];
 }
 
 export async function fetchObras(): Promise<ObraOption[]> {
