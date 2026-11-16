@@ -15,7 +15,12 @@ import {
   Users,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { folderDropProps, startDriveItemDrag, type DriveDragItem } from '@/components/drive/driveItemDrag';
+import {
+  folderDropProps,
+  startDriveItemDrag,
+  type DriveDragItem,
+  type FolderFileDrop,
+} from '@/components/drive/driveItemDrag';
 import type { SelectMods } from '@/components/drive/driveSelection';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import { DriveHoverActions } from '@/components/drive/DriveFilePreviewModal';
@@ -76,6 +81,8 @@ type Props = {
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
   onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  /** Arquivos de fora soltos em cima de uma pasta. */
+  fileDrop?: FolderFileDrop;
   /** Itens selecionados (chaves `folder-ID` / `file-ID`). */
   selectedKeys: Set<string>;
   onSelect: (key: string, mods: SelectMods) => void;
@@ -252,6 +259,7 @@ export function DriveListView({
   onRestore,
   onMove,
   onDropInto,
+  fileDrop,
   selectedKeys,
   onSelect,
   onClearSelection,
@@ -335,7 +343,7 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                 onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
               }}
               onDragEnd={() => onDragStateChange(null)}
-              {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
+              {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo, fileDrop) : {})}
               onClick={(e) => {
                 e.stopPropagation();
                 setOpenMenuId(null);

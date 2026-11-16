@@ -821,11 +821,10 @@ body::-webkit-scrollbar:vertical {
     background-color 0.2s ease,
     box-shadow 0.22s ease,
     border-color 0.2s ease;
-  /* camada própria: evita serrilhado/corte nas bordas arredondadas durante a escala */
-  will-change: transform;
-  backface-visibility: hidden;
 }
 
+/* Sem `will-change`/`backface-visibility` aqui: manter o cartão numa camada própria deixava o texto
+   (nomes de pastas e arquivos) levemente borrado. O navegador já cria a camada sozinho durante a animação. */
 .drive-item-card:hover {
   transform: scale(1.03);
   box-shadow: 0 10px 22px -10px rgba(15, 23, 42, 0.22);

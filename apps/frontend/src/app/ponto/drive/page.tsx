@@ -62,6 +62,7 @@ import {
   isDriveItemDrag,
   startDriveItemDrag,
   type DriveDragItem,
+  type FolderFileDrop,
 } from '@/components/drive/driveItemDrag';
 import { FolderAppearanceModal } from '@/components/drive/FolderAppearanceModal';
 import { FolderIconTile } from '@/components/drive/folderAppearance';
@@ -1160,7 +1161,7 @@ function DrivePageContent() {
   );
 
   const uploadFiles = useCallback(
-    async (droppedAll: DriveDroppedFile[]) => {
+    async (droppedAll: DriveDroppedFile[], destFolderId?: string) => {
       if (droppedAll.length === 0) {
         toast.error('Nenhum arquivo encontrado. Se arrastou uma pasta, tente de novo.');
         return;
@@ -1170,6 +1171,8 @@ function DrivePageContent() {
       const existingByName = new Map(filesRef.current.map((f) => [f.name.trim().toLowerCase(), f.id]));
       const replaceByFile = new Map<File, string>();
       for (const d of droppedAll) {
+        // Enviando para outra pasta (solto em cima dela): os nomes dela não estão carregados, então não há troca.
+        if (destFolderId !== undefined) break;
         if (d.relativePath.replace(/\\/g, '/').includes('/')) continue;
         const existingId = existingByName.get(d.file.name.trim().toLowerCase());
         if (existingId) replaceByFile.set(d.file, existingId);
@@ -1189,7 +1192,7 @@ function DrivePageContent() {
         }
       }
 
-      const rootFolderId = currentFolderId;
+      const rootFolderId = destFolderId ?? currentFolderId;
       /** path relativo da pasta (sem o nome do arquivo) → id no Drive */
       const folderIdByPath = new Map<string, string | undefined>();
       folderIdByPath.set('', rootFolderId);
@@ -1318,6 +1321,35 @@ function DrivePageContent() {
       }
     },
     [uploadFiles, canWriteInCurrentFolder],
+  );
+
+  /** Arquivo de fora solto em cima de uma pasta: envia para essa pasta. */
+  const handleDropOnFolder = useCallback(
+    async (e: React.DragEvent, folderId: string) => {
+      setIsDraggingOver(false);
+      if (!canWriteInCurrentFolder) {
+        toast.error('Não é possível enviar arquivos nesta pasta (somente leitura).');
+        return;
+      }
+      try {
+        const files = await collectFilesFromDataTransfer(e.dataTransfer);
+        await uploadFiles(files, folderId);
+      } catch {
+        toast.error('Não foi possível ler o que foi arrastado. Tente novamente.');
+      }
+    },
+    [uploadFiles, canWriteInCurrentFolder],
+  );
+
+  /** Liga as pastas das duas vistas ao envio por arrastar; some o aviso geral enquanto está sobre uma pasta. */
+  const folderFileDrop = useMemo(
+    () => ({
+      onDropFiles: (e: React.DragEvent, folderId: string) => void handleDropOnFolder(e, folderId),
+      onHover: (folderId: string | null) => {
+        if (folderId) setIsDraggingOver(false);
+      },
+    }),
+    [handleDropOnFolder],
   );
 
   // ── Download ───────────────────────────────────────────────────────────────
@@ -1475,7 +1507,7 @@ function DrivePageContent() {
       )}
       {/* Zona de drag-and-drop global */}
       <div
-        className="min-h-full"
+        className="relative min-h-[calc(100dvh-8rem)]"
         onDragOver={(e) => {
           if (isDriveItemDrag(e)) return;
           if (!canWriteInCurrentFolder) return;
@@ -1495,12 +1527,32 @@ function DrivePageContent() {
       >
         {/* Overlay drag-and-drop */}
         {isDraggingOver && canWriteInCurrentFolder && (
-          <div className="fixed inset-0 z-[2000] bg-red-600/10 border-4 border-dashed border-red-500 flex items-center justify-center pointer-events-none">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-8 shadow-xl text-center border border-gray-200 dark:border-gray-700">
-              <Upload className="h-12 w-12 text-red-600 dark:text-red-400 mx-auto mb-3" />
-              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Solte para fazer upload
-              </p>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -inset-3 z-[30] border-2 border-dashed border-red-400/80 bg-red-500/[0.04] sm:-inset-4 lg:-inset-8 dark:border-red-700/70 dark:bg-red-500/[0.07]"
+          >
+            {/* Cartão no padrão do sistema, centralizado na área, com a pasta de destino */}
+            <div
+              role="status"
+              className="absolute left-1/2 top-1/2 w-[22rem] max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+            >
+              <div className="flex items-center gap-3 p-4 sm:p-5">
+                <div className="shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                  <Upload className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
+                    Solte para enviar
+                  </h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
+                    Arquivos ou pastas, quantos quiser
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900/40 sm:px-5">
+                <span className="shrink-0 text-gray-500 dark:text-gray-400">Destino:</span>
+                <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">{nomePastaAtual}</span>
+              </div>
             </div>
           </div>
         )}
@@ -1714,6 +1766,7 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            fileDrop={folderFileDrop}
             selectedKeys={selectedSet}
             onSelect={handleSelect}
             onClearSelection={clearSelection}
@@ -1746,6 +1799,7 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            fileDrop={folderFileDrop}
             selectedKeys={selectedSet}
             onSelect={handleSelect}
             onClearSelection={clearSelection}
@@ -2224,6 +2278,7 @@ function GridView({
   onRestore,
   onMove,
   onDropInto,
+  fileDrop,
   selectedKeys,
   onSelect,
   onClearSelection,
@@ -2248,6 +2303,8 @@ function GridView({
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
   onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  /** Arquivos de fora soltos em cima de uma pasta. */
+  fileDrop?: FolderFileDrop;
   selectedKeys: Set<string>;
   onSelect: (key: string, mods: SelectMods) => void;
   onClearSelection: () => void;
@@ -2300,7 +2357,7 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                       onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
                     }}
                     onDragEnd={() => onDragStateChange(null)}
-                    {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
+                    {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo, fileDrop) : {})}
                     onClick={(e) => {
                       e.stopPropagation();
                       setOpenMenuId(null);

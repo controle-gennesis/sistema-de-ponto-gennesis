@@ -236,6 +236,15 @@ export function readDriveItemDrag(e: React.DragEvent): DriveDragItem[] {
   return [];
 }
 
+/** Arquivos de fora (do computador) soltos em cima de uma pasta: enviam para essa pasta. */
+export type FolderFileDrop = {
+  onDropFiles: (e: React.DragEvent, folderId: string) => void;
+  /** Arquivo de fora passando por cima da pasta (null = saiu dela). */
+  onHover?: (folderId: string | null) => void;
+};
+
+const isFileDrag = (e: React.DragEvent): boolean => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
 /**
  * Props para uma pasta aceitar itens soltos em cima dela.
  * `onHover` destaca a pasta enquanto o item está sobre ela.
@@ -243,29 +252,55 @@ export function readDriveItemDrag(e: React.DragEvent): DriveDragItem[] {
 export function folderDropProps(
   folderId: string,
   onDropInto: ((items: DriveDragItem[], targetFolderId: string) => void) | undefined,
-  onHover: (folderId: string | null) => void
+  onHover: (folderId: string | null) => void,
+  fileDrop?: FolderFileDrop
 ) {
-  if (!onDropInto) return {};
+  if (!onDropInto && !fileDrop) return {};
   return {
     onDragOver: (e: React.DragEvent) => {
-      if (!isDriveItemDrag(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
-      onHover(folderId);
+      if (isDriveItemDrag(e)) {
+        if (!onDropInto) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        onHover(folderId);
+        return;
+      }
+      if (fileDrop && isFileDrag(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        onHover(folderId);
+        fileDrop.onHover?.(folderId);
+      }
     },
     onDragLeave: (e: React.DragEvent) => {
-      if (!isDriveItemDrag(e)) return;
-      if (!e.currentTarget.contains(e.relatedTarget as Node)) onHover(null);
+      const interno = isDriveItemDrag(e) && !!onDropInto;
+      const arquivos = !isDriveItemDrag(e) && !!fileDrop && isFileDrag(e);
+      if (!interno && !arquivos) return;
+      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+        onHover(null);
+        if (arquivos) fileDrop?.onHover?.(null);
+      }
     },
     onDrop: (e: React.DragEvent) => {
-      if (!isDriveItemDrag(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      onHover(null);
-      // Uma pasta não pode ser solta dentro dela mesma.
-      const items = readDriveItemDrag(e).filter((it) => !(it.type === 'folder' && it.id === folderId));
-      if (items.length > 0) onDropInto(items, folderId);
+      if (isDriveItemDrag(e)) {
+        if (!onDropInto) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onHover(null);
+        // Uma pasta não pode ser solta dentro dela mesma.
+        const items = readDriveItemDrag(e).filter((it) => !(it.type === 'folder' && it.id === folderId));
+        if (items.length > 0) onDropInto(items, folderId);
+        return;
+      }
+      if (fileDrop && isFileDrag(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        onHover(null);
+        fileDrop.onHover?.(null);
+        fileDrop.onDropFiles(e, folderId);
+      }
     },
   };
 }
