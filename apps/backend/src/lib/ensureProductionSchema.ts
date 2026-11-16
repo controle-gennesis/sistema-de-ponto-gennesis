@@ -2240,6 +2240,9 @@ async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
   `);
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "address" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
   `);
   await prisma.$executeRawUnsafe(`

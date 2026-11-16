@@ -33,6 +33,7 @@ function serializeObra(row: {
   id: string;
   name: string;
   contratoId: string;
+  address?: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -42,6 +43,7 @@ function serializeObra(row: {
     id: row.id,
     name: row.name,
     contratoId: row.contratoId,
+    address: row.address ?? '',
     isActive: row.isActive,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -141,6 +143,7 @@ export class ObraController {
         typeof req.body?.contratoId === 'string' ? req.body.contratoId.trim() : '';
       if (!name) throw createError('Nome é obrigatório', 400);
       if (!contratoId) throw createError('Contrato é obrigatório', 400);
+      const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
       await assertCanManageObras(req, contratoId, req.body?.quick === true);
 
       const contrato = await prisma.contract.findUnique({ where: { id: contratoId } });
@@ -155,7 +158,7 @@ export class ObraController {
       if (duplicate) throw createError('Já existe uma obra com este nome neste contrato', 400);
 
       const created = await prisma.obra.create({
-        data: { name, contratoId },
+        data: { name, contratoId, address: address || null },
         include: obraInclude,
       });
       res.status(201).json({ success: true, data: serializeObra(created), message: 'Obra criada' });
@@ -191,6 +194,11 @@ export class ObraController {
         if (!name) throw createError('Nome é obrigatório', 400);
         nextName = name;
         data.name = name;
+      }
+
+      if (req.body?.address !== undefined) {
+        const address = typeof req.body.address === 'string' ? req.body.address.trim() : '';
+        data.address = address || null;
       }
 
       if (req.body?.isActive !== undefined) {

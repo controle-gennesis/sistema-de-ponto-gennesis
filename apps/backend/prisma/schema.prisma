@@ -2537,6 +2537,8 @@ model Obra {
   id         String   @id @default(cuid())
   name       String
   contratoId String
+  /// Endereço da obra (opcional)
+  address    String?
   /// ID legado (AppSheet / importações)
   externalId String?  @unique
   isActive   Boolean  @default(true)
