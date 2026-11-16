@@ -839,15 +839,43 @@ function DrivePageContent() {
     },
   });
 
+  /**
+   * Tira os itens movidos das listas em cache (menos a da pasta de destino) na hora, para não reaparecerem
+   * na origem enquanto a lista é recarregada. Cancela recargas em andamento que ainda trariam o estado antigo.
+   */
+  const removerMovidosDoCache = async (items: DriveDragItem[], destinoId: string | null) => {
+    const destinoKey = destinoId ?? 'root';
+    const folderIds = new Set(items.filter((i) => i.type === 'folder').map((i) => i.id));
+    const fileIds = new Set(items.filter((i) => i.type === 'file').map((i) => i.id));
+    await queryClient.cancelQueries({ queryKey: ['drive'] });
+    await queryClient.cancelQueries({ queryKey: ['drive-view'] });
+    const limpar = (old: any) =>
+      old && Array.isArray(old.folders) && Array.isArray(old.files)
+        ? {
+            ...old,
+            folders: old.folders.filter((f: { id: string }) => !folderIds.has(f.id)),
+            files: old.files.filter((f: { id: string }) => !fileIds.has(f.id)),
+          }
+        : old;
+    queryClient
+      .getQueriesData({ queryKey: ['drive'] })
+      .forEach(([key, old]) => {
+        if (key[1] === destinoKey) return;
+        queryClient.setQueryData(key, limpar(old));
+      });
+    queryClient.setQueriesData({ queryKey: ['drive-view'] }, limpar);
+  };
+
   /** Move pasta (com o conteúdo) ou arquivo para outra pasta, ou para a raiz do Meu Drive (null). */
   const moveItemMut = useMutation({
     mutationFn: async ({ type, id, destinoId }: { type: 'folder' | 'file'; id: string; destinoId: string | null }): Promise<unknown> =>
       type === 'folder'
         ? api.patch(`/drive/folders/${id}/move`, { parentId: destinoId })
         : api.patch(`/drive/files/${id}/move`, { folderId: destinoId }),
-    onSuccess: (_res, vars) => {
+    onSuccess: async (_res, vars) => {
       toast.success(vars.type === 'folder' ? 'Pasta movida.' : 'Arquivo movido.');
       setMoveTarget(null);
+      await removerMovidosDoCache([{ type: vars.type, id: vars.id }], vars.destinoId);
       queryClient.invalidateQueries({ queryKey: ['drive'] });
       queryClient.invalidateQueries({ queryKey: ['drive-view'] });
       queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
@@ -871,7 +899,8 @@ function DrivePageContent() {
       }
       return { ok, failed: items.length - ok };
     },
-    onSuccess: ({ ok, failed }) => {
+    onSuccess: async ({ ok, failed }, vars) => {
+      if (ok > 0) await removerMovidosDoCache(vars.items, vars.destinoId);
       if (ok > 0) toast.success(ok === 1 ? '1 item movido.' : `${ok} itens movidos.`);
       if (failed > 0) toast.error(failed === 1 ? '1 item não pôde ser movido.' : `${failed} itens não puderam ser movidos.`);
       setBulkMoveItems(null);
