@@ -915,18 +915,47 @@ export class DriveService {
 
   // ── Busca ─────────────────────────────────────────────────────────────
 
-  async search(userId: string, query: string) {
+  /** Ids de todas as subpastas (em qualquer nível, sem lixeira) de uma pasta, incluindo ela própria. */
+  private async getFolderTreeIds(rootId: string): Promise<string[]> {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      WITH RECURSIVE tree AS (
+        SELECT id FROM drive_folders WHERE id = ${rootId}
+        UNION ALL
+        SELECT c.id FROM drive_folders c JOIN tree t ON c."parentId" = t.id WHERE c."trashedAt" IS NULL
+      )
+      SELECT id FROM tree`;
+    return rows.map((r) => r.id);
+  }
+
+  async search(userId: string, query: string, scopeFolderId?: string) {
     const q = query.trim();
     if (!q) return { folders: [] as any[], files: [] as any[] };
 
+    // "Buscar só nesta pasta": limita a busca à pasta aberta e às subpastas dela.
+    let treeIds: string[] | null = null;
+    if (scopeFolderId) {
+      if (!(await this.canUserAccessFolder(userId, scopeFolderId))) {
+        throw new Error('Pasta não encontrada ou sem permissão de acesso');
+      }
+      treeIds = await this.getFolderTreeIds(scopeFolderId);
+    }
+
     const [folderCandidates, fileCandidates] = await Promise.all([
       prisma.driveFolder.findMany({
-        where: { name: { contains: q, mode: 'insensitive' }, ...NOT_TRASHED },
+        where: {
+          name: { contains: q, mode: 'insensitive' },
+          ...(treeIds ? { id: { in: treeIds.filter((id) => id !== scopeFolderId) } } : {}),
+          ...NOT_TRASHED,
+        },
         orderBy: { name: 'asc' },
         take: 200,
       }),
       prisma.driveFile.findMany({
-        where: { name: { contains: q, mode: 'insensitive' }, ...NOT_TRASHED },
+        where: {
+          name: { contains: q, mode: 'insensitive' },
+          ...(treeIds ? { folderId: { in: treeIds } } : {}),
+          ...NOT_TRASHED,
+        },
         orderBy: { name: 'asc' },
         take: 200,
       }),
@@ -954,12 +983,53 @@ export class DriveService {
       ...accessibleFiles.map((f) => f.ownerId),
     ]);
 
-    return {
-      folders: accessibleFolders.map((f) =>
-        this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-      ),
-      files: accessibleFiles.map((f) => this.mapFile(f, ownerNames)),
+    // Caminho de cada resultado (pastas acima dele), só até onde o usuário enxerga.
+    const nodes = new Map<string, { id: string; name: string; parentId: string | null }>();
+    let pendentes = [
+      ...accessibleFolders.map((f) => f.parentId),
+      ...accessibleFiles.map((f) => f.folderId),
+    ].filter((x): x is string => !!x);
+    for (let i = 0; i < 30 && pendentes.length > 0; i++) {
+      const ids = Array.from(new Set(pendentes.filter((id) => !nodes.has(id))));
+      if (ids.length === 0) break;
+      const rows = await prisma.driveFolder.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, parentId: true },
+      });
+      rows.forEach((r) => nodes.set(r.id, r));
+      pendentes = rows.map((r) => r.parentId).filter((x): x is string => !!x);
+    }
+    const acessoCache = new Map<string, boolean>();
+    const podeVer = async (id: string) => {
+      if (!acessoCache.has(id)) acessoCache.set(id, await this.canUserAccessFolder(userId, id));
+      return acessoCache.get(id)!;
     };
+    const caminhoDe = async (startId: string | null) => {
+      const path: Array<{ id: string; name: string }> = [];
+      let id = startId;
+      const vistos = new Set<string>();
+      while (id && !vistos.has(id)) {
+        vistos.add(id);
+        const n = nodes.get(id);
+        if (!n || !(await podeVer(id))) break;
+        path.unshift({ id: n.id, name: n.name });
+        id = n.parentId;
+      }
+      return path;
+    };
+
+    const foldersOut = [];
+    for (const f of accessibleFolders) {
+      foldersOut.push({
+        ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+        pathFolders: await caminhoDe(f.parentId),
+      });
+    }
+    const filesOut = [];
+    for (const f of accessibleFiles) {
+      filesOut.push({ ...this.mapFile(f, ownerNames), pathFolders: await caminhoDe(f.folderId) });
+    }
+    return { folders: foldersOut, files: filesOut };
   }
 
   // ── Views da sidebar ──────────────────────────────────────────────────

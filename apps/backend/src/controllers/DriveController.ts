@@ -473,7 +473,8 @@ export class DriveController {
     try {
       const userId = req.user!.id;
       const query = (req.query.q as string) || '';
-      const result = await driveService.search(userId, query);
+      const scopeFolderId = parseParentId(req.query.folderId) ?? undefined;
+      const result = await driveService.search(userId, query, scopeFolderId);
       res.json({ success: true, data: result });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });

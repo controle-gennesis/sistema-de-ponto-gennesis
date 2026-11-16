@@ -46,6 +46,7 @@ import {
 } from '@/components/drive/DriveSidebar';
 import { sortDriveItems, type DriveSortKey, type DriveSortState } from '@/components/drive/driveSort';
 import { DriveListView } from '@/components/drive/DriveListView';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
 import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
@@ -108,6 +109,8 @@ interface DriveFolder {
   canWrite?: boolean;
   /** Tamanho total do conteúdo (calculado pelo servidor). */
   sizeBytes?: number;
+  /** Só nos resultados de busca: pastas acima do item. */
+  pathFolders?: Array<{ id: string; name: string }>;
 }
 
 interface DriveFile {
@@ -118,6 +121,7 @@ interface DriveFile {
   size: number;
   mimeType: string;
   folderId: string | null;
+  pathFolders?: Array<{ id: string; name: string }>;
   ownerId: string;
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
@@ -224,6 +228,8 @@ function DrivePageContent() {
     }
   }, []);
   const [searchQuery, setSearchQuery] = useState('');
+  /** "Buscar só nesta pasta": quando ligado dentro de uma pasta, a busca fica limitada a ela. */
+  const [searchOnlyHere, setSearchOnlyHere] = useState(false);
   /** Item aberto na janela "Mover para…". */
   const [moveTarget, setMoveTarget] = useState<DriveMoveTarget | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -377,13 +383,16 @@ function DrivePageContent() {
     staleTime: 30_000,
   });
 
+  const searchScope = searchOnlyHere && isMyDriveView ? (currentFolderId ?? null) : null;
   const { data: searchResults, isLoading: loadingSearch } = useQuery<{
     folders: DriveFolder[];
     files: DriveFile[];
   }>({
-    queryKey: ['drive-search', searchQuery],
+    queryKey: ['drive-search', searchQuery, searchScope],
     queryFn: async () => {
-      const res = await api.get('/drive/search', { params: { q: searchQuery } });
+      const res = await api.get('/drive/search', {
+        params: { q: searchQuery, ...(searchScope ? { folderId: searchScope } : {}) },
+      });
       return res.data.data;
     },
     enabled: !!user && !!searchQuery.trim(),
@@ -445,6 +454,11 @@ function DrivePageContent() {
   const currentFolderMeta = isMyDriveView ? (contents?.currentFolder ?? null) : null;
   /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
   const nomePastaAtual = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1]!.name : 'Meu Drive';
+  /** Nome da pasta aberta lembrado durante a busca (nela a lista da pasta fica pausada e o caminho some). */
+  const nomePastaRef = useRef<{ id?: string; name: string }>({ name: '' });
+  if (breadcrumb.length > 0) nomePastaRef.current = { id: currentFolderId, name: nomePastaAtual };
+  const nomePastaBusca =
+    nomePastaRef.current.id === currentFolderId && nomePastaRef.current.name ? nomePastaRef.current.name : 'esta pasta';
   const isLoading = loadingContents || loadingSearch || loadingView;
   /** Esqueleto só depois de um instante: pastas que abrem rápido não "piscam" a tela de carregamento. */
   const showDriveSkeleton = useDelayedFlag(isLoading, 150);
@@ -1698,6 +1712,15 @@ function DrivePageContent() {
               &ldquo;{searchQuery}&rdquo;
             </span>{' '}
             — {folders.length + files.length} item(s)
+            {isMyDriveView && currentFolderId ? (
+              <span className="ml-4 inline-flex align-middle">
+                <Checkbox
+                  checked={searchOnlyHere}
+                  onChange={setSearchOnlyHere}
+                  label={<>Buscar só em &ldquo;{nomePastaBusca}&rdquo;</>}
+                />
+              </span>
+            ) : null}
           </p>
         )}
 

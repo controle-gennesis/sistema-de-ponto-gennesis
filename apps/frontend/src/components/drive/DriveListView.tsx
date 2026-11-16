@@ -39,6 +39,8 @@ type DriveFolder = {
   ownerPhotoUrl?: string | null;
   sizeBytes?: number;
   starred?: boolean;
+  /** Só nos resultados de busca: pastas acima do item (da raiz até a pasta dele). */
+  pathFolders?: Array<{ id: string; name: string }>;
   iconKey?: string | null;
   iconColor?: string | null;
   trashedAt?: string | null;
@@ -57,6 +59,7 @@ type DriveFile = {
   size: number;
   mimeType: string;
   folderId: string | null;
+  pathFolders?: Array<{ id: string; name: string }>;
   ownerId: string;
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
@@ -65,6 +68,34 @@ type DriveFile = {
   createdAt: string;
   updatedAt: string;
 };
+
+/** Linha pequena com a pasta onde o item está (só aparece nos resultados de busca). */
+function PathLine({
+  path,
+  onOpen,
+}: {
+  path?: Array<{ id: string; name: string }>;
+  onOpen: (id: string) => void;
+}) {
+  if (!path) return null;
+  const last = path[path.length - 1];
+  const texto = path.length ? path.map((p) => p.name).join(' > ') : 'Meu Drive';
+  return (
+    <button
+      type="button"
+      title={last ? `Abrir a pasta: ${texto}` : texto}
+      disabled={!last}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (last) onOpen(last.id);
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="mt-0.5 block max-w-full truncate text-left text-xs text-gray-500 enabled:hover:text-red-600 enabled:hover:underline dark:text-gray-400 dark:enabled:hover:text-red-400"
+    >
+      em {texto}
+    </button>
+  );
+}
 
 function SortHeader({
   label,
@@ -408,13 +439,16 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
               className={`${rowClass} ${dropAlvo === folder.id ? '!bg-red-50 ring-1 ring-inset ring-red-300 dark:!bg-red-950/20 dark:ring-red-800' : ''} ${selectedKeys.has(menuKey) ? 'drive-row-selected !bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
               <FolderIconTile iconKey={folder.iconKey} color={folder.iconColor} className="drive-item-card__icon h-8 w-8 rounded-lg" />
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
-                  {folder.name}
-                </span>
-                {folder.starred && !trashMode && (
-                  <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                )}
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {folder.name}
+                  </span>
+                  {folder.starred && !trashMode && (
+                    <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                  )}
+                </div>
+                <PathLine path={folder.pathFolders} onOpen={onOpenFolder} />
               </div>
               <OwnerCell
                 ownerId={folder.ownerId}
@@ -592,21 +626,24 @@ style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
               className={`${rowClass} ${selectedKeys.has(menuKey) ? 'drive-row-selected !bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
               <DriveMimeIcon mimeType={file.mimeType} fileName={file.name} className="drive-item-card__icon h-8 w-8" />
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
-                  {file.name}
-                </span>
-                {file.starred && !trashMode && (
-                  <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                )}
-                {!trashMode && (
-                  <DriveHoverActions
-                    file={file}
-                    onPreview={() => onPreview(file)}
-                    onDownload={() => void onDownload(file)}
-                    className="ml-auto shrink-0 pr-1"
-                  />
-                )}
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {file.name}
+                  </span>
+                  {file.starred && !trashMode && (
+                    <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                  )}
+                  {!trashMode && (
+                    <DriveHoverActions
+                      file={file}
+                      onPreview={() => onPreview(file)}
+                      onDownload={() => void onDownload(file)}
+                      className="ml-auto shrink-0 pr-1"
+                    />
+                  )}
+                </div>
+                <PathLine path={file.pathFolders} onOpen={onOpenFolder} />
               </div>
               <OwnerCell
                 ownerId={file.ownerId}
