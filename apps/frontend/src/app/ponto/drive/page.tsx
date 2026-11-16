@@ -44,6 +44,7 @@ import {
   DriveSidebar,
   type DriveSidebarView,
 } from '@/components/drive/DriveSidebar';
+import { sortDriveItems, type DriveSortKey, type DriveSortState } from '@/components/drive/driveSort';
 import { DriveListView } from '@/components/drive/DriveListView';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
 import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
@@ -105,6 +106,8 @@ interface DriveFolder {
   canManageShares?: boolean;
   /** Pode enviar ficheiros e criar subpastas (falso se só leitura na partilha). */
   canWrite?: boolean;
+  /** Tamanho total do conteúdo (calculado pelo servidor). */
+  sizeBytes?: number;
 }
 
 interface DriveFile {
@@ -402,24 +405,39 @@ function DrivePageContent() {
   const filtersActive = driveFiltersActive(filters);
   const ownerOk = (ownerId: string) =>
     filters.owner === 'all' || (filters.owner === 'me' ? ownerId === user?.id : ownerId !== user?.id);
+  // Ordenação (clique no título da coluna na lista). Padrão: como vem do servidor (mais recentes primeiro).
+  const [sort, setSort] = useState<DriveSortState>(null);
+  const toggleSort = useCallback((key: DriveSortKey) => {
+    setSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: 'asc' };
+      if (cur.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
+  }, []);
   const folders = useMemo(() => {
-    if (!filtersActive) return rawFolders;
-    // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
-    if (filters.type !== 'all' && filters.type !== 'folders') return [];
-    return rawFolders.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    let list = rawFolders;
+    if (filtersActive) {
+      // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
+      if (filters.type !== 'all' && filters.type !== 'folders') return [];
+      list = list.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    }
+    return sortDriveItems(list, sort, (f) => f.sizeBytes ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawFolders, filters, user?.id]);
+  }, [rawFolders, filters, user?.id, sort]);
   const files = useMemo(() => {
-    if (!filtersActive) return rawFiles;
-    if (filters.type === 'folders') return [];
-    return rawFiles.filter(
-      (f) =>
-        (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
-        ownerOk(f.ownerId) &&
-        driveMatchesModified(f.updatedAt, filters.modified),
-    );
+    let list = rawFiles;
+    if (filtersActive) {
+      if (filters.type === 'folders') return [];
+      list = list.filter(
+        (f) =>
+          (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
+          ownerOk(f.ownerId) &&
+          driveMatchesModified(f.updatedAt, filters.modified),
+      );
+    }
+    return sortDriveItems(list, sort, (f) => f.size ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawFiles, filters, user?.id]);
+  }, [rawFiles, filters, user?.id, sort]);
   /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -1779,6 +1797,8 @@ function DrivePageContent() {
           />
         ) : (
           <DriveListView
+            sort={sort}
+            onSort={toggleSort}
             folders={folders}
             files={files}
             onOpenFolder={openFolder}

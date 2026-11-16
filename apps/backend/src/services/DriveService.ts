@@ -304,6 +304,30 @@ export class DriveService {
     };
   }
 
+  /** Tamanho total (arquivos de todas as subpastas, sem lixeira) de cada pasta informada. */
+  private async getFolderSizes(folderIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (folderIds.length === 0) return map;
+    try {
+      const rows = await prisma.$queryRaw<Array<{ root: string; total: bigint | number | null }>>`
+        WITH RECURSIVE tree AS (
+          SELECT id AS root, id FROM drive_folders WHERE id = ANY(${folderIds}::text[])
+          UNION ALL
+          SELECT t.root, c.id FROM drive_folders c
+          JOIN tree t ON c."parentId" = t.id
+          WHERE c."trashedAt" IS NULL
+        )
+        SELECT t.root AS root, COALESCE(SUM(fl."size"), 0)::bigint AS total
+        FROM tree t
+        LEFT JOIN drive_files fl ON fl."folderId" = t.id AND fl."trashedAt" IS NULL
+        GROUP BY t.root`;
+      for (const r of rows) map.set(r.root, Number(r.total ?? 0));
+    } catch (err) {
+      console.error('[drive] falha ao calcular tamanho das pastas', err);
+    }
+    return map;
+  }
+
   async listFolderContents(
     userId: string,
     parentId?: string,
@@ -314,6 +338,7 @@ export class DriveService {
     if (parentId === undefined || parentId === null) {
       const foldersRaw = await this.listRootFoldersForUser(userId);
       const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));
+      const sizeMap = await this.getFolderSizes(foldersRaw.map((f) => f.id));
       const files = await prisma.driveFile.findMany({
         where: { ownerId: userId, folderId: null, ...NOT_TRASHED },
         orderBy: { updatedAt: 'desc' },
@@ -323,9 +348,10 @@ export class DriveService {
         ...files.map((f) => f.ownerId),
       ]);
       return {
-        folders: foldersRaw.map((f) =>
-          this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-        ),
+        folders: foldersRaw.map((f) => ({
+          ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+          sizeBytes: sizeMap.get(f.id) ?? 0,
+        })),
         files: files.map((f) => this.mapFile(f, ownerNames)),
       };
     }
@@ -345,14 +371,16 @@ export class DriveService {
       }),
     ]);
     const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));
+    const sizeMap = await this.getFolderSizes(foldersRaw.map((f) => f.id));
     const ownerNames = await this.resolveOwnerInfo([
       ...foldersRaw.map((f) => f.ownerId),
       ...allFiles.map((f) => f.ownerId),
     ]);
     return {
-      folders: foldersRaw.map((f) =>
-        this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-      ),
+      folders: foldersRaw.map((f) => ({
+        ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+        sizeBytes: sizeMap.get(f.id) ?? 0,
+      })),
       files: allFiles.map((f) => this.mapFile(f, ownerNames)),
     };
   }

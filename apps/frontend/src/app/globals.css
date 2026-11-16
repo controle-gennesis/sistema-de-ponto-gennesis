@@ -2532,3 +2532,27 @@ tr.orc-lista-row-enter > td {
     animation: none;
   }
 }
+
+/* Drive (lista) — ao selecionar uma linha com um clique: um pulso suave de cor e um leve deslize do nome */
+@keyframes drive-row-select {
+  0% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0);
+    filter: brightness(0.96);
+  }
+  45% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+  }
+  100% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+    filter: none;
+  }
+}
+.drive-row-selected {
+  animation: drive-row-select 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-row-selected {
+    animation: none;
+  }
+}
