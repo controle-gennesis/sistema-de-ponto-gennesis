@@ -576,10 +576,11 @@ export function SolicitacoesContabilidadePage() {
       for (let i = 0; i < anexos.length; i++) {
         const anexo = anexos[i];
         if (!anexo.file) throw new Error(`Selecione o arquivo do anexo ${i + 1}`);
-        if (!anexo.tipoArquivo) throw new Error(`Informe o tipo do arquivo do anexo ${i + 1}`);
+        const ehAtestado = form.requestType === 'CONTAB_ATESTADO';
+        if (!ehAtestado && !anexo.tipoArquivo) throw new Error(`Informe o tipo do arquivo do anexo ${i + 1}`);
         anexosPayload.push({
           ...(await fileToAttachment(anexo.file)),
-          tipoArquivo: anexo.tipoArquivo,
+          tipoArquivo: ehAtestado ? 'Atestado' : anexo.tipoArquivo,
           ...(anexo.dataValidade ? { dataValidade: anexo.dataValidade } : {}),
         });
       }
@@ -688,10 +689,11 @@ export function SolicitacoesContabilidadePage() {
       for (let i = 0; i < adjustAnexos.length; i++) {
         const anexo = adjustAnexos[i];
         if (!anexo.file) throw new Error(`Selecione o arquivo do anexo ${i + 1}`);
-        if (!anexo.tipoArquivo) throw new Error(`Informe o tipo do arquivo do anexo ${i + 1}`);
+        const ehAtestado = adjustTarget.requestType === 'CONTAB_ATESTADO';
+        if (!ehAtestado && !anexo.tipoArquivo) throw new Error(`Informe o tipo do arquivo do anexo ${i + 1}`);
         anexosPayload.push({
           ...(await fileToAttachment(anexo.file)),
-          tipoArquivo: anexo.tipoArquivo,
+          tipoArquivo: ehAtestado ? 'Atestado' : anexo.tipoArquivo,
           ...(anexo.dataValidade ? { dataValidade: anexo.dataValidade } : {}),
         });
       }
