@@ -22,7 +22,8 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
         "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso.",
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "2"
     },
     "android": {
       "versionCode": 14,
