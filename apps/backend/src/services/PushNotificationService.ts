@@ -14,6 +14,8 @@ export type PushPayload = {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /** Conjunto de botões de ação (registrado no app): ex. 'fuel-refuel', 'reservation-action'. */
+  categoryId?: string;
 };
 
 export function isValidExpoPushToken(token: unknown): token is string {
@@ -69,6 +71,7 @@ export async function sendPushToUsers(userIds: Array<string | null | undefined>,
             data: payload.data ?? {},
             sound: 'default',
             channelId: 'default',
+            ...(payload.categoryId ? { categoryId: payload.categoryId } : {}),
           })),
         ),
       });
@@ -94,7 +97,7 @@ const FUEL: Record<string, [string, string]> = {
   PENDING_MANAGER: ['Combustível aguardando gestor', 'aguardando o gestor'],
   PENDING_SUPPLIES: ['Combustível aguardando suprimentos', 'aguardando suprimentos'],
   APPROVED: ['Combustível aguardando suprimentos', 'aguardando suprimentos'],
-  AWAITING_REFUEL: ['Combustível liberado para abastecer', 'liberada para abastecer'],
+  AWAITING_REFUEL: ['Liberado para abastecer', 'liberada para abastecer'],
   COMPLETED: ['Abastecimento concluído', 'concluída'],
   REJECTED: ['Solicitação de combustível rejeitada', 'rejeitada'],
   CANCELLED: ['Solicitação de combustível cancelada', 'cancelada'],
@@ -174,6 +177,12 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
             title,
             body: `A solicitação${ref(row.displayNumber)} está ${what}`,
             data: { kind: 'fuel', entityId, status },
+            // Liberado para abastecer: o motorista já vê o botão "Informar abastecido".
+            ...(status === 'AWAITING_REFUEL'
+              ? { categoryId: 'fuel-refuel' }
+              : status === 'COMPLETED' || status === 'REJECTED'
+                ? { categoryId: 'view-details' }
+                : {}),
           });
           break;
         }
@@ -183,6 +192,12 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
             title,
             body: `A reserva${ref(row.code)} está ${what}`,
             data: { kind: 'reservation', entityId, status },
+            // Aprovada (devolução) ou aguardando vistoria: botão direto para a reserva.
+            ...(status === 'APPROVED' || status === 'COMPLETED'
+              ? { categoryId: 'reservation-action' }
+              : status === 'INSPECTED' || status === 'REJECTED'
+                ? { categoryId: 'view-details' }
+                : {}),
           });
           break;
         }

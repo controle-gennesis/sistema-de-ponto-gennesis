@@ -1,6 +1,7 @@
 import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { metaWhatsApp } from '../services/MetaWhatsAppService';
+import { sendPushToUsers } from '../services/PushNotificationService';
 import { DP_APPROVE_MODULE_KEY } from './dpApprovalAccess';
 import { isDfAdmLocalLabel, sanitizeDpApprovalSectors, sectorSolicitanteMatches } from './dpApprovalSectors';
 import { OC_APPROVE_COMPRAS_MODULE_KEY, OC_APPROVE_DIRETORIA_MODULE_KEY } from './ocApprovalAccess';
@@ -137,11 +138,20 @@ export async function notifyRequesterCancelledWhatsApp(params: {
   }
 }
 
-/** Avisa (template «nova_solicitacao_pendente») todo mundo com telefone cadastrado nos userIds dados. Nunca lança. */
+/**
+ * Avisa os aprovadores de uma nova pendência: push no celular (app) sempre; WhatsApp
+ * (template «nova_solicitacao_pendente») só se estiver ligado e houver telefone cadastrado. Nunca lança.
+ */
 export async function notifyNewPendingApprovalWhatsApp(
   userIds: string[],
   subjectLine: string
 ): Promise<void> {
+  // Push no app: independe do interruptor do WhatsApp.
+  void sendPushToUsers(userIds, {
+    title: 'Nova solicitação para aprovar',
+    body: subjectLine,
+    data: { kind: 'approval-pending' },
+  });
   try {
     const phones = await resolvePhonesForUserIds(userIds);
     if (phones.length === 0) return;
