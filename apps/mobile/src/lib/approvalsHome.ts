@@ -1,12 +1,14 @@
 import { DP_TYPE_LABELS, URGENCY_LABELS, type DpUrgency } from '../services/dpRequests';
 import {
   fetchDpApprovals,
+  fetchAditivoApprovals,
   fetchFdApprovals,
   fetchFuelApprovals,
   fetchMedicaoApprovals,
   fetchOcApprovals,
   fetchRmApprovals,
   ocPendingStatusesForUser,
+  type AditivoApprovalRow,
   type FdApprovalRow,
   type FuelApprovalRow,
   type MedicaoApprovalRow,
@@ -14,7 +16,7 @@ import {
   type RmApprovalRow,
 } from '../services/approvals';
 
-export type ApprovalTabId = 'dp' | 'fuel' | 'fd' | 'rm' | 'oc' | 'medicao';
+export type ApprovalTabId = 'dp' | 'fuel' | 'fd' | 'rm' | 'oc' | 'medicao' | 'aditivo';
 
 export type ApprovalListItem = {
   id: string;
@@ -44,6 +46,7 @@ const APPROVAL_TAB_LABELS: Record<ApprovalTabId, string> = {
   rm: 'RM',
   oc: 'OC',
   medicao: 'Medições',
+  aditivo: 'Aditivos',
 };
 
 export type OcPermissionFlags = {
@@ -83,6 +86,7 @@ export function isApprovalPendingStatus(kind: ApprovalTabId, status: string): bo
     return ['PENDING', 'PENDING_COMPRAS', 'DRAFT', 'PENDING_DIRETORIA'].includes(status);
   }
   if (kind === 'medicao') return status !== 'APPROVED' && status !== 'CORRECTION';
+  if (kind === 'aditivo') return status === 'PENDING';
   return false;
 }
 
@@ -204,6 +208,23 @@ export async function fetchPendingApprovalsForTab(
           row.empreiteiro?.contratoNome ||
           formatApprovalMoney(row.executedAmount),
         meta: formatApprovalDate(row.measurementDate),
+        statusLabel: 'Pendente',
+        pending: true,
+        raw: row,
+      }));
+  }
+
+  if (tab === 'aditivo') {
+    const rows = await fetchAditivoApprovals();
+    return rows
+      .filter((row: AditivoApprovalRow) => isApprovalPendingStatus('aditivo', row.status))
+      .map((row: AditivoApprovalRow) => ({
+        id: row.id,
+        title: `Aditivo nº ${row.number}`,
+        person: row.empreiteiro?.name || null,
+        place: row.serviceName || null,
+        subtitle: row.serviceName || row.empreiteiro?.name || formatApprovalMoney(row.amount),
+        meta: `${formatApprovalMoney(row.amount)} · ${formatApprovalDate(row.createdAt)}`,
         statusLabel: 'Pendente',
         pending: true,
         raw: row,

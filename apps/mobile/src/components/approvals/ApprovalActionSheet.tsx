@@ -39,6 +39,7 @@ import {
   rejectOcRequest,
   rejectRmRequest,
   returnMedicao,
+  type AditivoApprovalRow,
   type FuelApprovalRow,
   type FdApprovalRow,
   type MedicaoApprovalRow,
@@ -106,6 +107,7 @@ export default function ApprovalActionSheet({
   const fuelRaw = tab === 'fuel' && item ? (item.raw as FuelApprovalRow) : null;
 
   const fdRaw = tab === 'fd' && item ? (item.raw as FdApprovalRow) : null;
+  const aditivoRaw = tab === 'aditivo' && item ? (item.raw as AditivoApprovalRow) : null;
   const employeesQuery = useQuery({
     queryKey: ['payroll-employees'],
     queryFn: fetchPayrollEmployees,
@@ -355,7 +357,7 @@ export default function ApprovalActionSheet({
           </View>
         ) : null}
 
-        {!dpRaw && !fuelRaw && !fdRaw ? (
+        {!dpRaw && !fuelRaw && !fdRaw && !aditivoRaw ? (
           <View style={styles.detailGrid}>
             {item.subtitle ? (
               <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
@@ -363,6 +365,38 @@ export default function ApprovalActionSheet({
             {item.meta ? <DetailField styles={styles} label="Info" value={item.meta} /> : null}
             {item.statusLabel ? (
               <DetailField styles={styles} label="Status" value={item.statusLabel} />
+            ) : null}
+          </View>
+        ) : null}
+
+        {aditivoRaw ? (
+          <View style={styles.detailGrid}>
+            <DetailField styles={styles} label="Aditivo" value={`Nº ${aditivoRaw.number}`} />
+            <DetailField
+              styles={styles}
+              label="Empreiteiro"
+              value={aditivoRaw.empreiteiro?.name?.trim() || '—'}
+            />
+            <DetailField styles={styles} label="Serviço" value={aditivoRaw.serviceName?.trim() || '—'} />
+            <DetailField
+              styles={styles}
+              label="Valor do aditivo"
+              value={formatApprovalMoney(aditivoRaw.amount)}
+            />
+            <DetailField
+              styles={styles}
+              label="Vigência"
+              value={aditivoRaw.effectiveDate?.trim() || '—'}
+            />
+            <DetailField styles={styles} label="Motivo" value={aditivoRaw.reason?.trim() || '—'} />
+            {aditivoRaw.servicesAdded?.trim() ? (
+              <DetailField styles={styles} label="Serviços incluídos" value={aditivoRaw.servicesAdded.trim()} />
+            ) : null}
+            {aditivoRaw.servicesRemoved?.trim() ? (
+              <DetailField styles={styles} label="Serviços removidos" value={aditivoRaw.servicesRemoved.trim()} />
+            ) : null}
+            {aditivoRaw.createdByName?.trim() ? (
+              <DetailField styles={styles} label="Lançado por" value={aditivoRaw.createdByName.trim()} />
             ) : null}
           </View>
         ) : null}

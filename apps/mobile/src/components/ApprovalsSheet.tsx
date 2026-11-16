@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
   ClipboardList,
+  FilePlus2,
   Fuel,
   MailPlus,
   Package,
@@ -30,6 +31,7 @@ import { useTheme } from '../context/ThemeContext';
 import { usePermissions } from '../hooks/usePermissions';
 import { showAppToast } from './AppToast';
 import {
+  approveAditivo,
   approveDpRequest,
   approveFdRequest,
   approveFuelRequest,
@@ -42,7 +44,9 @@ import {
   rejectFuelRequest,
   rejectOcRequest,
   rejectRmRequest,
+  returnAditivo,
   returnMedicao,
+  type AditivoApprovalRow,
   type MedicaoApprovalRow,
   type OcApprovalRow,
 } from '../services/approvals';
@@ -69,6 +73,10 @@ function itemRefCode(item: ApprovalListItemWithTab): string {
   if (raw?.displayNumber != null && String(raw.displayNumber).trim() !== '') {
     return `#${raw.displayNumber}`;
   }
+  if (item.tab === 'aditivo') {
+    const n = (item.raw as { number?: number | null })?.number;
+    if (n != null) return `Nº ${n}`;
+  }
   if (item.tab === 'rm' || item.tab === 'oc') {
     const m = item.title.match(/#\s*([^\s]+)/);
     if (m?.[1]) return `#${m[1]}`;
@@ -85,6 +93,7 @@ const APPROVAL_TYPE_ICONS: Record<ApprovalTabId, LucideIcon> = {
   rm: Package,
   oc: ShoppingCart,
   medicao: Ruler,
+  aditivo: FilePlus2,
 };
 
 function itemDateLabel(item: ApprovalListItemWithTab): string {
@@ -136,12 +145,15 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
     if (canAccessDpApproverPages) list.push('dp');
     if (canApproveFuel) list.push('fuel');
     if (canApproveFd) list.push('fd');
-    // RM, OC e Medições não aparecem nesta folha: seguem só pela web.
+    // Medições e aditivos de empreita: a API já entrega só o que o aprovador pode decidir.
+    if (canApproveEmpreiteiroDaily) list.push('medicao', 'aditivo');
+    // RM e OC não aparecem nesta folha: seguem só pela web.
     return list;
   }, [
     canAccessDpApproverPages,
     canApproveFuel,
     canApproveFd,
+    canApproveEmpreiteiroDaily,
   ]);
 
   const ocFlags = useMemo(
@@ -245,6 +257,19 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
         if (action === 'reject') {
           if (!comment) throw new Error('Informe o motivo da devolução');
           await returnMedicao(empreiteiroId, id, comment);
+        }
+        return;
+      }
+      if (tab === 'aditivo') {
+        const row = item.raw as AditivoApprovalRow;
+        const empreiteiroId = row.empreiteiroId || row.empreiteiro?.id;
+        const linkId = row.empreiteiroContractId;
+        if (!empreiteiroId || !linkId) throw new Error('Contrato do aditivo não encontrado');
+        if (action === 'approve') {
+          await approveAditivo(empreiteiroId, linkId, id);
+        } else {
+          if (!comment) throw new Error('Informe o que precisa ser corrigido');
+          await returnAditivo(empreiteiroId, linkId, id, comment);
         }
       }
     },

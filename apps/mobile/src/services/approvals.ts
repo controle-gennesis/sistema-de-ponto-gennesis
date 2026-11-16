@@ -95,6 +95,23 @@ export type MedicaoApprovalRow = {
   notes?: string | null;
 };
 
+export type AditivoApprovalRow = {
+  id: string;
+  number: number;
+  status: string;
+  reason?: string | null;
+  effectiveDate?: string | null;
+  amount?: number | null;
+  servicesAdded?: string | null;
+  servicesRemoved?: string | null;
+  createdAt?: string | null;
+  createdByName?: string | null;
+  empreiteiroId: string;
+  empreiteiroContractId: string;
+  serviceName?: string | null;
+  empreiteiro?: { id?: string; name?: string; specialty?: string | null } | null;
+};
+
 function phaseQuery(phase: ApprovalPhase): string {
   return `phase=${encodeURIComponent(phase)}`;
 }
@@ -235,6 +252,48 @@ export async function returnMedicao(
     { note },
   );
   await readApiData(res);
+}
+
+export async function fetchAditivoApprovals(): Promise<AditivoApprovalRow[]> {
+  const res = await api.get('/api/empreiteiros/addenda/pending');
+  return (await readApiData<AditivoApprovalRow[]>(res)) || [];
+}
+
+export async function approveAditivo(
+  empreiteiroId: string,
+  linkId: string,
+  addendumId: string,
+): Promise<void> {
+  const res = await api.post(
+    `/api/empreiteiros/${empreiteiroId}/contracts/${linkId}/addenda/${addendumId}/approve`,
+    {},
+  );
+  await readApiData(res);
+}
+
+export async function returnAditivo(
+  empreiteiroId: string,
+  linkId: string,
+  addendumId: string,
+  note: string,
+): Promise<void> {
+  const res = await api.post(
+    `/api/empreiteiros/${empreiteiroId}/contracts/${linkId}/addenda/${addendumId}/return`,
+    { note },
+  );
+  await readApiData(res);
+}
+
+/** Quantas medições e aditivos de empreita aguardam o aprovador (a API já filtra pelo escopo dele). */
+export async function fetchEmpreiteiroPendingCount(): Promise<number> {
+  const [medicoes, aditivos] = await Promise.all([
+    fetchMedicaoApprovals().catch(() => [] as MedicaoApprovalRow[]),
+    fetchAditivoApprovals().catch(() => [] as AditivoApprovalRow[]),
+  ]);
+  const pendingMedicoes = medicoes.filter(
+    (m) => m.status !== 'APPROVED' && m.status !== 'CORRECTION',
+  ).length;
+  return pendingMedicoes + aditivos.length;
 }
 
 export function ocPendingStatusesForUser(opts: {
