@@ -197,6 +197,15 @@ function formatMapUnitPriceBR(v: number): string {
   return formatUnitPriceBr(v);
 }
 
+/** CNPJ (14 dígitos) ou CPF (11) do fornecedor com máscara; outro formato sai como está. */
+function formatCnpjFornecedor(raw?: string | null): string {
+  const txt = String(raw ?? '').trim();
+  const d = txt.replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  return txt;
+}
+
 function formatDateTimeBR(dateString: string) {
   return new Date(dateString).toLocaleDateString('pt-BR', {
     day: '2-digit',
@@ -905,10 +914,12 @@ export default function MapaCotacaoPage() {
       suppliers.map((s) => {
         // Só o nome do fornecedor (o código continua valendo na busca).
         const label = s.tradeName?.trim() || s.name?.trim() || s.code;
+        const cnpj = formatCnpjFornecedor(s.cnpj);
         return {
           value: s.id,
           label,
-          searchText: `${s.code ?? ''} ${s.name} ${s.tradeName ?? ''} ${s.cnpj ?? ''}`,
+          ...(cnpj ? { description: `CNPJ ${cnpj}` } : {}),
+          searchText: `${s.code ?? ''} ${s.name} ${s.tradeName ?? ''} ${s.cnpj ?? ''} ${String(s.cnpj ?? '').replace(/\D/g, '')}`,
         };
       }),
     [suppliers]
@@ -2367,6 +2378,12 @@ export default function MapaCotacaoPage() {
                                       <span className="line-clamp-2 whitespace-normal break-words text-xs leading-snug text-gray-800 dark:text-gray-200">
                                         {sup ? sup.tradeName?.trim() || sup.name : supplierId}
                                       </span>
+                                      {formatCnpjFornecedor(sup?.cnpj) ? (
+                                        // flex + justify-center: o CNPJ (mais largo que a coluna) fica centralizado, sem pender para a direita.
+                                        <span className="mt-0.5 flex justify-center whitespace-nowrap text-[11px] font-normal tabular-nums text-gray-500 dark:text-gray-400">
+                                          {formatCnpjFornecedor(sup?.cnpj)}
+                                        </span>
+                                      ) : null}
                                     </th>
                                   );
                                 })}

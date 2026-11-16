@@ -754,50 +754,19 @@ function ContratoAcompanhamentoPanel({
                   <Settings2 className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
                 </button>
               ) : null}
-              {allowToolbarCreate && (canWrite || currentPeriodEntry) ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (currentPeriodEntry) {
-                        openReuniao(currentPeriodEntry.id, canWrite ? 'edit' : 'view');
-                        return;
-                      }
-                      if (!canWrite) return;
-                      periodoAtualMutation.mutate(false);
-                    }}
-                    disabled={periodoAtualMutation.isPending || loadingConfig}
-                    className={TOOLBAR_BTN_PRIMARY_ICON}
-                    title={
-                      currentPeriodEntry
-                        ? canWrite
-                          ? fillButtonContinueLabel
-                          : 'Visualizar quinzena'
-                        : fillButtonLabel
-                    }
-                    aria-label={
-                      currentPeriodEntry
-                        ? canWrite
-                          ? fillButtonContinueLabel
-                          : 'Visualizar quinzena'
-                        : fillButtonLabel
-                    }
-                  >
-                    <Plus className="h-4 w-4 shrink-0" />
-                  </button>
-                  {canWrite && !fromMetricasPage && (currentPeriodEntry || showInlineForm) ? (
-                    <button
-                      type="button"
-                      onClick={() => periodoAtualMutation.mutate(true)}
-                      disabled={periodoAtualMutation.isPending || loadingConfig}
-                      className={TOOLBAR_BTN_ICON}
-                      title={newRecordLabel}
-                      aria-label={newRecordLabel}
-                    >
-                      <Plus className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
-                    </button>
-                  ) : null}
-                </>
+              {/* Um "+" só: cria um novo registro (o do período atual, se ainda não existe).
+                  Continuar o registro atual é pela ação "Continuar preenchimento" nos três pontinhos. */}
+              {allowToolbarCreate && canWrite && (!fromMetricasPage || !(currentPeriodEntry || showInlineForm)) ? (
+                <button
+                  type="button"
+                  onClick={() => periodoAtualMutation.mutate(!!(currentPeriodEntry || showInlineForm))}
+                  disabled={periodoAtualMutation.isPending || loadingConfig}
+                  className={TOOLBAR_BTN_PRIMARY_ICON}
+                  title={currentPeriodEntry || showInlineForm ? newRecordLabel : fillButtonLabel}
+                  aria-label={currentPeriodEntry || showInlineForm ? newRecordLabel : fillButtonLabel}
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                </button>
               ) : null}
             </div>
           </div>
