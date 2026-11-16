@@ -17897,7 +17897,7 @@ export function OrcamentoPageView({
   const nomeArquivoExportOrcamento = (tipo: string, ext: 'xlsx' | 'pdf') =>
     montarNomeArquivoOrcamento({
       tipo,
-      semTipo: /^orcamento/i.test(tipo),
+      semTipo: /^orcamento\b/i.test(tipo),
       codigo: codigoOrcamentoAtivo,
       descricao: nomeOrcamentoSemCodigo || nomeContratoExport(),
       ext,
