@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { LogOut } from 'lucide-react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -21,6 +23,7 @@ import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeAprovacoesCard from '../components/HomeAprovacoesCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
 import HomeQuickAccess from '../components/HomeQuickAccess';
+import HomeFeedbackCard from '../components/HomeFeedbackCard';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import type { RootStackParamList } from '../../App';
 
@@ -37,6 +40,20 @@ export default function HomeScreen() {
   const { user, logout } = useAuth();
   const { colors, isDark } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Teclado aberto: abre espaço embaixo para o botão de enviar a avaliação não ficar escondido.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvt, (e) => setKeyboardHeight(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
@@ -83,11 +100,13 @@ export default function HomeScreen() {
   return (
     <View style={styles.safeArea}>
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerOffset + 16, paddingBottom: bottomContentInset },
+          { paddingTop: headerOffset + 16, paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : bottomContentInset },
         ]}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         {...chromeScroll}
         refreshControl={
@@ -141,6 +160,10 @@ export default function HomeScreen() {
         <HomeAgendaCard />
 
         <HomeTarefasCard />
+
+        <HomeFeedbackCard
+          onInputFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 320)}
+        />
       </ScrollView>
     </View>
   );

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -238,11 +239,21 @@ const getStyles = (colors: any, isDark: boolean) =>
   StyleSheet.create({
     card: {
       backgroundColor: colors.surface,
-      borderRadius: 16,
+      borderRadius: 20,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      padding: 16,
+      padding: 18,
       marginBottom: 16,
+      ...Platform.select({
+        ios: {
+          shadowColor: '#0f172a',
+          shadowOpacity: isDark ? 0 : 0.07,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+        },
+        android: { elevation: isDark ? 0 : 3 },
+        default: {},
+      }),
     },
     header: {
       flexDirection: 'row',

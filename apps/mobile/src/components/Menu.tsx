@@ -14,7 +14,17 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Moon, Sun, LogOut, X, Clock, SquareKanban, BookOpen } from 'lucide-react-native';
+import {
+  Home,
+  Moon,
+  Sun,
+  LogOut,
+  X,
+  Clock,
+  SquareKanban,
+  BookOpen,
+  ChevronRight,
+} from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../context/ThemeContext';
@@ -41,35 +51,60 @@ const LEFT_BLEED = 56;
 function MenuItemRow({
   label,
   icon: Icon,
-  color,
   onPress,
   anim,
-  index,
+  index = 0,
+  danger = false,
+  chevron = true,
+  colors,
+  isDark,
 }: {
   label: string;
   icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
-  color: string;
   onPress: () => void;
-  anim: Animated.Value;
-  index: number;
+  anim?: Animated.Value;
+  index?: number;
+  danger?: boolean;
+  chevron?: boolean;
+  colors: any;
+  isDark: boolean;
 }) {
   const start = Math.min(0.12 * index, 0.55);
-  const opacity = anim.interpolate({
-    inputRange: [start, Math.min(start + 0.35, 1)],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-  const translateX = anim.interpolate({
-    inputRange: [start, Math.min(start + 0.35, 1)],
-    outputRange: [-16, 0],
-    extrapolate: 'clamp',
-  });
+  const animStyle = anim
+    ? {
+        opacity: anim.interpolate({
+          inputRange: [start, Math.min(start + 0.35, 1)],
+          outputRange: [0, 1],
+          extrapolate: 'clamp',
+        }),
+        transform: [
+          {
+            translateX: anim.interpolate({
+              inputRange: [start, Math.min(start + 0.35, 1)],
+              outputRange: [-16, 0],
+              extrapolate: 'clamp',
+            }),
+          },
+        ],
+      }
+    : null;
+  const accent = danger ? '#dc2626' : colors.primary;
+  const rowBg = isDark ? 'transparent' : colors.screenRoot ?? '#f4f4f5';
 
   return (
-    <Animated.View style={{ opacity, transform: [{ translateX }] }}>
-      <TouchableOpacity style={styles.item} onPress={onPress} activeOpacity={0.65}>
-        <Icon size={20} color={color} strokeWidth={2} />
-        <Text style={[styles.itemLabel, { color }]}>{label}</Text>
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        style={[styles.item, { backgroundColor: rowBg }]}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.itemIcon, { backgroundColor: `${accent}1A` }]}>
+          <Icon size={20} color={accent} strokeWidth={2.1} />
+        </View>
+        <Text style={[styles.itemLabel, { color: danger ? accent : colors.text }]} numberOfLines={1}>
+          {label}
+        </Text>
+        {chevron ? <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} /> : null}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -320,10 +355,11 @@ export default function Menu({ visible, onClose }: MenuProps) {
                     key={item.key}
                     label={item.label}
                     icon={item.icon}
-                    color={colors.text}
                     onPress={item.onPress}
                     anim={itemsAnim}
                     index={index}
+                    colors={colors}
+                    isDark={isDark}
                   />
                 ))}
               </ScrollView>
@@ -348,7 +384,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                   ) : (
                     <Moon size={20} color={colors.text} strokeWidth={2} />
                   )}
-                  <Text style={[styles.itemLabel, { color: colors.text }]}>
+                  <Text style={[styles.footerLabel, { color: colors.text }]}>
                     {isDark ? 'Tema claro' : 'Tema escuro'}
                   </Text>
                 </TouchableOpacity>
@@ -358,7 +394,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                   activeOpacity={0.65}
                 >
                   <LogOut size={20} color={colors.primary} strokeWidth={2} />
-                  <Text style={[styles.itemLabel, { color: colors.primary }]}>Sair</Text>
+                  <Text style={[styles.footerLabel, { color: colors.primary }]}>Sair</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>
@@ -462,13 +498,23 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 4,
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  itemIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+    flex: 1,
+    fontSize: 15.5,
+    fontWeight: '600',
     letterSpacing: -0.2,
   },
   footer: {
@@ -482,5 +528,10 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingVertical: 14,
     paddingHorizontal: 4,
+  },
+  footerLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: -0.2,
   },
 });

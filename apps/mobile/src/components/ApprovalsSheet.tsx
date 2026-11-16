@@ -16,7 +16,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BadgeCheck,
   CalendarDays,
   ClipboardList,
   Fuel,
@@ -412,7 +411,7 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
       }}
       title="Aprovações"
       subtitle={subtitle}
-      icon={BadgeCheck}
+      leftHeader
       overlay={overlays}
     >
     <FlatList
