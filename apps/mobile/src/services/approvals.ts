@@ -81,6 +81,7 @@ export type OcApprovalRow = {
 
 export type MedicaoApprovalRow = {
   id: string;
+  displayNumber?: number | null;
   empreiteiroId: string;
   status: string;
   measurementDate?: string | null;

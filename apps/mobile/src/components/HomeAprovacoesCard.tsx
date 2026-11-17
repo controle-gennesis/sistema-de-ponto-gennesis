@@ -116,25 +116,21 @@ export default function HomeAprovacoesCard() {
 const getStyles = (colors: any, isDark: boolean) =>
   StyleSheet.create({
     card: {
-      position: 'relative',
-      overflow: 'hidden',
       backgroundColor: colors.surface,
       borderRadius: 20,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      paddingHorizontal: 18,
-      paddingTop: 16,
-      paddingBottom: 16,
+      padding: 18,
       marginBottom: 16,
       gap: 16,
       ...Platform.select({
         ios: {
           shadowColor: '#0f172a',
-          shadowOpacity: isDark ? 0 : 0.07,
+          shadowOpacity: 0,
           shadowRadius: 14,
           shadowOffset: { width: 0, height: 6 },
         },
-        android: { elevation: isDark ? 0 : 3 },
+        android: { elevation: 0 },
         default: {},
       }),
     },

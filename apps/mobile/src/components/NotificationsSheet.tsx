@@ -115,7 +115,13 @@ export default function NotificationsSheet() {
   const unread = notifications.filter((n) => !n.read).length;
 
   return (
-    <Modal visible={mounted} transparent animationType="none" onRequestClose={closeSheet}>
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={closeSheet}
+    >
       <View style={styles.overlay}>
         <Animated.View
           pointerEvents="none"

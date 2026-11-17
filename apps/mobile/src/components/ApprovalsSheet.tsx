@@ -75,7 +75,7 @@ function itemRefCode(item: ApprovalListItemWithTab): string {
   }
   if (item.tab === 'aditivo') {
     const n = (item.raw as { number?: number | null })?.number;
-    if (n != null) return `Nº ${n}`;
+    if (n != null) return `#${n}`;
   }
   if (item.tab === 'rm' || item.tab === 'oc') {
     const m = item.title.match(/#\s*([^\s]+)/);
@@ -421,7 +421,6 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
         tab={selected?.tab ?? null}
         item={selectedForSheet}
         onClose={() => setSelected(null)}
-        embedded
       />
     </>
   );

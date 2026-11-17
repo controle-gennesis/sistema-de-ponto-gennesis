@@ -278,6 +278,12 @@ export default function PunchScreen() {
     return () => subs.forEach((sub) => sub.remove());
   }, [windowHeight]);
 
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  // Animação do "ponto registrado": o check salta com mola e um anel se expande por trás.
+  const successPop = useRef(new Animated.Value(0)).current;
+  const successPulse = useRef(new Animated.Value(0)).current;
+  const successFade = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (!showSuccessModal) return;
     successPop.setValue(0);
@@ -324,11 +330,6 @@ export default function PunchScreen() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [address, setAddress] = useState('Obtendo localização');
   const [loadingDots, setLoadingDots] = useState(1);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  // Animação do "ponto registrado": o check salta com mola e um anel se expande por trás.
-  const successPop = useRef(new Animated.Value(0)).current;
-  const successPulse = useRef(new Animated.Value(0)).current;
-  const successFade = useRef(new Animated.Value(0)).current;
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showFacePhotoModal, setShowFacePhotoModal] = useState(false);
@@ -1915,6 +1916,17 @@ const getStyles = (colors: any, isDark: boolean) =>
       shadowOffset: { width: 0, height: 2 },
       elevation: 3,
       zIndex: 2,
+    },
+    input: {
+      minHeight: 88,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderRadius: 12,
+      padding: 12,
+      color: colors.text,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.surface,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      fontSize: 15,
+      fontWeight: '500',
     },
     charCount: {
       marginTop: 8,

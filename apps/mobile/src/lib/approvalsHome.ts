@@ -200,7 +200,7 @@ export async function fetchPendingApprovalsForTab(
       .filter((row: MedicaoApprovalRow) => isApprovalPendingStatus('medicao', row.status))
       .map((row: MedicaoApprovalRow) => ({
         id: row.id,
-        title: row.empreiteiro?.name || 'Medição',
+        title: row.displayNumber != null ? `Medição #${row.displayNumber}` : row.empreiteiro?.name || 'Medição',
         person: row.empreiteiro?.name || null,
         place: row.contratoNome || row.empreiteiro?.contratoNome || null,
         subtitle:
@@ -220,7 +220,7 @@ export async function fetchPendingApprovalsForTab(
       .filter((row: AditivoApprovalRow) => isApprovalPendingStatus('aditivo', row.status))
       .map((row: AditivoApprovalRow) => ({
         id: row.id,
-        title: `Aditivo nº ${row.number}`,
+        title: `Aditivo #${row.number}`,
         person: row.empreiteiro?.name || null,
         place: row.serviceName || null,
         subtitle: row.serviceName || row.empreiteiro?.name || formatApprovalMoney(row.amount),

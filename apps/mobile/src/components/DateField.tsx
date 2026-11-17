@@ -13,11 +13,14 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { Calendar, ChevronDown, X } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import FormFieldLabel from './FormFieldLabel';
 
 type Mode = 'date' | 'datetime';
 
 type DateFieldProps = {
   label: string;
+  /** Mostra o asterisco vermelho de campo obrigatório (como nos outros campos). */
+  required?: boolean;
   /** Valor em `YYYY-MM-DD` (date) ou `YYYY-MM-DDTHH:mm` (datetime) */
   value: string;
   onChange: (value: string) => void;
@@ -90,6 +93,7 @@ function displayLabel(value: string, mode: Mode): string {
 
 export default function DateField({
   label,
+  required,
   value,
   onChange,
   mode = 'date',
@@ -157,7 +161,7 @@ export default function DateField({
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
+      <FormFieldLabel label={label} required={required} style={[styles.label, { color: colors.textSecondary }]} />
       <TouchableOpacity
         onPress={openPicker}
         activeOpacity={0.75}
