@@ -47,6 +47,7 @@ import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
 import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
 import { RmApprovalsSection } from './_components/RmApprovalsSection';
+import { RmCorrecoesAprovacaoSection } from './_components/RmCorrecoesAprovacaoSection';
 import { MedicaoApprovalsSection } from './_components/MedicaoApprovalsSection';
 import { AditivoApprovalsSection } from './_components/AditivoApprovalsSection';
 import {
@@ -1580,7 +1581,13 @@ function AprovacoesPage() {
 
           {canApproveFuel && activeTab === 'fuel' && <FuelApprovalsSection />}
 
-          {canApproveMaterialRequests && activeTab === 'rm' && <RmApprovalsSection />}
+          {canApproveMaterialRequests && activeTab === 'rm' && (
+            <div className="space-y-6">
+              {/* Correções de itens de RMs aprovadas aguardando aprovação (antes de voltar ao mapa). */}
+              <RmCorrecoesAprovacaoSection />
+              <RmApprovalsSection />
+            </div>
+          )}
 
           {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
 

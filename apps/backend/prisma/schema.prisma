@@ -6340,3 +6340,14 @@ model MaterialRequestCorrectionLog {
   @@index([materialRequestId])
   @@map("material_request_correction_logs")
 }
+
+/// Item da RM corrigido pelo solicitante e enviado ao aprovador (fica em correção, fora do mapa, até aprovar).
+model MaterialRequestItemCorrectionReview {
+  materialRequestItemId String   @id
+  materialRequestId     String
+  submittedById         String
+  submittedAt           DateTime @default(now())
+
+  @@index([materialRequestId])
+  @@map("material_request_item_correction_reviews")
+}

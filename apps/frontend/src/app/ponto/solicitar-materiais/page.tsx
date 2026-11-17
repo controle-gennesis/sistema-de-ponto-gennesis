@@ -1156,14 +1156,20 @@ function SolicitarMateriaisPage() {
   });
 
   // Histórico de correções da RM (quem, quando, material e/ou quantidade).
-  const { data: detailCorrecoes = [] } = useQuery({
+  const { data: detailCorrecoesData } = useQuery({
     queryKey: ['material-request-correcoes', detailViewId],
     queryFn: async () => {
       const res = await api.get(`/material-requests/${detailViewId}/correcoes`);
-      return (res.data?.data ?? []) as RmCorrecaoLog[];
+      return (res.data?.data ?? { logs: [], aguardandoAprovacao: [] }) as {
+        logs: RmCorrecaoLog[];
+        aguardandoAprovacao: string[];
+      };
     },
     enabled: !!detailViewId && !!userData?.data?.id,
   });
+  const detailCorrecoes = detailCorrecoesData?.logs ?? [];
+  /** Itens com a correção já enviada ao aprovador (aguardando a decisão). */
+  const itensAguardandoAprovacao = new Set(detailCorrecoesData?.aguardandoAprovacao ?? []);
   // RM feita pelo orçamento/FD: vai para o TOTVS, então a troca de material só mostra itens com identificador.
   const { data: detailRmDaFd = false } = useQuery({
     queryKey: ['material-request-da-fd', detailViewId],
@@ -1188,9 +1194,42 @@ function SolicitarMateriaisPage() {
   const [trocaMaterialItem, setTrocaMaterialItem] = useState<
     Record<string, { materialId: string; label: string; unit: string }>
   >({});
+  /** Quantidade digitada na correção de cada item (itemId → texto). */
+  const [qtdCorrecaoItem, setQtdCorrecaoItem] = useState<Record<string, string>>({});
   useEffect(() => {
     setTrocaMaterialItem({});
+    setQtdCorrecaoItem({});
   }, [detailViewId]);
+
+  /** Correção de todos os itens em correção de uma vez ("Salvar e reenviar"). */
+  const correctItemsBatchMutation = useMutation({
+    mutationFn: async ({
+      requestId,
+      items,
+    }: {
+      requestId: string;
+      items: { itemId: string; quantity: number; materialId?: string; materialLabel?: string }[];
+    }) => {
+      const res = await api.patch(`/material-requests/${requestId}/items/correct-batch`, { items });
+      return res.data;
+    },
+    onSuccess: async (_data, { requestId }) => {
+      toast.success('Correção enviada para aprovação.');
+      setTrocaMaterialItem({});
+      setQtdCorrecaoItem({});
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-request-detail', requestId] }),
+        queryClient.invalidateQueries({ queryKey: ['material-request-correcoes', requestId] }),
+        queryClient.invalidateQueries({ queryKey: ['material-requests-approved-map'] }),
+        queryClient.invalidateQueries({ queryKey: ['fd-pedidos-resumo'] }),
+        queryClient.invalidateQueries({ queryKey: ['rm-minhas-correcao-count'] }),
+      ]);
+    },
+    onError: (error: { response?: { data?: { message?: string } } }) => {
+      toast.error(error.response?.data?.message || 'Não foi possível salvar a correção');
+    },
+  });
 
   const detailRmDisplayNo = useMemo(() => {
     const fromDetail = formatRmListDisplayId(
@@ -3404,6 +3443,7 @@ function SolicitarMateriaisPage() {
 
                         {detailTab === 'materiais' ? (
                           d.items && d.items.length > 0 ? (
+                            <>
                             <div className="table-scroll">
                               <table className="w-full text-xs sm:text-sm">
                                 <thead>
@@ -3442,8 +3482,10 @@ function SolicitarMateriaisPage() {
                                     ).bankDetails?.trim();
                                     const unitPrice =
                                       (item as { unitPrice?: number | null }).unitPrice ?? null;
+                                    const aguardandoAprovacaoItem = !!item.id && itensAguardandoAprovacao.has(item.id);
                                     const podeCorrigirItem =
                                       item.status === 'IN_REVIEW' &&
+                                      !aguardandoAprovacaoItem &&
                                       !!item.id &&
                                       !!detailViewId &&
                                       (d.requestedBy === userId || isElevatedUser);
@@ -3527,44 +3569,25 @@ function SolicitarMateriaisPage() {
                                               ) : null}
                                             </div>
                                           ) : null}
+                                          {aguardandoAprovacaoItem ? (
+                                            <p className="mt-1.5 inline-flex rounded-md bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">
+                                              Correção aguardando aprovação
+                                            </p>
+                                          ) : null}
                                           <HistoricoCorrecoes registros={historicoItem} />
                                         </td>
                                         <td className="whitespace-nowrap px-2 py-3 text-right align-top tabular-nums">
                                           {podeCorrigirItem ? (
-                                            <form
-                                              className="flex items-center justify-end gap-2"
-                                              onSubmit={(e) => {
-                                                e.preventDefault();
-                                                const raw = new FormData(e.currentTarget).get('quantity');
-                                                const quantity = Number(String(raw).replace(',', '.'));
-                                                if (!Number.isFinite(quantity) || quantity <= 0) {
-                                                  toast.error('Informe uma quantidade maior que zero');
-                                                  return;
-                                                }
-                                                correctItemQtyMutation.mutate({
-                                                  requestId: detailViewId!,
-                                                  itemId: item.id!,
-                                                  quantity,
-                                                  ...(troca && troca.materialId !== itemMaterialId
-                                                    ? { materialId: troca.materialId, materialLabel: troca.label }
-                                                    : {}),
-                                                });
-                                              }}
-                                            >
-                                              <input
-                                                name="quantity"
-                                                defaultValue={Number(item.quantity)}
-                                                inputMode="decimal"
-                                                className="w-20 rounded-md border border-amber-400 bg-white px-2 py-1 text-right text-sm dark:bg-gray-900"
-                                              />
-                                              <button
-                                                type="submit"
-                                                disabled={correctItemQtyMutation.isPending}
-                                                className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-                                              >
-                                                Salvar
-                                              </button>
-                                            </form>
+                                            // Salva junto com os demais itens no botão "Salvar e reenviar".
+                                            <input
+                                              value={qtdCorrecaoItem[item.id!] ?? String(Number(item.quantity))}
+                                              onChange={(e) =>
+                                                setQtdCorrecaoItem((prev) => ({ ...prev, [item.id!]: e.target.value }))
+                                              }
+                                              inputMode="decimal"
+                                              aria-label="Quantidade corrigida"
+                                              className="w-20 rounded-md border border-amber-400 bg-white px-2 py-1 text-right text-sm dark:bg-gray-900"
+                                            />
                                           ) : (
                                             Number(item.quantity)
                                           )}
@@ -3608,6 +3631,59 @@ function SolicitarMateriaisPage() {
                                 </tbody>
                               </table>
                             </div>
+                            {(() => {
+                              // Um botão só: grava a correção de todos os itens em correção e devolve ao mapa.
+                              const emCorrecao = d.items.filter(
+                                (it) =>
+                                  it.status === 'IN_REVIEW' &&
+                                  !!it.id &&
+                                  !itensAguardandoAprovacao.has(it.id) &&
+                                  (d.requestedBy === userId || isElevatedUser)
+                              );
+                              if (emCorrecao.length === 0 || !detailViewId) return null;
+                              const enviar = () => {
+                                const itens: {
+                                  itemId: string;
+                                  quantity: number;
+                                  materialId?: string;
+                                  materialLabel?: string;
+                                }[] = [];
+                                for (const it of emCorrecao) {
+                                  const raw = qtdCorrecaoItem[it.id!] ?? String(Number(it.quantity));
+                                  const quantity = Number(String(raw).replace(',', '.'));
+                                  if (!Number.isFinite(quantity) || quantity <= 0) {
+                                    toast.error('Informe uma quantidade maior que zero em todos os itens em correção');
+                                    return;
+                                  }
+                                  const atualId = String((it as { materialId?: string }).materialId || '');
+                                  const troca = trocaMaterialItem[it.id!];
+                                  itens.push({
+                                    itemId: it.id!,
+                                    quantity,
+                                    ...(troca && troca.materialId !== atualId
+                                      ? { materialId: troca.materialId, materialLabel: troca.label }
+                                      : {}),
+                                  });
+                                }
+                                correctItemsBatchMutation.mutate({ requestId: detailViewId, items: itens });
+                              };
+                              return (
+                                <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {emCorrecao.length} {emCorrecao.length === 1 ? 'item em correção' : 'itens em correção'}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={enviar}
+                                    disabled={correctItemsBatchMutation.isPending}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                  >
+                                    {correctItemsBatchMutation.isPending ? 'Enviando…' : 'Salvar e reenviar para aprovação'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                            </>
                           ) : (
                             <p className="py-10 text-center text-sm text-gray-400">
                               Nenhum material nesta solicitação.

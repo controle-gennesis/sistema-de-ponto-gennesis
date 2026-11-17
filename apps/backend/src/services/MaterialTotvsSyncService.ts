@@ -135,9 +135,6 @@ function normalizeCodeKey(code: string): string {
   return t.toUpperCase();
 }
 
-function normalizeNameKey(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toUpperCase();
-}
 
 function parseIdPrd(raw: unknown): number | null {
   if (raw === null || raw === undefined || raw === '') return null;
@@ -412,7 +409,7 @@ function needsUpdate(
  * Busca PRODUTOSATIVOS no TOTVS RM e faz upsert local:
  * 1) por totvsIdPrd (IDPRD)
  * 2) por código (CODIGOPRD)
- * 3) por nome exato único (só para alinhar código sem criar duplicata)
+ * (nunca pelo nome: o RM tem muitos produtos com o mesmo nome)
  *
  * Nunca apaga materiais locais. OCs continuam apontando para o mesmo id.
  */
@@ -501,15 +498,10 @@ export async function runMaterialTotvsSync(
 
     const byIdPrd = new Map<number, LocalMaterial>();
     const byCode = new Map<string, LocalMaterial>();
-    const byName = new Map<string, LocalMaterial[]>();
 
     for (const mat of existing) {
       if (mat.totvsIdPrd != null && mat.totvsIdPrd > 0) byIdPrd.set(mat.totvsIdPrd, mat);
       if (mat.code) byCode.set(normalizeCodeKey(mat.code), mat);
-      const nk = normalizeNameKey(mat.name);
-      const arr = byName.get(nk) ?? [];
-      arr.push(mat);
-      byName.set(nk, arr);
     }
 
     type CreateRow = {
@@ -542,6 +534,8 @@ export async function runMaterialTotvsSync(
 
     const toCreate: CreateRow[] = [];
     const toUpdate: UpdateRow[] = [];
+    /** Cadastros locais que já receberam um produto do RM nesta sincronização. */
+    const vinculados = new Set<string>();
 
     for (const m of mapped) {
       const codeKey = normalizeCodeKey(m.code);
@@ -549,18 +543,18 @@ export async function runMaterialTotvsSync(
       const byCod = byCode.get(codeKey);
       let target = byId || byCod;
 
-      // Nome exato único: alinha código errado sem criar segundo cadastro.
-      if (!target) {
-        const nameHits = byName.get(normalizeNameKey(m.name)) ?? [];
-        if (nameHits.length === 1) {
-          const only = nameHits[0];
-          const idTaken =
-            m.idPrd != null ? byIdPrd.get(m.idPrd) : undefined;
-          if (!idTaken || idTaken.id === only.id) {
-            target = only;
-          }
-        }
+      // Só identificador (IDPRD) ou código: nunca pelo nome. O RM tem muitos produtos com o mesmo
+      // nome (ex.: 09.01.0177 e 09.01.0745); casar pelo nome fazia um sobrescrever o outro.
+
+      // Cada cadastro do Conecta recebe um único produto do RM por sincronização.
+      if (target && vinculados.has(target.id)) {
+        conflicts += 1;
+        console.warn(
+          `[material-totvs] ${m.code} (IDPRD ${m.idPrd ?? '-'}) não atualizado: o cadastro já recebeu outro produto nesta sincronização`
+        );
+        continue;
       }
+      if (target) vinculados.add(target.id);
 
       // Texto INATIV* no nome → nunca criar/atualizar como ativo.
       const inactiveByText = looksInactiveText(m.name);
@@ -605,8 +599,6 @@ export async function runMaterialTotvsSync(
         };
         byCode.set(codeKey, placeholder);
         if (m.idPrd != null) byIdPrd.set(m.idPrd, placeholder);
-        const nk = normalizeNameKey(m.name);
-        byName.set(nk, [...(byName.get(nk) ?? []), placeholder]);
         continue;
       }
 

@@ -4,6 +4,7 @@ import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permis
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
+import { itensAguardandoAprovacao } from '../lib/rmCorrecaoFd';
 import { getDpManagerApprovalVisibilityWhere } from '../lib/dpApprovalAccess';
 import { admTstManagerApprovalExclusionWhere } from '../lib/dpRequestAdmTst';
 import { getFdManagerApprovalVisibilityWhere } from '../lib/fdApprovalAccess';
@@ -109,6 +110,22 @@ export class ApprovalNotificationController {
           rmWhere.costCenterId = { in: rmScope };
         }
         rm = await prisma.materialRequest.count({ where: rmWhere });
+        // RMs aprovadas com itens corrigidos aguardando a aprovação da correção.
+        try {
+          const enviados = await itensAguardandoAprovacao();
+          if (enviados.length > 0) {
+            rm += await prisma.materialRequest.count({
+              where: {
+                status: 'APPROVED',
+                id: { in: [...new Set(enviados.map((e) => e.materialRequestId))] },
+                items: { some: { id: { in: enviados.map((e) => e.materialRequestItemId) }, status: 'IN_REVIEW' } },
+                ...(rmScope !== null ? { costCenterId: { in: rmScope } } : {}),
+              },
+            });
+          }
+        } catch {
+          /* tabela ainda não criada: não conta */
+        }
       }
 
       let espelhoMirrors = 0;

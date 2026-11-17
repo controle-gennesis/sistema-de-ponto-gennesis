@@ -6,6 +6,9 @@ import {
   nomeDoUsuario,
   registrarCorrecaoRm,
   rotuloDoMaterial,
+  marcarItensAguardandoAprovacao,
+  desmarcarItensAguardandoAprovacao,
+  itensAguardandoAprovacao,
   type FdCorrecaoAlteracao,
   type RmLinhaCorrigida,
 } from '../lib/rmCorrecaoFd';
@@ -1523,6 +1526,10 @@ export class MaterialRequestService {
     if (item.status !== 'IN_REVIEW') {
       throw new Error('Este item não está em correção de quantidade');
     }
+    const jaEnviado = (await itensAguardandoAprovacao([requestId])).some((r) => r.materialRequestItemId === itemId);
+    if (jaEnviado) {
+      throw new Error('Não é possível corrigir: a correção deste item já está aguardando aprovação');
+    }
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       throw new Error('Quantidade deve ser maior que zero');
@@ -1558,9 +1565,10 @@ export class MaterialRequestService {
         ...(novoMaterial ? { materialId: novoMaterial.id, unit: unidade, unitPrice } : {}),
         quantity: qty,
         totalPrice,
-        status: 'APPROVED',
+        // Continua em correção (fora do mapa) até o aprovador aprovar a correção.
       },
     });
+    await marcarItensAguardandoAprovacao(requestId, [itemId], userId);
 
     // Histórico da correção (quem, quando, o que mudou) e espelho nos itens pedidos da FD.
     const rotuloAntigo = await rotuloDoMaterial(item.materialId);
@@ -1607,8 +1615,8 @@ export class MaterialRequestService {
         materialRequestId: requestId,
         userId,
         content: novoMaterial
-          ? `Material trocado de ${rotuloAntigo || 'material anterior'} para ${rotuloNovo || 'novo material'} (${qty} ${unidade}). O item voltou ao mapa de cotação.`
-          : `Quantidade corrigida para ${qty} ${item.unit}. O item voltou ao mapa de cotação.`,
+          ? `Material trocado de ${rotuloAntigo || 'material anterior'} para ${rotuloNovo || 'novo material'} (${qty} ${unidade}). Correção enviada para aprovação.`
+          : `Quantidade corrigida para ${qty} ${item.unit}. Correção enviada para aprovação.`,
       },
     });
 
