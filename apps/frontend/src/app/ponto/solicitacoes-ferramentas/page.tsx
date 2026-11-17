@@ -635,6 +635,12 @@ function SolicitacoesFerramentasPage() {
   ];
 
   const listHeader = LIST_HEADER_BY_FILTER[statusFilter];
+  // A partir da cotação a SC já existe: mostra o ID da SC na lista.
+  const showScId =
+    statusFilter === 'QUOTATION' ||
+    statusFilter === 'AWAITING_PAYMENT' ||
+    statusFilter === 'AWAITING_RECEIPT' ||
+    statusFilter === 'COMPLETED';
   const ListHeaderIcon = listHeader.Icon;
 
   const stats = useMemo(() => {
@@ -781,11 +787,10 @@ function SolicitacoesFerramentasPage() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className={cadastroListClasses.th}>ID</th>
+                      {showScId ? <th className={cadastroListClasses.th}>ID da SC</th> : null}
                       <th className={cadastroListClasses.th}>Solicitação</th>
                       <th className={cadastroListClasses.thCenter}>Solicitante</th>
                       <th className={cadastroListClasses.thCenter}>Contrato / Obra</th>
-                      <th className={cadastroListClasses.thCenter}>Tipo</th>
-                      <th className={cadastroListClasses.thCenter}>Polo</th>
                       <th className={cadastroListClasses.thCenter}>Prioridade</th>
                       <th className={cadastroListClasses.thCenter}>Período</th>
                       <th className={cadastroListClasses.thCenter}>Status</th>
@@ -804,6 +809,11 @@ function SolicitacoesFerramentasPage() {
                             {formatCadastroListId(row.code, listRange.startItem + index)}
                           </ListRowNavigableLabel>
                         </td>
+                        {showScId ? (
+                          <td className={cadastroListClasses.tdMono}>
+                            <span className="font-mono">{row.scId || '—'}</span>
+                          </td>
+                        ) : null}
                         <td className={`${cadastroListClasses.tdTruncate} max-w-[26rem] lg:max-w-[40rem]`}>
                           <p className="line-clamp-2 break-words font-medium text-gray-900 dark:text-gray-100" title={row.titulo}>
                             {row.titulo}
@@ -818,10 +828,6 @@ function SolicitacoesFerramentasPage() {
                           </p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">{row.obra || '—'}</p>
                         </td>
-                        <td className={cadastroListClasses.tdCenter}>
-                          {formatToolRentalDemand(row.demandType)}
-                        </td>
-                        <td className={cadastroListClasses.tdCenter}>{row.polo}</td>
                         <td className={cadastroListClasses.tdCenter}>
                           {formatToolRentalPriority(row.priority)}
                         </td>
