@@ -338,6 +338,7 @@ export class ContractController {
               name: true,
               email: true,
               cpf: true,
+              profilePhotoUrl: true,
               employee: {
                 select: {
                   position: true,
@@ -357,6 +358,7 @@ export class ContractController {
           name: r.user.name,
           email: r.user.email,
           cpf: r.user.cpf || null,
+          profilePhotoUrl: r.user.profilePhotoUrl || null,
           position: r.user.employee?.position || null,
           department: r.user.employee?.department || null,
         })),

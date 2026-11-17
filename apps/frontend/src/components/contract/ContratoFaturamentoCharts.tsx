@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   Area,
   AreaChart,
@@ -1141,9 +1142,40 @@ export type ContratoResumoPessoa = {
   name: string;
   email?: string | null;
   cpf?: string | null;
+  /** Foto de perfil do usuário (a mesma usada no resto do sistema). */
+  profilePhotoUrl?: string | null;
   position?: string | null;
   department?: string | null;
 };
+
+/** Foto de perfil da pessoa; sem foto (ou se ela não carregar), mostra as iniciais coloridas. */
+function PessoaAvatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
+  const [fotoComErro, setFotoComErro] = useState(false);
+  const href = fotoComErro ? null : resolveApiMediaUrl(photoUrl ?? null);
+  if (href) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={href}
+        alt=""
+        aria-hidden
+        className="h-10 w-10 shrink-0 rounded-full object-cover"
+        referrerPolicy="no-referrer"
+        onError={() => setFotoComErro(true)}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarToneForName(
+        name
+      )}`}
+      aria-hidden
+    >
+      {personInitials(name)}
+    </span>
+  );
+}
 
 function PessoasContratoCard({
   people,
@@ -1184,14 +1216,7 @@ function PessoasContratoCard({
                   key={person.id}
                   className="flex items-center gap-3 rounded-xl px-1.5 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
                 >
-                      <span
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarToneForName(
-                      person.name
-                    )}`}
-                    aria-hidden
-                  >
-                    {personInitials(person.name)}
-                      </span>
+                  <PessoaAvatar name={person.name} photoUrl={person.profilePhotoUrl} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                       {person.name}
