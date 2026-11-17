@@ -223,8 +223,8 @@ export function useChromeVisibility() {
   return useContext(ChromeVisibilityContext);
 }
 
-/** Folga visual entre o fim do conteúdo e a chrome (igual ao gap sob a navbar). */
-export const CHROME_CONTENT_GAP = 16;
+/** Folga entre o fim do conteúdo e a tab bar: igual à margem lateral dos blocos (20). */
+export const CHROME_CONTENT_GAP = 20;
 
 export function useChromeScroll() {
   const chrome = useContext(ChromeVisibilityContext);
@@ -237,9 +237,9 @@ export function useChromeScroll() {
     }, [reveal]),
   );
 
-  // iPhone: tab bar nativa sobrepõe a cena — precisa de inset no scroll.
-  // iPad e Android: a cena já reserva a altura da barra de baixo.
-  const tabBarOffset = Platform.OS === 'ios' && !Platform.isPad ? getTabBarHeight(insets.bottom) : 0;
+  // A tab bar fica por cima da cena em todas as plataformas (no @react-navigation v7 a cena não
+  // reserva a altura dela), então o conteúdo precisa terminar acima dela.
+  const tabBarOffset = getTabBarHeight(insets.bottom);
 
   return {
     scrollProps: chrome?.scrollHandlers ?? {},

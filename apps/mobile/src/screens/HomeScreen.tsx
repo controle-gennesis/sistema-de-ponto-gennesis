@@ -104,7 +104,7 @@ export default function HomeScreen() {
         style={styles.container}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerOffset + 16, paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : bottomContentInset },
+          { paddingTop: headerOffset + 16, paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(0, bottomContentInset - 16) }, // o último cartão já tem 16 de margem embaixo
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}

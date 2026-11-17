@@ -31,7 +31,7 @@ import EmpreitaHomeScreen from './src/screens/empreiteiro/EmpreitaHomeScreen';
 import EmpreitaServicoScreen from './src/screens/empreiteiro/EmpreitaServicoScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
 import AppUpdateGate from './src/components/AppUpdateGate';
-import ThemeBackground from './src/components/ThemeBackground';
+import ThemeBackground, { ThemePatternFill } from './src/components/ThemeBackground';
 
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 
@@ -77,6 +77,41 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const queryClient = new QueryClient();
 
 const MIN_SPLASH_MS = 900;
+
+/**
+ * As telas da pilha são transparentes (o padrão aparece atrás). Durante a animação de abrir/voltar,
+ * duas telas transparentes ficam uma por cima da outra. Aqui cada página leva o próprio fundo opaco.
+ */
+function withOpaqueBackground<P extends object>(Screen: React.ComponentType<P>) {
+  function Wrapped(props: P) {
+    return (
+      <View style={{ flex: 1 }}>
+        <ThemePatternFill />
+        <Screen {...props} />
+      </View>
+    );
+  }
+  Wrapped.displayName = `Opaque(${Screen.displayName ?? Screen.name ?? 'Screen'})`;
+  return Wrapped;
+}
+
+const OpaqueBottomTabNavigator = withOpaqueBackground(BottomTabNavigator);
+const OpaquePunchScreen = withOpaqueBackground(PunchScreen);
+const OpaqueTimeRecordsScreen = withOpaqueBackground(TimeRecordsScreen);
+const OpaqueFuelRequestsScreen = withOpaqueBackground(FuelRequestsScreen);
+const OpaqueProfileScreen = withOpaqueBackground(ProfileScreen);
+const OpaquePncpLicitacoesScreen = withOpaqueBackground(PncpLicitacoesScreen);
+const OpaqueAgendaScreen = withOpaqueBackground(AgendaScreen);
+const OpaqueDiarioObraListScreen = withOpaqueBackground(DiarioObraListScreen);
+const OpaqueDiarioObraEditorScreen = withOpaqueBackground(DiarioObraEditorScreen);
+const OpaqueKanbanBoardsScreen = withOpaqueBackground(KanbanBoardsScreen);
+const OpaqueKanbanBoardScreen = withOpaqueBackground(KanbanBoardScreen);
+const OpaqueKanbanCardScreen = withOpaqueBackground(KanbanCardScreen);
+const OpaqueDpRequestsScreen = withOpaqueBackground(DpRequestsScreen);
+const OpaqueGestaoOsDetailScreen = withOpaqueBackground(GestaoOsDetailScreen);
+const OpaqueGestaoOsQrScreen = withOpaqueBackground(GestaoOsQrScreen);
+const OpaqueGestaoOsUnplannedScreen = withOpaqueBackground(GestaoOsUnplannedScreen);
+const OpaqueFieldAssistantScreen = withOpaqueBackground(FieldAssistantScreen);
 
 function AppNavigator() {
   const { isAuthenticated, loading, user } = useAuth();
@@ -190,26 +225,27 @@ function AppNavigator() {
                 contentStyle: {
                   backgroundColor: 'transparent',
                 },
-                animation: 'slide_from_right',
+                // iOS: transição nativa padrão (empurra/volta como qualquer app iOS); as telas têm fundo opaco.
+                animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
               }}
             >
-              <Stack.Screen name="Main" component={BottomTabNavigator} />
-              <Stack.Screen name="Punch" component={PunchScreen} />
-              <Stack.Screen name="TimeRecords" component={TimeRecordsScreen} />
-              <Stack.Screen name="FuelRequests" component={FuelRequestsScreen} />
-              <Stack.Screen name="Profile" component={ProfileScreen} />
-              <Stack.Screen name="Pncp" component={PncpLicitacoesScreen} />
-              <Stack.Screen name="Agenda" component={AgendaScreen} />
-              <Stack.Screen name="DiarioObra" component={DiarioObraListScreen} />
-              <Stack.Screen name="DiarioObraEditor" component={DiarioObraEditorScreen} />
-              <Stack.Screen name="KanbanBoards" component={KanbanBoardsScreen} />
-              <Stack.Screen name="KanbanBoard" component={KanbanBoardScreen} />
-              <Stack.Screen name="KanbanCard" component={KanbanCardScreen} />
-              <Stack.Screen name="DpRequests" component={DpRequestsScreen} />
-              <Stack.Screen name="GestaoOsDetail" component={GestaoOsDetailScreen} />
-              <Stack.Screen name="GestaoOsQr" component={GestaoOsQrScreen} />
-              <Stack.Screen name="GestaoOsUnplanned" component={GestaoOsUnplannedScreen} />
-              <Stack.Screen name="FieldAssistant" component={FieldAssistantScreen} />
+              <Stack.Screen name="Main" component={OpaqueBottomTabNavigator} />
+              <Stack.Screen name="Punch" component={OpaquePunchScreen} />
+              <Stack.Screen name="TimeRecords" component={OpaqueTimeRecordsScreen} />
+              <Stack.Screen name="FuelRequests" component={OpaqueFuelRequestsScreen} />
+              <Stack.Screen name="Profile" component={OpaqueProfileScreen} />
+              <Stack.Screen name="Pncp" component={OpaquePncpLicitacoesScreen} />
+              <Stack.Screen name="Agenda" component={OpaqueAgendaScreen} />
+              <Stack.Screen name="DiarioObra" component={OpaqueDiarioObraListScreen} />
+              <Stack.Screen name="DiarioObraEditor" component={OpaqueDiarioObraEditorScreen} />
+              <Stack.Screen name="KanbanBoards" component={OpaqueKanbanBoardsScreen} />
+              <Stack.Screen name="KanbanBoard" component={OpaqueKanbanBoardScreen} />
+              <Stack.Screen name="KanbanCard" component={OpaqueKanbanCardScreen} />
+              <Stack.Screen name="DpRequests" component={OpaqueDpRequestsScreen} />
+              <Stack.Screen name="GestaoOsDetail" component={OpaqueGestaoOsDetailScreen} />
+              <Stack.Screen name="GestaoOsQr" component={OpaqueGestaoOsQrScreen} />
+              <Stack.Screen name="GestaoOsUnplanned" component={OpaqueGestaoOsUnplannedScreen} />
+              <Stack.Screen name="FieldAssistant" component={OpaqueFieldAssistantScreen} />
             </Stack.Navigator>
             <NotificationsSheet />
           </>
