@@ -8,8 +8,6 @@ import {
   Alert,
   ActivityIndicator,
   Switch,
-  Modal,
-  Pressable,
   TextInput,
   Platform,
 } from 'react-native';
@@ -32,11 +30,14 @@ import {
   Sun,
   ChevronRight,
   BellRing,
+  Bell,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
+import SheetModal from '../components/SheetModal';
+import NotificationPrefsSheet from '../components/NotificationPrefsSheet';
 import PunchRemindersSheet, { punchReminderSummary } from '../components/PunchRemindersSheet';
 import {
   DEFAULT_PUNCH_REMINDER_PREFS,
@@ -73,7 +74,9 @@ export default function ProfileScreen() {
   const { user, updateUser, logout, biometric, enableBiometrics, disableBiometrics } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [bioPasswordOpen, setBioPasswordOpen] = useState(false);
   const [remindersOpen, setRemindersOpen] = useState(false);
+  const [notifPrefsOpen, setNotifPrefsOpen] = useState(false);
   const [reminderPrefs, setReminderPrefs] = useState<PunchReminderPrefs>(DEFAULT_PUNCH_REMINDER_PREFS);
   const showReminders = !!user?.employee && user.employee.requiresTimeClock !== false && !user.empreiteiro;
 
@@ -86,7 +89,6 @@ export default function ProfileScreen() {
   const [pwdConfirm, setPwdConfirm] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
-  const [bioPasswordOpen, setBioPasswordOpen] = useState(false);
   const [bioPassword, setBioPassword] = useState('');
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
@@ -351,11 +353,13 @@ export default function ProfileScreen() {
               accessibilityLabel="Alterar foto de perfil"
               hitSlop={6}
             >
-              {uploadingPhoto ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Pencil size={12} color="#fff" strokeWidth={2.4} />
-              )}
+              <View style={styles.editPhotoInner}>
+                {uploadingPhoto ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Pencil size={12} color="#fff" strokeWidth={2.4} />
+                )}
+              </View>
             </TouchableOpacity>
           </View>
           <Text style={styles.name} numberOfLines={2}>
@@ -421,8 +425,8 @@ export default function ProfileScreen() {
                     onValueChange={onToggleBiometrics}
                     style={{ alignSelf: 'center' }}
                     disabled={bioBusy || !biometric.available}
-                    trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
-                    thumbColor={biometric.enabled ? colors.primary : '#f4f4f5'}
+                    trackColor={{ false: isDark ? '#4b5563' : '#d1d5db', true: '#fca5a5' }}
+                    thumbColor={biometric.enabled ? colors.primary : isDark ? '#9ca3af' : '#f4f4f5'}
                   />
                 </View>
                 <View style={styles.divider} />
@@ -438,6 +442,9 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.infoText}>
                 <Text style={styles.infoValue}>Alterar senha</Text>
+                <Text style={[styles.infoLabel, { marginTop: 2, marginBottom: 0 }]}>
+                  Troque a senha de acesso à sua conta
+                </Text>
               </View>
               <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2} />
             </TouchableOpacity>
@@ -445,6 +452,23 @@ export default function ProfileScreen() {
 
           <Text style={styles.sectionTitle}>Preferências</Text>
           <View style={styles.sectionCard}>
+            <TouchableOpacity
+              style={styles.bioRow}
+              onPress={() => setNotifPrefsOpen(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.infoIcon}>
+                <Bell size={18} color={colors.primary} strokeWidth={2} />
+              </View>
+              <View style={styles.infoText}>
+                <Text style={styles.infoValue}>Notificações</Text>
+                <Text style={[styles.infoLabel, { marginTop: 2, marginBottom: 0 }]}>
+                  Escolha quais avisos receber
+                </Text>
+              </View>
+              <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2} />
+            </TouchableOpacity>
+            <View style={styles.divider} />
             {showReminders ? (
               <>
                 <TouchableOpacity
@@ -481,11 +505,13 @@ export default function ProfileScreen() {
                 value={isDark}
                 onValueChange={toggleTheme}
                 style={{ alignSelf: 'center' }}
-                trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
-                thumbColor={isDark ? colors.primary : '#f4f4f5'}
+                trackColor={{ false: isDark ? '#4b5563' : '#d1d5db', true: '#fca5a5' }}
+                thumbColor={isDark ? colors.primary : isDark ? '#9ca3af' : '#f4f4f5'}
               />
             </View>
           </View>
+
+          <NotificationPrefsSheet visible={notifPrefsOpen} onClose={() => setNotifPrefsOpen(false)} />
 
           <PunchRemindersSheet
             visible={remindersOpen}
@@ -502,91 +528,75 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      <Modal visible={pwdOpen} transparent animationType="fade" onRequestClose={closePasswordModal}>
-        <Pressable style={styles.modalOverlay} onPress={closePasswordModal}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Alterar senha</Text>
-            <TextInput
-              value={pwdCurrent}
-              onChangeText={setPwdCurrent}
-              placeholder="Senha atual"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              style={styles.modalInput}
-              autoFocus
-            />
-            <TextInput
-              value={pwdNew}
-              onChangeText={setPwdNew}
-              placeholder="Nova senha (mín. 8 caracteres)"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              style={styles.modalInput}
-            />
-            <TextInput
-              value={pwdConfirm}
-              onChangeText={setPwdConfirm}
-              placeholder="Confirmar nova senha"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              style={styles.modalInput}
-            />
-            <TouchableOpacity
-              style={styles.modalPrimary}
-              onPress={() => void submitPasswordChange()}
-              disabled={pwdBusy}
-            >
-              {pwdBusy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.modalPrimaryText}>Salvar</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={closePasswordModal}>
-              <Text style={styles.modalCancel}>Cancelar</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal
-        visible={bioPasswordOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setBioPasswordOpen(false)}
+      <SheetModal
+        visible={pwdOpen}
+        onClose={closePasswordModal}
+        title="Alterar senha"
+        subtitle="Troque a senha de acesso à sua conta"
+        icon={KeyRound}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setBioPasswordOpen(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Ativar {biometric.label}</Text>
-            <Text style={styles.modalBody}>
-              Confirme a senha da conta para guardar o acesso rápido neste aparelho.
-            </Text>
-            <TextInput
-              value={bioPassword}
-              onChangeText={setBioPassword}
-              placeholder="Senha"
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry
-              style={styles.modalInput}
-              autoFocus
-            />
-            <TouchableOpacity
-              style={styles.modalPrimary}
-              onPress={() => void confirmEnableBiometrics()}
-              disabled={bioBusy}
-            >
-              {bioBusy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.modalPrimaryText}>Ativar</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setBioPasswordOpen(false)}>
-              <Text style={styles.modalCancel}>Cancelar</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <TextInput
+          value={pwdCurrent}
+          onChangeText={setPwdCurrent}
+          placeholder="Senha atual"
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry
+          style={styles.modalInput}
+        />
+        <TextInput
+          value={pwdNew}
+          onChangeText={setPwdNew}
+          placeholder="Nova senha (mín. 8 caracteres)"
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry
+          style={styles.modalInput}
+        />
+        <TextInput
+          value={pwdConfirm}
+          onChangeText={setPwdConfirm}
+          placeholder="Confirmar nova senha"
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry
+          style={styles.modalInput}
+        />
+        <TouchableOpacity
+          style={styles.modalPrimary}
+          onPress={() => void submitPasswordChange()}
+          disabled={pwdBusy}
+        >
+          {pwdBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalPrimaryText}>Salvar</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closePasswordModal}>
+          <Text style={styles.modalCancel}>Cancelar</Text>
+        </TouchableOpacity>
+      </SheetModal>
+
+      <SheetModal
+        visible={bioPasswordOpen}
+        onClose={() => setBioPasswordOpen(false)}
+        title={`Ativar ${biometric.label}`}
+        subtitle="Confirme a senha da conta para guardar o acesso rápido neste aparelho"
+        icon={ScanFace}
+      >
+        <TextInput
+          value={bioPassword}
+          onChangeText={setBioPassword}
+          placeholder="Senha"
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry
+          style={styles.modalInput}
+        />
+        <TouchableOpacity
+          style={styles.modalPrimary}
+          onPress={() => void confirmEnableBiometrics()}
+          disabled={bioBusy}
+        >
+          {bioBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalPrimaryText}>Ativar</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setBioPasswordOpen(false)}>
+          <Text style={styles.modalCancel}>Cancelar</Text>
+        </TouchableOpacity>
+      </SheetModal>
     </View>
   );
 }
@@ -618,16 +628,23 @@ const getStyles = (colors: any, isDark: boolean) =>
       height: 104,
       marginBottom: 16,
     },
+    // Anel na cor do fundo + miolo vermelho (o fundo das telas é transparente, então usa appShell).
     editPhotoBtn: {
       position: 'absolute',
-      right: 0,
-      bottom: 0,
+      right: -3,
+      bottom: -3,
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.appShell,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editPhotoInner: {
       width: 32,
       height: 32,
       borderRadius: 16,
       backgroundColor: colors.primary,
-      borderWidth: 3,
-      borderColor: colors.screenRoot,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -728,31 +745,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontSize: 12,
       fontWeight: '500',
       opacity: 0.8,
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-      // Na parte de cima da tela: com o teclado aberto o cartão (e o Cancelar) ficava por trás dele.
-      justifyContent: 'flex-start',
-      paddingHorizontal: 24,
-      paddingTop: 110,
-    },
-    modalCard: {
-      backgroundColor: colors.card,
-      borderRadius: 18,
-      padding: 20,
-    },
-    modalTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.text,
-      marginBottom: 8,
-    },
-    modalBody: {
-      fontSize: 14,
-      lineHeight: 20,
-      color: colors.textSecondary,
-      marginBottom: 14,
     },
     modalInput: {
       borderWidth: StyleSheet.hairlineWidth * 1.5,

@@ -141,14 +141,10 @@ export default function SheetModal({
               if (visibleRef.current) move(0, e?.duration || 220);
             }),
           ]
-        : [
-            Keyboard.addListener('keyboardDidShow', (e) => {
-              if (visibleRef.current) move(e.endCoordinates.height, 200);
-            }),
-            Keyboard.addListener('keyboardDidHide', () => {
-              if (visibleRef.current) move(0, 160);
-            }),
-          ];
+        : // Android: o app usa softwareKeyboardLayoutMode "pan", em que o próprio sistema já empurra a
+          // janela do Modal pra cima até o campo ficar visível. Somar a altura do teclado aqui subia a
+          // folha duas vezes (ela "pulava" pro topo). Então no Android não há inset manual.
+          [];
     return () => subs.forEach((sub) => sub.remove());
   }, [keyboardInset, windowHeight]);
 

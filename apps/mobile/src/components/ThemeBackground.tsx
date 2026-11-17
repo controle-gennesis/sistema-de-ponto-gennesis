@@ -5,6 +5,9 @@ import { useTheme } from '../context/ThemeContext';
 const BG_LIGHT = require('../../assets/backgrounds/padrao-engenharia-claro.png');
 const BG_DARK = require('../../assets/backgrounds/padrao-engenharia-escuro.png');
 
+/** Troque para true para voltar a mostrar o padrão de engenharia no fundo. */
+const SHOW_PATTERN = true;
+
 /** Mantém os dois padrões em memória para a troca de tema não decodificar PNG do zero. */
 let themeBackgroundsPrefetched = false;
 
@@ -30,6 +33,8 @@ export function ThemePatternFill() {
       pointerEvents="none"
       style={[StyleSheet.absoluteFill, { backgroundColor: colors.appShell }]}
     >
+      {SHOW_PATTERN ? (
+        <>
       <ImageBackground
         source={BG_LIGHT}
         style={StyleSheet.absoluteFill}
@@ -42,6 +47,8 @@ export function ThemePatternFill() {
         imageStyle={{ opacity: isDark ? 0.55 : 0 }}
         resizeMode="repeat"
       />
+        </>
+      ) : null}
     </View>
   );
 }
@@ -50,11 +57,13 @@ export default function ThemeBackground({ children }: Props) {
   const { isDark, colors } = useTheme();
 
   useEffect(() => {
-    prefetchThemeBackgrounds();
+    if (SHOW_PATTERN) prefetchThemeBackgrounds();
   }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.appShell }]}>
+      {SHOW_PATTERN ? (
+        <>
       <ImageBackground
         source={BG_LIGHT}
         style={styles.pattern}
@@ -69,6 +78,8 @@ export default function ThemeBackground({ children }: Props) {
         resizeMode="repeat"
         pointerEvents="none"
       />
+        </>
+      ) : null}
       <View style={styles.content}>{children}</View>
     </View>
   );

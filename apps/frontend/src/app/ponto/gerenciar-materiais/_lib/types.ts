@@ -40,6 +40,8 @@ export interface MaterialRequest {
   serviceOrder?: string | null;
   service_orders?: MaterialRequestServiceOrderRef | null;
   description: string;
+  /** Observação da engenharia no pedido de material da FD (só nos detalhes da RM e no Histórico da OC). */
+  observacaoSolicitante?: string | null;
   demandSheet?: string | null;
   /** Obra (texto livre; na RM feita pela FD, a obra da FD). */
   obra?: string | null;

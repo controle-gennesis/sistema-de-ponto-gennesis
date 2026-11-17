@@ -1868,6 +1868,7 @@ model MaterialRequest {
   serviceOrder              String? // Ordem de serviÃ§o (texto livre)
   obra                      String? // Obra (texto livre)
   description               String? // DescriÃ§Ã£o/observaÃ§Ãµes da requisiÃ§Ã£o
+  observacaoSolicitante     String? // Observação da engenharia no pedido da FD (detalhes da RM e Histórico da OC)
   demandSheet               String? // NÃºmero ou referÃªncia da ficha de demanda
   demandSheetAttachmentUrl  String? // URL do anexo da FD (primeiro arquivo; compat)
   demandSheetAttachmentName String? // Nome original do anexo da FD (primeiro arquivo; compat)

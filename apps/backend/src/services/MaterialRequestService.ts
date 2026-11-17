@@ -1262,7 +1262,7 @@ export class MaterialRequestService {
                 files[0].name,
             },
           ]);
-          return this.attachAvgPaidToMaterialRequestItems(withKinds);
+          return this.comObservacaoSolicitante(id, await this.attachAvgPaidToMaterialRequestItems(withKinds));
         }
       } catch {
         // ignora se a coluna ainda não existir
@@ -1270,7 +1270,21 @@ export class MaterialRequestService {
     }
 
     const [withKinds] = await withRmItemProductKinds([enriched]);
-    return this.attachAvgPaidToMaterialRequestItems(withKinds);
+    return this.comObservacaoSolicitante(id, await this.attachAvgPaidToMaterialRequestItems(withKinds));
+  }
+
+  /** Observação da engenharia no pedido da FD (coluna lida por SQL: o client Prisma pode estar desatualizado). */
+  private async comObservacaoSolicitante<T>(id: string, request: T): Promise<T> {
+    if (!request) return request;
+    try {
+      const rows = await prisma.$queryRawUnsafe<Array<{ observacaoSolicitante: string | null }>>(
+        `SELECT "observacaoSolicitante" FROM "material_requests" WHERE "id" = $1 LIMIT 1`,
+        id
+      );
+      return { ...request, observacaoSolicitante: rows[0]?.observacaoSolicitante ?? null };
+    } catch {
+      return request; // coluna ainda não criada
+    }
   }
 
   /** Anexa média paga (últimas 10 OCs) em cada item — só referência (mapa/modais), não afeta OC. */

@@ -156,7 +156,7 @@ export async function postDpRequestMessage(req: AuthRequest, res: Response, next
     });
     await markRead(row.id, req.user.id);
 
-    notifyParticipants(row, req.user.id, `Mensagem na solicitação nº ${row.displayNumber}`, `${authorName}: ${parsed.data.body.slice(0, 120)}`);
+    notifyParticipants(row, req.user.id, 'Nova mensagem', `Solicitação #${row.displayNumber}\n${authorName}: ${parsed.data.body.slice(0, 120)}`);
 
     const items = await listMessages(row.id);
     res.json({ success: true, data: { items } });
@@ -182,8 +182,8 @@ export async function announceAccountingDone(dpRequestId: string, actorUserId: s
   notifyParticipants(
     row,
     actorUserId,
-    `Contabilidade concluiu - solicitação nº ${row.displayNumber}`,
-    `${authorName} concluiu o atendimento. O DP pode encerrar.`
+    'Contabilidade concluiu',
+    `Solicitação #${row.displayNumber}\nO DP pode encerrar`
   );
 }
 
@@ -209,8 +209,8 @@ export async function announceAccountingCancelled(
   notifyParticipants(
     row,
     actorUserId,
-    `Pedido cancelado - solicitação nº ${row.displayNumber}`,
-    `${authorName} cancelou o pedido${motivo ? `: ${motivo.slice(0, 120)}` : '.'}`
+    'Pedido cancelado',
+    `Solicitação #${row.displayNumber}\n${authorName}${motivo ? `: ${motivo.slice(0, 120)}` : ''}`
   );
 }
 
@@ -236,8 +236,8 @@ export async function announceAccountingReturned(
   await markRead(row.id, actorUserId);
   if (requesterUserId && requesterUserId !== actorUserId) {
     void sendPushToUsers([requesterUserId], {
-      title: `Pedido devolvido para ajuste - solicitação nº ${row.displayNumber}`,
-      body: `${authorName}: ${motivo.slice(0, 120)}`,
+      title: 'Pedido devolvido para ajuste',
+      body: `Solicitação #${row.displayNumber}\n${authorName}: ${motivo.slice(0, 120)}`,
       data: { type: 'dp-request-message', id: row.id },
     }).catch(() => undefined);
   }
@@ -267,8 +267,8 @@ export async function announceRequesterAdjusted(
   notifyParticipants(
     row,
     actorUserId,
-    `Solicitação ajustada - nº ${row.displayNumber}`,
-    `${authorName} corrigiu e reenviou o pedido à Contabilidade.`
+    'Solicitação ajustada',
+    `Solicitação #${row.displayNumber}\n${authorName} reenviou o pedido`
   );
 }
 
@@ -425,8 +425,8 @@ export async function postDpRequestAttachment(req: AuthRequest, res: Response, n
     notifyParticipants(
       row,
       req.user.id,
-      `Documento na solicitação nº ${row.displayNumber}`,
-      `${authorName} anexou: ${originalName}`.slice(0, 140)
+      'Novo documento',
+      `Solicitação #${row.displayNumber}\n${authorName} anexou ${originalName}`.slice(0, 160)
     );
     res.json({ success: true, data: { items: await listAttachments(row.id) } });
   } catch (e) {

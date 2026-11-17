@@ -115,21 +115,24 @@ export function workOrderStatusLabel(status: string): string {
 }
 
 export function workOrderStatusTitle(status: string): string {
-  return `Chamado: ${workOrderStatusLabel(status).toLowerCase()}`;
+  return `Chamado ${workOrderStatusLabel(status).toLowerCase()}`;
 }
 
-export function workOrderStatusMessage(status: string, displayCode?: string | null): string {
+export function workOrderStatusMessage(_status: string, displayCode?: string | null): string {
   const ref = formatRef(displayCode);
-  return `O chamado${ref ? ` ${ref}` : ''} agora está: ${workOrderStatusLabel(status).toLowerCase()}`;
+  return `Chamado${ref ? ` ${ref}` : ''}`;
 }
 
 export function dpStatusTitle(label: string): string {
-  return `Solicitação: ${label.toLowerCase()}`;
+  const l = label.toLowerCase();
+  if (l === 'sua pendência') return 'Você tem uma pendência';
+  if (l.startsWith('pendência')) return label;
+  return `Solicitação ${l}`;
 }
 
-export function dpStatusMessage(label: string, displayCode?: string | null): string {
+export function dpStatusMessage(_label: string, displayCode?: string | null): string {
   const ref = formatRef(displayCode);
-  return `A solicitação${ref ? ` ${ref}` : ''} agora está: ${label.toLowerCase()}`;
+  return `Solicitação${ref ? ` ${ref}` : ''}`;
 }
 
 export function fuelStatusTitle(status: string): string {
@@ -163,70 +166,15 @@ function formatRef(displayCode?: string | null): string | null {
   return raw.startsWith('#') ? raw : `#${raw}`;
 }
 
-export function fuelStatusMessage(status: string, displayCode?: string | null): string {
+/** Combustível e reserva: o título já diz o que mudou; a mensagem só identifica o pedido. */
+export function fuelStatusMessage(_status: string, displayCode?: string | null): string {
   const ref = formatRef(displayCode);
-  const map = (withId: string, withoutId: string) => (ref ? withId : withoutId);
-
-  switch (status) {
-    case 'PENDING_MANAGER':
-      return map(
-        `A solicitação ${ref} está aguardando o gestor`,
-        'A solicitação está aguardando o gestor',
-      );
-    case 'PENDING_SUPPLIES':
-    case 'APPROVED':
-      return map(
-        `A solicitação ${ref} está aguardando suprimentos`,
-        'A solicitação está aguardando suprimentos',
-      );
-    case 'AWAITING_REFUEL':
-      return map(
-        `A solicitação ${ref} foi liberada para abastecer`,
-        'A solicitação foi liberada para abastecer',
-      );
-    case 'COMPLETED':
-      return map(
-        `O abastecimento da solicitação ${ref} foi concluído`,
-        'O abastecimento foi concluído',
-      );
-    case 'REJECTED':
-      return map(`A solicitação ${ref} foi rejeitada`, 'A solicitação foi rejeitada');
-    case 'CANCELLED':
-      return map(`A solicitação ${ref} foi cancelada`, 'A solicitação foi cancelada');
-    default:
-      return map(`Atualização na solicitação ${ref}`, 'Atualização na solicitação');
-  }
+  return `Solicitação de abastecimento${ref ? ` ${ref}` : ''}`;
 }
 
-export function reservationStatusMessage(status: string, displayCode?: string | null): string {
+export function reservationStatusMessage(_status: string, displayCode?: string | null): string {
   const ref = formatRef(displayCode);
-  const map = (withId: string, withoutId: string) => (ref ? withId : withoutId);
-
-  switch (status) {
-    case 'PENDING_SUPPLIES':
-      return map(
-        `A reserva ${ref} está aguardando aprovação`,
-        'A reserva está aguardando aprovação',
-      );
-    case 'APPROVED':
-      return map(`A reserva ${ref} foi aprovada`, 'A reserva foi aprovada');
-    case 'COMPLETED':
-      return map(
-        `A reserva ${ref} está aguardando vistoria`,
-        'A reserva está aguardando vistoria',
-      );
-    case 'INSPECTED':
-      return map(
-        `A vistoria da reserva ${ref} foi concluída`,
-        'A vistoria da reserva foi concluída',
-      );
-    case 'REJECTED':
-      return map(`A reserva ${ref} foi rejeitada`, 'A reserva foi rejeitada');
-    case 'CANCELLED':
-      return map(`A reserva ${ref} foi cancelada`, 'A reserva foi cancelada');
-    default:
-      return map(`Atualização na reserva ${ref}`, 'Atualização na reserva');
-  }
+  return `Reserva${ref ? ` ${ref}` : ''}`;
 }
 
 export function fuelStatusBody(status: string, displayCode?: string | null): string {

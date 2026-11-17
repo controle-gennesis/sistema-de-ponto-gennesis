@@ -3407,6 +3407,17 @@ function SolicitarMateriaisPage() {
                         )
                       });
                     }
+                    if (String(d.observacaoSolicitante ?? '').trim()) {
+                      infoRows.push({
+                        label: 'Observação da engenharia',
+                        stacked: true,
+                        value: (
+                          <span className="whitespace-pre-wrap leading-relaxed">
+                            {String(d.observacaoSolicitante)}
+                          </span>
+                        )
+                      });
+                    }
 
                     return (
                       <div className="space-y-5 text-sm">

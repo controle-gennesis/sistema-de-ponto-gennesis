@@ -1,5 +1,4 @@
 import { prisma, getPrisma } from '../lib/prisma';
-import { observacaoParaTotvs, TOTVS_OC_OBSERVACAO_MAX } from '../lib/ocObservacaoTotvs';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
@@ -2568,12 +2567,7 @@ export class PurchaseOrderService {
     if (historicoOc.length > OC_HISTORICO_MAX) {
       cabecalho.push(`Histórico da OC com ${historicoOc.length} caracteres — máximo ${OC_HISTORICO_MAX}.`);
     }
-    const observacaoTotvs = observacaoParaTotvs(order.notes);
-    if (observacaoTotvs.length > TOTVS_OC_OBSERVACAO_MAX) {
-      cabecalho.push(
-        `Observações da OC com ${observacaoTotvs.length} caracteres — o TOTVS aceita no máximo ${TOTVS_OC_OBSERVACAO_MAX}. Resuma o texto.`
-      );
-    }
+    // Observação acima do limite do TOTVS não bloqueia: o envio corta o excesso (limitarObservacao).
 
     const [hydrated] = await withPurchaseOrderCatalogCodes([order]);
     const itensOc = hydrated.items || [];
