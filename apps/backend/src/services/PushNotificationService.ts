@@ -128,6 +128,23 @@ const DP: Record<string, string> = {
   CANCELLED: 'Cancelada',
 };
 
+/** Título do aviso de cada etapa da solicitação interna (curto, no mesmo padrão dos demais). */
+const DP_TITLE: Record<string, string> = {
+  WAITING_MANAGER: 'Solicitação aguardando aprovação',
+  PENDING_DP: 'Solicitação pendente',
+  IN_REVIEW_DP: 'Solicitação em análise',
+  IN_FINANCEIRO: 'Solicitação no Financeiro',
+  IN_ACCOUNTING: 'Solicitação na Contabilidade',
+  WAITING_RETURN: 'Você tem uma pendência',
+  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
+  WAITING_RETURN_ADM_TST: 'Pendência com ADM/TST',
+  WAITING_RETURN_ENGINEERING: 'Pendência com a Engenharia',
+  WAITING_SUPPLIES: 'Solicitação aguardando Suprimentos',
+  WAITING_PAYMENT: 'Solicitação aguardando pagamento',
+  CONCLUDED: 'Solicitação finalizada',
+  CANCELLED: 'Solicitação cancelada',
+};
+
 const WORK_ORDER: Record<string, string> = {
   OPEN: 'Aberta',
   UNDER_REVIEW: 'Em análise',
@@ -173,10 +190,10 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
       const entityId = String(row.id ?? '');
       switch (model) {
         case 'FuelRefuelRequest': {
-          const [title, what] = FUEL[status] ?? ['Atualização de combustível', 'atualizada'];
+          const [title] = FUEL[status] ?? ['Atualização de combustível'];
           await sendPushToUsers([row.requesterId as string], {
             title,
-            body: `A solicitação${ref(row.displayNumber)} está ${what}`,
+            body: `Solicitação de abastecimento${ref(row.displayNumber)}`,
             data: { kind: 'fuel', entityId, status },
             // Liberado para abastecer: o motorista já vê o botão "Informar abastecido".
             ...(status === 'AWAITING_REFUEL'
@@ -188,10 +205,10 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           break;
         }
         case 'VehicleReservation': {
-          const [title, what] = RESERVATION[status] ?? ['Atualização de reserva', 'atualizada'];
+          const [title] = RESERVATION[status] ?? ['Atualização de reserva'];
           await sendPushToUsers([row.createdById as string], {
             title,
-            body: `A reserva${ref(row.code)} está ${what}`,
+            body: `Reserva${ref(row.code)}`,
             data: { kind: 'reservation', entityId, status },
             // Aprovada (devolução) ou aguardando vistoria: botão direto para a reserva.
             ...(status === 'APPROVED' || status === 'COMPLETED'
@@ -207,10 +224,9 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
             where: { id: String(row.employeeId ?? '') },
             select: { userId: true },
           });
-          const label = DP[status] ?? status;
           await sendPushToUsers([employee?.userId], {
-            title: `Solicitação: ${label.toLowerCase()}`,
-            body: `A solicitação${ref(row.displayNumber)} agora está: ${label.toLowerCase()}`,
+            title: DP_TITLE[status] ?? `Solicitação ${(DP[status] ?? status).toLowerCase()}`,
+            body: `Solicitação${ref(row.displayNumber)}`,
             data: { kind: 'dp', entityId, status },
           });
           break;
@@ -219,8 +235,8 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           const label = WORK_ORDER[status] ?? status;
           const code = row.osNumber != null ? `OS ${row.osNumber}` : row.displayNumber;
           await sendPushToUsers([row.requesterId as string, row.assigneeId as string], {
-            title: `Chamado: ${label.toLowerCase()}`,
-            body: `O chamado${ref(code, '')} agora está: ${label.toLowerCase()}`,
+            title: `Chamado ${label.toLowerCase()}`,
+            body: `Chamado${ref(code, '')}`,
             data: { kind: 'workorder', entityId, status },
           });
           break;

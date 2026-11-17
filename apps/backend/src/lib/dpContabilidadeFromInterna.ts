@@ -264,8 +264,8 @@ async function createLinkedAccountingRequest(
     void listDpContabilidadeUserIds()
       .then((ids) =>
         sendPushToUsers(ids, {
-          title: 'Atendimento Contábil',
-          body: `Novo pedido: ${row.title?.trim() || INTERNA_TYPE_LABELS[row.requestType] || 'Solicitação interna'}`,
+          title: 'Novo pedido na Contabilidade',
+          body: INTERNA_TYPE_LABELS[row.requestType] || row.title?.trim() || 'Solicitação interna',
           data: { type: 'dp-contabilidade', id: created.id },
         }),
       )
