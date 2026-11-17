@@ -8,6 +8,7 @@ import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import {
   OC_STATUS,
   RM_STATUS,
+  ocsEnviadasTotvs,
   type ItemResumo,
   type OcResumo,
 } from '@/components/engenharia/FdPedidosResumoModal';
@@ -65,7 +66,8 @@ export function FdHistoricoPedidosSection({
       };
       atual.itens += 1;
       for (const m of it.materiais) {
-        for (const oc of m.ocs) {
+        // Só OC enviada ao TOTVS conta; antes disso o item segue "Aguardando OC".
+        for (const oc of ocsEnviadasTotvs(m.ocs)) {
           if (!atual.ocs.some((o) => o.orderNumber === oc.orderNumber)) atual.ocs.push(oc);
         }
       }

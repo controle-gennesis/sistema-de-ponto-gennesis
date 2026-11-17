@@ -29,6 +29,7 @@ import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { OrcamentoService } from '../services/OrcamentoService';
 import { MaterialRequestService } from '../services/MaterialRequestService';
+import type { FdCorrecaoRegistro } from '../lib/rmCorrecaoFd';
 import {
   getFdApprovalNotifyUserIds,
   notifyApprovalDecisionWhatsApp,
@@ -285,6 +286,8 @@ type FdItemPedido = {
   alertas: string[];
   /** "Custo estimado (40%)" do item na FD no momento do pedido (coluna da aba Ficha de demanda). */
   custoEstimado40?: number | null;
+  /** Histórico das correções feitas na RM para este item (quem, quando e o que mudou). */
+  correcoes?: FdCorrecaoRegistro[];
 };
 
 const FD_QTD_EPS = 1e-6;
@@ -323,6 +326,9 @@ function parseItensPedidos(raw: unknown): FdItemPedido[] {
           }))
         : [],
       alertas: Array.isArray(r.alertas) ? (r.alertas as unknown[]).map(String) : [],
+      ...(Array.isArray(r.correcoes) && r.correcoes.length > 0
+        ? { correcoes: r.correcoes as FdCorrecaoRegistro[] }
+        : {}),
     }))
     .filter((r) => r.fdItemKey);
 }
@@ -3008,6 +3014,8 @@ export class DemandSheetApprovalController {
             ? { id: rm.id, requestNumber: rm.requestNumber, status: rm.status }
             : { id: it.materialRequestId, requestNumber: it.requestNumber, status: null },
           materiais: materiais.map((m) => ({ ...m, ocs: ocsDoMaterial(m.materialId, m.quantity) })),
+          // Histórico das correções feitas na RM para este item (quem, quando, o que mudou).
+          correcoes: it.correcoes ?? [],
         };
       });
 

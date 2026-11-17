@@ -116,6 +116,27 @@ async function ensureQuoteMapDrafts(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureMaterialRequestCorrectionLogs(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'material_request_correction_logs')) return;
+  console.warn('[Schema] Tabela material_request_correction_logs ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "material_request_correction_logs" (
+      "id" TEXT NOT NULL,
+      "materialRequestId" TEXT NOT NULL,
+      "materialId" TEXT,
+      "previousMaterialId" TEXT,
+      "userId" TEXT NOT NULL,
+      "userName" TEXT,
+      "changes" JSONB NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "material_request_correction_logs_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "material_request_correction_logs_materialRequestId_idx" ON "material_request_correction_logs"("materialRequestId");
+  `);
+}
+
 async function ensurePleitoOsTemporariasAnteriores(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'pleitos', 'osTemporariasAnteriores')) return;
   console.warn('[Schema] Coluna pleitos.osTemporariasAnteriores ausente — adicionando.');
@@ -3504,6 +3525,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePleitoOsTemporaria(prisma);
     await ensurePleitoOsTemporariasAnteriores(prisma);
     await ensureQuoteMapDrafts(prisma);
+    await ensureMaterialRequestCorrectionLogs(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

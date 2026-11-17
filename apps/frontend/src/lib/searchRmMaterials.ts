@@ -61,6 +61,28 @@ export async function sugerirRmMaterials(descricao: string, limit = 30): Promise
   return res.data?.data ?? [];
 }
 
+/**
+ * Pedido pelo orçamento/FD (vai para o TOTVS): só materiais com identificador do TOTVS (IDPRD).
+ * Materiais sem identificador são de OCs feitas fora da FD, que seguem só no Conecta.
+ */
+export async function searchRmMaterialsTotvs(search: string, limit = 100): Promise<RmMaterialListItem[]> {
+  const term = search.trim();
+  if (term.length < 2) return [];
+  const res = await api.get('/material-requests/materials', {
+    params: { search: term, limit, comIdPrd: 1 },
+  });
+  return res.data?.data ?? [];
+}
+
+export async function sugerirRmMaterialsTotvs(descricao: string, limit = 30): Promise<RmMaterialListItem[]> {
+  const term = descricao.trim();
+  if (term.length < 3) return [];
+  const res = await api.get('/material-requests/materials', {
+    params: { search: term, limit, sugestao: 1, comIdPrd: 1 },
+  });
+  return res.data?.data ?? [];
+}
+
 /** Palavras digitadas (sem acento) — usadas para destacar o que bateu na lista. */
 export function palavrasDaBusca(texto: string): string[] {
   return texto

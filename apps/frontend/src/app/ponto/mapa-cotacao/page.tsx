@@ -70,6 +70,7 @@ import {
   OC_STATUS,
   RM_STATUS,
   fmtMoeda,
+  ocsEnviadasTotvs,
   type ItemResumo,
   type OcPagaResumo,
 } from '@/components/engenharia/FdPedidosResumoModal';
@@ -1530,7 +1531,8 @@ export default function MapaCotacaoPage() {
                 quantity: m.quantity,
                 unit: m.unit,
                 detalhamento: m.detalhamento,
-                ocs: m.ocs.map((oc) => ({
+                // Só OC enviada ao TOTVS; antes disso o item segue "Aguardando OC".
+                ocs: ocsEnviadasTotvs(m.ocs).map((oc) => ({
                   orderNumber: oc.orderNumber,
                   status: OC_STATUS[oc.status] ?? oc.status,
                   totvsIdMov: oc.totvsIdMov,
@@ -1547,7 +1549,7 @@ export default function MapaCotacaoPage() {
           solicitados = {
             grupos: Array.from(porRm.values()),
             totalItens: itensResumo.length,
-            comOc: itensResumo.filter((i) => i.materiais.some((m) => m.ocs.length > 0)).length,
+            comOc: itensResumo.filter((i) => i.materiais.some((m) => ocsEnviadasTotvs(m.ocs).length > 0)).length,
             ocsPagas: resumo?.ocsPagas?.length ?? 0,
             totalPago: resumo?.totalOcsPagas ?? 0,
           };

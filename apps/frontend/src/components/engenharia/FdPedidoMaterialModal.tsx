@@ -20,15 +20,10 @@ import {
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
-import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
-import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';import {
-  getRmMaterialLabel,
-  isRmServiceMaterial,
-  palavrasDaBusca,
-  searchRmMaterials,
-  sugerirRmMaterials,
-  type RmMaterialListItem,
-} from '@/lib/searchRmMaterials';
+import { MaterialBuscaDropdown } from '@/components/engenharia/MaterialBuscaDropdown';
+import { HistoricoCorrecoes, type CorrecaoRegistro } from '@/components/engenharia/HistoricoCorrecoes';
+import { FdPedidosResumoModal } from '@/components/engenharia/FdPedidosResumoModal';
+import { getRmMaterialLabel } from '@/lib/searchRmMaterials';
 
 /** Insumo da ficha de demanda — cada linha da FD é associada separadamente. */
 export interface FdInsumoLine {
@@ -96,39 +91,8 @@ export interface FdItemPedido {
   alertas?: string[];
   /** RM enviada para correção: o item fica livre para um novo pedido pela FD. */
   emCorrecao?: boolean;
-}
-
-/** Opção da busca de material: código, nome com as palavras buscadas em destaque, unidade e tipo. */
-function OpcaoMaterial({ material, busca }: { material: RmMaterialListItem; busca: string }) {
-  const nome = material.name?.trim() || material.description?.trim() || 'Material sem nome';
-  const termos = palavrasDaBusca(busca);
-  const normal = (w: string) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const partes = nome.split(/(\s+)/);
-  return (
-    <span className="block min-w-0">
-      <span className="flex items-baseline gap-2">
-        {material.code ? (
-          <span className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">{material.code}</span>
-        ) : null}
-        <span className="min-w-0 whitespace-normal break-words text-sm text-gray-900 dark:text-gray-100">
-          {partes.map((parte, i) =>
-            termos.length > 0 && termos.some((t) => normal(parte).includes(t)) ? (
-              <mark key={i} className="rounded bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-500/30">
-                {parte}
-              </mark>
-            ) : (
-              <React.Fragment key={i}>{parte}</React.Fragment>
-            )
-          )}
-        </span>
-      </span>
-      <span className="mt-0.5 block text-[11px] text-gray-500 dark:text-gray-400">
-        {material.unit?.trim() ? `Unidade: ${material.unit.trim()}` : 'Sem unidade'}
-        {' · '}
-        {isRmServiceMaterial(material) ? 'Serviço' : 'Produto'}
-      </span>
-    </span>
-  );
+  /** Histórico das correções feitas na RM para este item. */
+  correcoes?: CorrecaoRegistro[];
 }
 
 /** Tolerância de arredondamento ao comparar com a quantidade da FD. */
@@ -489,6 +453,10 @@ export function FdPedidoMaterialModal({
     const pedidos = pedidoPorKey.get(ins.key) ?? [];
     const rmsDoItem = [...new Set(pedidos.map((p) => p.requestNumber).filter(Boolean))];
     const rmsEmCorrecao = correcaoPorKey.get(ins.key) ?? [];
+    const historicoItem = itensPedidos
+      .filter((p) => p.fdItemKey === ins.key)
+      .flatMap((p) => p.correcoes ?? [])
+      .sort((x, y) => x.em.localeCompare(y.em));
     const materiaisPedidos = pedidos.flatMap((p) => p.materiais ?? []);
     const rows = mappings[ins.key] || [];
     const pronto = itemPronto(ins.key);
@@ -567,6 +535,12 @@ export function FdPedidoMaterialModal({
           </div>
         </div>
 
+        {/* Histórico das correções feitas na RM para este item (quem, quando, o que mudou). */}
+        {historicoItem.length > 0 ? (
+          <div className="pl-6">
+            <HistoricoCorrecoes registros={historicoItem} />
+          </div>
+        ) : null}
         {analise.travado ? (
           <div className="mt-2 space-y-1 pl-6 text-xs text-gray-600 dark:text-gray-400">
             {materiaisPedidos.map((m, idx) => (
@@ -588,7 +562,8 @@ export function FdPedidoMaterialModal({
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
                   {/* Mesma busca da RM: retorna IDs de engenharia, que a RM exige. */}
-                  <AsyncSearchSelectDropdown<RmMaterialListItem>
+                  {/* Pedido pela FD vai para o TOTVS: só materiais com identificador (IDPRD). */}
+                  <MaterialBuscaDropdown
                     value={row.materialId}
                     selectedLabel={row.materialLabel || undefined}
                     onChange={(mat) =>
@@ -599,23 +574,10 @@ export function FdPedidoMaterialModal({
                         unidade: mat.unit || '',
                       })
                     }
-                    searchFn={searchRmMaterials}
-                    getOptionId={(m) => m.id}
-                    // Mostra a unidade do cadastro (a mesma do TOTVS) já na lista.
-                    getOptionLabel={(m) =>
-                      m.unit?.trim() ? `${getRmMaterialLabel(m)} · ${m.unit.trim()}` : getRmMaterialLabel(m)
-                    }
-                    placeholder="Buscar material..."
-                    searchPlaceholder="Digite palavras do material, em qualquer ordem (ex.: jan bas alu)"
-                    minSearchLength={2}
-                    queryKeyPrefix="rm-materials-search"
-                    listMaxPx={440}
-                    showResultCount
-                    defaultOptionsFn={() => sugerirRmMaterials(ins.descricao)}
-                    defaultOptionsKey={ins.key}
-                    defaultOptionsLabel="Sugestões para este item"
-                    renderOptionWithQuery={(m, q) => <OpcaoMaterial material={m} busca={q} />}
-                    openDownOnly
+                    sugestaoTexto={ins.descricao}
+                    sugestaoKey={ins.key}
+                    sugestaoLabel="Sugestões para este item"
+                    somenteComIdentificador
                   />
                 </div>
                 <input
@@ -815,6 +777,10 @@ export function FdPedidoMaterialModal({
                 const recolhida = !buscaAtiva && !etapasExpandidas.has(g.etapa);
                 const pedidosEtapa = g.itens.filter((i) => pedidoPorKey.has(i.key)).length;
                 const prontosEtapa = g.itens.filter((i) => itemPronto(i.key)).length;
+                // Itens de RM enviada para correção (liberados para novo pedido) — aviso na etapa.
+                const emCorrecaoEtapa = g.itens.filter(
+                  (i) => !pedidoPorKey.has(i.key) && correcaoPorKey.has(i.key)
+                ).length;
                 return (
                   <section key={g.etapa} className="rounded-lg border border-gray-200 dark:border-gray-700">
                     <button
@@ -831,6 +797,14 @@ export function FdPedidoMaterialModal({
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold uppercase text-gray-900 dark:text-gray-100">
                         {g.etapa || 'Sem etapa'}
                       </span>
+                      {emCorrecaoEtapa > 0 && (
+                        <span
+                          className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                          title="Itens desta etapa cuja RM foi enviada para correção: estão liberados para um novo pedido."
+                        >
+                          {emCorrecaoEtapa} em correção
+                        </span>
+                      )}
                       <span className="shrink-0 text-xs text-gray-600 dark:text-gray-300">
                         {prontosEtapa > 0 && (
                           <span className="text-green-700 dark:text-green-400">{prontosEtapa} prontos · </span>

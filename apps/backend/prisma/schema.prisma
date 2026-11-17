@@ -6316,3 +6316,22 @@ model QuoteMapDraft {
 
   @@map("quote_map_drafts")
 }
+
+/// Histórico de correções da RM (troca de material e/ou quantidade, item cancelado): quem, quando e o que mudou.
+/// Sem relação com os itens: a correção da RM inteira recria os itens e o histórico continua.
+model MaterialRequestCorrectionLog {
+  id                String   @id @default(cuid())
+  materialRequestId String
+  /// Material do item depois da correção (para mostrar o histórico no item atual).
+  materialId        String?
+  /// Material do item antes da correção.
+  previousMaterialId String?
+  userId            String
+  userName          String?
+  /// [{ campo: 'material' | 'quantidade' | 'cancelado', de, para }]
+  changes           Json
+  createdAt         DateTime @default(now())
+
+  @@index([materialRequestId])
+  @@map("material_request_correction_logs")
+}

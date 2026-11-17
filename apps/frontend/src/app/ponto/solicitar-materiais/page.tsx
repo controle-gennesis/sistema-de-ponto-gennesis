@@ -106,6 +106,12 @@ import {
   type RmCardFilter
 } from '@/app/ponto/gerenciar-materiais/_lib/rmCardFilter';
 import { RmDetailOcTab } from '@/app/ponto/gerenciar-materiais/_components/RmDetailOcTab';
+import { MaterialBuscaDropdown } from '@/components/engenharia/MaterialBuscaDropdown';
+import {
+  HistoricoCorrecoes,
+  correcoesDoItemRm,
+  type RmCorrecaoLog,
+} from '@/components/engenharia/HistoricoCorrecoes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 type SolicitacaoDetailTab = 'resumo' | 'materiais' | 'ocs' | 'documentos';
@@ -948,6 +954,8 @@ function SolicitarMateriaisPage() {
   const [detailFdAttachmentBusy, setDetailFdAttachmentBusy] = useState(false);
   const [newItemMaterialLabels, setNewItemMaterialLabels] = useState<string[]>(['']);
   const [editItemMaterialLabels, setEditItemMaterialLabels] = useState<string[]>(['']);
+  /** Material de cada linha quando a correção foi aberta (para espelhar a troca nos itens pedidos da FD). */
+  const [editItemOriginalMaterialIds, setEditItemOriginalMaterialIds] = useState<string[]>(['']);
 
   const [rmListSearch, setRmListSearch] = useState('');
   /** '' | `rm:PENDING` | `oc:APPROVED` … — fase da SC ou de alguma OC */
@@ -1147,6 +1155,43 @@ function SolicitarMateriaisPage() {
     enabled: !!detailViewId && !!userData?.data?.id
   });
 
+  // Histórico de correções da RM (quem, quando, material e/ou quantidade).
+  const { data: detailCorrecoes = [] } = useQuery({
+    queryKey: ['material-request-correcoes', detailViewId],
+    queryFn: async () => {
+      const res = await api.get(`/material-requests/${detailViewId}/correcoes`);
+      return (res.data?.data ?? []) as RmCorrecaoLog[];
+    },
+    enabled: !!detailViewId && !!userData?.data?.id,
+  });
+  // RM feita pelo orçamento/FD: vai para o TOTVS, então a troca de material só mostra itens com identificador.
+  const { data: detailRmDaFd = false } = useQuery({
+    queryKey: ['material-request-da-fd', detailViewId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${detailViewId}`);
+      return !!res.data?.data?.fdId;
+    },
+    enabled: !!detailViewId && !!userData?.data?.id,
+    staleTime: 60_000,
+  });
+  // RM em correção completa feita pelo orçamento/FD: a lista mostra só materiais com identificador.
+  const { data: correctionRmDaFd = false } = useQuery({
+    queryKey: ['material-request-da-fd', correctionEditId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${correctionEditId}`);
+      return !!res.data?.data?.fdId;
+    },
+    enabled: !!correctionEditId && !!userData?.data?.id,
+    staleTime: 60_000,
+  });
+  /** Troca de material escolhida na correção de cada item (itemId → material). */
+  const [trocaMaterialItem, setTrocaMaterialItem] = useState<
+    Record<string, { materialId: string; label: string; unit: string }>
+  >({});
+  useEffect(() => {
+    setTrocaMaterialItem({});
+  }, [detailViewId]);
+
   const detailRmDisplayNo = useMemo(() => {
     const fromDetail = formatRmListDisplayId(
       (detailRmData as { requestNumber?: string } | undefined)?.requestNumber
@@ -1207,8 +1252,11 @@ function SolicitarMateriaisPage() {
         demandSheetAttachments: form.demandSheetAttachments,
         demandSheetAttachmentUrl: form.demandSheetAttachments[0]?.url || undefined,
         demandSheetAttachmentName: form.demandSheetAttachments[0]?.name || undefined,
-        items: form.items.map((item) => ({
+        items: form.items.map((item, index) => ({
           materialId: item.materialId,
+          // Para espelhar a correção nos itens pedidos da FD (troca de material/quantidade).
+          originalMaterialId: editItemOriginalMaterialIds[index] || undefined,
+          materialLabel: editItemMaterialLabels[index] || undefined,
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice) || 0,
           observation: item.observation,
@@ -1225,6 +1273,8 @@ function SolicitarMateriaisPage() {
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
         queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-request-correcoes', variables.id] }),
+        queryClient.invalidateQueries({ queryKey: ['fd-pedidos-resumo'] }),
         ...(variables.submitForApproval
           ? [queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] })]
           : []),
@@ -1266,23 +1316,39 @@ function SolicitarMateriaisPage() {
       requestId,
       itemId,
       quantity,
+      materialId,
+      materialLabel,
     }: {
       requestId: string;
       itemId: string;
       quantity: number;
+      materialId?: string;
+      materialLabel?: string;
     }) => {
       const res = await api.patch(
         `/material-requests/${requestId}/items/${itemId}/correct-quantity`,
-        { quantity }
+        { quantity, ...(materialId ? { materialId, materialLabel } : {}) }
       );
       return res.data;
     },
-    onSuccess: async (_data, { requestId }) => {
-      toast.success('Quantidade atualizada. O item voltou ao mapa de cotação.');
+    onSuccess: async (_data, { requestId, itemId, materialId }) => {
+      toast.success(
+        materialId
+          ? 'Material trocado. O item voltou ao mapa de cotação.'
+          : 'Quantidade atualizada. O item voltou ao mapa de cotação.'
+      );
+      setTrocaMaterialItem((prev) => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
         queryClient.invalidateQueries({ queryKey: ['material-request-detail', requestId] }),
+        queryClient.invalidateQueries({ queryKey: ['material-request-correcoes', requestId] }),
         queryClient.invalidateQueries({ queryKey: ['material-requests-approved-map'] }),
+        queryClient.invalidateQueries({ queryKey: ['fd-pedidos-resumo'] }),
+        queryClient.invalidateQueries({ queryKey: ['rm-minhas-correcao-count'] }),
       ]);
     },
     onError: (error: { response?: { data?: { message?: string } } }) => {
@@ -1723,6 +1789,13 @@ function SolicitarMateriaisPage() {
             )
           : [emptyRmFormItem()]
     });
+    setEditItemOriginalMaterialIds(
+      itemsFromApi.length > 0
+        ? itemsFromApi.map(
+            (it: { materialId?: string; material?: { id?: string } }) => it.materialId || it.material?.id || ''
+          )
+        : ['']
+    );
     setEditItemMaterialLabels(
       itemsFromApi.length > 0
         ? itemsFromApi.map(
@@ -1923,6 +1996,7 @@ function SolicitarMateriaisPage() {
       items: [...prev.items, emptyRmFormItem()]
     }));
     setEditItemMaterialLabels((prev) => [...prev, '']);
+    setEditItemOriginalMaterialIds((prev) => [...prev, '']);
   };
 
   const handleItemAttachmentFile = async (form: 'new' | 'edit', index: number, file: File | null) => {
@@ -2094,6 +2168,7 @@ function SolicitarMateriaisPage() {
       items: prev.items.filter((_, i) => i !== index)
     }));
     setEditItemMaterialLabels((prev) => prev.filter((_, i) => i !== index));
+    setEditItemOriginalMaterialIds((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleEditItemChange = (index: number, field: string, value: unknown) => {
@@ -3367,6 +3442,20 @@ function SolicitarMateriaisPage() {
                                     ).bankDetails?.trim();
                                     const unitPrice =
                                       (item as { unitPrice?: number | null }).unitPrice ?? null;
+                                    const podeCorrigirItem =
+                                      item.status === 'IN_REVIEW' &&
+                                      !!item.id &&
+                                      !!detailViewId &&
+                                      (d.requestedBy === userId || isElevatedUser);
+                                    const troca = item.id ? trocaMaterialItem[item.id] : undefined;
+                                    const itemMaterialId = String(
+                                      (item as { materialId?: string }).materialId ||
+                                        (mat as { id?: string } | null | undefined)?.id ||
+                                        ''
+                                    );
+                                    const historicoItem = itemMaterialId
+                                      ? correcoesDoItemRm(detailCorrecoes, itemMaterialId)
+                                      : [];
                                     return (
                                       <tr
                                         key={item.id || idx}
@@ -3393,12 +3482,55 @@ function SolicitarMateriaisPage() {
                                               {bankDetails}
                                             </p>
                                           ) : null}
+                                          {podeCorrigirItem ? (
+                                            <div className="mt-2 min-w-[260px]">
+                                              <p className="mb-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                                Trocar material (opcional)
+                                              </p>
+                                              <MaterialBuscaDropdown
+                                                value={troca?.materialId || ''}
+                                                selectedLabel={troca?.label}
+                                                onChange={(m) =>
+                                                  setTrocaMaterialItem((prev) => ({
+                                                    ...prev,
+                                                    [item.id!]: {
+                                                      materialId: m.id,
+                                                      label: getRmMaterialLabel(m),
+                                                      unit: m.unit || '',
+                                                    },
+                                                  }))
+                                                }
+                                                sugestaoTexto={mat?.name || mat?.description || line}
+                                                sugestaoKey={item.id}
+                                                sugestaoLabel="Sugestões parecidas com o material atual"
+                                                somenteComIdentificador={detailRmDaFd}
+                                                listMaxPx={320}
+                                              />
+                                              {troca ? (
+                                                <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
+                                                  Novo material: {troca.label}
+                                                  {troca.unit ? ` · ${troca.unit}` : ''}{' '}
+                                                  <button
+                                                    type="button"
+                                                    className="ml-1 text-red-600 underline dark:text-red-400"
+                                                    onClick={() =>
+                                                      setTrocaMaterialItem((prev) => {
+                                                        const next = { ...prev };
+                                                        delete next[item.id!];
+                                                        return next;
+                                                      })
+                                                    }
+                                                  >
+                                                    desfazer
+                                                  </button>
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                          ) : null}
+                                          <HistoricoCorrecoes registros={historicoItem} />
                                         </td>
                                         <td className="whitespace-nowrap px-2 py-3 text-right align-top tabular-nums">
-                                          {item.status === 'IN_REVIEW' &&
-                                          item.id &&
-                                          detailViewId &&
-                                          (d.requestedBy === userId || isElevatedUser) ? (
+                                          {podeCorrigirItem ? (
                                             <form
                                               className="flex items-center justify-end gap-2"
                                               onSubmit={(e) => {
@@ -3410,9 +3542,12 @@ function SolicitarMateriaisPage() {
                                                   return;
                                                 }
                                                 correctItemQtyMutation.mutate({
-                                                  requestId: detailViewId,
+                                                  requestId: detailViewId!,
                                                   itemId: item.id!,
                                                   quantity,
+                                                  ...(troca && troca.materialId !== itemMaterialId
+                                                    ? { materialId: troca.materialId, materialLabel: troca.label }
+                                                    : {}),
                                                 });
                                               }}
                                             >
@@ -3892,17 +4027,16 @@ function SolicitarMateriaisPage() {
                         <div className="space-y-3">
                           <div>
                             <label className={RM_FORM_FIELD_LABEL_CLS}>Material *</label>
-                            <AsyncSearchSelectDropdown<RmMaterialListItem>
+                            {/* Mesma lista do pedido pela FD; RM da FD vai para o TOTVS: só materiais com identificador. */}
+                            <MaterialBuscaDropdown
                               value={item.materialId}
                               selectedLabel={editItemMaterialLabels[index]}
                               onChange={(material) => handleEditItemMaterialSelect(index, material)}
-                              searchFn={searchRmMaterials}
-                              getOptionId={(m) => m.id}
-                              getOptionLabel={getRmMaterialLabel}
-                              placeholder="Digite para buscar material..."
-                              minSearchLength={2}
-                              noFocusRing
-                              queryKeyPrefix="rm-materials-search"
+                              sugestaoTexto={editItemMaterialLabels[index]}
+                              sugestaoKey={`edit-${index}`}
+                              sugestaoLabel="Sugestões parecidas com o material atual"
+                              somenteComIdentificador={correctionRmDaFd}
+                              listMaxPx={320}
                             />
                           </div>
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
