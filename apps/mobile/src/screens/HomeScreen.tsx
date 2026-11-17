@@ -10,7 +10,7 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
-import { LogOut } from 'lucide-react-native';
+import { LogOut, Settings } from 'lucide-react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -134,6 +134,12 @@ export default function HomeScreen() {
               borderColor={isDark ? colors.border : 'rgba(15, 23, 42, 0.08)'}
               borderWidth={StyleSheet.hairlineWidth * 1.5}
             />
+            {/* Anel (cor do fundo) + miolo vermelho: sem borda, pra não sangrar o vermelho no Android. */}
+            <View style={styles.settingsBadgeRing}>
+              <View style={styles.settingsBadge}>
+                <Settings size={11} color="#fff" strokeWidth={2.4} />
+              </View>
+            </View>
           </TouchableOpacity>
           <View style={styles.greetingTextWrap}>
             <Text style={styles.greetingEyebrow}>{greetingPrefix()},</Text>
@@ -184,6 +190,25 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 28,
     },
     greetingTextWrap: { flex: 1, minWidth: 0 },
+    settingsBadgeRing: {
+      position: 'absolute',
+      right: -3,
+      bottom: -3,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.appShell,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    settingsBadge: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     logoutBtn: {
       width: 44,
       height: 44,

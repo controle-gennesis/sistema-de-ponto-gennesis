@@ -18,6 +18,86 @@ export type PushPayload = {
   categoryId?: string;
 };
 
+/** Categorias de aviso que a pessoa pode ligar/desligar no Perfil do app. */
+export const PUSH_CATEGORIES = [
+  { key: 'approvals', label: 'Aprovações pendentes', description: 'Quando chega algo para você aprovar' },
+  { key: 'fuel', label: 'Abastecimento', description: 'Andamento das suas solicitações de combustível' },
+  { key: 'reservation', label: 'Frota', description: 'Andamento das suas reservas de veículo' },
+  { key: 'dp', label: 'Solicitações internas', description: 'Mudanças de status das suas solicitações' },
+  { key: 'dp-messages', label: 'Mensagens das solicitações', description: 'Novas mensagens nas solicitações' },
+  { key: 'accounting', label: 'Atendimento contábil', description: 'Andamento dos atendimentos da contabilidade' },
+  { key: 'workorder', label: 'Chamados', description: 'Mudanças de status dos chamados' },
+  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card' },
+] as const;
+
+const CATEGORY_KEYS: ReadonlySet<string> = new Set(PUSH_CATEGORIES.map((c) => c.key));
+
+/** Descobre a categoria de um aviso pelo `data` do payload (sem categoria = sempre envia). */
+function categoryOfPayload(data?: Record<string, unknown>): string | null {
+  const id = String(data?.kind ?? data?.type ?? '');
+  switch (id) {
+    case 'approval-pending':
+      return 'approvals';
+    case 'fuel':
+      return 'fuel';
+    case 'reservation':
+      return 'reservation';
+    case 'dp':
+      return 'dp';
+    case 'dp-request-message':
+      return 'dp-messages';
+    case 'dp-contabilidade':
+      return 'accounting';
+    case 'workorder':
+      return 'workorder';
+    case 'kanban-assigned':
+      return 'kanban';
+    default:
+      return null;
+  }
+}
+
+async function mutedCategories(userId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ category: string }>>`
+    SELECT "category" FROM "push_muted_categories" WHERE "userId" = ${userId}
+  `;
+  return rows.map((r) => r.category);
+}
+
+/** Lista as categorias com o estado (ligada/desligada) do usuário. */
+export async function getPushPreferences(userId: string) {
+  const muted = new Set(await mutedCategories(userId).catch(() => [] as string[]));
+  return PUSH_CATEGORIES.map((c) => ({ ...c, enabled: !muted.has(c.key) }));
+}
+
+export async function setPushPreference(userId: string, category: string, enabled: boolean) {
+  if (!CATEGORY_KEYS.has(category)) throw new Error('Categoria inválida');
+  if (enabled) {
+    await prisma.$executeRaw`DELETE FROM "push_muted_categories" WHERE "userId" = ${userId} AND "category" = ${category}`;
+  } else {
+    await prisma.$executeRaw`
+      INSERT INTO "push_muted_categories" ("userId", "category") VALUES (${userId}, ${category})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
+/** Tira dos destinatários quem desativou essa categoria. Se a consulta falhar, envia a todos. */
+async function withoutMuted(userIds: string[], category: string | null): Promise<string[]> {
+  if (!category || !userIds.length) return userIds;
+  try {
+    const rows = await prisma.$queryRaw<Array<{ userId: string }>>`
+      SELECT "userId" FROM "push_muted_categories"
+      WHERE "category" = ${category} AND "userId" = ANY(${userIds}::text[])
+    `;
+    if (!rows.length) return userIds;
+    const muted = new Set(rows.map((r) => r.userId));
+    return userIds.filter((id) => !muted.has(id));
+  } catch {
+    return userIds;
+  }
+}
+
 export function isValidExpoPushToken(token: unknown): token is string {
   return typeof token === 'string' && EXPO_TOKEN_RE.test(token);
 }
@@ -53,7 +133,10 @@ type ExpoTicket = { status: 'ok' | 'error'; details?: { error?: string } };
 /** Envia pra todos os aparelhos dos usuários. Nunca lança: push não pode derrubar a operação. */
 export async function sendPushToUsers(userIds: Array<string | null | undefined>, payload: PushPayload) {
   try {
-    const ids = [...new Set(userIds.filter((id): id is string => !!id))];
+    const ids = await withoutMuted(
+      [...new Set(userIds.filter((id): id is string => !!id))],
+      categoryOfPayload(payload.data),
+    );
     const tokens = (await tokensForUsers(ids)).filter(isValidExpoPushToken);
     if (!tokens.length) return;
 
