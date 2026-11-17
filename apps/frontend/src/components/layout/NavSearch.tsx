@@ -12,6 +12,7 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { resolveModuleCategoryIcon } from '@/lib/moduleNavIcons';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
+import { isSociosBlockedCollaborationPath } from '@/lib/sociosCollaborationAccess';
 
 type SearchItem = {
   name: string;
@@ -46,6 +47,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canApproveMaterialRequests,
     canApproveEmpreiteiroDaily,
     canAccessCollaborationTools,
+    canAccessDrive,
     isLinkedEmpreiteiro,
   } = usePermissions();
   const localInputRef = useRef<HTMLInputElement | null>(null);
@@ -93,15 +95,16 @@ export function NavSearch({ inputRef }: NavSearchProps) {
       return catalog.filter((item) => item.href === '/ponto/empreiteiros');
     }
     return catalog.filter((item) => {
+      if (!canAccessCollaborationTools && isSociosBlockedCollaborationPath(item.href)) return false;
       if (
         item.href === '/ponto/agenda' ||
         item.href === '/ponto/conversas' ||
-        item.href === '/ponto/drive' ||
         item.href === '/ponto/kanban' ||
         item.href === '/ponto/flow'
       ) {
         return canAccessCollaborationTools;
       }
+      if (item.href === '/ponto/drive') return canAccessDrive;
       if (item.href === '/ponto/home') {
         return true;
       }
@@ -111,7 +114,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
       }
       if (isAdministrator) return true;
       const key = pathToModuleKey(item.href);
-      if (OPEN_ACCESS.has(key)) return canAccessCollaborationTools;
+      if (OPEN_ACCESS.has(key)) return key === pathToModuleKey('/ponto/drive') ? canAccessDrive : canAccessCollaborationTools;
       return can(key);
     });
   }, [
@@ -121,6 +124,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canAccessLicitacoesPage,
     canSeeApprovals,
     canAccessCollaborationTools,
+    canAccessDrive,
     isLinkedEmpreiteiro,
   ]);
 

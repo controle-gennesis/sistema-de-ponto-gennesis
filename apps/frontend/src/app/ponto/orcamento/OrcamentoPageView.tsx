@@ -176,6 +176,7 @@ import {
   type EtapaFd,
 } from './CotacaoEmpreitaPainel';
 import { OrcamentoDetalhadoPainel, type LinhaOrcamentoDetalhado } from './OrcamentoDetalhadoPainel';
+import { OrcamentoSelecaoSoma } from './OrcamentoSelecaoSoma';
 import { exportCronogramaPdf } from '@/lib/exportCronogramaPdf';
 import {
   downloadCronogramaExcel,
@@ -3440,6 +3441,24 @@ function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
       // Mesmo padrão do badge "Lançado" no Controle Financeiro
       return `${base} bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200`;
   }
+}
+
+/** Polo da FD pelo cadastro do centro de custo (campo Polo; sem ele, o Estado). */
+function poloFdDoCentroCusto(cc: { polo?: string | null; state?: string | null } | null | undefined): PoloFd | '' {
+  const norm = (v: unknown) =>
+    String(v ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toUpperCase();
+  const polo = norm(cc?.polo);
+  if (polo) {
+    if (polo.includes('GOIAS') || /\bGO\b/.test(polo)) return 'GO';
+    if (polo.includes('BRASILIA') || polo.includes('DISTRITO') || /\bDF\b/.test(polo)) return 'DF';
+  }
+  const uf = norm(cc?.state);
+  if (uf === 'GO' || uf === 'DF') return uf;
+  return '';
 }
 
 function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
@@ -7773,6 +7792,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   commitOnChange = true,
   disabled = false,
   somenteLeitura = false,
+  editarComDuploClique = false,
 }: {
   id?: string;
   draftKey?: string;
@@ -7796,7 +7816,15 @@ const FdCampoLocal = memo(function FdCampoLocal({
   disabled?: boolean;
   /** Orçamento travado: dá para entrar na célula e ver a fórmula, mas nada é editado nem gravado. */
   somenteLeitura?: boolean;
+  /**
+   * Como na memória de cálculo: um clique seleciona a célula (mostra o valor, sem cursor) e já dá para
+   * alterar digitando (o texto digitado substitui o conteúdo). A fórmula só abre no duplo clique, no Enter ou no F2.
+   */
+  editarComDuploClique?: boolean;
 }) {
+  const [editando, setEditando] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inativo = editarComDuploClique && !editando;
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
   );
@@ -7868,9 +7896,39 @@ const FdCampoLocal = memo(function FdCampoLocal({
     else if (mode === 'live') scheduleCommit(next);
   };
 
+  /**
+   * Começa a edição da célula já focada (duplo clique, Enter, F2 ou tecla digitada).
+   * `inicial` = texto digitado (substitui o conteúdo); sem ele, abre com a fórmula para editar.
+   */
+  const iniciarEdicao = (inicial?: string) => {
+    if (disabled) return;
+    setEditando(true);
+    focusedRef.current = true;
+    setFocadoVisual(true);
+    if (!somenteLeitura && inicial !== undefined) {
+      applyValue(inicial, 'local');
+    } else {
+      const edit = String(editOnFocusRef.current ?? '').trim();
+      if (edit) {
+        localRef.current = edit;
+        setLocal(edit);
+        if (draftKey && !somenteLeitura) fdCampoDrafts.set(draftKey, edit);
+      }
+    }
+    onFocusExtraRef.current?.();
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const fim = el.value.length;
+      el.setSelectionRange(fim, fim);
+    });
+  };
+
   const pintar = Boolean(colorirFormula) && focadoVisual && local.trimStart().startsWith('=');
   const campo = (
     <input
+      ref={inputRef}
       id={id}
       type="text"
       inputMode={inputMode}
@@ -7879,14 +7937,22 @@ const FdCampoLocal = memo(function FdCampoLocal({
       title={title}
       autoComplete="off"
       disabled={disabled}
-      readOnly={somenteLeitura}
+      readOnly={somenteLeitura || inativo}
+      onDoubleClick={() => {
+        if (inativo) iniciarEdicao();
+      }}
       data-formula={focadoVisual && local.trimStart().startsWith('=') ? 'true' : undefined}
       className={`${pintar ? `${className ?? ''} !text-transparent` : className ?? ''}${
         somenteLeitura ? ' pointer-events-auto select-text' : ''
-      }`}
+      }${inativo ? ' !caret-transparent cursor-cell selection:bg-transparent' : ''}`}
       value={local}
       onFocus={() => {
         if (disabled) return;
+        // Só selecionada (um clique ou Tab): mostra o valor, sem abrir a fórmula.
+        if (inativo) {
+          focusedRef.current = true;
+          return;
+        }
         if (somenteLeitura) {
           focusedRef.current = true;
           setFocadoVisual(true);
@@ -7911,6 +7977,24 @@ const FdCampoLocal = memo(function FdCampoLocal({
       }}
       onKeyDown={(e) => {
         if (disabled) return;
+        if (inativo) {
+          if (e.key === 'Escape') {
+            e.currentTarget.blur();
+            return;
+          }
+          if (e.key === 'Enter' || e.key === 'F2') {
+            e.preventDefault();
+            e.stopPropagation();
+            iniciarEdicao();
+            return;
+          }
+          // Digitar numa célula selecionada troca o conteúdo (como na memória de cálculo).
+          if (!somenteLeitura && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete')) {
+            e.preventDefault();
+            iniciarEdicao(e.key.length === 1 ? e.key : '');
+          }
+          return;
+        }
         if (somenteLeitura) {
           if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
           return;
@@ -7923,6 +8007,9 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onBlur={(e) => {
         focusedRef.current = false;
         setFocadoVisual(false);
+        setEditando(false);
+        // Só selecionada (nada digitado): não grava nem mexe na fórmula guardada.
+        if (inativo) return;
         onBlurExtraRef.current?.();
         if (disabled) return;
         if (somenteLeitura) {
@@ -9396,6 +9483,10 @@ export function OrcamentoPageView({
   const [fdAprovacaoInitialForm, setFdAprovacaoInitialForm] =
     useState<Partial<FichaDemandaApprovalFormState> | null>(null);
   const [fdAprovacaoPreparando, setFdAprovacaoPreparando] = useState(false);
+  /** Polo da FD veio do centro de custo: o campo fica travado no formulário. */
+  const [fdPoloDoCentroCusto, setFdPoloDoCentroCusto] = useState(false);
+  /** OS e pasta usadas na sequência do código da FD (o servidor confere o número ao lançar). */
+  const fdCodigoBaseOsRef = useRef('');
   const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
   const [finalizandoOrcamento, setFinalizandoOrcamento] = useState(false);
   const [confirmFinalizarOrcamento, setConfirmFinalizarOrcamento] = useState(false);
@@ -15396,6 +15487,8 @@ export function OrcamentoPageView({
         etapa,
         subetapa,
         composicao,
+        // Mesmo valor da coluna "Custo estimado (40%)" da aba Ficha de demanda (sem o ajuste de fechamento).
+        custoEstimado40: Math.round((Number(l.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100,
         ...(() => {
           const custo = (Number(l.total) || 0) * fatorCusto;
           const desconto = detalhado
@@ -15424,7 +15517,10 @@ export function OrcamentoPageView({
 
   /** Quantos itens da FD atual já entraram em alguma RM. */
   const fdItensSolicitados = useMemo(() => {
-    const pedidos = new Set((fdAprovadaRecord?.itensPedidos ?? []).map((p) => p.fdItemKey));
+    // Pedido de RM em correção não conta: o item está liberado para um novo pedido.
+    const pedidos = new Set(
+      (fdAprovadaRecord?.itensPedidos ?? []).filter((p) => !p.emCorrecao).map((p) => p.fdItemKey)
+    );
     return insumosParaPedido.filter((ins) => pedidos.has(ins.key)).length;
   }, [fdAprovadaRecord, insumosParaPedido]);
 
@@ -15755,6 +15851,34 @@ export function OrcamentoPageView({
     }, 1500);
     return () => window.clearTimeout(t);
   }, [fdIdEspelhoCusto, loadingFromApi, custoRealTotalFd]);
+
+  // Espelha na FD aprovada o "Custo estimado (40%)" de cada insumo (mesmo valor da coluna da FD),
+  // para o mapa de cotação mostrar o valor do item sem recalcular.
+  const custoEstimado40PorItem = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const row of linhasAnaliticoOrcamento) {
+      if (row.kind !== 'insumo') continue;
+      m[row.key] = Math.round((Number(row.total) || 0) * PLANILHA_FATOR_CUSTO_ESTIMADO * 100) / 100;
+    }
+    return m;
+  }, [linhasAnaliticoOrcamento]);
+  const custoEstimadoItensEspelhadoRef = useRef<{ fdId: string; assinatura: string } | null>(null);
+  useEffect(() => {
+    if (!fdIdEspelhoCusto || loadingFromApi) return;
+    if (Object.keys(custoEstimado40PorItem).length === 0) return;
+    const assinatura = JSON.stringify(custoEstimado40PorItem);
+    const ultimo = custoEstimadoItensEspelhadoRef.current;
+    if (ultimo && ultimo.fdId === fdIdEspelhoCusto && ultimo.assinatura === assinatura) return;
+    const t = window.setTimeout(() => {
+      custoEstimadoItensEspelhadoRef.current = { fdId: fdIdEspelhoCusto, assinatura };
+      void api
+        .patch(`/demand-sheet-approvals/${fdIdEspelhoCusto}/custo-estimado-itens`, { itens: custoEstimado40PorItem })
+        .catch(() => {
+          custoEstimadoItensEspelhadoRef.current = null;
+        });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [fdIdEspelhoCusto, loadingFromApi, custoEstimado40PorItem]);
 
   // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
   useEffect(() => {
@@ -16683,6 +16807,41 @@ export function OrcamentoPageView({
       const nextDim = { ...atual, linhas };
       queueMicrotask(() => syncQuantidadeOrcamentoDaMemoria(itemKey, nextDim));
       return aplicarVinculosMemoria({ ...prev, [itemKey]: nextDim });
+    });
+  };
+
+  /** Mescla (span > 1) ou desfaz (span <= 1) células de Descrição/Detalhes a partir da linha `idx`. */
+  const definirMesclagemMedicao = (
+    itemKey: string,
+    campo: 'mesclaDescricao' | 'mesclaDetalhes',
+    idx: number,
+    span: number
+  ) => {
+    if (gradeTravadaRef.current) return;
+    setDimensoesPorItem(prev => {
+      const base = prev[itemKey];
+      if (!base) return prev;
+      const atual = dimensoesComLinhasEfetivas(base, 'un');
+      if (!atual.linhas[idx]) return prev;
+      const campoTexto = campo === 'mesclaDescricao' ? 'descricao' : 'detalhes';
+      const linhas = atual.linhas.map((ln, i) => {
+        if (i === idx) {
+          const nova: LinhaMedicao = { ...ln };
+          if (span > 1) nova[campo] = span;
+          else delete nova[campo];
+          return nova;
+        }
+        if (span > 1 && i > idx && i < idx + span) {
+          // Como no Excel, só o texto da célula de cima permanece.
+          const nova: LinhaMedicao = { ...ln };
+          delete nova[campo];
+          if (campoTexto === 'descricao') nova.descricao = '';
+          else delete nova.detalhes;
+          return nova;
+        }
+        return ln;
+      });
+      return aplicarVinculosMemoria({ ...prev, [itemKey]: { ...atual, linhas } });
     });
   };
 
@@ -17738,7 +17897,7 @@ export function OrcamentoPageView({
   const nomeArquivoExportOrcamento = (tipo: string, ext: 'xlsx' | 'pdf') =>
     montarNomeArquivoOrcamento({
       tipo,
-      semTipo: /^orcamento/i.test(tipo),
+      semTipo: /^orcamento\b/i.test(tipo),
       codigo: codigoOrcamentoAtivo,
       descricao: nomeOrcamentoSemCodigo || nomeContratoExport(),
       ext,
@@ -18916,9 +19075,35 @@ export function OrcamentoPageView({
       }
 
       const codigoFdBase = (codigoOrcamentoAtivo || orcamentoAtivoId.slice(0, 8)).replace(/\s+/g, '');
-      const poloInferido = inferirPoloFdDeTexto(
-        `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
-      );
+      // Código da FD: FD-<OS e pasta>-NN, definido pelo servidor (a FD já lançada mantém o seu).
+      let codigoFd = `FD-${codigoFdBase}`;
+      try {
+        const codRes = await api.get('/demand-sheet-approvals/proximo-codigo', {
+          params: {
+            contratoId: embeddedContractId || undefined,
+            base: codigoFdBase,
+            fdId: (meta.fichaDemandaApprovalId || '').trim() || undefined,
+          },
+        });
+        codigoFd = String(codRes.data?.data?.codigo || codigoFd);
+      } catch {
+        /* sem prévia: o servidor define o número ao lançar */
+      }
+      fdCodigoBaseOsRef.current = codigoFdBase;
+      // Polo: o do centro de custo (travado); sem cadastro, o adivinhado pelo nome (editável).
+      let poloCc: PoloFd | '' = '';
+      try {
+        const ccRes = await api.get(`/cost-centers/${centroCustoId}`);
+        poloCc = poloFdDoCentroCusto(ccRes.data?.data ?? ccRes.data);
+      } catch {
+        poloCc = '';
+      }
+      setFdPoloDoCentroCusto(Boolean(poloCc));
+      const poloInferido =
+        poloCc ||
+        inferirPoloFdDeTexto(
+          `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
+        );
       const custo = resumoFinanceiro.totalComDescontoEBdi * 0.4;
       const fat = resumoFinanceiro.totalComDescontoEBdi;
 
@@ -18926,7 +19111,7 @@ export function OrcamentoPageView({
         contratoId: embeddedContractId || '',
         obra: meta.obra?.trim() || nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || '',
         codigoPedido: meta.osNumeroPasta.trim() || codigoFdBase,
-        codFichaDemanda: `FD-${codigoFdBase}`,
+        codFichaDemanda: codigoFd,
         faturamentoEstimado: formatCurrencyInput(fat),
         custoEstimado: formatCurrencyInput(custo),
         observacao:
@@ -18967,6 +19152,7 @@ export function OrcamentoPageView({
         orcamentoCentroCustoId: centroCustoId,
         orcamentoId: orcamentoAtivoId,
         fichaDemandaApprovalId: (meta.fichaDemandaApprovalId || '').trim() || undefined,
+        codigoFdBaseOs: fdCodigoBaseOsRef.current || undefined,
       });
       const fdId = String(res.data?.data?.id || '').trim() || undefined;
       const recarregou = await recarregarDoServidor();
@@ -22259,7 +22445,7 @@ export function OrcamentoPageView({
                                                 addLinhaCabecalhoSecaoMedicao
                                               }
                                               removeLinhaMedicao={removeLinhaMedicao}
-                                              mesclarLinhasMedicao={mesclarLinhasMedicao}
+                                              definirMesclagemMedicao={definirMesclagemMedicao}
                                               estiloTitulo={estiloLinhaItemOrc(
                                                 aparenciaMemorial,
                                                 isDark
@@ -22803,6 +22989,7 @@ export function OrcamentoPageView({
                                       >
                                           <FdCampoLocal
                                             draftKey={`orc-qtd:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={
                                               row.quantidade === 0
                                                 ? ''
@@ -22960,6 +23147,7 @@ export function OrcamentoPageView({
                                           <FdCampoLocal
                                             id={inputId}
                                             draftKey={`orc-${colDef.campo}:${row.key}`}
+                                            editarComDuploClique
                                             committedValue={formatarMoedaCampoOrc(colDef.valor)}
                                             editValueOnFocus={formulaFoco}
                                             colorirFormula={
@@ -23119,6 +23307,8 @@ export function OrcamentoPageView({
                         </tbody>
                       </table>
                     </div>
+
+                    <OrcamentoSelecaoSoma rootRef={montagemOrcamentoTableRef} />
 
                     {destaqueCalculoOrc?.balao ? (
                       <DicaFormulaCompleta
@@ -23610,10 +23800,10 @@ export function OrcamentoPageView({
                         statusAprovacaoAtivo === 'aprovado'
                           ? 'Orçamento e FD já trancados'
                           : podeEnviarFdAprovacao
-                            ? 'Lançar FD e trancar orçamento'
+                            ? 'Lançar FD'
                             : 'Finalize o orçamento antes de lançar a FD'
                       }
-                      aria-label="Lançar FD e trancar orçamento"
+                      aria-label="Lançar FD"
                     >
                       {fdAprovacaoPreparando ? (
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
@@ -23732,13 +23922,15 @@ export function OrcamentoPageView({
         initialForm={fdAprovacaoInitialForm}
         hideContractField={Boolean(embeddedContractId)}
         obraBloqueada={Boolean(meta.obra?.trim())}
+        poloBloqueado={fdPoloDoCentroCusto}
+        codigoFdBloqueado
         onSave={(form) => {
           void confirmarEnvioFichaDemandaAprovacao(form);
         }}
         isSaving={fdAprovacaoEnviando}
         title="Lançar ficha de demanda"
         aviso="Ao lançar, o orçamento e a FD ficam trancados: ninguém altera mais. Só o administrador ou quem tem autorização no centro de custo pode destrancar. O pedido de material é liberado logo após o lançamento."
-        textoSalvar="Lançar e trancar"
+        textoSalvar="Lançar"
       />
 
       <FdResultadoPorOcModal

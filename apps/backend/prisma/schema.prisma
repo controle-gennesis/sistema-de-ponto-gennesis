@@ -800,6 +800,7 @@ enum DpRequestType {
   // Pedidos criados direto para a Contabilidade (prefixo CONTAB_ porque os nomes sem prefixo já são do fluxo do DP)
   CONTAB_ADMISSAO
   CONTAB_AFASTAMENTO
+  CONTAB_ATESTADO
   CONTAB_ALTERACAO_FUNCAO
   CONTAB_ALTERACAO_SALARIAL
   CONTAB_FERIAS
@@ -880,6 +881,7 @@ model DpRequest {
 enum DpContabilidadeRequestType {
   ADMISSAO
   AFASTAMENTO
+  ATESTADO
   ALTERACAO_FUNCAO
   ALTERACAO_SALARIAL
   CONVENCAO_COLETIVA
@@ -2535,6 +2537,8 @@ model Obra {
   id         String   @id @default(cuid())
   name       String
   contratoId String
+  /// Endereço da obra (opcional)
+  address    String?
   /// ID legado (AppSheet / importações)
   externalId String?  @unique
   isActive   Boolean  @default(true)
@@ -2559,6 +2563,9 @@ model DiarioObra {
   /// Sem atividade no dia (com o motivo em `noActivityReason`).
   noActivity       Boolean  @default(false)
   noActivityReason String?
+  /// OS do contrato escolhida ao criar o diário: SE (`divSe`) e Pasta (`folderNumber`) do pleito.
+  osDivSe          String?
+  osFolder         String?
   /// Clima, atividades, mão de obra, equipamentos, materiais, ocorrências e observações.
   content          Json     @default("{}")
   createdById      String?
@@ -6299,4 +6306,37 @@ model ContratoSocioSubitem {
 
   @@index([contrato, ano, mes])
   @@map("contrato_socio_subitens")
+}
+
+/// Rascunho do Mapa de Cotação: um por RM, compartilhado por todos os compradores (separado do QuoteMap da OC).
+model QuoteMapDraft {
+  id                String   @id @default(cuid())
+  materialRequestId String   @unique
+  /// Estado da tela: fornecedores, preços, frete, desconto, quantidades e detalhamentos.
+  data              Json
+  updatedById       String
+  updatedByName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("quote_map_drafts")
+}
+
+/// Histórico de correções da RM (troca de material e/ou quantidade, item cancelado): quem, quando e o que mudou.
+/// Sem relação com os itens: a correção da RM inteira recria os itens e o histórico continua.
+model MaterialRequestCorrectionLog {
+  id                String   @id @default(cuid())
+  materialRequestId String
+  /// Material do item depois da correção (para mostrar o histórico no item atual).
+  materialId        String?
+  /// Material do item antes da correção.
+  previousMaterialId String?
+  userId            String
+  userName          String?
+  /// [{ campo: 'material' | 'quantidade' | 'cancelado', de, para }]
+  changes           Json
+  createdAt         DateTime @default(now())
+
+  @@index([materialRequestId])
+  @@map("material_request_correction_logs")
 }

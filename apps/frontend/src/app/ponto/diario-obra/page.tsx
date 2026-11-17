@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { ListPagination } from '@/components/ui/ListPagination';
+import { AppTabButton } from '@/components/ui/AppTabButton';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import {
   CadastroListEmpty,
@@ -29,8 +31,17 @@ import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { DiarioDayStrip } from './DiarioDayStrip';
 
 const PAGE_SIZE = 20;
+
+type Stage = 'all' | 'draft' | 'final' | 'none';
+const STAGES: Array<{ key: Stage; label: string }> = [
+  { key: 'all', label: 'Todos' },
+  { key: 'draft', label: 'Em preenchimento' },
+  { key: 'final', label: 'Finalizados' },
+  { key: 'none', label: 'Sem atividade' },
+];
 const WEEKDAYS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
 type DiarioRow = {
@@ -47,9 +58,16 @@ type DiarioRow = {
   activities: number;
   workers: number;
   occurrences: number;
+  /** OS escolhida ao criar o diário ('' = diário antigo, sem OS). */
+  osDivSe?: string;
+  osFolder?: string;
+  osLabel?: string;
   updatedAt: string;
   updatedByName: string;
 };
+
+type OsOption = { divSe: string; folderNumber: string; label: string; description: string };
+const osKeyOf = (o: { divSe: string; folderNumber: string }) => `${o.divSe}|${o.folderNumber}`;
 
 type ContractOption = { id: string; name: string; number?: string };
 type ObraOption = { id: string; name: string; contratoId: string; isActive?: boolean };
@@ -76,21 +94,33 @@ const brDateTime = (value: string) => {
 export default function DiarioObraListPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { canCreate, canDelete } = useCadastroCrudPermissions('/ponto/diario-obra');
+  const { canCreate, canDelete, canEdit } = useCadastroCrudPermissions('/ponto/diario-obra');
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterContratoId, setFilterContratoId] = useState('');
   const [filterObraId, setFilterObraId] = useState('');
+  const [stage, setStage] = useState<Stage>('all');
+  /** Dia escolhido na faixa de dias ('' = todos). */
+  const [dayFilter, setDayFilter] = useState('');
+  const [monthRef, setMonthRef] = useState(() => {
+    const n = new Date();
+    return { y: n.getFullYear(), m0: n.getMonth() };
+  });
   const [page, setPage] = useState(1);
 
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formContratoId, setFormContratoId] = useState('');
   const [formObraId, setFormObraId] = useState('');
+  const [formOsKey, setFormOsKey] = useState('');
   const [formDate, setFormDate] = useState(todayIso());
   const [creating, setCreating] = useState(false);
   const [deleteRow, setDeleteRow] = useState<DiarioRow | null>(null);
+  /** Diário aberto na janela "Editar" (define ou troca a OS). */
+  const [editRow, setEditRow] = useState<DiarioRow | null>(null);
+  const [editOsKey, setEditOsKey] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -144,10 +174,10 @@ export default function DiarioObraListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterContratoId, filterObraId]);
+  }, [debouncedSearch, filterContratoId, filterObraId, stage, dayFilter]);
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, page],
+    queryKey: ['diario-obra-list', debouncedSearch, filterContratoId, filterObraId, stage, dayFilter, page],
     queryFn: async () =>
       (
         await api.get('/diario-obra', {
@@ -155,12 +185,38 @@ export default function DiarioObraListPage() {
             search: debouncedSearch || undefined,
             contratoId: filterContratoId || undefined,
             obraId: filterObraId || undefined,
+            from: dayFilter || undefined,
+            to: dayFilter || undefined,
+            status: stage === 'all' ? undefined : stage,
             page,
             limit: PAGE_SIZE,
           },
         })
       ).data,
   });
+
+  // Totais de cada etapa, com a busca e os filtros aplicados.
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['diario-obra-list', 'stats', debouncedSearch, filterContratoId, filterObraId, dayFilter],
+    queryFn: async () =>
+      (
+        await api.get('/diario-obra/stats', {
+          params: {
+            search: debouncedSearch || undefined,
+            contratoId: filterContratoId || undefined,
+            obraId: filterObraId || undefined,
+            from: dayFilter || undefined,
+            to: dayFilter || undefined,
+          },
+        })
+      ).data?.data as Record<Stage, number> | undefined,
+  });
+
+  const shiftMonth = (delta: number) =>
+    setMonthRef((m) => {
+      const d = new Date(m.y, m.m0 + delta, 1);
+      return { y: d.getFullYear(), m0: d.getMonth() };
+    });
   const items: DiarioRow[] = listData?.data ?? [];
   const total: number = listData?.pagination?.total ?? 0;
   const totalPages: number = listData?.pagination?.totalPages ?? 1;
@@ -178,9 +234,82 @@ export default function DiarioObraListPage() {
     onError: () => toast.error('Não foi possível excluir o diário de obra.'),
   });
 
+  // OS do contrato escolhido (SE e Pasta dos pleitos), para a pessoa escolher ao criar o diário.
+  const { data: osOptionsData, isLoading: loadingOs } = useQuery({
+    queryKey: ['diario-obra-os', formContratoId],
+    enabled: showForm && !!formContratoId,
+    queryFn: async () =>
+      (await api.get('/diario-obra/os-options', { params: { contratoId: formContratoId } })).data?.data as
+        | OsOption[]
+        | undefined,
+  });
+  const osOptions: OsOption[] = osOptionsData ?? [];
+  const osSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        osOptions.map((o) => ({
+          value: osKeyOf(o),
+          label: o.description ? `${o.label} - ${o.description}` : o.label,
+          searchText: `${o.label} ${o.description}`,
+        })),
+      ),
+    [osOptions],
+  );
+
+  const { data: editOsData, isLoading: loadingEditOs } = useQuery({
+    queryKey: ['diario-obra-os', editRow?.contratoId ?? ''],
+    enabled: !!editRow?.contratoId,
+    queryFn: async () =>
+      (await api.get('/diario-obra/os-options', { params: { contratoId: editRow?.contratoId } })).data?.data as
+        | OsOption[]
+        | undefined,
+  });
+  const editOsOptions: OsOption[] = editOsData ?? [];
+  const editOsSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        editOsOptions.map((o) => ({
+          value: osKeyOf(o),
+          label: o.description ? `${o.label} - ${o.description}` : o.label,
+          searchText: `${o.label} ${o.description}`,
+        })),
+      ),
+    [editOsOptions],
+  );
+
+  const openEdit = (row: DiarioRow) => {
+    setEditRow(row);
+    setEditOsKey(row.osDivSe || row.osFolder ? `${row.osDivSe ?? ''}|${row.osFolder ?? ''}` : '');
+    setSavingEdit(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editRow) return;
+    const os = editOsOptions.find((o) => osKeyOf(o).toLowerCase() === editOsKey.toLowerCase());
+    if (editOsOptions.length > 0 && !os) {
+      toast.error('Selecione a OS do diário.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api.patch(`/diario-obra/${editRow.obraId}/${editRow.date}/os`, {
+        osDivSe: os?.divSe ?? '',
+        osFolder: os?.folderNumber ?? '',
+      });
+      toast.success('Diário atualizado.');
+      setEditRow(null);
+      void queryClient.invalidateQueries({ queryKey: ['diario-obra-list'] });
+    } catch {
+      toast.error('Não foi possível atualizar o diário.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const openForm = () => {
     setFormContratoId(filterContratoId);
     setFormObraId(filterObraId);
+    setFormOsKey('');
     setFormDate(todayIso());
     setCreating(false);
     setShowForm(true);
@@ -189,6 +318,12 @@ export default function DiarioObraListPage() {
   const submitForm = async () => {
     if (!formContratoId || !formObraId || !formDate) {
       toast.error('Selecione o contrato, a obra e a data.');
+      return;
+    }
+    // Contrato com OS cadastradas: a OS é obrigatória.
+    const osEscolhida = osOptions.find((o) => osKeyOf(o) === formOsKey);
+    if (osOptions.length > 0 && !osEscolhida) {
+      toast.error('Selecione a OS do diário.');
       return;
     }
     setCreating(true);
@@ -200,7 +335,11 @@ export default function DiarioObraListPage() {
         setCreating(false);
         return;
       }
-      await api.put(`/diario-obra/${formObraId}/${formDate}`, { noActivity: false });
+      await api.put(`/diario-obra/${formObraId}/${formDate}`, {
+        noActivity: false,
+        osDivSe: osEscolhida?.divSe ?? '',
+        osFolder: osEscolhida?.folderNumber ?? '',
+      });
       toast.success('Diário de obra criado.');
       setShowForm(false);
       setCreating(false);
@@ -224,7 +363,7 @@ export default function DiarioObraListPage() {
   }
 
   const activeFilters = !!(filterContratoId || filterObraId);
-  const hasFilters = !!(debouncedSearch || activeFilters);
+  const hasFilters = !!(debouncedSearch || activeFilters || stage !== 'all');
   const startItem = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const endItem = Math.min(page * PAGE_SIZE, total);
 
@@ -237,6 +376,48 @@ export default function DiarioObraListPage() {
             description="Gerencie os diários de obra"
           />
 
+          <div className="scroll-mt-4 bg-transparent px-2">
+            <nav
+              aria-label="Etapas dos diários de obra"
+              className="flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-visible py-3 sm:gap-x-2"
+            >
+              {STAGES.map((st) => {
+                const active = stage === st.key;
+                return (
+                  <React.Fragment key={st.key}>
+                    <AppTabButton
+                      active={active}
+                      onClick={() => setStage(st.key)}
+                      className="flex items-center gap-2 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                    >
+                      {st.label}
+                      <span className="app-tab__badge">
+                        <TabCountBadge count={loadingStats ? 0 : (statsData?.[st.key] ?? 0)} active={active} tone="red" />
+                      </span>
+                    </AppTabButton>
+                    {st.key === 'all' ? (
+                      <span
+                        aria-hidden
+                        className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                      >
+                        |
+                      </span>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
+          </div>
+
+          <DiarioDayStrip
+            year={monthRef.y}
+            month0={monthRef.m0}
+            onShiftMonth={shiftMonth}
+            selected={dayFilter}
+            onSelect={setDayFilter}
+            today={todayIso()}
+          />
+
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
@@ -245,7 +426,9 @@ export default function DiarioObraListPage() {
                     <BookOpen className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Diários de Obra</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {stage === 'all' ? 'Diários de Obra' : STAGES.find((x) => x.key === stage)?.label}
+                    </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">{total} cadastrado(s)</p>
                   </div>
                 </div>
@@ -326,12 +509,12 @@ export default function DiarioObraListPage() {
                         <tr>
                           <th className={cadastroListClasses.th}>Data</th>
                           <th className={cadastroListClasses.th}>Contrato</th>
-                          <th className={`${cadastroListClasses.th} !text-center`}>Situação</th>
+                          <th className={`${cadastroListClasses.th} !text-center`}>Status</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Atividades</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Equipe</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Ocorrências</th>
                           <th className={`${cadastroListClasses.th} !text-center`}>Atualizado</th>
-                          {canDelete ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
+                          {canDelete || canEdit ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -352,6 +535,11 @@ export default function DiarioObraListPage() {
                               <span className="block text-xs text-gray-500 dark:text-gray-400">
                                 {it.contratoName || '—'}
                               </span>
+                              {it.osLabel ? (
+                                <span className="mt-0.5 block text-xs font-medium text-red-600 dark:text-red-400">
+                                  OS {it.osLabel}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-center sm:px-6">
                               <span
@@ -362,7 +550,7 @@ export default function DiarioObraListPage() {
                                     : it.noActivity
                                       ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                       : it.activities > 0
-                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                         : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                                 }`}
                               >
@@ -371,8 +559,8 @@ export default function DiarioObraListPage() {
                                   : it.noActivity
                                     ? 'Sem atividade'
                                     : it.activities > 0
-                                      ? 'Preenchido'
-                                      : 'Em branco'}
+                                      ? 'Em preenchimento'
+                                      : 'Em preenchimento'}
                               </span>
                             </td>
                             <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">{it.activities}</td>
@@ -386,7 +574,7 @@ export default function DiarioObraListPage() {
                                 <span className="block text-xs text-gray-500 dark:text-gray-400">{it.updatedByName}</span>
                               ) : null}
                             </td>
-                            {canDelete ? (
+                            {canDelete || canEdit ? (
                               <RowActionMenuCell
                                 isOpen={isRowMenuOpen(it.id)}
                                 onToggle={(e) => {
@@ -407,6 +595,7 @@ export default function DiarioObraListPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
+                  onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
                   onDelete={canDelete ? () => setDeleteRow(rowForActionMenu) : undefined}
                 />
               ) : null}
@@ -510,6 +699,7 @@ export default function DiarioObraListPage() {
                   onChange={(v) => {
                     setFormContratoId(v);
                     setFormObraId('');
+                    setFormOsKey('');
                   }}
                   options={contractOptions}
                   placeholder="Selecione o contrato"
@@ -531,9 +721,93 @@ export default function DiarioObraListPage() {
                 />
               </div>
               <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS{osOptions.length > 0 ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
+                </label>
+                <StringSingleSelectDropdown
+                  value={formOsKey}
+                  onChange={setFormOsKey}
+                  options={osSelectOptions}
+                  placeholder={
+                    !formContratoId
+                      ? 'Selecione primeiro o contrato'
+                      : loadingOs
+                        ? 'Carregando OS...'
+                        : osOptions.length === 0
+                          ? 'Nenhuma OS cadastrada neste contrato'
+                          : 'Selecione a OS'
+                  }
+                  emptyOptionLabel="Selecione a OS"
+                  emptyOptionsMessage="Nenhuma OS cadastrada neste contrato"
+                  disabled={!formContratoId || osOptions.length === 0}
+                  matchTriggerWidth
+                />
+              </div>
+              <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Data <span className="text-red-600 dark:text-red-400">*</span></label>
                 <DatePickerField value={formDate} onChange={setFormDate} />
               </div>
+            </div>
+          </Modal>
+        ) : null}
+
+        {editRow ? (
+          <Modal
+            isOpen
+            onClose={() => setEditRow(null)}
+            title="Editar diário de obra"
+            size="md"
+            footer={
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditRow(null)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveEdit()}
+                  disabled={savingEdit}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                >
+                  {savingEdit ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              <div className="rounded-lg bg-gray-50 px-3 py-2.5 text-sm dark:bg-gray-900/40">
+                <p className="font-medium text-gray-900 dark:text-gray-100">{editRow.obraName || '—'}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {editRow.contratoName || '—'} · {brDate(editRow.date)}
+                </p>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS{editOsOptions.length > 0 ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
+                </label>
+                <StringSingleSelectDropdown
+                  value={editOsKey}
+                  onChange={setEditOsKey}
+                  options={editOsSelectOptions}
+                  placeholder={
+                    loadingEditOs
+                      ? 'Carregando OS...'
+                      : editOsOptions.length === 0
+                        ? 'Nenhuma OS cadastrada neste contrato'
+                        : 'Selecione a OS'
+                  }
+                  emptyOptionLabel="Selecione a OS"
+                  emptyOptionsMessage="Nenhuma OS cadastrada neste contrato"
+                  disabled={editOsOptions.length === 0}
+                  matchTriggerWidth
+                />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Dá para definir ou trocar a OS também em diários finalizados. O conteúdo do relatório não muda.
+              </p>
             </div>
           </Modal>
         ) : null}

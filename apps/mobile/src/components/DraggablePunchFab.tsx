@@ -9,6 +9,8 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, RadialGradient, Stop, Circle, Ellipse } from 'react-native-svg';
+import { Fingerprint } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
@@ -61,165 +63,24 @@ function FabPulse({ color }: { color: string }) {
   );
 }
 
-/**
- * Relógio de verdade: os ponteiros mostram a hora atual. O das horas e o dos minutos andam
- * suave; o dos segundos dá um "tique" por segundo, com uma mola curtinha (passa um tiquinho e
- * assenta). Só `transform` com driver nativo — leve. Um timer de 1 s só atualiza os alvos.
- */
-function AnimatedClockIcon({ size = 26, color = '#fff' }: { size?: number; color?: string }) {
-  const angles = () => {
-    const now = new Date();
-    const sec = now.getSeconds();
-    const min = now.getMinutes();
-    return {
-      sec: sec * 6,
-      min: min * 6 + sec * 0.1,
-      hour: (now.getHours() % 12) * 30 + min * 0.5,
-    };
-  };
-  const initial = useRef(angles()).current;
-  const secondHand = useRef(new Animated.Value(initial.sec)).current;
-  const minuteHand = useRef(new Animated.Value(initial.min)).current;
-  const hourHand = useRef(new Animated.Value(initial.hour)).current;
-  // Ângulos acumulados (não voltam a 0): evita o ponteiro "rebobinar" ao virar o minuto.
-  const turns = useRef({ sec: initial.sec, min: initial.min, hour: initial.hour }).current;
-
-  useEffect(() => {
-    const tick = () => {
-      const next = angles();
-      const wrap = (prev: number, target: number) => {
-        // leva o alvo para a volta mais próxima do valor atual (só pra frente)
-        let t = target;
-        while (t < prev - 0.001) t += 360;
-        return t;
-      };
-      turns.sec = wrap(turns.sec, next.sec);
-      turns.min = wrap(turns.min, next.min);
-      turns.hour = wrap(turns.hour, next.hour);
-      Animated.spring(secondHand, {
-        toValue: turns.sec,
-        friction: 4.2,
-        tension: 220,
-        useNativeDriver: true,
-      }).start();
-      Animated.timing(minuteHand, {
-        toValue: turns.min,
-        duration: 900,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }).start();
-      Animated.timing(hourHand, {
-        toValue: turns.hour,
-        duration: 900,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }).start();
-    };
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [hourHand, minuteHand, secondHand, turns]);
-
-  const stroke = 2.2;
-  const center = size / 2;
-  const hand = (
-    value: Animated.Value,
-    length: number,
-    width: number,
-    handColor: string,
-    tail = 0,
-  ) => (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        width: size,
-        height: size,
-        alignItems: 'center',
-        transform: [
-          {
-            rotate: value.interpolate({
-              inputRange: [0, 360],
-              outputRange: ['0deg', '360deg'],
-              extrapolate: 'extend',
-            }),
-          },
-        ],
-      }}
-    >
-      {/* o ponteiro sai do centro pra cima; girar o contêiner gira em volta do centro */}
-      <View
-        style={{
-          position: 'absolute',
-          top: center - length,
-          width,
-          height: length + tail,
-          borderRadius: width / 2,
-          backgroundColor: handColor,
-        }}
-      />
-    </Animated.View>
-  );
-
+/** Esfera vermelha com brilho: gradiente radial (luz no alto à esquerda) + reflexo suave. */
+function PunchOrb() {
   return (
-    <View style={{ width: size, height: size }}>
-      {/* aro separado: assim o centro dos ponteiros é o centro exato do relógio */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          right: 0,
-          bottom: 0,
-          borderRadius: size / 2,
-          borderWidth: stroke,
-          borderColor: color,
-        }}
-      />
-      {/* marcas das 12, 3, 6 e 9 */}
-      {[0, 90, 180, 270].map((deg) => (
-        <View
-          key={deg}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: size,
-            height: size,
-            alignItems: 'center',
-            transform: [{ rotate: `${deg}deg` }],
-          }}
-        >
-          <View
-            style={{
-              position: 'absolute',
-              top: stroke + 1.5,
-              width: 1.6,
-              height: 2.4,
-              borderRadius: 1,
-              backgroundColor: color,
-              opacity: 0.7,
-            }}
-          />
-        </View>
-      ))}
-      {hand(hourHand, size * 0.26, stroke, color)}
-      {hand(minuteHand, size * 0.37, stroke, color)}
-      {hand(secondHand, size * 0.4, 1.4, 'rgba(255,255,255,0.78)', 2.5)}
-      <View
-        style={{
-          position: 'absolute',
-          top: center - 2,
-          left: center - 2,
-          width: 4,
-          height: 4,
-          borderRadius: 2,
-          backgroundColor: color,
-        }}
-      />
-    </View>
+    <Svg width={SIZE} height={SIZE} viewBox="0 0 100 100" style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Defs>
+        <RadialGradient id="orb" cx="32%" cy="26%" rx="85%" ry="85%" fx="32%" fy="26%">
+          <Stop offset="0" stopColor="#ff8a80" />
+          <Stop offset="0.45" stopColor="#ef4444" />
+          <Stop offset="1" stopColor="#b91c1c" />
+        </RadialGradient>
+        <RadialGradient id="glow" cx="50%" cy="50%" rx="50%" ry="50%">
+          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        </RadialGradient>
+      </Defs>
+      <Circle cx="50" cy="50" r="50" fill="url(#orb)" />
+      <Ellipse cx="34" cy="24" rx="22" ry="13" fill="url(#glow)" />
+    </Svg>
   );
 }
 
@@ -256,8 +117,6 @@ export default function DraggablePunchFab() {
   const movedRef = useRef(false);
   const dragOrigin = useRef({ x: 0, y: 0 });
   const pressScale = useRef(new Animated.Value(1)).current;
-  const burst = useRef(new Animated.Value(0)).current;
-  const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -354,31 +213,14 @@ export default function DraggablePunchFab() {
             void savePos(snapped.x, snapped.y);
           });
           if (!movedRef.current) {
-            // Toque: volta com um "boing", solta um anel e dá uma voltinha no relógio;
-            // a tela de ponto abre logo em seguida (160 ms) pra a animação aparecer.
-            burst.setValue(0);
-            spin.setValue(0);
-            Animated.parallel([
-              Animated.spring(pressScale, {
-                toValue: 1,
-                friction: 3.2,
-                tension: 260,
-                useNativeDriver: true,
-              }),
-              Animated.timing(burst, {
-                toValue: 1,
-                duration: 520,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-              }),
-              Animated.timing(spin, {
-                toValue: 1,
-                duration: 420,
-                easing: Easing.out(Easing.back(1.4)),
-                useNativeDriver: true,
-              }),
-            ]).start();
-            setTimeout(openPunch, 160);
+            // Toque: volta ao tamanho normal sem quique e abre a tela de ponto na hora.
+            Animated.timing(pressScale, {
+              toValue: 1,
+              duration: 100,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }).start();
+            openPunch();
           } else {
             Animated.spring(pressScale, {
               toValue: 1,
@@ -397,7 +239,7 @@ export default function DraggablePunchFab() {
           }).start();
         },
       }),
-    [burst, clamp, maxX, minX, openPunch, pos, pressScale, savePos, spin],
+    [clamp, maxX, minX, openPunch, pos, pressScale, savePos],
   );
 
   if (!ready) return null;
@@ -421,40 +263,16 @@ export default function DraggablePunchFab() {
         style={[
           styles.face,
           {
-            backgroundColor: colors.primary,
-            shadowOpacity: isDark ? 0.4 : 0.22,
+            shadowColor: '#dc2626',
+            shadowOpacity: isDark ? 0.55 : 0.4,
             transform: [{ scale: pressScale }],
           },
         ]}
       >
-        {null}
-        {/* anel do toque: maior e mais forte que o pulso de espera */}
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.burst,
-            {
-              borderColor: colors.primary,
-              opacity: burst.interpolate({ inputRange: [0, 0.1, 1], outputRange: [0, 0.7, 0] }),
-              transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [1, 2] }) }],
-            },
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.inner,
-            {
-              transform: [
-                {
-                  rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }),
-                },
-              ],
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <AnimatedClockIcon size={26} color="#fff" />
-        </Animated.View>
+        <PunchOrb />
+        <View style={styles.inner} pointerEvents="none">
+          <Fingerprint size={28} color="#fff" strokeWidth={2} />
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -482,15 +300,6 @@ const styles = StyleSheet.create({
       },
       android: {},
     }),
-  },
-  burst: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: SIZE / 2,
-    borderWidth: 3,
   },
   inner: {
     flex: 1,

@@ -2,8 +2,10 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, Calculator, CalendarRange, ClipboardList, HardHat, Wrench, type LucideIcon } from 'lucide-react';
+import { BookOpen, Calculator, CalendarRange, ChevronRight, ClipboardList, HardHat, Wrench, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import api from '@/lib/api';
 
@@ -53,6 +55,7 @@ function BlocoModulo({
   carregando,
   erro,
   rodape,
+  onAbrir,
   children,
 }: {
   titulo: string;
@@ -62,10 +65,33 @@ function BlocoModulo({
   carregando: boolean;
   erro: boolean;
   rodape?: React.ReactNode;
+  /** Clicar no bloco abre os detalhes numa janela, sem sair da página. */
+  onAbrir?: () => void;
   children: React.ReactNode;
 }) {
+  const clicavel = !!onAbrir && !carregando && !erro;
   return (
-    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+    <Card
+      className={`${cadastroListClasses.card} flex min-h-0 flex-col ${
+        clicavel
+          ? 'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-red-200 hover:shadow-md focus-visible:ring-2 focus-visible:ring-red-500 dark:hover:border-red-800'
+          : ''
+      }`}
+      {...(clicavel
+        ? {
+            role: 'button' as const,
+            tabIndex: 0,
+            title: `Ver detalhes de ${titulo}`,
+            onClick: onAbrir,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onAbrir?.();
+              }
+            },
+          }
+        : {})}
+    >
       <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
         <div className="flex items-center gap-3">
           <div className={`rounded-lg p-2 sm:p-3 ${iconBg}`}>
@@ -86,8 +112,16 @@ function BlocoModulo({
         ) : (
           <>
             <div className="flex-1">{children}</div>
-            {rodape ? (
-              <p className="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">{rodape}</p>
+            {rodape || clicavel ? (
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">
+                <p className="min-w-0">{rodape}</p>
+                {clicavel ? (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-red-600 dark:text-red-400">
+                    Ver detalhes
+                    <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </>
         )}
@@ -167,6 +201,101 @@ function ultimasRevisoes(rows: OrcamentoRow[]): OrcamentoRow[] {
 
 const statusNorm = (s?: string | null) => String(s ?? 'rascunho').trim().toLowerCase();
 
+/** Cronogramas = última revisão de cada orçamento que já virou cronograma (mesma regra da página de Cronogramas). */
+function filtrarCronogramas(ultimas: OrcamentoRow[]): OrcamentoRow[] {
+  return ultimas.filter((o) => {
+    const s = statusNorm(o.statusAprovacao);
+    return num(o.versao) > 1 || s === 'finalizado' || s === 'aguardando_aprovacao' || s === 'aprovado';
+  });
+}
+
+const STATUS_ORCAMENTO: Record<string, { label: string; classe: string }> = {
+  rascunho: { label: 'Rascunho', classe: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200' },
+  pronta: { label: 'Pronta', classe: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300' },
+  em_correcao: { label: 'Em correção', classe: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' },
+  aguardando_aprovacao: { label: 'Em aprovação', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  aprovado: { label: 'Aprovado', classe: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
+  finalizado: { label: 'Finalizado', classe: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  reprovado: { label: 'Reprovado', classe: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+};
+
+const STATUS_FERRAMENTA: Record<string, { label: string; classe: string }> = {
+  OPEN: { label: 'Aberto', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  SUPPLIER_RELATION: { label: 'Relação com fornecedor', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  QUOTATION: { label: 'Cotação', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  AWAITING_PAYMENT: { label: 'Aguardando pagamento', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  AWAITING_RECEIPT: { label: 'Aguardando recebimento', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  IN_USE: { label: 'Em uso', classe: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
+  COMPLETED: { label: 'Concluído', classe: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
+  REJECTED: { label: 'Recusado', classe: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+  CANCELLED: { label: 'Cancelado', classe: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+};
+
+const STATUS_FD: Record<string, { label: string; classe: string }> = {
+  WAITING_MANAGER: { label: 'Aguardando', classe: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  APPROVED: { label: 'Aprovada', classe: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
+  REJECTED: { label: 'Rejeitada', classe: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+  CANCELLED: { label: 'Cancelada', classe: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+};
+
+function Selo({ texto, classe }: { texto: string; classe: string }) {
+  return <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${classe}`}>{texto}</span>;
+}
+
+/** Resumo no topo da janela: pequenos indicadores lado a lado. */
+function ChipsModal({ itens }: { itens: Array<{ rotulo: string; valor: string }> }) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {itens.map((i) => (
+        <div key={i.rotulo} className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{i.rotulo}</p>
+          <p className="mt-0.5 text-base font-bold tabular-nums text-gray-900 dark:text-gray-100">{i.valor}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Tabela da janela de detalhes (rola por dentro, com o cabeçalho fixo). */
+function TabelaModal({
+  colunas,
+  linhas,
+  vazio,
+}: {
+  colunas: Array<{ titulo: string; alinhar?: 'left' | 'right' | 'center' }>;
+  linhas: Array<{ chave: string; celulas: React.ReactNode[] }>;
+  vazio: string;
+}) {
+  if (linhas.length === 0) return <CadastroListEmpty icon={ClipboardList} title={vazio} />;
+  const alinhar = (a?: 'left' | 'right' | 'center') => (a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left');
+  return (
+    <div className="max-h-[52vh] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
+          <tr>
+            {colunas.map((c) => (
+              <th key={c.titulo} className={`whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 ${alinhar(c.alinhar)}`}>
+                {c.titulo}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/70">
+          {linhas.map((l) => (
+            <tr key={l.chave} className="bg-white transition-colors hover:bg-gray-50/80 dark:bg-gray-900/40 dark:hover:bg-gray-800/50">
+              {l.celulas.map((c, i) => (
+                <td key={i} className={`px-4 py-2.5 align-middle text-gray-800 dark:text-gray-100 ${alinhar(colunas[i]?.alinhar)}`}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /**
  * Blocos de resumo dos módulos que ficam fora da página do contrato
  * (Orçamentos, Cronogramas, Diários de Obra, Obras, Fichas de Demanda e Pedidos de ferramentas).
@@ -198,7 +327,7 @@ export function ContratoResumoModulos({
     queryFn: async () => {
       const res = await api.get('/diario-obra', { params: { contratoId: contractId, limit: 100 } });
       return {
-        rows: (res.data?.data ?? []) as Array<{ date?: string; finalizedAt?: string | null; noActivity?: boolean }>,
+        rows: (res.data?.data ?? []) as Array<{ id?: string; date?: string; obraName?: string | null; finalizedAt?: string | null; noActivity?: boolean }>,
         total: num(res.data?.pagination?.total),
       };
     },
@@ -220,7 +349,16 @@ export function ContratoResumoModulos({
     queryKey: ['resumo-fichas-demanda', contractId],
     queryFn: async () => {
       const res = await api.get('/demand-sheet-approvals', { params: { contratoId: contractId } });
-      return (res.data?.data ?? []) as Array<{ status?: string; faturamentoEstimado?: unknown; custoEstimado?: unknown }>;
+      return (res.data?.data ?? []) as Array<{
+        id?: string;
+        codFichaDemanda?: string | null;
+        obra?: string | null;
+        status?: string;
+        faturamentoEstimado?: unknown;
+        custoEstimado?: unknown;
+        dataHora?: string | null;
+        createdAt?: string | null;
+      }>;
     },
     enabled: acesso.fichasDemanda,
     ...semRetry,
@@ -231,7 +369,7 @@ export function ContratoResumoModulos({
     queryFn: async () => {
       const res = await api.get('/tool-rental-requests', { params: { contractId, limit: 100 } });
       return {
-        rows: (res.data?.data ?? []) as Array<{ status?: string; updatedAt?: string | null }>,
+        rows: (res.data?.data ?? []) as Array<{ id?: string; code?: string | null; titulo?: string | null; obra?: string | null; status?: string; updatedAt?: string | null }>,
         total: num(res.data?.pagination?.total),
       };
     },
@@ -240,6 +378,7 @@ export function ContratoResumoModulos({
   });
 
   const ultimas = React.useMemo(() => ultimasRevisoes(orcQ.data ?? []), [orcQ.data]);
+  const [aberto, setAberto] = React.useState<null | 'orc' | 'cron' | 'diarios' | 'obras' | 'fd' | 'ferr'>(null);
 
   const blocos: React.ReactNode[] = [];
 
@@ -258,6 +397,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="orc"
+        onAbrir={() => setAberto('orc')}
         titulo="Orçamentos"
         icon={Calculator}
         iconBg="bg-blue-100 dark:bg-blue-900/30"
@@ -283,10 +423,7 @@ export function ContratoResumoModulos({
 
   // ── Cronogramas: anel de avanço + etapas ────────────────────────────────
   if (acesso.cronogramas) {
-    const cronos = ultimas.filter((o) => {
-      const s = statusNorm(o.statusAprovacao);
-      return num(o.versao) > 1 || s === 'finalizado' || s === 'aguardando_aprovacao' || s === 'aprovado';
-    });
+    const cronos = filtrarCronogramas(ultimas);
     const comProgresso = cronos.filter((o) => o.cronogramaProgressoFisico != null);
     const media = comProgresso.length ? comProgresso.reduce((t, o) => t + num(o.cronogramaProgressoFisico), 0) / comProgresso.length : 0;
     const etapas = cronos.reduce((t, o) => t + num(o.cronogramaTotalEtapas), 0);
@@ -295,6 +432,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="cron"
+        onAbrir={() => setAberto('cron')}
         titulo="Cronogramas"
         icon={CalendarRange}
         iconBg="bg-indigo-100 dark:bg-indigo-900/30"
@@ -358,6 +496,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="diarios"
+        onAbrir={() => setAberto('diarios')}
         titulo="Diários de Obra"
         icon={BookOpen}
         iconBg="bg-amber-100 dark:bg-amber-900/30"
@@ -411,6 +550,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="obras"
+        onAbrir={() => setAberto('obras')}
         titulo="Obras"
         icon={HardHat}
         iconBg="bg-orange-100 dark:bg-orange-900/30"
@@ -464,6 +604,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="fd"
+        onAbrir={() => setAberto('fd')}
         titulo="Fichas de Demanda"
         icon={ClipboardList}
         iconBg="bg-red-100 dark:bg-red-900/30"
@@ -536,6 +677,7 @@ export function ContratoResumoModulos({
     blocos.push(
       <BlocoModulo
         key="ferr"
+        onAbrir={() => setAberto('ferr')}
         titulo="Pedidos de Ferramentas"
         icon={Wrench}
         iconBg="bg-cyan-100 dark:bg-cyan-900/30"
@@ -565,6 +707,227 @@ export function ContratoResumoModulos({
     );
   }
 
+  // ── Janela de detalhes (abre ao clicar num bloco) ───────────────────────
+  let janela: { titulo: string; conteudo: React.ReactNode } | null = null;
+  if (aberto === 'orc') {
+    const rows = [...ultimas].sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
+    janela = {
+      titulo: 'Orçamentos do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Orçamentos', valor: String(rows.length) },
+              { rotulo: 'Valor total (com BDI)', valor: brl(rows.reduce((t, o) => t + num(o.totalComBdi), 0)) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhum orçamento neste contrato"
+            colunas={[{ titulo: 'Orçamento' }, { titulo: 'Situação' }, { titulo: 'Valor (com BDI)', alinhar: 'right' }, { titulo: 'Atualizado', alinhar: 'right' }]}
+            linhas={rows.map((o) => {
+              const st = STATUS_ORCAMENTO[statusNorm(o.statusAprovacao)] ?? STATUS_ORCAMENTO.rascunho;
+              return {
+                chave: o.id,
+                celulas: [
+                  <span key="n" className="font-medium">{o.nome || 'Sem nome'}</span>,
+                  <Selo key="s" texto={st.label} classe={st.classe} />,
+                  <span key="v" className="tabular-nums">{brl(num(o.totalComBdi))}</span>,
+                  <span key="d" className="tabular-nums text-gray-500 dark:text-gray-400">{dataBr(o.updatedAt)}</span>,
+                ],
+              };
+            })}
+          />
+        </div>
+      ),
+    };
+  } else if (aberto === 'cron') {
+    const rows = filtrarCronogramas(ultimas);
+    janela = {
+      titulo: 'Cronogramas do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Cronogramas', valor: String(rows.length) },
+              { rotulo: 'Etapas atrasadas', valor: String(rows.reduce((t, o) => t + num(o.cronogramaAtrasado), 0)) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhum cronograma neste contrato"
+            colunas={[{ titulo: 'Cronograma' }, { titulo: 'Avanço físico' }, { titulo: 'Etapas', alinhar: 'right' }, { titulo: 'Atrasadas', alinhar: 'right' }]}
+            linhas={rows.map((o) => {
+              const p = Math.max(0, Math.min(100, num(o.cronogramaProgressoFisico)));
+              const atras = num(o.cronogramaAtrasado);
+              return {
+                chave: o.id,
+                celulas: [
+                  <span key="n" className="font-medium">{o.nome || 'Sem nome'}</span>,
+                  <div key="p" className="flex min-w-[9rem] items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                      <div className="h-full rounded-full bg-indigo-500" style={{ width: `${p}%` }} />
+                    </div>
+                    <span className="w-10 text-right text-xs font-semibold tabular-nums">{p.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span>
+                  </div>,
+                  <span key="e" className="tabular-nums">{num(o.cronogramaTotalEtapas) > 0 ? `${num(o.cronogramaConcluido)} de ${num(o.cronogramaTotalEtapas)}` : '—'}</span>,
+                  <span key="a" className={`font-semibold tabular-nums ${atras > 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{atras}</span>,
+                ],
+              };
+            })}
+          />
+        </div>
+      ),
+    };
+  } else if (aberto === 'diarios') {
+    const rows = diariosQ.data?.rows ?? [];
+    const total = diariosQ.data?.total ?? 0;
+    janela = {
+      titulo: 'Diários de Obra do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Registros', valor: String(total) },
+              { rotulo: 'Finalizados', valor: String(rows.filter((d) => d.finalizedAt).length) },
+              { rotulo: 'Em preenchimento', valor: String(rows.filter((d) => !d.finalizedAt).length) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhum diário de obra neste contrato"
+            colunas={[{ titulo: 'Data' }, { titulo: 'Obra' }, { titulo: 'Situação' }]}
+            linhas={rows.map((d, i) => ({
+              chave: d.id ?? `${d.date}-${i}`,
+              celulas: [
+                <span key="d" className="font-medium tabular-nums">{dataBr(d.date)}</span>,
+                <span key="o">{d.obraName || '—'}</span>,
+                d.noActivity ? (
+                  <Selo key="s" texto="Sem atividade" classe="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                ) : d.finalizedAt ? (
+                  <Selo key="s" texto="Finalizado" classe="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" />
+                ) : (
+                  <Selo key="s" texto="Em preenchimento" classe="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" />
+                ),
+              ],
+            }))}
+          />
+          {total > rows.length ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400">Mostrando os {rows.length} registros mais recentes de {total}.</p>
+          ) : null}
+        </div>
+      ),
+    };
+  } else if (aberto === 'obras') {
+    const rows = [...(obrasQ.data ?? [])].sort((a, b) => Number(b.isActive !== false) - Number(a.isActive !== false));
+    janela = {
+      titulo: 'Obras do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Obras', valor: String(rows.length) },
+              { rotulo: 'Ativas', valor: String(rows.filter((o) => o.isActive !== false).length) },
+              { rotulo: 'Inativas', valor: String(rows.filter((o) => o.isActive === false).length) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhuma obra neste contrato"
+            colunas={[{ titulo: 'Obra' }, { titulo: 'Situação' }]}
+            linhas={rows.map((o) => ({
+              chave: o.id,
+              celulas: [
+                <span key="n" className="font-medium">{o.name || 'Obra sem nome'}</span>,
+                o.isActive === false ? (
+                  <Selo key="s" texto="Inativa" classe="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                ) : (
+                  <Selo key="s" texto="Ativa" classe="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" />
+                ),
+              ],
+            }))}
+          />
+        </div>
+      ),
+    };
+  } else if (aberto === 'fd') {
+    const rows = [...(fdQ.data ?? [])].sort(
+      (a, b) => new Date(b.dataHora ?? b.createdAt ?? 0).getTime() - new Date(a.dataHora ?? a.createdAt ?? 0).getTime()
+    );
+    janela = {
+      titulo: 'Fichas de Demanda do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Fichas', valor: String(rows.length) },
+              { rotulo: 'Faturamento estimado', valor: brl(rows.reduce((t, f) => t + num(f.faturamentoEstimado), 0)) },
+              { rotulo: 'Custo estimado', valor: brl(rows.reduce((t, f) => t + num(f.custoEstimado), 0)) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhuma ficha de demanda neste contrato"
+            colunas={[
+              { titulo: 'Ficha' },
+              { titulo: 'Obra' },
+              { titulo: 'Situação' },
+              { titulo: 'Faturamento est.', alinhar: 'right' },
+              { titulo: 'Custo est.', alinhar: 'right' },
+              { titulo: 'Data', alinhar: 'right' },
+            ]}
+            linhas={rows.map((f, i) => {
+              const st = STATUS_FD[f.status ?? ''] ?? { label: f.status || '—', classe: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200' };
+              return {
+                chave: f.id ?? `${f.codFichaDemanda}-${i}`,
+                celulas: [
+                  <span key="c" className="font-medium">{f.codFichaDemanda || '—'}</span>,
+                  <span key="o">{f.obra || '—'}</span>,
+                  <Selo key="s" texto={st.label} classe={st.classe} />,
+                  <span key="f" className="tabular-nums">{brl(num(f.faturamentoEstimado))}</span>,
+                  <span key="k" className="tabular-nums">{brl(num(f.custoEstimado))}</span>,
+                  <span key="d" className="tabular-nums text-gray-500 dark:text-gray-400">{dataBr(f.dataHora ?? f.createdAt)}</span>,
+                ],
+              };
+            })}
+          />
+        </div>
+      ),
+    };
+  } else if (aberto === 'ferr') {
+    const rows = ferramentasQ.data?.rows ?? [];
+    const total = ferramentasQ.data?.total ?? 0;
+    janela = {
+      titulo: 'Pedidos de ferramentas do contrato',
+      conteudo: (
+        <div className="space-y-4">
+          <ChipsModal
+            itens={[
+              { rotulo: 'Pedidos', valor: String(total) },
+              { rotulo: 'Em uso', valor: String(rows.filter((r) => r.status === 'IN_USE').length) },
+              { rotulo: 'Concluídos', valor: String(rows.filter((r) => r.status === 'COMPLETED').length) },
+            ]}
+          />
+          <TabelaModal
+            vazio="Nenhum pedido de ferramentas neste contrato"
+            colunas={[{ titulo: 'Código' }, { titulo: 'Pedido' }, { titulo: 'Obra' }, { titulo: 'Situação' }, { titulo: 'Atualizado', alinhar: 'right' }]}
+            linhas={rows.map((r, i) => {
+              const st = STATUS_FERRAMENTA[r.status ?? ''] ?? { label: r.status || '—', classe: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200' };
+              return {
+                chave: r.id ?? `${r.code}-${i}`,
+                celulas: [
+                  <span key="c" className="font-medium tabular-nums">{r.code || '—'}</span>,
+                  <span key="t">{r.titulo || '—'}</span>,
+                  <span key="o">{r.obra || '—'}</span>,
+                  <Selo key="s" texto={st.label} classe={st.classe} />,
+                  <span key="d" className="tabular-nums text-gray-500 dark:text-gray-400">{dataBr(r.updatedAt)}</span>,
+                ],
+              };
+            })}
+          />
+          {total > rows.length ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400">Mostrando os {rows.length} pedidos mais recentes de {total}.</p>
+          ) : null}
+        </div>
+      ),
+    };
+  }
+
   if (blocos.length === 0) return null;
 
   // Larguras diferentes (grade de 12 colunas): cada linha soma 12, então nunca sobra espaço vazio.
@@ -588,12 +951,17 @@ export function ContratoResumoModulos({
     else spans.push(12);
   }
   return (
-    <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-12">
-      {blocos.map((b, i) => (
-        <div key={(b as React.ReactElement).key ?? i} className={`flex min-w-0 [&>*]:w-full ${spanClasse[spans[i]]}`}>
-          {b}
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-12">
+        {blocos.map((b, i) => (
+          <div key={(b as React.ReactElement).key ?? i} className={`flex min-w-0 [&>*]:w-full ${spanClasse[spans[i]]}`}>
+            {b}
+          </div>
+        ))}
+      </div>
+      <Modal isOpen={janela != null} onClose={() => setAberto(null)} title={janela?.titulo ?? ''} size="xl">
+        {janela?.conteudo}
+      </Modal>
+    </>
   );
 }

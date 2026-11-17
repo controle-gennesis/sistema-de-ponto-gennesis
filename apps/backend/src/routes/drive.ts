@@ -80,6 +80,7 @@ router.post('/folders/:id/shares', DriveController.addFolderShare);
 router.patch('/folders/:id/shares/:userId', DriveController.updateFolderShare);
 router.delete('/folders/:id/shares/:userId', DriveController.removeFolderShare);
 router.get('/folders/:id/path', DriveController.getFolderPath);
+router.get('/folders/:id/download', DriveController.downloadFolder);
 
 // Arquivos
 router.post('/files/presign', DriveController.presignUpload);

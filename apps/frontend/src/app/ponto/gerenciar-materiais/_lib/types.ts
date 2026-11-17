@@ -41,6 +41,8 @@ export interface MaterialRequest {
   service_orders?: MaterialRequestServiceOrderRef | null;
   description: string;
   demandSheet?: string | null;
+  /** Obra (texto livre; na RM feita pela FD, a obra da FD). */
+  obra?: string | null;
   demandSheetAttachmentUrl?: string | null;
   demandSheetAttachmentName?: string | null;
   demandSheetAttachments?: Array<{ url?: string; name?: string }> | null;

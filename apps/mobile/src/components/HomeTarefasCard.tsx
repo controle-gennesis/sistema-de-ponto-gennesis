@@ -5,11 +5,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckSquare, ExternalLink, Star } from 'lucide-react-native';
+import { CheckSquare, Star } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import {
   fetchPlannerTaskLists,
@@ -149,14 +150,6 @@ export default function HomeTarefasCard() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          onPress={openTarefas}
-          style={styles.openBtn}
-          hitSlop={10}
-          accessibilityLabel="Abrir tarefas"
-        >
-          <ExternalLink size={16} color={colors.textSecondary} strokeWidth={2.2} />
-        </TouchableOpacity>
       </View>
 
       {isLoading ? (
@@ -246,11 +239,21 @@ const getStyles = (colors: any, isDark: boolean) =>
   StyleSheet.create({
     card: {
       backgroundColor: colors.surface,
-      borderRadius: 16,
+      borderRadius: 20,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      padding: 16,
+      padding: 18,
       marginBottom: 16,
+      ...Platform.select({
+        ios: {
+          shadowColor: '#0f172a',
+          shadowOpacity: isDark ? 0 : 0.07,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+        },
+        android: { elevation: isDark ? 0 : 3 },
+        default: {},
+      }),
     },
     header: {
       flexDirection: 'row',
@@ -286,13 +289,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontSize: 13,
       fontWeight: '500',
       color: colors.textSecondary,
-    },
-    openBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     loadingWrap: {
       paddingVertical: 12,

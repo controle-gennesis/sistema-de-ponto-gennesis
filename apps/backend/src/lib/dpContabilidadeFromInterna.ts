@@ -19,6 +19,7 @@ const INTERNA_TYPE_LABELS: Record<string, string> = {
   SOLICITACAO_GERAL: 'Solicitação geral',
   CONTAB_ADMISSAO: 'Admissão',
   CONTAB_AFASTAMENTO: 'Afastamento',
+  CONTAB_ATESTADO: 'Atestados',
   CONTAB_ALTERACAO_FUNCAO: 'Alteração de função',
   CONTAB_ALTERACAO_SALARIAL: 'Alteração salarial',
   CONTAB_FERIAS: 'Férias',
@@ -276,6 +277,21 @@ async function createLinkedAccountingRequest(
     }
     throw err;
   }
+}
+
+/** Depois que o solicitante ajusta o pedido, atualiza a descrição do card da Contabilidade com os dados novos. */
+export async function refreshDirectAccountingDescription(sourceId: string): Promise<void> {
+  const row = await prisma.dpRequest.findUnique({ where: { id: sourceId } });
+  if (!row || !isAccountingDirectRequestType(row.requestType)) return;
+  let contractName: string | null = null;
+  if (row.contractId) {
+    const contract = await prisma.contract.findUnique({ where: { id: row.contractId }, select: { name: true } });
+    contractName = contract?.name ?? null;
+  }
+  await prisma.dpContabilidadeRequest.updateMany({
+    where: { sourceDpRequestId: sourceId },
+    data: { description: buildDirectDescription(row, contractName) },
+  });
 }
 
 /** DP finalizou uma solicitação interna de tipo que segue para a Contabilidade. */

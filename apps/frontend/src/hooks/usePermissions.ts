@@ -272,12 +272,14 @@ export function usePermissions() {
 
   const isDepartmentSocios = isSociosDepartment(userDepartment);
   /**
-   * Chat, agenda, flow, drive e tasks (kanban) — ocultos/bloqueados só para quem tem
+   * Chat, agenda, flow e tasks (kanban) — ocultos/bloqueados só para quem tem
    * setor «Sócios» no cadastro do funcionário. Enquanto o usuário carrega, não libera
    * (evita flash dos atalhos para Sócios).
    */
   const canAccessCollaborationTools =
     !isLoadingUser && !!user && !isDepartmentSocios && !isLinkedEmpreiteiro;
+  /** Drive: liberado para todos (inclusive Sócios), exceto empreiteiro vinculado. */
+  const canAccessDrive = !isLoadingUser && !!user && !isLinkedEmpreiteiro;
 
   const employeesKey = pk('/ponto/funcionarios');
   const contractsKey = pk('/ponto/contratos');
@@ -648,6 +650,7 @@ export function usePermissions() {
     isDepartmentContratosLicitacoes,
     isDepartmentSocios,
     canAccessCollaborationTools,
+    canAccessDrive,
     permissions: finalPermissions,
     can,
     canAction,
@@ -789,7 +792,7 @@ export function useRoutePermission(route: string) {
     };
   }
 
-  // Setor Sócios: sem chat, agenda, flow, drive nem tasks
+  // Setor Sócios: sem chat, agenda, flow nem tasks (o Drive fica liberado), nem as páginas gerais bloqueadas
   if (!canAccessCollaborationTools && isSociosBlockedCollaborationPath(route)) {
     return { hasAccess: false, isLoading: false, canAccessContract };
   }

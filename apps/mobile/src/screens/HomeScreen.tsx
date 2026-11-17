@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,18 +6,24 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
+  Keyboard,
+  Platform,
 } from 'react-native';
+import { LogOut } from 'lucide-react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { syncPunchReminders } from '../notifications/punchReminders';
 import { useTheme } from '../context/ThemeContext';
 import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeAprovacoesCard from '../components/HomeAprovacoesCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
-import HomeTasksButton from '../components/HomeTasksButton';
+import HomeQuickAccess from '../components/HomeQuickAccess';
+import HomeFeedbackCard from '../components/HomeFeedbackCard';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import type { RootStackParamList } from '../../App';
 
@@ -31,9 +37,23 @@ function greetingPrefix() {
 export default function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { colors, isDark } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Teclado aberto: abre espaço embaixo para o botão de enviar a avaliação não ficar escondido.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvt, (e) => setKeyboardHeight(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { scrollProps: chromeScroll, headerOffset, bottomContentInset } = useChromeScroll();
 
@@ -41,6 +61,13 @@ export default function HomeScreen() {
 
   const goProfile = () => {
     (navigation as any).navigate('Profile');
+  };
+
+  const confirmLogout = () => {
+    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Sair', style: 'destructive', onPress: () => void logout() },
+    ]);
   };
 
   const onRefresh = useCallback(async () => {
@@ -63,14 +90,23 @@ export default function HomeScreen() {
     }, [queryClient]),
   );
 
+  // Renova os lembretes de ponto sempre que a tela inicial ganha foco (ex.: depois de bater o ponto).
+  useFocusEffect(
+    useCallback(() => {
+      void syncPunchReminders(user);
+    }, [user]),
+  );
+
   return (
     <View style={styles.safeArea}>
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerOffset + 16, paddingBottom: bottomContentInset },
+          { paddingTop: headerOffset + 16, paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : bottomContentInset },
         ]}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         {...chromeScroll}
         refreshControl={
@@ -84,12 +120,6 @@ export default function HomeScreen() {
         }
       >
         <View style={styles.greetingRow}>
-          <View style={styles.greetingTextWrap}>
-            <Text style={styles.greetingEyebrow}>{greetingPrefix()},</Text>
-            <Text style={styles.greetingName} numberOfLines={1}>
-              {displayName}!
-            </Text>
-          </View>
           <TouchableOpacity
             onPress={goProfile}
             activeOpacity={0.8}
@@ -105,15 +135,35 @@ export default function HomeScreen() {
               borderWidth={StyleSheet.hairlineWidth * 1.5}
             />
           </TouchableOpacity>
+          <View style={styles.greetingTextWrap}>
+            <Text style={styles.greetingEyebrow}>{greetingPrefix()},</Text>
+            <Text style={styles.greetingName} numberOfLines={1}>
+              {displayName}!
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={confirmLogout}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Sair"
+            hitSlop={8}
+            style={styles.logoutBtn}
+          >
+            <LogOut size={20} color={colors.primary} strokeWidth={2} />
+          </TouchableOpacity>
         </View>
 
-        <HomeAprovacoesCard />
+        <HomeQuickAccess />
 
-        <HomeTasksButton />
+        <HomeAprovacoesCard />
 
         <HomeAgendaCard />
 
         <HomeTarefasCard />
+
+        <HomeFeedbackCard
+          onInputFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 320)}
+        />
       </ScrollView>
     </View>
   );
@@ -134,6 +184,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 28,
     },
     greetingTextWrap: { flex: 1, minWidth: 0 },
+    logoutBtn: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     greetingEyebrow: {
       fontSize: 13,
       fontWeight: '600',

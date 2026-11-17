@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Ban,
   CalendarDays,
+  Check,
   Download,
   X,
   ChevronLeft,
@@ -843,7 +844,10 @@ function PillToggle<T extends string>({
         {idx >= 0 ? (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 rounded-md bg-white shadow-sm transition-[left] duration-300 ease-out dark:bg-gray-600"
+            className={`pointer-events-none absolute inset-y-0 rounded-md shadow-sm transition-[left] duration-300 ease-out ${
+              // Dia finalizado (somente leitura): a escolha fica em destaque, não "apagada".
+              disabled ? 'bg-red-600 dark:bg-red-500' : 'bg-white dark:bg-gray-600'
+            }`}
             style={{ width: `${100 / n}%`, left: `${(idx * 100) / n}%` }}
           />
         ) : null}
@@ -858,10 +862,14 @@ function PillToggle<T extends string>({
               aria-pressed={active}
               disabled={disabled}
               onClick={() => onChange(o.value)}
-              className={`relative z-10 inline-flex h-9 items-center justify-center rounded-md px-2.5 text-sm outline-none transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
-                active
-                  ? 'font-medium text-red-600 dark:text-red-400'
-                  : 'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              className={`relative z-10 inline-flex h-9 items-center justify-center rounded-md px-2.5 text-sm outline-none transition-colors duration-200 disabled:cursor-default ${
+                disabled
+                  ? active
+                    ? 'font-semibold text-white'
+                    : 'font-normal text-gray-400 dark:text-gray-500'
+                  : active
+                    ? 'font-medium text-red-600 dark:text-red-400'
+                    : 'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               }`}
             >
               {o.label}
@@ -894,7 +902,13 @@ function WeatherPeriod({
         onChange={(v) => onChange({ ...value, sky: v === value.sky ? null : v })}
         options={SKY_OPTIONS.map(({ value: v, Icon: SkyIcon, label }) => ({
           value: v,
-          label: <SkyIcon className="h-5 w-5" aria-hidden />,
+          // Ícone + nome, para a escolha ficar clara sem precisar adivinhar o ícone.
+          label: (
+            <span className="inline-flex items-center gap-1.5">
+              <SkyIcon className="h-5 w-5" aria-hidden />
+              <span>{label}</span>
+            </span>
+          ),
           title: label,
           ariaLabel: `${title}: ${label}`,
         }))}
@@ -945,6 +959,8 @@ export function DiarioObraEditor({
   const [modal, setModal] = useState<{ section: SectionKey; row: Row | null } | null>(null);
   const [noActivityOpen, setNoActivityOpen] = useState(false);
   const [finalizedAt, setFinalizedAt] = useState<string | null>(null);
+  /** OS escolhida ao criar o diário (SE e Pasta), só para mostrar. */
+  const [osLabel, setOsLabel] = useState('');
   const [confirm, setConfirm] = useState<null | 'delete' | 'finalize' | 'reopen'>(null);
   const [busy, setBusy] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -987,7 +1003,7 @@ export function DiarioObraEditor({
           { label: obra.name, href: obraHref },
           // Dentro do contrato, «Diários de Obra» é a aba da obra; na rota geral o módulo já aparece no início.
           ...(contractId ? [{ label: 'Diários de Obra', href: obraHref }] : []),
-          { label: `RDO - ${brDate(selected)}`, href: `${diarioBase}/${selected}` },
+          { label: brDate(selected), href: `${diarioBase}/${selected}` },
         ]
       : null,
     { priority: 1 },
@@ -1007,8 +1023,11 @@ export function DiarioObraEditor({
     queryFn: async () => (await api.get(`/diario-obra/${obraId}/month/${monthKey}`)).data?.data ?? [],
   });
   const daysWithRdo = useMemo(() => {
-    const m = new Map<string, boolean>();
-    for (const r of (monthDays ?? []) as Array<{ date: string; noActivity: boolean }>) m.set(r.date, r.noActivity);
+    // 'final' = finalizado; 'draft' = com atividade, ainda não finalizado; 'none' = sem atividade
+    const m = new Map<string, 'final' | 'draft' | 'none'>();
+    for (const r of (monthDays ?? []) as Array<{ date: string; noActivity: boolean; finalizedAt?: string | null }>) {
+      m.set(r.date, r.noActivity ? 'none' : r.finalizedAt ? 'final' : 'draft');
+    }
     return m;
   }, [monthDays]);
 
@@ -1027,6 +1046,11 @@ export function DiarioObraEditor({
         if (cancelled) return;
         setRdo(fromApi(res.data?.data));
         setFinalizedAt(res.data?.data?.finalizedAt ?? null);
+        {
+          const d = String(res.data?.data?.osDivSe ?? '').replace(/^(OS|SE)\s+/i, '').trim();
+          const f = String(res.data?.data?.osFolder ?? '').trim();
+          setOsLabel(d ? (f ? `${d} - ${f}` : d) : '');
+        }
         setLoadedKey(`${obraId}|${selected}`);
       })
       .catch(() => {
@@ -1079,6 +1103,7 @@ export function DiarioObraEditor({
       await exportDiarioObraPdf({
         obraName: obra?.name ?? '',
         contratoName: contratoLabel,
+        osLabel,
         dateIso: selected,
         weekday: WEEKDAY_FULL[new Date(parseIso(selected).y, parseIso(selected).m0, parseIso(selected).d).getDay()],
         finalized: locked,
@@ -1093,6 +1118,7 @@ export function DiarioObraEditor({
         materials: rdo.materials,
         occurrences: rdo.occurrences,
         notes: rdo.notes,
+        generatedBy: userData?.data?.name || undefined,
       });
     } catch {
       toast.error('Não foi possível gerar o PDF.');
@@ -1357,13 +1383,13 @@ export function DiarioObraEditor({
               ) : null}
             </div>
 
-            {/* Centro: título e obra */}
+            {/* Centro: obra e contrato */}
             <div className="order-1 min-w-0 text-center sm:order-2">
               <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-                RDO - {brDate(selected)}
+                {loadingObra ? 'Obra' : obra?.name || 'Obra'}
               </h1>
               <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-                {loadingObra ? '' : obra?.name || ''}
+                {loadingObra ? '' : contratoLabel}
               </p>
             </div>
 
@@ -1388,7 +1414,8 @@ export function DiarioObraEditor({
                     >
                       Reabrir RDO
                     </button>
-                  ) : (
+                  ) : rdo.noActivity ? null : (
+                    // Dia sem atividade não tem o que finalizar: o botão só aparece para diários preenchidos.
                     <button
                       type="button"
                       disabled={!ready || saveState === 'saving'}
@@ -1423,6 +1450,7 @@ export function DiarioObraEditor({
                         </h3>
                         <p className="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
                           {brDate(selected)} · {WEEKDAY_FULL[selWeekday]}
+                          {osLabel ? ` · OS ${osLabel}` : ''}
                           {locked ? ' · Finalizado' : saveState === 'error' ? ' · Erro ao salvar' : ''}
                         </p>
                       </div>
@@ -1458,27 +1486,28 @@ export function DiarioObraEditor({
                       const isSel = iso === selected;
                       const future = iso > today;
                       const weekend = wd === 0 || wd === 6;
-                      // verde = teve atividade; vermelho = sem atividade; sem cor = ainda não registrado
-                      const status: 'work' | 'none' | null = daysWithRdo.has(iso)
-                        ? daysWithRdo.get(iso)
-                          ? 'none'
-                          : 'work'
-                        : null;
+                      // verde = finalizado; amarelo = com atividade, ainda não finalizado; vermelho = sem atividade;
+                      // sem cor = ainda não registrado
+                      const status: 'final' | 'draft' | 'none' | null = daysWithRdo.get(iso) ?? null;
                       const tone =
-                        status === 'work'
+                        status === 'final'
                           ? 'text-green-700 dark:text-green-400'
-                          : status === 'none'
-                            ? 'text-red-600 dark:text-red-400'
-                            : null;
-                      // Hoje: sem fundo colorido, só o círculo — verde (teve atividade), vermelho (sem atividade) ou cinza (não começou)
+                          : status === 'draft'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : status === 'none'
+                              ? 'text-red-600 dark:text-red-400'
+                              : null;
+                      // Hoje: sem fundo colorido, só o círculo — na cor da situação do dia (cinza se não começou)
                       const isToday = iso === today;
                       const ringHoje = !isToday
                         ? ''
-                        : status === 'work'
+                        : status === 'final'
                           ? 'ring-1 ring-green-600 dark:ring-green-400'
-                          : status === 'none'
-                            ? 'ring-1 ring-red-600 dark:ring-red-400'
-                            : 'ring-1 ring-gray-400 dark:ring-gray-500';
+                          : status === 'draft'
+                            ? 'ring-1 ring-amber-500 dark:ring-amber-400'
+                            : status === 'none'
+                              ? 'ring-1 ring-red-600 dark:ring-red-400'
+                              : 'ring-1 ring-gray-400 dark:ring-gray-500';
                       return (
                         <button
                           key={iso}
@@ -1495,9 +1524,11 @@ export function DiarioObraEditor({
                                 ? ''
                                 : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                               : isSel
-                              ? status === 'work'
+                              ? status === 'final'
                                 ? 'bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-900/50'
-                                : 'bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50'
+                                : status === 'draft'
+                                  ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50'
+                                  : 'bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50'
                               : weekend
                                 ? `bg-gray-100 dark:bg-gray-800 ${future ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`
                                 : future
@@ -1524,10 +1555,12 @@ export function DiarioObraEditor({
                           <span className="flex h-3 items-center justify-center">
                             {status === 'none' ? (
                               <X className="h-3 w-3 text-red-600 dark:text-red-400" strokeWidth={3} aria-label="Sem atividade" />
+                            ) : status === 'final' ? (
+                              <Check className="h-3 w-3 text-green-600 dark:text-green-400" strokeWidth={3} aria-label="Finalizado" />
                             ) : (
                               <span
                                 className={`h-1.5 w-1.5 rounded-full ${
-                                  status === 'work' ? 'bg-green-600 dark:bg-green-400' : 'bg-transparent'
+                                  status === 'draft' ? 'bg-amber-500 dark:bg-amber-400' : 'bg-transparent'
                                 }`}
                               />
                             )}
@@ -1548,7 +1581,7 @@ export function DiarioObraEditor({
                     <SectionCard
                       Icon={Ban}
                       title="Sem atividade"
-                      subtitle={rdo.noActivity ? 'Dia registrado sem serviço' : 'Não houve serviço, com o motivo'}
+                      subtitle="Dia sem serviço"
                       action={
                         <button
                           type="button"

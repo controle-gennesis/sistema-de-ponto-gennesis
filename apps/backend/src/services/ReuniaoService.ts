@@ -884,14 +884,14 @@ export class ReuniaoService {
     kind: ReuniaoKind,
     entry: ReuniaoIndexEntry,
   ): Promise<ReuniaoFillStatus> {
+    // "Finalizar preenchimento" (a tela confere os obrigatórios): conta como Preenchido,
+    // mesmo com perguntas opcionais em branco.
+    if (entry.submittedAt) return 'preenchido';
     const data = await this.getReuniao(contractId, kind, entry.id);
     if (data) {
-      // submittedAt sozinho não basta: só "Preenchido" com todos os campos.
       if (this.reuniaoDataIsComplete(data)) return 'preenchido';
       if (this.reuniaoDataHasAnyProgress(data)) return 'preenchendo';
     }
-
-    if (entry.submittedAt) return 'preenchendo';
     if (entry.updatedAt && entry.createdAt && entry.updatedAt !== entry.createdAt) {
       return 'preenchendo';
     }
@@ -903,6 +903,7 @@ export class ReuniaoService {
     kind: ReuniaoKind,
     entry: ReuniaoIndexEntry,
   ): Promise<boolean> {
+    if (entry.submittedAt) return true;
     const data = await this.getReuniao(contractId, kind, entry.id);
     return data ? this.reuniaoDataIsComplete(data) : false;
   }

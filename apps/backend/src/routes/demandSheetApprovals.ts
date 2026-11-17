@@ -132,6 +132,8 @@ router.post('/:id/desfazer-cancelamento', controller.desfazerCancelamento.bind(c
 router.get('/material-request-ids', controller.listFdMaterialRequestIds.bind(controller));
 // Obra das FDs por orçamento (detalhes da OS em Contratos) — só leitura.
 router.get('/obras-por-orcamento', controller.obrasPorOrcamento.bind(controller));
+// Próximo código da FD (FD-<OS e pasta>-NN) — prévia do lançamento pelo orçamento.
+router.get('/proximo-codigo', controller.getProximoCodigo.bind(controller));
 router.get(
   '/by-material-request/:materialRequestId',
   controller.getFdAssociationByMaterialRequest.bind(controller)
@@ -192,6 +194,7 @@ router.patch(
 );
 // Espelho do custo real da aba Ficha de demanda (acesso conferido no controller).
 router.patch('/:id/custo-real', controller.updateCustoReal.bind(controller));
+router.patch('/:id/custo-estimado-itens', controller.updateCustoEstimadoItens.bind(controller));
 router.patch(
   '/:id/supplies-edit',
   requireModuleAccess(fdsAprovadasModule),

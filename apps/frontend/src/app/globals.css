@@ -821,11 +821,10 @@ body::-webkit-scrollbar:vertical {
     background-color 0.2s ease,
     box-shadow 0.22s ease,
     border-color 0.2s ease;
-  /* camada própria: evita serrilhado/corte nas bordas arredondadas durante a escala */
-  will-change: transform;
-  backface-visibility: hidden;
 }
 
+/* Sem `will-change`/`backface-visibility` aqui: manter o cartão numa camada própria deixava o texto
+   (nomes de pastas e arquivos) levemente borrado. O navegador já cria a camada sozinho durante a animação. */
 .drive-item-card:hover {
   transform: scale(1.03);
   box-shadow: 0 10px 22px -10px rgba(15, 23, 42, 0.22);
@@ -870,6 +869,34 @@ body::-webkit-scrollbar:vertical {
 /* Drive (lista) — a entrada em cascata move as linhas para baixo; sem isso aparece uma barra de rolagem que some */
 .table-scroll:has(> .drive-stagger) {
   overflow-y: hidden;
+}
+
+/* Drive — esqueleto de carregamento: um brilho suave atravessa os blocos (sem piscar) */
+@keyframes drive-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.drive-bone {
+  background-color: rgb(229 231 235 / 0.85);
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.75) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: drive-shimmer 1.7s ease-in-out infinite;
+}
+
+.dark .drive-bone {
+  background-color: rgb(55 65 81 / 0.7);
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.09) 50%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drive-bone {
+    animation: none;
+  }
 }
 
 /* Drive — ao abrir uma pasta, os itens entram em cascata (um depois do outro) */
@@ -2502,6 +2529,30 @@ tr.orc-lista-row-enter > td {
 @media (prefers-reduced-motion: reduce) {
   .reuniao-cell-fill,
   .reuniao-cell-stripe {
+    animation: none;
+  }
+}
+
+/* Drive (lista) — ao selecionar uma linha com um clique: um pulso suave de cor e um leve deslize do nome */
+@keyframes drive-row-select {
+  0% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0);
+    filter: brightness(0.96);
+  }
+  45% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+  }
+  100% {
+    box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+    filter: none;
+  }
+}
+.drive-row-selected {
+  animation: drive-row-select 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: inset 3px 0 0 0 rgb(220 38 38 / 0.9);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-row-selected {
     animation: none;
   }
 }

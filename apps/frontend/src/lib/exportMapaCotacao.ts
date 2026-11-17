@@ -3,7 +3,48 @@ import {
   brandedPdfUsableWidth,
   exportBrandedPdfTable,
   type BrandedPdfColumn,
+  type BrandedPdfSection,
 } from '@/lib/exportBrandedPdfTable';
+
+type FdMaterialExport = { materialLabel: string; quantity: number; unit: string; detalhamento?: string };
+
+/** Itens da FD de onde saiu a RM (painel "Itens da FD" do mapa). */
+export type MapaCotacaoExportFdItem = {
+  fdItem: string;
+  descricao: string;
+  quantidadeFd: number | null;
+  unidadeFd: string;
+  custoEstimado40: number | null;
+  alertas: string[];
+  materiais: FdMaterialExport[];
+};
+
+/** O que já foi solicitado da FD, agrupado por RM (modal "Itens já solicitados"). */
+export type MapaCotacaoExportFdSolicitado = {
+  rm: { requestNumber: string; status: string };
+  itens: {
+    fdItem: string;
+    descricao: string;
+    quantidadeFd: number | null;
+    unidadeFd: string;
+    alertas: string[];
+    materiais: (FdMaterialExport & {
+      ocs: { orderNumber: string; status: string; totvsIdMov: number | null; valorPago: string }[];
+    })[];
+  }[];
+};
+
+export type MapaCotacaoExportFd = {
+  codigo: string;
+  itens: MapaCotacaoExportFdItem[];
+  solicitados?: {
+    grupos: MapaCotacaoExportFdSolicitado[];
+    totalItens: number;
+    comOc: number;
+    ocsPagas: number;
+    totalPago: number;
+  };
+};
 
 export type MapaCotacaoExportItem = {
   codigo: string;
@@ -38,7 +79,117 @@ export type MapaCotacaoExportOptions = {
   arquivoBase: string;
   itens: MapaCotacaoExportItem[];
   fornecedores: MapaCotacaoExportFornecedor[];
+  /** Só no PDF: itens da FD e o que já foi solicitado dela (quando a RM saiu de uma FD). */
+  fd?: MapaCotacaoExportFd | null;
 };
+
+const ALERTA_LABEL: Record<string, string> = { '1:N': 'vários materiais', unidade: 'unidade diferente da FD' };
+
+function colunasPorPeso(
+  pesos: { key: string; label: string; peso: number; tone?: BrandedPdfColumn['tone'] }[],
+  orientacao: 'landscape' | 'portrait'
+): BrandedPdfColumn[] {
+  const soma = pesos.reduce((a, c) => a + c.peso, 0);
+  const largura = brandedPdfUsableWidth(orientacao);
+  return pesos.map((c) => ({
+    key: c.key,
+    label: c.label,
+    width: (c.peso / soma) * largura,
+    ...(c.tone ? { tone: c.tone } : {}),
+  }));
+}
+
+/** Célula "Item da FD": código + descrição; alertas em negrito abaixo. */
+function celulaItemFd(it: { fdItem: string; descricao: string; alertas: string[] }): Record<string, string> {
+  const alertas = it.alertas.map((a) => ALERTA_LABEL[a] ?? a).join(' e ');
+  return {
+    itemFd: `${it.fdItem} ${it.descricao}`.trim(),
+    ...(alertas ? { itemFdBold: `Atenção: ${alertas}` } : {}),
+  };
+}
+
+const qtdUnid = (n: number | null | undefined, unidade: string) =>
+  n == null || !Number.isFinite(n) ? '—' : `${qtd(n)} ${unidade}`.trim();
+
+function secoesFd(fd: MapaCotacaoExportFd, orientacao: 'landscape' | 'portrait'): BrandedPdfSection[] {
+  const secoes: BrandedPdfSection[] = [];
+
+  if (fd.itens.length) {
+    const columns = colunasPorPeso(
+      [
+        { key: 'itemFd', label: 'Item da FD', peso: 4 },
+        { key: 'qtdFd', label: 'Qtd. FD', peso: 0.9 },
+        { key: 'custo40', label: 'Custo est. 40%', peso: 1.1, tone: 'bold' },
+        { key: 'material', label: 'Material', peso: 3.2 },
+        { key: 'qtdPedida', label: 'Qtd. pedida', peso: 0.9 },
+      ],
+      orientacao
+    );
+    const rows: Record<string, string>[] = [];
+    for (const it of fd.itens) {
+      const mats = it.materiais.length ? it.materiais : [null];
+      mats.forEach((m, idx) => {
+        rows.push({
+          ...(idx === 0
+            ? {
+                ...celulaItemFd(it),
+                qtdFd: qtdUnid(it.quantidadeFd, it.unidadeFd),
+                custo40: brl(it.custoEstimado40),
+              }
+            : { itemFd: ' ', qtdFd: ' ', custo40: ' ' }),
+          material: m?.materialLabel || '—',
+          qtdPedida: m ? qtdUnid(m.quantity, m.unit) : '—',
+        });
+      });
+    }
+    secoes.push({ title: 'Itens da FD', subtitle: `${fd.codigo} · Custo estimado 40%`, columns, rows });
+  }
+
+  const sol = fd.solicitados;
+  if (sol) {
+    secoes.push({
+      title: 'Itens já solicitados',
+      subtitle:
+        `${fd.codigo} · ${sol.totalItens} item(ns) solicitados · ${sol.comOc} com ordem de compra` +
+        ` · Total pago: ${brl(sol.totalPago)} (${sol.ocsPagas} OC(s))`,
+      ...(sol.grupos.length ? {} : { rows: [] }),
+    });
+    const columns = colunasPorPeso(
+      [
+        { key: 'itemFd', label: 'Item da FD', peso: 3.2 },
+        { key: 'qtdFd', label: 'Qtd. FD', peso: 0.9 },
+        { key: 'material', label: 'Material', peso: 3 },
+        { key: 'qtdPedida', label: 'Qtd. pedida', peso: 0.9 },
+        { key: 'oc', label: 'Ordem de compra', peso: 1.4 },
+        { key: 'idMov', label: 'IdMov TOTVS', peso: 0.9 },
+        { key: 'pago', label: 'Valor pago', peso: 1.1 },
+      ],
+      orientacao
+    );
+    for (const g of sol.grupos) {
+      const rows: Record<string, string>[] = [];
+      for (const it of g.itens) {
+        const mats = it.materiais.length ? it.materiais : [null];
+        mats.forEach((m, idx) => {
+          const ocs = m?.ocs ?? [];
+          rows.push({
+            ...(idx === 0
+              ? { ...celulaItemFd(it), qtdFd: qtdUnid(it.quantidadeFd, it.unidadeFd) }
+              : { itemFd: ' ', qtdFd: ' ' }),
+            material: m?.materialLabel || '—',
+            ...(m?.detalhamento ? { materialBold: `Detalhamento: ${m.detalhamento}` } : {}),
+            qtdPedida: m ? qtdUnid(m.quantity, m.unit) : '—',
+            oc: ocs.length ? ocs.map((o) => `${o.orderNumber} · ${o.status}`).join('\n') : 'Aguardando OC',
+            idMov: ocs.length ? ocs.map((o) => (o.totvsIdMov != null ? String(o.totvsIdMov) : 'Não enviada')).join('\n') : '—',
+            pago: ocs.length ? ocs.map((o) => o.valorPago).join('\n') : '—',
+          });
+        });
+      }
+      secoes.push({ kind: 'group', title: g.rm.requestNumber, subtitle: g.rm.status, columns, rows });
+    }
+  }
+  return secoes;
+}
 
 const brl = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n)
@@ -181,5 +332,6 @@ export async function exportarMapaCotacao(opts: MapaCotacaoExportOptions): Promi
     columns,
     rows,
     orientation: opts.orientacao,
+    sections: opts.fd ? secoesFd(opts.fd, opts.orientacao) : undefined,
   });
 }

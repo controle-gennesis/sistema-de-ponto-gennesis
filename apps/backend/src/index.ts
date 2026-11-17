@@ -350,7 +350,8 @@ const chaveUsuarioOuIp = (req: import('express').Request): string => {
 // Rate limiting geral (uma única instância — antes havia duas contando em dobro)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: enableRateLimit ? 2000 : 50_000,
+  // Por usuário: várias abas + celular fazem muitas consultas em segundo plano (heartbeat, chat, contadores).
+  max: enableRateLimit ? 6000 : 50_000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,

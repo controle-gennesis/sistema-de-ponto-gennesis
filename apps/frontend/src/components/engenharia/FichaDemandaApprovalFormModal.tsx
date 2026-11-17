@@ -262,6 +262,10 @@ export type FichaDemandaApprovalFormModalProps = {
   hideContractField?: boolean;
   /** Obra já definida no orçamento de origem: mostrada sem edição. */
   obraBloqueada?: boolean;
+  /** Polo vindo do centro de custo: mostrado sem edição. */
+  poloBloqueado?: boolean;
+  /** Código da FD gerado pelo sistema (sequência da OS): mostrado sem edição. */
+  codigoFdBloqueado?: boolean;
   /** Aviso no topo do formulário (ex.: lançar a FD tranca orçamento + FD). */
   aviso?: string;
   /** Texto do botão de confirmar no cadastro (padrão: "Enviar Ficha"). */
@@ -278,6 +282,8 @@ export function FichaDemandaApprovalFormModal({
   title,
   hideContractField = false,
   obraBloqueada = false,
+  poloBloqueado = false,
+  codigoFdBloqueado = false,
   aviso,
   textoSalvar,
 }: FichaDemandaApprovalFormModalProps) {
@@ -647,8 +653,14 @@ export function FichaDemandaApprovalFormModal({
                     value={form.codFichaDemanda}
                     onChange={(e) => setForm({ ...form, codFichaDemanda: e.target.value })}
                     placeholder="Ex.: FD-001"
-                    className={fieldClass}
+                    readOnly={codigoFdBloqueado}
+                    className={`${fieldClass} ${codigoFdBloqueado ? 'cursor-default bg-gray-50 dark:bg-gray-900/40' : ''}`}
                   />
+                  {codigoFdBloqueado ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Gerado pelo sistema: OS e pasta + número sequencial.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <FieldLabel required>Faturamento Estimado</FieldLabel>
@@ -689,8 +701,12 @@ export function FichaDemandaApprovalFormModal({
                         <button
                           key={polo}
                           type="button"
-                          onClick={() => setForm({ ...form, polo })}
-                          className={`rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
+                          disabled={poloBloqueado && !selected}
+                          onClick={() => {
+                            if (poloBloqueado) return;
+                            setForm({ ...form, polo });
+                          }}
+                          className={`rounded-lg border py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${poloBloqueado ? 'cursor-default' : ''} ${
                             selected
                               ? 'border-red-600 bg-red-600 text-white'
                               : 'border-gray-300 bg-white text-gray-900 hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
@@ -701,6 +717,9 @@ export function FichaDemandaApprovalFormModal({
                       );
                     })}
                   </div>
+                  {poloBloqueado ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Definido pelo centro de custo.</p>
+                  ) : null}
                 </div>
               </div>
             </div>

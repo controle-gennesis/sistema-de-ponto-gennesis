@@ -7,6 +7,7 @@ import { MaterialRequestService } from '../services/MaterialRequestService';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import { savePersistentUpload } from '../lib/persistentUpload';
+import { listarCorrecoesRm } from '../lib/rmCorrecaoFd';
 import {
   assertUserCanApproveMaterialRequests,
   assertUserCanApproveMaterialRequestForCostCenter,
@@ -86,7 +87,12 @@ router.get('/materials', async (req: AuthRequest, res: Response, next: NextFunct
     if (search.length >= 2) {
       // sugestao=1: sugestões pela descrição do item da FD (basta bater parte das palavras).
       const sugestao = String(req.query.sugestao ?? '') === '1';
-      const data = await materialRequestService.searchConstructionMaterialsForRmDropdown(search, limit, { sugestao });
+      // comIdPrd=1: só materiais com identificador do TOTVS (pedido pelo orçamento/FD vai para o TOTVS).
+      const comIdPrd = String(req.query.comIdPrd ?? '') === '1';
+      const data = await materialRequestService.searchConstructionMaterialsForRmDropdown(search, limit, {
+        sugestao,
+        comIdPrd,
+      });
       res.json({ success: true, data });
       return;
     }
@@ -127,6 +133,33 @@ router.post("/upload-item-attachment", (req: AuthRequest, res: Response, next: N
     });
   } catch (error) {
     next(error);
+  }
+});
+
+// RMs do próprio usuário enviadas para correção (RM inteira ou itens em correção) — sininho e menu. Só leitura.
+router.get('/minhas/correcao-count', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const count = await prisma.materialRequest.count({
+      where: {
+        requestedBy: req.user.id,
+        OR: [{ status: 'IN_REVIEW' }, { status: 'APPROVED', items: { some: { status: 'IN_REVIEW' } } }],
+      },
+    });
+    return res.json({ success: true, data: { count } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Histórico de correções da RM (quem, quando, material e/ou quantidade). Só leitura.
+router.get('/:id/correcoes', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const data = await listarCorrecoesRm(String(req.params.id || '').trim());
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
   }
 });
 
@@ -372,6 +405,11 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
           ? undefined
           : normalizeRmPriority(priority),
       items: items.map((item: any) => normalizeRmItemBody(item)),
+      // Material de cada linha antes da correção (para o histórico e os itens pedidos da FD).
+      correcaoLinhas: items.map((item: any) => ({
+        originalMaterialId: typeof item?.originalMaterialId === 'string' ? item.originalMaterialId : undefined,
+        materialLabel: typeof item?.materialLabel === 'string' ? item.materialLabel : undefined,
+      })),
       demandSheet,
       demandSheetAttachmentUrl,
       demandSheetAttachmentName,
@@ -569,20 +607,24 @@ router.patch('/:id/items/:itemId/correct-quantity', async (req: AuthRequest, res
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { id, itemId } = req.params;
     const quantity = Number(req.body?.quantity);
+    // Opcional: troca de material na correção do item.
+    const materialId = typeof req.body?.materialId === 'string' ? req.body.materialId : undefined;
+    const materialLabel = typeof req.body?.materialLabel === 'string' ? req.body.materialLabel : undefined;
     const request = await materialRequestService.correctOpenItemQuantity(
       id,
       itemId,
       quantity,
       req.user.id,
-      !!req.user.isAdmin
+      !!req.user.isAdmin,
+      { materialId, materialLabel }
     );
     res.json({
       success: true,
       data: request,
-      message: 'Quantidade atualizada. O item voltou ao mapa de cotação.',
+      message: 'Correção salva. O item voltou ao mapa de cotação.',
     });
   } catch (error) {
-    if (error instanceof Error && /não encontrad|Não é possível|Quantidade|Apenas o solicitante|não está/.test(error.message)) {
+    if (error instanceof Error && /não encontrad|Não é possível|Quantidade|Apenas o solicitante|não está|Material/.test(error.message)) {
       const status = /Apenas o solicitante/.test(error.message) ? 403 : 400;
       res.status(status).json({ success: false, message: error.message });
       return;

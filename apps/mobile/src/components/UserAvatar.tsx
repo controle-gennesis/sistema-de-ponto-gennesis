@@ -35,7 +35,7 @@ export default function UserAvatar({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: showPhoto ? '#ddd' : backgroundColor,
+          backgroundColor: showPhoto ? 'transparent' : backgroundColor,
           borderColor,
           borderWidth: borderColor ? borderWidth : 0,
         },

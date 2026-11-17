@@ -36,9 +36,11 @@ import {
   getPriorityInfo,
   getStatusInfo,
   rmContractDisplay,
+  rmObra,
   rmOsDisplay,
   rmSolicitante,
 } from '../_lib/display';
+import { formatDateBr } from '@/lib/dateTimeBr';
 import { getMaterialRequestDisplayStatus, isMaterialRequestEffectivelyCancelled } from '../_lib/search';
 import { formatRmListDisplayId } from '../_lib/rmListDisplay';
 import {
@@ -59,10 +61,10 @@ import {
 import { computeRowActionMenuPosition } from '@/lib/computeRowActionMenuPosition';
 const cellPad = 'px-2 sm:px-3 py-3';
 const cellPadTh = 'px-2 sm:px-3 py-4';
-const rmColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
+const rmColCls = 'min-w-[8rem] whitespace-nowrap';
 const itensColCls = 'w-[7%] min-w-[4.5rem]';
 const tipoColCls = 'w-[9%] min-w-[5.5rem]';
-const ocColCls = 'w-[5%] min-w-[3.5rem]';
+const ocColCls = 'min-w-[8rem]';
 const actionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
 const thTextCls = `${cellPadTh} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`;
 const thCenterCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap`;
@@ -407,36 +409,25 @@ export function MaterialRequestsRmList({
               </span>
             </div>
             <div className="table-scroll">
-              <table className={`${cadastroListClasses.table} text-sm`}>
-                <colgroup>
-                  <col className="w-[4%]" />
-                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
-                  <col className={showStatusColumn ? 'w-[10%]' : 'w-[12%]'} />
-                  <col className={showStatusColumn ? 'w-[14%]' : 'w-[16%]'} />
-                  <col className={showStatusColumn ? 'w-[8%]' : 'w-[10%]'} />
-                  {showStatusColumn ? <col className="w-[8%]" /> : null}
-                  <col className={itensColCls} />
-                  <col className={tipoColCls} />
-                  <col className={ocColCls} />
-                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
-                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
-                  <col className="w-[4%]" />
-                </colgroup>
+              <table className={`${cadastroListClasses.table} !table-auto min-w-[88rem] text-sm`}>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
                     <th scope="col" className={rmThCls}>
                       RM
                     </th>
-                    <th className={thTextCls}>Solicitante</th>
-                    <th className={thCenterCls}>OS</th>
+                    <th className={thCenterCls}>Data</th>
                     <th className={thCenterCls}>Contrato</th>
+                    <th className={thCenterCls}>OS</th>
+                    <th className={thCenterCls}>Obra</th>
+                    <th className={`${thCenterCls} whitespace-nowrap`}>Cód. FD</th>
+                    <th className={thTextCls}>Solicitante</th>
                     <th className={thCenterCls}>Prioridade</th>
                     {showStatusColumn && <th className={thCenterCls}>Status</th>}
                     <th className={itensThCls}>Itens</th>
                     <th className={tipoThCls}>Tipo</th>
                     <th className={ocThCls}>OC</th>
                     <th className={thCenterCls}>Status OC</th>
-                    <th className={`${thCenterCls} whitespace-nowrap`}>Status de entrega</th>
+                    <th className={`${thCenterCls} whitespace-nowrap`}>Status entrega</th>
                     <th
                       scope="col"
                       className={actionThCls}
@@ -481,25 +472,36 @@ export function MaterialRequestsRmList({
                           title={request.requestNumber || undefined}
                         >
                           <ListRowNavigableLabel className="font-medium">
-                            {formatRmListDisplayId(request.requestNumber)}
+                            {request.requestNumber?.trim() || formatRmListDisplayId(request.requestNumber)}
                           </ListRowNavigableLabel>
-                          {fdRequestIds.has(request.id) && (
-                            <span
-                              className="ml-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-                              title="RM criada pela Ficha de Demanda"
-                            >
-                              FD
-                            </span>
-                          )}
+                          {/* Espaço da etiqueta FD sempre reservado: os códigos ficam alinhados com ou sem ela. */}
+                          <span
+                            className={`ml-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 ${
+                              fdRequestIds.has(request.id) ? '' : 'invisible'
+                            }`}
+                            title={fdRequestIds.has(request.id) ? 'RM criada pela Ficha de Demanda' : undefined}
+                            aria-hidden={!fdRequestIds.has(request.id)}
+                          >
+                            FD
+                          </span>
                         </td>
-                        <td className={tdTextCls}>
-                          <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>
+                        <td className={`${tdCenterCls} whitespace-nowrap tabular-nums`}>
+                          {formatDateBr(request.createdAt, '—')}
+                        </td>
+                        <td className={tdCenterCls} title={rmContractDisplay(request)}>
+                          <span className="line-clamp-2">{rmContractDisplay(request)}</span>
                         </td>
                         <td className={tdCenterCls} title={rmOsDisplay(request)}>
                           <span className="line-clamp-2">{rmOsDisplay(request)}</span>
                         </td>
-                        <td className={tdCenterCls} title={rmContractDisplay(request)}>
-                          <span className="line-clamp-2">{rmContractDisplay(request)}</span>
+                        <td className={tdCenterCls} title={rmObra(request) || undefined}>
+                          <span className="line-clamp-2">{rmObra(request) || '—'}</span>
+                        </td>
+                        <td className={`${tdCenterCls} whitespace-nowrap`} title={request.demandSheet || undefined}>
+                          {request.demandSheet?.trim() || '—'}
+                        </td>
+                        <td className={tdTextCls}>
+                          <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>
                         </td>
                         <td className={tdCenterCls}>
                           <span className={`text-xs font-medium whitespace-nowrap ${priorityInfo.color}`}>
@@ -561,7 +563,7 @@ export function MaterialRequestsRmList({
                                   className="block w-full text-center font-medium whitespace-nowrap"
                                   title={row.idTitle}
                                 >
-                                  {row.id}
+                                  {row.idTitle || row.id}
                                 </span>
                               ))}
                             </div>

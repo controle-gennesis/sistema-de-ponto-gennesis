@@ -398,6 +398,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         navigationRef.navigate('KanbanCard', { cardId: data.cardId });
         return;
       }
+      if (data?.kind === 'punch-reminder' && navigationRef.isReady()) {
+        navigationRef.navigate('Punch');
+        return;
+      }
+      // Nova solicitação para aprovar: abre o início, onde está o cartão de Aprovações.
+      if (data?.kind === 'approval-pending' && navigationRef.isReady()) {
+        navigationRef.navigate('Main', { screen: 'Home' });
+        return;
+      }
       const route =
         data?.kind === 'fuel'
           ? 'Combustivel'

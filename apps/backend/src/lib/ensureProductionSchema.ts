@@ -96,6 +96,47 @@ async function ensurePleitoOsTemporaria(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureQuoteMapDrafts(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'quote_map_drafts')) return;
+  console.warn('[Schema] Tabela quote_map_drafts ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "quote_map_drafts" (
+      "id" TEXT NOT NULL,
+      "materialRequestId" TEXT NOT NULL,
+      "data" JSONB NOT NULL,
+      "updatedById" TEXT NOT NULL,
+      "updatedByName" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "quote_map_drafts_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "quote_map_drafts_materialRequestId_key" ON "quote_map_drafts"("materialRequestId");
+  `);
+}
+
+async function ensureMaterialRequestCorrectionLogs(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'material_request_correction_logs')) return;
+  console.warn('[Schema] Tabela material_request_correction_logs ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "material_request_correction_logs" (
+      "id" TEXT NOT NULL,
+      "materialRequestId" TEXT NOT NULL,
+      "materialId" TEXT,
+      "previousMaterialId" TEXT,
+      "userId" TEXT NOT NULL,
+      "userName" TEXT,
+      "changes" JSONB NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "material_request_correction_logs_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "material_request_correction_logs_materialRequestId_idx" ON "material_request_correction_logs"("materialRequestId");
+  `);
+}
+
 async function ensurePleitoOsTemporariasAnteriores(prisma: PrismaClient): Promise<void> {
   if (await columnExists(prisma, 'pleitos', 'osTemporariasAnteriores')) return;
   console.warn('[Schema] Coluna pleitos.osTemporariasAnteriores ausente — adicionando.');
@@ -907,6 +948,7 @@ async function ensureDpRequestAccountingDirectEnums(prisma: PrismaClient): Promi
     { enumName: 'DpRequestType', value: 'SOLICITACAO_GERAL' },
     { enumName: 'DpRequestType', value: 'CONTAB_ADMISSAO' },
     { enumName: 'DpRequestType', value: 'CONTAB_AFASTAMENTO' },
+    { enumName: 'DpRequestType', value: 'CONTAB_ATESTADO' },
     { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_FUNCAO' },
     { enumName: 'DpRequestType', value: 'CONTAB_ALTERACAO_SALARIAL' },
     { enumName: 'DpRequestType', value: 'CONTAB_FERIAS' },
@@ -1671,12 +1713,17 @@ async function ensurePncpTables(prisma: PrismaClient): Promise<void> {
 }
 
 async function ensureDpContabilidadeTables(prisma: PrismaClient): Promise<void> {
+  // Banco já criado antes do tipo ATESTADO: garante o valor no enum.
+  await prisma
+    .$executeRawUnsafe(`ALTER TYPE "DpContabilidadeRequestType" ADD VALUE IF NOT EXISTS 'ATESTADO'`)
+    .catch(() => undefined);
   // Tabelas próprias do módulo DP/Contabilidade (sem vínculo com dp_requests).
   await prisma.$executeRawUnsafe(`
     DO $$ BEGIN
       CREATE TYPE "DpContabilidadeRequestType" AS ENUM (
         'ADMISSAO',
         'AFASTAMENTO',
+        'ATESTADO',
         'ALTERACAO_FUNCAO',
         'ALTERACAO_SALARIAL',
         'CONVENCAO_COLETIVA',
@@ -2184,6 +2231,16 @@ async function ensureOcsBoletoPixExtrasTable(prisma: PrismaClient): Promise<void
   `);
 }
 
+/** OS (SE e Pasta) do diário de obra: a tabela vem das migrations; aqui só garante as colunas novas. */
+async function ensureDiarioObraOsColumns(prisma: PrismaClient): Promise<void> {
+  await prisma
+    .$executeRawUnsafe(`ALTER TABLE "diarios_obra" ADD COLUMN IF NOT EXISTS "osDivSe" TEXT;`)
+    .catch(() => undefined);
+  await prisma
+    .$executeRawUnsafe(`ALTER TABLE "diarios_obra" ADD COLUMN IF NOT EXISTS "osFolder" TEXT;`)
+    .catch(() => undefined);
+}
+
 async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "obras" (
@@ -2213,6 +2270,9 @@ async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
     CREATE INDEX IF NOT EXISTS "obras_contratoId_idx" ON "obras"("contratoId");
   `);
 
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "address" TEXT;
+  `);
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
   `);
@@ -3477,6 +3537,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePleitoObra(prisma);
     await ensurePleitoOsTemporaria(prisma);
     await ensurePleitoOsTemporariasAnteriores(prisma);
+    await ensureQuoteMapDrafts(prisma);
+    await ensureMaterialRequestCorrectionLogs(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);
@@ -3540,6 +3602,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureJuridicoProcessoAdvogadoColumns(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);
     await ensureObrasTable(prisma);
+    await ensureDiarioObraOsColumns(prisma);
     await ensureEmpreiteirosTable(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);

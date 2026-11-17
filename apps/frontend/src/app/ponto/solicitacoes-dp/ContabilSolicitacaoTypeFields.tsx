@@ -20,6 +20,7 @@ export type ContabilFormRequestType =
   | 'SOLICITACAO_GERAL'
   | 'CONTAB_ADMISSAO'
   | 'CONTAB_AFASTAMENTO'
+  | 'CONTAB_ATESTADO'
   | 'CONTAB_ALTERACAO_FUNCAO'
   | 'CONTAB_ALTERACAO_SALARIAL'
   | 'CONTAB_FERIAS'
@@ -34,6 +35,7 @@ export const CONTABIL_TYPE_LABELS: Record<ContabilFormRequestType, string> = {
   SOLICITACAO_GERAL: 'Solicitação Geral',
   CONTAB_ADMISSAO: 'Admissão',
   CONTAB_AFASTAMENTO: 'Afastamento',
+  CONTAB_ATESTADO: 'Atestados',
   CONTAB_ALTERACAO_FUNCAO: 'Alteração de Função',
   CONTAB_ALTERACAO_SALARIAL: 'Alteração Salarial',
   CONTAB_FERIAS: 'Férias',
@@ -202,12 +204,23 @@ function SimNaoField({
 function AnexosField({
   anexos,
   onChange,
+  simples = false,
 }: {
   anexos: ContabilAnexoDraft[];
   onChange: (next: ContabilAnexoDraft[]) => void;
+  /** Só o arquivo (sem tipo e sem validade): usado em Atestados. */
+  simples?: boolean;
 }) {
   const update = (id: string, patch: Partial<ContabilAnexoDraft>) =>
     onChange(anexos.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  const seletorRef = React.useRef<HTMLInputElement | null>(null);
+  /** Atestados: o "+" já abre a escolha do arquivo e adiciona um anexo por arquivo escolhido. */
+  const adicionarArquivos = (files: FileList | null) => {
+    const lista = Array.from(files ?? []);
+    if (!lista.length) return;
+    const livres = MAX_CONTABIL_ANEXOS - anexos.length;
+    onChange([...anexos, ...lista.slice(0, livres).map((file) => ({ ...newContabilAnexoDraft(), file }))]);
+  };
 
   return (
     <div className="space-y-3 md:col-span-2">
@@ -218,15 +231,30 @@ function AnexosField({
             type="button"
             title="Adicionar anexo"
             aria-label="Adicionar anexo"
-            onClick={() => onChange([...anexos, newContabilAnexoDraft()])}
+            onClick={() => (simples ? seletorRef.current?.click() : onChange([...anexos, newContabilAnexoDraft()]))}
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
             <Plus className="h-4 w-4" />
           </button>
         ) : null}
+        {simples ? (
+          <input
+            ref={seletorRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".pdf,image/*,.doc,.docx,.xls,.xlsx,.csv"
+            onChange={(e) => {
+              adicionarArquivos(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        ) : null}
       </div>
       {anexos.length === 0 ? (
-        <p className="text-xs text-gray-500 dark:text-gray-400">Nenhum anexo adicionado (opcional).</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {simples ? 'Adicione o arquivo com os atestados (clique no +).' : 'Nenhum anexo adicionado (opcional).'}
+        </p>
       ) : null}
       {anexos.map((anexo, index) => (
         <div
@@ -262,6 +290,7 @@ function AnexosField({
               />
             </label>
           </div>
+          {simples ? null : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls}>Tipo do arquivo <span className="text-red-600">*</span></label>
@@ -281,6 +310,7 @@ function AnexosField({
               onChange={(dataValidade) => update(anexo.id, { dataValidade })}
             />
           </div>
+          )}
         </div>
       ))}
     </div>
@@ -490,6 +520,12 @@ export function ContabilSolicitacaoTypeFields({
       );
       break;
 
+    case 'CONTAB_ATESTADO':
+      fields = (
+        <TextAreaField label="Observações" value={text('observacoes')} onChange={set('observacoes')} placeholder="Informações adicionais (opcional)" />
+      );
+      break;
+
     case 'CONTAB_ALTERACAO_FUNCAO': {
       const alteracaoSalarial = text('alteracaoSalarial');
       fields = (
@@ -593,7 +629,7 @@ export function ContabilSolicitacaoTypeFields({
   return (
     <>
       {fields}
-      <AnexosField anexos={anexos} onChange={onAnexosChange} />
+      <AnexosField anexos={anexos} onChange={onAnexosChange} simples={requestType === 'CONTAB_ATESTADO'} />
     </>
   );
 }

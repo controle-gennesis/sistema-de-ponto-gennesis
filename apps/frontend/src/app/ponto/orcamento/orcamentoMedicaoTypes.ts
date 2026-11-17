@@ -19,6 +19,10 @@ export interface LinhaMedicao {
   descricao?: string;
   /** Texto livre da coluna DETALHES (primeira coluna da memória). */
   detalhes?: string;
+  /** Células mescladas: nº de linhas que a Descrição desta linha ocupa (a partir dela, para baixo). */
+  mesclaDescricao?: number;
+  /** Células mescladas: nº de linhas que os Detalhes desta linha ocupam (a partir dela, para baixo). */
+  mesclaDetalhes?: number;
   origemLinhaId?: string;
   /** Rótulo da composição de origem na planilha (ex.: 2.1.1) — memória / carga agregada. */
   origemComposicaoRotulo?: string;

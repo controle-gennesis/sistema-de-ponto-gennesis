@@ -1,5 +1,14 @@
 import { prisma } from '../lib/prisma';
 import { fasesFluigDasOcs, type FluigOcFase } from '../lib/fluigOcFase';
+import {
+  descreverQuantidade,
+  espelharCorrecaoNaFd,
+  nomeDoUsuario,
+  registrarCorrecaoRm,
+  rotuloDoMaterial,
+  type FdCorrecaoAlteracao,
+  type RmLinhaCorrigida,
+} from '../lib/rmCorrecaoFd';
 import { type EngineeringMaterial, Prisma, PurchaseOrderStatus } from '@prisma/client';
 import { remapExactUnbCostCenterIdToConsorcio } from '../lib/migrarRmUnbParaConsorcio';
 import { isUnbCostCenterRecord, unbCostCenterLabelPrismaWhere } from '../lib/unbCostCenterScope';
@@ -461,6 +470,8 @@ export interface UpdateMaterialRequestCorrectionData {
   demandSheetAttachments?: DemandSheetAttachment[];
   /** Se true, volta para PENDING após salvar (reenvio para aprovação). */
   submitForApproval?: boolean;
+  /** Mesma ordem de `items`: material da linha antes da correção e rótulo do material atual. */
+  correcaoLinhas?: { originalMaterialId?: string; materialLabel?: string }[];
 }
 
 /** Busca de materiais: letras com acento → sem acento (o mesmo par usado no SQL com translate). */
@@ -624,7 +635,7 @@ export class MaterialRequestService {
   async searchConstructionMaterialsForRmDropdown(
     search: string,
     limit = 50,
-    opts?: { sugestao?: boolean }
+    opts?: { sugestao?: boolean; comIdPrd?: boolean }
   ): Promise<RmDropdownMaterial[]> {
     const term = search.trim();
     if (term.length < 2) return [];
@@ -641,7 +652,7 @@ export class MaterialRequestService {
     const campo = `translate(lower(coalesce("code", '') || ' ' || coalesce("name", '') || ' ' || coalesce("description", '')), $1, $2)`;
     const conds = tokens.map((_, i) => `${campo} LIKE $${i + 3}`);
     const linhas = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      `SELECT "id" FROM "construction_materials" WHERE "isActive" = true AND (${conds.join(sugestao ? ' OR ' : ' AND ')}) LIMIT 600`,
+      `SELECT "id" FROM "construction_materials" WHERE "isActive" = true${opts?.comIdPrd ? ' AND "totvsIdPrd" IS NOT NULL' : ''} AND (${conds.join(sugestao ? ' OR ' : ' AND ')}) LIMIT 600`,
       ACENTOS_BUSCA,
       SEM_ACENTOS_BUSCA,
       ...tokens.map((t) => `%${t}%`)
@@ -1493,11 +1504,12 @@ export class MaterialRequestService {
     itemId: string,
     quantity: number,
     userId: string,
-    isAdmin = false
+    isAdmin = false,
+    opts?: { materialId?: string; materialLabel?: string }
   ) {
     const existing = await prisma.materialRequest.findUnique({
       where: { id: requestId },
-      select: { id: true, requestedBy: true, status: true },
+      select: { id: true, requestedBy: true, status: true, requestNumber: true },
     });
     if (!existing) throw new Error('Requisição não encontrada');
     if (existing.requestedBy !== userId && !isAdmin) {
@@ -1516,23 +1528,87 @@ export class MaterialRequestService {
       throw new Error('Quantidade deve ser maior que zero');
     }
 
-    const unitPrice = Number(item.unitPrice ?? 0);
+    // Troca de material (opcional) na correção do item.
+    const novoMaterialId = String(opts?.materialId || '').trim();
+    const trocaMaterial = !!novoMaterialId && novoMaterialId !== item.materialId;
+    let novoMaterial: { id: string; unit: string; medianPrice: unknown } | null = null;
+    if (trocaMaterial) {
+      novoMaterial = await prisma.engineeringMaterial.findFirst({
+        where: { id: novoMaterialId, isActive: true },
+        select: { id: true, unit: true, medianPrice: true },
+      });
+      if (!novoMaterial) throw new Error('Material não encontrado ou inativo');
+      const repetido = await prisma.materialRequestItem.count({
+        where: { materialRequestId: requestId, materialId: novoMaterialId, id: { not: itemId }, status: { not: 'CANCELLED' } },
+      });
+      if (repetido > 0) throw new Error('Não é possível trocar: este material já está em outro item da RM');
+    }
+
+    let unitPrice = Number(item.unitPrice ?? 0);
+    if (novoMaterial) {
+      const avg = await this.avgPaidByEngineeringMaterialIds([novoMaterial.id]);
+      unitPrice = this.resolveItemUnitPrice(null, avg.get(novoMaterial.id), novoMaterial.medianPrice);
+    }
     const totalPrice = Number.isFinite(unitPrice) ? Math.round(unitPrice * qty * 100) / 100 : 0;
+    const unidade = novoMaterial ? novoMaterial.unit || item.unit : item.unit;
 
     await prisma.materialRequestItem.update({
       where: { id: itemId },
       data: {
+        ...(novoMaterial ? { materialId: novoMaterial.id, unit: unidade, unitPrice } : {}),
         quantity: qty,
         totalPrice,
         status: 'APPROVED',
       },
     });
 
+    // Histórico da correção (quem, quando, o que mudou) e espelho nos itens pedidos da FD.
+    const rotuloAntigo = await rotuloDoMaterial(item.materialId);
+    const rotuloNovo = novoMaterial ? opts?.materialLabel?.trim() || (await rotuloDoMaterial(novoMaterial.id)) : '';
+    const qtdAnterior = Number(item.quantity);
+    const alteracoes: FdCorrecaoAlteracao[] = [];
+    if (novoMaterial) alteracoes.push({ campo: 'material', de: rotuloAntigo, para: rotuloNovo });
+    if (Math.abs(qtdAnterior - qty) > 1e-9 || unidade !== item.unit) {
+      alteracoes.push({
+        campo: 'quantidade',
+        de: descreverQuantidade(qtdAnterior, item.unit),
+        para: descreverQuantidade(qty, unidade),
+      });
+    }
+    if (alteracoes.length > 0) {
+      const autor = await nomeDoUsuario(userId);
+      await registrarCorrecaoRm({
+        materialRequestId: requestId,
+        materialId: novoMaterial ? novoMaterial.id : item.materialId,
+        previousMaterialId: item.materialId,
+        userId,
+        userName: autor,
+        changes: alteracoes,
+      });
+      await espelharCorrecaoNaFd({
+        materialRequestId: requestId,
+        requestNumber: existing.requestNumber,
+        por: autor,
+        linhas: [
+          {
+            previousMaterialId: item.materialId,
+            materialId: novoMaterial ? novoMaterial.id : item.materialId,
+            ...(novoMaterial ? { materialLabel: rotuloNovo, unit: unidade } : {}),
+            quantity: qty,
+            previousQuantity: qtdAnterior,
+            alteracoes,
+          },
+        ],
+      });
+    }
+
     await prisma.materialRequestComment.create({
       data: {
         materialRequestId: requestId,
         userId,
-        content: `Quantidade corrigida para ${qty} ${item.unit}. O item voltou ao mapa de cotação.`,
+        content: novoMaterial
+          ? `Material trocado de ${rotuloAntigo || 'material anterior'} para ${rotuloNovo || 'novo material'} (${qty} ${unidade}). O item voltou ao mapa de cotação.`
+          : `Quantidade corrigida para ${qty} ${item.unit}. O item voltou ao mapa de cotação.`,
       },
     });
 
@@ -1686,7 +1762,95 @@ export class MaterialRequestService {
 
     await persistDemandSheetAttachmentsJson(prisma, id, attachmentFiles);
 
+    await this.registrarCorrecaoDaRmInteira(existing, itemCreates, data.correcaoLinhas ?? [], userId);
+
     return await this.getMaterialRequestById(id);
+  }
+
+  /**
+   * Correção da RM inteira (os itens são recriados): compara cada linha com o material original,
+   * grava o histórico e espelha nos itens pedidos da FD. Linha nova (sem original) não pertence à FD.
+   */
+  private async registrarCorrecaoDaRmInteira(
+    existing: {
+      id: string;
+      requestNumber: string;
+      items: Array<{ materialId: string; quantity: unknown; unit: string; status: string }>;
+    },
+    novos: Array<{ materialId: string; quantity: number; unit: string }>,
+    linhas: { originalMaterialId?: string; materialLabel?: string }[],
+    userId: string
+  ): Promise<void> {
+    try {
+      const antigos = existing.items.filter((i) => i.status !== 'CANCELLED');
+      const usados = new Set<string>();
+      const corrigidas: RmLinhaCorrigida[] = [];
+      for (let i = 0; i < novos.length; i++) {
+        const orig = String(linhas[i]?.originalMaterialId || '').trim();
+        if (!orig) continue;
+        const antigo = antigos.find((a) => a.materialId === orig);
+        if (!antigo) continue;
+        usados.add(orig);
+        const novo = novos[i];
+        const alteracoes: FdCorrecaoAlteracao[] = [];
+        const trocou = novo.materialId !== orig;
+        let rotuloNovo = '';
+        if (trocou) {
+          rotuloNovo = linhas[i]?.materialLabel?.trim() || (await rotuloDoMaterial(novo.materialId));
+          alteracoes.push({ campo: 'material', de: await rotuloDoMaterial(orig), para: rotuloNovo });
+        }
+        const qtdAntiga = Number(antigo.quantity);
+        if (Math.abs(qtdAntiga - novo.quantity) > 1e-9 || antigo.unit !== novo.unit) {
+          alteracoes.push({
+            campo: 'quantidade',
+            de: descreverQuantidade(qtdAntiga, antigo.unit),
+            para: descreverQuantidade(novo.quantity, novo.unit),
+          });
+        }
+        if (alteracoes.length === 0) continue;
+        corrigidas.push({
+          previousMaterialId: orig,
+          materialId: novo.materialId,
+          ...(trocou ? { materialLabel: rotuloNovo, unit: novo.unit } : {}),
+          quantity: novo.quantity,
+          previousQuantity: qtdAntiga,
+          alteracoes,
+        });
+      }
+      // Linha removida na correção: o material sai do item da FD.
+      for (const antigo of antigos) {
+        if (usados.has(antigo.materialId)) continue;
+        if (novos.some((n) => n.materialId === antigo.materialId)) continue;
+        const rotulo = await rotuloDoMaterial(antigo.materialId);
+        corrigidas.push({
+          previousMaterialId: antigo.materialId,
+          materialId: null,
+          alteracoes: [
+            { campo: 'cancelado', de: `${rotulo} · ${descreverQuantidade(Number(antigo.quantity), antigo.unit)}` },
+          ],
+        });
+      }
+      if (corrigidas.length === 0) return;
+      const autor = await nomeDoUsuario(userId);
+      for (const c of corrigidas) {
+        await registrarCorrecaoRm({
+          materialRequestId: existing.id,
+          materialId: c.materialId ?? c.previousMaterialId,
+          previousMaterialId: c.previousMaterialId,
+          userId,
+          userName: autor,
+          changes: c.alteracoes,
+        });
+      }
+      await espelharCorrecaoNaFd({
+        materialRequestId: existing.id,
+        requestNumber: existing.requestNumber,
+        por: autor,
+        linhas: corrigidas,
+      });
+    } catch (err) {
+      console.warn('[RM correção] Falha ao registrar a correção da RM:', err);
+    }
   }
 
   /**
@@ -1871,6 +2035,29 @@ export class MaterialRequestService {
       item.material.name?.trim() ||
       item.material.sinapiCode?.trim() ||
       'Material';
+
+    // Histórico e FD: o material sai do item da FD (item sem material volta a ficar livre).
+    {
+      const autor = await nomeDoUsuario(userId);
+      const rotulo = (await rotuloDoMaterial(item.materialId)) || materialLabel;
+      const alteracoes: FdCorrecaoAlteracao[] = [
+        { campo: 'cancelado', de: `${rotulo} · ${descreverQuantidade(Number(item.quantity), item.unit)}` },
+      ];
+      await registrarCorrecaoRm({
+        materialRequestId: requestId,
+        materialId: item.materialId,
+        previousMaterialId: item.materialId,
+        userId,
+        userName: autor,
+        changes: alteracoes,
+      });
+      await espelharCorrecaoNaFd({
+        materialRequestId: requestId,
+        requestNumber: rm.requestNumber,
+        por: autor,
+        linhas: [{ previousMaterialId: item.materialId, materialId: null, alteracoes }],
+      });
+    }
 
     await prisma.materialRequestComment.create({
       data: {

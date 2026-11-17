@@ -4906,9 +4906,23 @@ export class PurchaseOrderService {
         },
       });
 
-      if (rmItemId) {
+      // Identifica o item da RM: vínculo direto ou fallback por materialId (OCs legadas sem vínculo).
+      let resolvedRmItemId = rmItemId;
+      if (!resolvedRmItemId && order.materialRequestId && line.materialId) {
+        const candidate = await tx.materialRequestItem.findFirst({
+          where: {
+            materialRequestId: order.materialRequestId,
+            materialId: line.materialId,
+            status: { notIn: ['CANCELLED'] },
+          },
+          select: { id: true },
+        });
+        if (candidate) resolvedRmItemId = candidate.id;
+      }
+
+      if (resolvedRmItemId) {
         await tx.materialRequestItem.update({
-          where: { id: rmItemId },
+          where: { id: resolvedRmItemId },
           data: {
             status: cancelItem ? 'CANCELLED' : 'APPROVED',
             fulfilledQuantity: null,
@@ -4917,9 +4931,8 @@ export class PurchaseOrderService {
         });
 
         if (!cancelItem) {
-          // Remove vencedores/preços do item em mapas antigos para não travar nova cotação.
-          await tx.quoteMapWinnerItem.deleteMany({ where: { materialRequestItemId: rmItemId } });
-          await tx.quoteMapSupplierItem.deleteMany({ where: { materialRequestItemId: rmItemId } });
+          await tx.quoteMapWinnerItem.deleteMany({ where: { materialRequestItemId: resolvedRmItemId } });
+          await tx.quoteMapSupplierItem.deleteMany({ where: { materialRequestItemId: resolvedRmItemId } });
         }
       }
 

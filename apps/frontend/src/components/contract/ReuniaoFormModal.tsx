@@ -1253,8 +1253,25 @@ export function ReuniaoFormModal({
     };
     const ok = await persist(dataToSave, { finalize: true });
     if (!ok) return;
-    toast.success(kind === 'mensal' ? 'Relatório salvo!' : 'Reunião salva!');
+    toast.success(kind === 'mensal' ? 'Relatório finalizado!' : 'Reunião finalizada!');
     onClose();
+  };
+
+  /** Salva o que já foi preenchido, sem conferir obrigatórios; o status fica "Em andamento". */
+  const handleSaveDraft = async () => {
+    if (readOnly) return;
+    const userName = authService.getUser()?.name?.trim() || '';
+    const dataToSave: ReuniaoData = {
+      ...form,
+      identificacao: {
+        ...form.identificacao,
+        responsavelPreenchimento:
+          form.identificacao.responsavelPreenchimento?.trim() || userName,
+      },
+    };
+    const ok = await persist(dataToSave);
+    if (!ok) return;
+    toast.success('Rascunho salvo.');
   };
 
   const renderSection = (section: Section) => (
@@ -1403,6 +1420,15 @@ export function ReuniaoFormModal({
           </>
         ) : (
           <>
+        <button
+          type="button"
+          onClick={() => void handleSaveDraft()}
+          disabled={saving}
+          className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+          title="Salva o que já foi preenchido; o status continua Em andamento"
+        >
+          Salvar rascunho
+        </button>
         {multiStep && activeFillStep > 0 ? (
               <button
                 type="button"
@@ -1430,7 +1456,7 @@ export function ReuniaoFormModal({
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
               >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Salvar
+            Finalizar preenchimento
               </button>
             )}
           </>

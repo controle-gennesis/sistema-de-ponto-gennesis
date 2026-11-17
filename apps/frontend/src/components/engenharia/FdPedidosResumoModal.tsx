@@ -6,6 +6,7 @@ import { AlertTriangle, Loader2, X } from 'lucide-react';
 import api from '@/lib/api';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import type { FdInsumoLine } from '@/components/engenharia/FdPedidoMaterialModal';
+import { HistoricoCorrecoes, type CorrecaoRegistro } from '@/components/engenharia/HistoricoCorrecoes';
 
 export type OcResumo = {
   ocId?: string;
@@ -24,6 +25,14 @@ export type OcResumo = {
   valorPago?: number | null;
 };
 
+/**
+ * OC que já conta como "ordem de compra" do item: enviada com sucesso ao TOTVS (tem IdMov) e não
+ * cancelada/reprovada. Antes disso (gerada, em aprovação, não enviada) o item segue "Aguardando OC".
+ */
+export function ocsEnviadasTotvs<T extends { status: string; totvsIdMov: number | null }>(ocs: T[]): T[] {
+  return ocs.filter((oc) => oc.totvsIdMov != null && oc.status !== 'CANCELLED' && oc.status !== 'REJECTED');
+}
+
 /** OC paga (validada pelo compras no G4), contada uma vez pelo total da OC. */
 export type OcPagaResumo = { orderNumber: string; totvsIdMov: number; valor: number };
 
@@ -39,6 +48,8 @@ export type ItemResumo = {
   alertas: string[];
   requestedAt: string;
   rm: { id: string; requestNumber: string; status: string | null };
+  /** Histórico das correções feitas na RM para este item. */
+  correcoes?: CorrecaoRegistro[];
   materiais: {
     materialId: string;
     materialLabel: string;
@@ -109,7 +120,8 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
     },
     enabled: isOpen && !!fdApprovalId,
     staleTime: 0,
-    refetchOnWindowFocus: false,
+    // Sempre a situação atual (ex.: depois de uma correção na RM ou do envio da OC ao TOTVS).
+    refetchOnWindowFocus: true,
   });
 
   /** Agrupa por RM (pedido), mostrando todos os itens de cada RM juntos. */
@@ -136,7 +148,7 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
   if (!isOpen) return null;
 
   const total = data?.itens.length ?? 0;
-  const comOc = (data?.itens ?? []).filter((i) => i.materiais.some((m) => m.ocs.length > 0)).length;
+  const comOc = (data?.itens ?? []).filter((i) => i.materiais.some((m) => ocsEnviadasTotvs(m.ocs).length > 0)).length;
   const ocsPagas = data?.ocsPagas ?? [];
   const totalOcsPagas = data?.totalOcsPagas ?? 0;
 
@@ -253,6 +265,7 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                         {it.alertas.map((a) => ALERTA_LABEL[a] ?? a).join(' e ')}
                                       </p>
                                     )}
+                                    <HistoricoCorrecoes registros={it.correcoes ?? []} />
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300" rowSpan={linhas.length}>
                                     {it.quantidadeFd != null ? `${fmtQtd(it.quantidadeFd)} ${it.unidadeFd}` : '—'}
@@ -271,8 +284,8 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                 {m ? `${fmtQtd(m.quantity)} ${m.unit}` : '—'}
                               </td>
                               <td className="whitespace-nowrap px-3 py-2">
-                                {m && m.ocs.length > 0 ? (
-                                  m.ocs.map((oc) => (
+                                {m && ocsEnviadasTotvs(m.ocs).length > 0 ? (
+                                  ocsEnviadasTotvs(m.ocs).map((oc) => (
                                     <p key={oc.orderNumber}>
                                       <span className="font-medium text-gray-900 dark:text-gray-100">{oc.orderNumber}</span>{' '}
                                       <span className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -285,8 +298,8 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                 )}
                               </td>
                               <td className="whitespace-nowrap px-3 py-2 tabular-nums">
-                                {m && m.ocs.length > 0 ? (
-                                  m.ocs.map((oc) => (
+                                {m && ocsEnviadasTotvs(m.ocs).length > 0 ? (
+                                  ocsEnviadasTotvs(m.ocs).map((oc) => (
                                     <p key={oc.orderNumber}>
                                       {oc.totvsIdMov != null ? (
                                         <span className="font-medium text-green-700 dark:text-green-400">{oc.totvsIdMov}</span>
@@ -300,8 +313,8 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                 )}
                               </td>
                               <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                                {m && m.ocs.length > 0 ? (
-                                  m.ocs.map((oc) => (
+                                {m && ocsEnviadasTotvs(m.ocs).length > 0 ? (
+                                  ocsEnviadasTotvs(m.ocs).map((oc) => (
                                     <p key={oc.orderNumber}>
                                       {oc.pago && oc.valorPago != null ? (
                                         <span className="font-medium text-gray-900 dark:text-gray-100">

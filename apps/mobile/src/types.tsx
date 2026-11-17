@@ -1,3 +1,13 @@
+/** Horário de trabalho cadastrado no funcionário (HH:mm; dias da semana 0=domingo…6=sábado). */
+export interface WorkSchedule {
+  startTime?: string;
+  endTime?: string;
+  lunchStartTime?: string;
+  lunchEndTime?: string;
+  workDays?: number[];
+  toleranceMinutes?: number;
+}
+
 export interface Employee {
   id: string;
   userId: string;
@@ -17,6 +27,7 @@ export interface Employee {
   isRemote: boolean;
   /** Se false, não precisa bater ponto (padrão true, como no web). */
   requiresTimeClock?: boolean;
+  workSchedule?: WorkSchedule | null;
 }
 
 export interface User {

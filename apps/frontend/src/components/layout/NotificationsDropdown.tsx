@@ -61,6 +61,7 @@ const OPERATION_IDS = new Set([
   'kanban-assigned',
   'fd-compras',
   'fd-reprovadas',
+  'rm-correcao',
   'furo-estoque',
   'recebimento',
   'fuel-supplies',
@@ -229,6 +230,21 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeMyDpRequests && !permissionsLoading,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
+  // RMs do próprio usuário enviadas para correção (pelo aprovador ou pelo comprador no mapa).
+  const canSeeMyMaterialRequests = isAdministrator || can(pathToModuleKey('/ponto/solicitar-materiais'));
+  const { data: rmCorrecaoCount = 0 } = useQuery({
+    queryKey: ['rm-minhas-correcao-count'],
+    queryFn: async () => {
+      const res = await api.get('/material-requests/minhas/correcao-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeMyMaterialRequests && !permissionsLoading,
     refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
@@ -511,6 +527,16 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: ClipboardCheck,
       });
     }
+    if (canSeeMyMaterialRequests && rmCorrecaoCount > 0) {
+      list.push({
+        id: 'rm-correcao',
+        title: 'Solicitações de Material',
+        description: 'Enviadas para correção',
+        count: rmCorrecaoCount,
+        href: '/ponto/solicitar-materiais',
+        Icon: ShoppingCart,
+      });
+    }
     if ((kanbanAssigned?.count ?? 0) > 0) {
       // Abre o card mais recente; ao abri-lo ele sai da contagem e o próximo clique leva ao seguinte.
       const unico = kanbanAssigned!.items[0];
@@ -647,6 +673,8 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     paraEncerrarCount,
     canSeeMyDpRequests,
     dpReturnPendingCount,
+    canSeeMyMaterialRequests,
+    rmCorrecaoCount,
     dpMessagesUnread,
     chatUnreadCount,
     gestaoOsInbox,

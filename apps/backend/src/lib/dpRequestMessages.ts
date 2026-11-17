@@ -214,6 +214,64 @@ export async function announceAccountingCancelled(
   );
 }
 
+/** A Contabilidade devolveu o pedido para ajuste: mensagem com o motivo + aviso para quem abriu. */
+export async function announceAccountingReturned(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  reason: string,
+  requesterUserId?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const motivo = reason.trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: `Contabilidade devolveu o pedido para ajuste. Motivo: ${motivo}`,
+    },
+  });
+  await markRead(row.id, actorUserId);
+  if (requesterUserId && requesterUserId !== actorUserId) {
+    void sendPushToUsers([requesterUserId], {
+      title: `Pedido devolvido para ajuste - solicitação nº ${row.displayNumber}`,
+      body: `${authorName}: ${motivo.slice(0, 120)}`,
+      data: { type: 'dp-request-message', id: row.id },
+    }).catch(() => undefined);
+  }
+}
+
+/** O solicitante corrigiu e reenviou o pedido devolvido: aviso para a Contabilidade e o DP. */
+export async function announceRequesterAdjusted(
+  dpRequestId: string,
+  actorUserId: string,
+  authorName: string,
+  note?: string | null
+) {
+  const row = await prisma.dpRequest.findUnique({ where: { id: dpRequestId } });
+  if (!row) return;
+  const extra = (note ?? '').trim();
+  await prisma.dpRequestComment.create({
+    data: {
+      requestId: row.id,
+      userId: actorUserId,
+      userName: authorName,
+      body: extra
+        ? `Solicitação ajustada e reenviada à Contabilidade. Observação: ${extra}`
+        : 'Solicitação ajustada e reenviada à Contabilidade.',
+    },
+  });
+  await markRead(row.id, actorUserId);
+  notifyParticipants(
+    row,
+    actorUserId,
+    `Solicitação ajustada - nº ${row.displayNumber}`,
+    `${authorName} corrigiu e reenviou o pedido à Contabilidade.`
+  );
+}
+
 export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     if (!req.user) throw createError('Usuário não autenticado', 401);

@@ -72,6 +72,7 @@ type FlowStatus =
   | 'RDO_SELECT_CONTRATO'
   | 'RDO_SELECT_OBRA'
   | 'RDO_ASK_DATE'
+  | 'RDO_SELECT_OS'
   | 'RDO_ASK_MODE'
   | 'RDO_HUB'
   | 'RDO_ACT_TITLE'

@@ -103,55 +103,138 @@ async function assertObra(obraId: string) {
   if (!obra) throw createError('Obra não encontrada', 404);
 }
 
-/** Lista de diários (um por obra/dia), com filtros por contrato, obra, período e busca. */
-router.get('/', async (req: AuthRequest, res, next) => {
+/** Etapa do RDO: finalizado vem primeiro; "sem atividade" e "em preenchimento" são os não finalizados. */
+const STAGE_WHERE: Record<string, Record<string, unknown>> = {
+  final: { finalizedAt: { not: null } },
+  none: { finalizedAt: null, noActivity: true },
+  draft: { finalizedAt: null, noActivity: false },
+};
+
+/**
+ * Filtro comum da lista e dos totais por etapa: contrato, obra, período e busca, sempre dentro dos contratos
+ * Liberados para o usuário. Devolve `null` quando a pessoa não enxerga nenhum contrato.
+ */
+async function buildListWhere(req: AuthRequest): Promise<any | null> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  const contratoId = str(req.query.contratoId, 40);
+  const obraId = str(req.query.obraId, 40);
+  const from = str(req.query.from, 10);
+  const to = str(req.query.to, 10);
+  const search = str(req.query.search, 100);
+
+  const dateFilter: Record<string, string> = {};
+  if (DATE_RE.test(from)) dateFilter.gte = from;
+  if (DATE_RE.test(to)) dateFilter.lte = to;
+
+  // Só diários de obras de contratos Liberados (administradores veem tudo).
+  const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+  const allowedIds = access.filter === 'ids' ? access.ids : null;
+  if (access.filter === 'none' || (contratoId && allowedIds && !allowedIds.includes(contratoId))) return null;
+  const contratoFilter = contratoId
+    ? { contratoId }
+    : allowedIds
+      ? { contratoId: { in: allowedIds } }
+      : {};
+
+  return {
+    ...(obraId ? { obraId } : {}),
+    ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+    ...(Object.keys(contratoFilter).length || search
+      ? {
+          obra: {
+            ...contratoFilter,
+            ...(search
+              ? {
+                  OR: [
+                    { name: { contains: search, mode: 'insensitive' } },
+                    { contrato: { name: { contains: search, mode: 'insensitive' } } },
+                    { contrato: { number: { contains: search, mode: 'insensitive' } } },
+                  ],
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Rótulo da OS como no resto do sistema: "AD-725 - 1" (SE sem o prefixo OS/SE, mais a Pasta, se houver). */
+function osLabel(divSe: string, folder: string): string {
+  const d = divSe.replace(/^(OS|SE)\s+/i, '').trim();
+  if (!d) return '';
+  return folder ? `${d} - ${folder}` : d;
+}
+
+/** OS (SE e Pasta) de um contrato, para escolher ao criar o diário. Só contratos Liberados para o usuário. */
+router.get('/os-options', async (req: AuthRequest, res, next) => {
   try {
     if (!req.user) throw createError('Usuário não autenticado', 401);
+    const contratoId = str(req.query.contratoId, 40);
+    if (!contratoId) throw createError('Informe o contrato', 400);
+    const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+    if (access.filter === 'none' || (access.filter === 'ids' && !access.ids.includes(contratoId))) {
+      throw createError('Sem permissão para este contrato', 403);
+    }
+    const rows = await prisma.pleito.findMany({
+      where: { updatedContractId: contratoId },
+      select: { divSe: true, folderNumber: true, serviceDescription: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const seen = new Map<string, { divSe: string; folderNumber: string; label: string; description: string }>();
+    for (const r of rows) {
+      const divSe = (r.divSe ?? '').trim();
+      const folder = (r.folderNumber ?? '').trim();
+      const label = osLabel(divSe, folder);
+      if (!label) continue;
+      const key = `${divSe.toLowerCase()}|${folder.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          divSe,
+          folderNumber: folder,
+          label,
+          description: (r.serviceDescription ?? '').trim().slice(0, 140),
+        });
+      }
+    }
+    const data = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { numeric: true }));
+    res.json({ success: true, data });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Totais por etapa (todos, em preenchimento, finalizados, sem atividade), com os mesmos filtros da lista. */
+router.get('/stats', async (req: AuthRequest, res, next) => {
+  try {
+    const base = await buildListWhere(req);
+    if (!base) {
+      res.json({ success: true, data: { all: 0, draft: 0, final: 0, none: 0 } });
+      return;
+    }
+    const [all, draft, final, none] = await Promise.all([
+      prisma.diarioObra.count({ where: base }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.draft } }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.final } }),
+      prisma.diarioObra.count({ where: { ...base, ...STAGE_WHERE.none } }),
+    ]);
+    res.json({ success: true, data: { all, draft, final, none } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Lista de diários (um por obra/dia), com filtros por contrato, obra, período, etapa e busca. */
+router.get('/', async (req: AuthRequest, res, next) => {
+  try {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
-    const contratoId = str(req.query.contratoId, 40);
-    const obraId = str(req.query.obraId, 40);
-    const from = str(req.query.from, 10);
-    const to = str(req.query.to, 10);
-    const search = str(req.query.search, 100);
-
-    const dateFilter: Record<string, string> = {};
-    if (DATE_RE.test(from)) dateFilter.gte = from;
-    if (DATE_RE.test(to)) dateFilter.lte = to;
-
-    // Só diários de obras de contratos Liberados (administradores veem tudo).
-    const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
-    const allowedIds = access.filter === 'ids' ? access.ids : null;
-    if (access.filter === 'none' || (contratoId && allowedIds && !allowedIds.includes(contratoId))) {
+    const base = await buildListWhere(req);
+    if (!base) {
       res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 1 } });
       return;
     }
-    const contratoFilter = contratoId
-      ? { contratoId }
-      : allowedIds
-        ? { contratoId: { in: allowedIds } }
-        : {};
-
-    const where: any = {
-      ...(obraId ? { obraId } : {}),
-      ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
-      ...(Object.keys(contratoFilter).length || search
-        ? {
-            obra: {
-              ...contratoFilter,
-              ...(search
-                ? {
-                    OR: [
-                      { name: { contains: search, mode: 'insensitive' } },
-                      { contrato: { name: { contains: search, mode: 'insensitive' } } },
-                      { contrato: { number: { contains: search, mode: 'insensitive' } } },
-                    ],
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    };
+    const stage = STAGE_WHERE[str(req.query.status, 10)];
+    const where: any = stage ? { ...base, ...stage } : base;
 
     const [total, rows] = await Promise.all([
       prisma.diarioObra.count({ where }),
@@ -183,6 +266,9 @@ router.get('/', async (req: AuthRequest, res, next) => {
         contratoNumber: r.obra?.contrato?.number ?? '',
         noActivity: r.noActivity,
         noActivityReason: r.noActivityReason,
+        osDivSe: r.osDivSe ?? '',
+        osFolder: r.osFolder ?? '',
+        osLabel: osLabel(r.osDivSe ?? '', r.osFolder ?? ''),
         finalizedAt: r.finalizedAt,
         activities: count(c.activities),
         workers: count(c.labor?.direct) + count(c.labor?.indirect),
@@ -244,6 +330,10 @@ router.put('/:obraId/:date', async (req: AuthRequest, res, next) => {
       noActivityReason: noActivity ? str(req.body?.noActivityReason) || null : null,
       content: normalizeContent(req.body),
       updatedById: req.user?.id ?? null,
+      // A OS só muda quando vem no corpo (o salvamento automático do editor não a envia).
+      ...(req.body && 'osDivSe' in req.body
+        ? { osDivSe: str(req.body.osDivSe, 80) || null, osFolder: str(req.body.osFolder, 80) || null }
+        : {}),
     };
     const row = await prisma.diarioObra.upsert({
       where: { obraId_date: { obraId, date } },
@@ -251,6 +341,44 @@ router.put('/:obraId/:date', async (req: AuthRequest, res, next) => {
       update: data,
     });
     res.json({ success: true, data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Define ou troca só a OS do diário (SE e Pasta). Vale também para diário finalizado: é dado de identificação,
+ * não muda o conteúdo do relatório. A OS precisa ser uma das OS do contrato da obra.
+ */
+router.patch('/:obraId/:date/os', async (req: AuthRequest, res, next) => {
+  try {
+    const { obraId, date } = req.params;
+    if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+    const row = await prisma.diarioObra.findUnique({
+      where: { obraId_date: { obraId, date } },
+      select: { id: true, obra: { select: { contratoId: true } } },
+    });
+    if (!row) throw createError('Diário não encontrado', 404);
+    const divSe = str(req.body?.osDivSe, 80);
+    const folder = str(req.body?.osFolder, 80);
+    if (divSe || folder) {
+      const exists = await prisma.pleito.findFirst({
+        where: {
+          updatedContractId: row.obra.contratoId,
+          divSe: { equals: divSe, mode: 'insensitive' },
+          ...(folder
+            ? { folderNumber: { equals: folder, mode: 'insensitive' as const } }
+            : { OR: [{ folderNumber: null }, { folderNumber: '' }] }),
+        },
+        select: { id: true },
+      });
+      if (!exists) throw createError('OS não encontrada neste contrato', 400);
+    }
+    const updated = await prisma.diarioObra.update({
+      where: { id: row.id },
+      data: { osDivSe: divSe || null, osFolder: folder || null, updatedById: req.user?.id ?? null },
+    });
+    res.json({ success: true, data: updated });
   } catch (e) {
     next(e);
   }

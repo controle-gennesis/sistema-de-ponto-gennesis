@@ -1542,8 +1542,11 @@ function OcOrderMaterialsTable({
           {order.items?.map((line, idx) => {
             const lineSubtitle = purchaseOrderLineSubtitle(line);
             const canReturnThis = showActions && Boolean(line.id);
+            const isReturnedItem =
+              order.status === 'CANCELLED' &&
+              /\[Item devolvido à RM/.test(order.notes || '');
             return (
-              <tr key={line.id || idx} className="text-gray-900 dark:text-gray-100">
+              <tr key={line.id || idx} className={`text-gray-900 dark:text-gray-100${isReturnedItem ? ' opacity-60' : ''}`}>
                 <td className="py-3 pr-2 text-center tabular-nums align-top font-medium text-gray-500 dark:text-gray-400">
                   {idx + 1}
                 </td>
@@ -1552,6 +1555,11 @@ function OcOrderMaterialsTable({
                 </td>
                 <td className="py-3 px-2 align-top max-w-[220px] sm:max-w-none">
                   <span className="block">{catalogMaterialLabel(line.material)}</span>
+                  {isReturnedItem ? (
+                    <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                      Devolvido à RM
+                    </span>
+                  ) : null}
                   {lineSubtitle ? (
                     <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-gray-500 dark:text-gray-400">
                       {lineSubtitle}
@@ -5812,8 +5820,9 @@ export function OcPurchaseOrdersPanel({
           <div className="absolute inset-0 bg-black/50" onClick={requestCloseSelectedOrder} />
           <div
             className={`relative my-auto flex w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800 ${
-              selectedOrder.status !== 'IN_REVIEW' && ocDetailTab === 'comentarios'
-                ? 'h-[min(92dvh,calc(100dvh-2rem))]'
+              // Com abas: altura fixa, para o modal não mudar de tamanho ao trocar de aba (o conteúdo rola dentro).
+              selectedOrder.status !== 'IN_REVIEW'
+                ? 'h-[min(85dvh,calc(100dvh-2rem))]'
                 : 'max-h-[min(92dvh,calc(100dvh-2rem))]'
             } ${selectedOrder.status === 'IN_REVIEW' ? 'max-w-2xl' : 'max-w-4xl'}`}
             role="dialog"

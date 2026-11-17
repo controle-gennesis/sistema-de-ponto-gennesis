@@ -316,6 +316,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    canAccessDrive,
+    isDepartmentSocios,
     canApproveEmpreiteiroDaily,
     isDepartmentPessoal,
   } = usePermissions();
@@ -662,8 +664,23 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
   );
 
+  // RMs do próprio usuário enviadas para correção — número em "Solicitação de Materiais" (mesma consulta do sininho).
+  const { data: rmCorrecaoCount = 0 } = useQuery({
+    queryKey: ['rm-minhas-correcao-count'],
+    queryFn: async () => {
+      const res = await api.get('/material-requests/minhas/correcao-count');
+      const n = Number(res.data?.data?.count ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: !isLoading && (isAdministrator || can(pk('/ponto/solicitar-materiais'))),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const navBadgeCountForHref = (href: string): number => {
     if (href === '/ponto/aprovacoes') return approvalCounts.total;
+    if (href === '/ponto/solicitar-materiais') return rmCorrecaoCount;
     // RM já entra no badge de Aprovações — não somar de novo em Suprimentos
     if (href === '/ponto/gerenciar-materiais' && canApproveMaterialRequests) {
       const aprovacoesVisible =
@@ -891,7 +908,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
-            permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+            permission: !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitacoes-dp')))
           },
           {
             name: 'Frota',
@@ -900,7 +917,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Car,
             description: 'Solicitar reserva de veículos da frota',
             permission:
-              isAdministrator || can(pk('/ponto/reserva-veiculos'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/reserva-veiculos')))
           },
           {
             name: 'Abastecimento',
@@ -909,7 +926,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Fuel,
             description: 'Solicitar abastecimento de veículos',
             permission:
-              isAdministrator || can(pk('/ponto/solicitar-combustivel'))
+              !isDepartmentSocios && (isAdministrator || can(pk('/ponto/solicitar-combustivel')))
           },
           {
             name: 'Alterações de Ponto',
@@ -965,7 +982,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/treinamentos',
             icon: GraduationCap,
             description: 'Videoaulas, avaliações e certificados',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
           {
             name: 'Central de Ajuda',
@@ -973,7 +990,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/central-de-ajuda',
             icon: HelpCircle,
             description: 'Guias e tutoriais passo a passo do sistema',
-            permission: !isLinkedEmpreiteiro,
+            permission: !isLinkedEmpreiteiro && !isDepartmentSocios,
           },
         ]
       },
@@ -1860,7 +1877,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveMaterialRequests ||
     canApproveEmpreiteiroDaily;
 
-  const showRailAtalhos = canAccessCollaborationTools || canSeeAprovacoesAtalho;
+  const showRailAtalhos = canAccessCollaborationTools || canAccessDrive || canSeeAprovacoesAtalho;
 
   useEffect(() => {
     setRailFavorites(readRailFavorites());
@@ -1914,7 +1931,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             badge: 0,
           }
         : null,
-      canAccessCollaborationTools
+      canAccessDrive
         ? {
             href: '/ponto/drive' as const,
             label: 'Meu Drive',
@@ -1947,6 +1964,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const railFavoritosVisiveis = railFavorites
     .map((href) => railAtalhosByHref.get(href))
     .filter((item): item is (typeof railAtalhosDisponiveis)[number] => item != null);
+
+  // Só um atalho disponível (ex.: Sócios, só com o Drive): mostra ele direto e dispensa o botão "Atalhos".
+  const railSoUmAtalho = railAtalhosDisponiveis.length === 1;
+  const railFavoritosMostrados = railSoUmAtalho ? railAtalhosDisponiveis : railFavoritosVisiveis;
 
   const favoritosHrefSet = new Set(railFavoritosVisiveis.map((i) => i.href));
   const atalhosBadgeOculto =
@@ -2257,7 +2278,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (!sidebarHydrated) return;
     if (isLoading && menuItems.length === 0) return;
     if (railEnterPlayedRef.current) return;
-    if (menuItems.length === 0 && !canAccessCollaborationTools && !canSeeAprovacoesAtalho) return;
+    if (menuItems.length === 0 && !canAccessCollaborationTools && !canAccessDrive && !canSeeAprovacoesAtalho) return;
 
     railEnterPlayedRef.current = true;
     setRailEnterClass(false);
@@ -2618,7 +2639,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           {showRailAtalhos ? (
           <div className="relative z-20 flex flex-shrink-0 flex-col items-center overflow-visible px-2 pb-4 [@media(max-height:820px)]:pb-2">
             <div className="flex flex-col items-center gap-2 [@media(max-height:820px)]:gap-1">
-              {railFavoritosVisiveis.map((item, favIndex) => {
+              {railFavoritosMostrados.map((item, favIndex) => {
                 const active = isFooterShortcutActive(item.href);
                 return (
                   <SidebarRailTooltip
@@ -2655,6 +2676,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   </SidebarRailTooltip>
                 );
               })}
+              {!railSoUmAtalho ? (
               <SidebarRailTooltip
                 label="Atalhos"
                 enterIndex={menuItems.length + 1 + railFavoritosVisiveis.length}
@@ -2709,6 +2731,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   <NotificationCountBadge count={atalhosBadgeOculto} rail />
                 </button>
               </SidebarRailTooltip>
+              ) : null}
             </div>
             {menuAtalhosRail && (
               <ActionMenuOverlay

@@ -4,7 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { BadgeCheck, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { usePermissions } from '../hooks/usePermissions';
-import { approvalsPendingTotal, fetchApprovalNotificationCounts } from '../services/approvals';
+import {
+  approvalsPendingTotal,
+  fetchApprovalNotificationCounts,
+  fetchEmpreiteiroPendingCount,
+} from '../services/approvals';
 import ApprovalsSheet from './ApprovalsSheet';
 
 export default function HomeAprovacoesCard() {
@@ -36,8 +40,16 @@ export default function HomeAprovacoesCard() {
     refetchInterval: 60_000,
   });
 
+  // Medições e aditivos de empreita não vêm na contagem geral: somam à parte.
+  const empreiteiroQuery = useQuery({
+    queryKey: ['approvals', 'empreiteiro-pending-count'],
+    enabled: canSeeAprovacoes && canApproveEmpreiteiroDaily,
+    queryFn: fetchEmpreiteiroPendingCount,
+    refetchInterval: 60_000,
+  });
+
   const data = countsQuery.data;
-  const total = approvalsPendingTotal(data);
+  const total = approvalsPendingTotal(data) + (empreiteiroQuery.data ?? 0);
   const hasPending = total > 0;
 
 
@@ -60,7 +72,6 @@ export default function HomeAprovacoesCard() {
       >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <View style={styles.headerDot} />
             <Text style={styles.kicker}>Aprovações</Text>
           </View>
           <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
@@ -138,18 +149,11 @@ const getStyles = (colors: any, isDark: boolean) =>
       alignItems: 'center',
       gap: 8,
     },
-    headerDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
-      backgroundColor: colors.primary,
-    },
     kicker: {
-      fontSize: 12,
+      fontSize: 17,
       fontWeight: '700',
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
-      color: colors.textSecondary,
+      color: colors.text,
+      letterSpacing: -0.3,
     },
     loadingText: {
       fontSize: 15,

@@ -15,7 +15,10 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { DriveFile, DriveFolder, DriveFolderSharePermission } from '@prisma/client';
+import type JSZipType from 'jszip';
 import { prisma } from '../lib/prisma';
+
+type JSZipFolder = InstanceType<typeof JSZipType>;
 import { s3BodyToBuffer } from '../lib/awsS3Compat';
 
 /** Limite padrão: 5 GB (vídeos longos). Override via DRIVE_MAX_FILE_SIZE (bytes). */
@@ -301,6 +304,30 @@ export class DriveService {
     };
   }
 
+  /** Tamanho total (arquivos de todas as subpastas, sem lixeira) de cada pasta informada. */
+  private async getFolderSizes(folderIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (folderIds.length === 0) return map;
+    try {
+      const rows = await prisma.$queryRaw<Array<{ root: string; total: bigint | number | null }>>`
+        WITH RECURSIVE tree AS (
+          SELECT id AS root, id FROM drive_folders WHERE id = ANY(${folderIds}::text[])
+          UNION ALL
+          SELECT t.root, c.id FROM drive_folders c
+          JOIN tree t ON c."parentId" = t.id
+          WHERE c."trashedAt" IS NULL
+        )
+        SELECT t.root AS root, COALESCE(SUM(fl."size"), 0)::bigint AS total
+        FROM tree t
+        LEFT JOIN drive_files fl ON fl."folderId" = t.id AND fl."trashedAt" IS NULL
+        GROUP BY t.root`;
+      for (const r of rows) map.set(r.root, Number(r.total ?? 0));
+    } catch (err) {
+      console.error('[drive] falha ao calcular tamanho das pastas', err);
+    }
+    return map;
+  }
+
   async listFolderContents(
     userId: string,
     parentId?: string,
@@ -311,6 +338,7 @@ export class DriveService {
     if (parentId === undefined || parentId === null) {
       const foldersRaw = await this.listRootFoldersForUser(userId);
       const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));
+      const sizeMap = await this.getFolderSizes(foldersRaw.map((f) => f.id));
       const files = await prisma.driveFile.findMany({
         where: { ownerId: userId, folderId: null, ...NOT_TRASHED },
         orderBy: { updatedAt: 'desc' },
@@ -320,9 +348,10 @@ export class DriveService {
         ...files.map((f) => f.ownerId),
       ]);
       return {
-        folders: foldersRaw.map((f) =>
-          this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-        ),
+        folders: foldersRaw.map((f) => ({
+          ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+          sizeBytes: sizeMap.get(f.id) ?? 0,
+        })),
         files: files.map((f) => this.mapFile(f, ownerNames)),
       };
     }
@@ -342,14 +371,16 @@ export class DriveService {
       }),
     ]);
     const shareMap = await this.getShareCountsByFolderIds(foldersRaw.map((f) => f.id));
+    const sizeMap = await this.getFolderSizes(foldersRaw.map((f) => f.id));
     const ownerNames = await this.resolveOwnerInfo([
       ...foldersRaw.map((f) => f.ownerId),
       ...allFiles.map((f) => f.ownerId),
     ]);
     return {
-      folders: foldersRaw.map((f) =>
-        this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-      ),
+      folders: foldersRaw.map((f) => ({
+        ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+        sizeBytes: sizeMap.get(f.id) ?? 0,
+      })),
       files: allFiles.map((f) => this.mapFile(f, ownerNames)),
     };
   }
@@ -715,6 +746,49 @@ export class DriveService {
     };
   }
 
+  /** Monta um .zip com a pasta inteira (subpastas e arquivos, sem itens da lixeira). */
+  async buildFolderZip(
+    folderId: string,
+    userId: string,
+    maxBytes = 500 * 1024 * 1024,
+  ): Promise<{ buffer: Buffer; name: string }> {
+    if (!(await this.canUserAccessFolder(userId, folderId))) {
+      throw new Error('Pasta não encontrada ou sem permissão');
+    }
+    const root = await prisma.driveFolder.findUnique({ where: { id: folderId } });
+    if (!root || root.trashedAt) throw new Error('Pasta não encontrada');
+
+    const safe = (n: string) => n.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sem-nome';
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    let total = 0;
+
+    const walk = async (id: string, dir: JSZipFolder) => {
+      const files = await prisma.driveFile.findMany({ where: { folderId: id, trashedAt: null } });
+      const usados = new Set<string>();
+      for (const f of files) {
+        total += Number(f.size);
+        if (total > maxBytes) {
+          throw new Error('Pasta grande demais para baixar de uma vez (limite de 500 MB)');
+        }
+        const result = await this.s3.send(
+          new GetObjectCommand({ Bucket: this.bucketName, Key: f.s3Key }),
+        );
+        if (!result.Body) continue;
+        let nome = safe(f.name || f.originalName);
+        for (let i = 2; usados.has(nome); i++) nome = `${i}-${safe(f.name || f.originalName)}`;
+        usados.add(nome);
+        dir.file(nome, await s3BodyToBuffer(result.Body));
+      }
+      const subs = await prisma.driveFolder.findMany({ where: { parentId: id, trashedAt: null } });
+      for (const s of subs) await walk(s.id, dir.folder(safe(s.name))!);
+    };
+
+    await walk(folderId, zip.folder(safe(root.name))!);
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+    return { buffer, name: safe(root.name) };
+  }
+
   private async assertUserCanAccessFile(fileId: string, userId: string): Promise<DriveFile> {
     const file = await prisma.driveFile.findFirst({ where: { id: fileId } });
     if (!file) throw new Error('Arquivo não encontrado');
@@ -841,18 +915,47 @@ export class DriveService {
 
   // ── Busca ─────────────────────────────────────────────────────────────
 
-  async search(userId: string, query: string) {
+  /** Ids de todas as subpastas (em qualquer nível, sem lixeira) de uma pasta, incluindo ela própria. */
+  private async getFolderTreeIds(rootId: string): Promise<string[]> {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      WITH RECURSIVE tree AS (
+        SELECT id FROM drive_folders WHERE id = ${rootId}
+        UNION ALL
+        SELECT c.id FROM drive_folders c JOIN tree t ON c."parentId" = t.id WHERE c."trashedAt" IS NULL
+      )
+      SELECT id FROM tree`;
+    return rows.map((r) => r.id);
+  }
+
+  async search(userId: string, query: string, scopeFolderId?: string) {
     const q = query.trim();
     if (!q) return { folders: [] as any[], files: [] as any[] };
 
+    // "Buscar só nesta pasta": limita a busca à pasta aberta e às subpastas dela.
+    let treeIds: string[] | null = null;
+    if (scopeFolderId) {
+      if (!(await this.canUserAccessFolder(userId, scopeFolderId))) {
+        throw new Error('Pasta não encontrada ou sem permissão de acesso');
+      }
+      treeIds = await this.getFolderTreeIds(scopeFolderId);
+    }
+
     const [folderCandidates, fileCandidates] = await Promise.all([
       prisma.driveFolder.findMany({
-        where: { name: { contains: q, mode: 'insensitive' }, ...NOT_TRASHED },
+        where: {
+          name: { contains: q, mode: 'insensitive' },
+          ...(treeIds ? { id: { in: treeIds.filter((id) => id !== scopeFolderId) } } : {}),
+          ...NOT_TRASHED,
+        },
         orderBy: { name: 'asc' },
         take: 200,
       }),
       prisma.driveFile.findMany({
-        where: { name: { contains: q, mode: 'insensitive' }, ...NOT_TRASHED },
+        where: {
+          name: { contains: q, mode: 'insensitive' },
+          ...(treeIds ? { folderId: { in: treeIds } } : {}),
+          ...NOT_TRASHED,
+        },
         orderBy: { name: 'asc' },
         take: 200,
       }),
@@ -880,12 +983,53 @@ export class DriveService {
       ...accessibleFiles.map((f) => f.ownerId),
     ]);
 
-    return {
-      folders: accessibleFolders.map((f) =>
-        this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
-      ),
-      files: accessibleFiles.map((f) => this.mapFile(f, ownerNames)),
+    // Caminho de cada resultado (pastas acima dele), só até onde o usuário enxerga.
+    const nodes = new Map<string, { id: string; name: string; parentId: string | null }>();
+    let pendentes = [
+      ...accessibleFolders.map((f) => f.parentId),
+      ...accessibleFiles.map((f) => f.folderId),
+    ].filter((x): x is string => !!x);
+    for (let i = 0; i < 30 && pendentes.length > 0; i++) {
+      const ids = Array.from(new Set(pendentes.filter((id) => !nodes.has(id))));
+      if (ids.length === 0) break;
+      const rows = await prisma.driveFolder.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, parentId: true },
+      });
+      rows.forEach((r) => nodes.set(r.id, r));
+      pendentes = rows.map((r) => r.parentId).filter((x): x is string => !!x);
+    }
+    const acessoCache = new Map<string, boolean>();
+    const podeVer = async (id: string) => {
+      if (!acessoCache.has(id)) acessoCache.set(id, await this.canUserAccessFolder(userId, id));
+      return acessoCache.get(id)!;
     };
+    const caminhoDe = async (startId: string | null) => {
+      const path: Array<{ id: string; name: string }> = [];
+      let id = startId;
+      const vistos = new Set<string>();
+      while (id && !vistos.has(id)) {
+        vistos.add(id);
+        const n = nodes.get(id);
+        if (!n || !(await podeVer(id))) break;
+        path.unshift({ id: n.id, name: n.name });
+        id = n.parentId;
+      }
+      return path;
+    };
+
+    const foldersOut = [];
+    for (const f of accessibleFolders) {
+      foldersOut.push({
+        ...this.mapFolder(f, userId, shareMap.get(f.id) ?? 0, ownerNames),
+        pathFolders: await caminhoDe(f.parentId),
+      });
+    }
+    const filesOut = [];
+    for (const f of accessibleFiles) {
+      filesOut.push({ ...this.mapFile(f, ownerNames), pathFolders: await caminhoDe(f.folderId) });
+    }
+    return { folders: foldersOut, files: filesOut };
   }
 
   // ── Views da sidebar ──────────────────────────────────────────────────
