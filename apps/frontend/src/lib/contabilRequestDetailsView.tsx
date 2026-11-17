@@ -129,6 +129,9 @@ const FIELDS_BY_TYPE: Record<string, FieldDef[]> = {
     { key: 'dataDemissao', label: 'Data da demissão / desligamento', kind: 'date' },
     { key: 'ultimoDiaTrabalhado', label: 'Último dia trabalhado', kind: 'date' },
     { key: 'possuiProventoDesconto', label: 'Possui provento ou desconto?', kind: 'simnao' },
+    { key: 'proventos', label: 'Proventos', kind: 'long' },
+    { key: 'descontos', label: 'Descontos', kind: 'long' },
+    // Formato antigo (solicitações criadas antes dos campos de texto livre).
     { key: 'proventoDesconto', label: 'Provento / desconto' },
     { key: 'valor', label: 'Valor' },
     { key: 'observacoes', label: 'Solicitação / observações', kind: 'long' },
@@ -172,7 +175,20 @@ export function ContabilRequestDetailsView({
 
   const rows = defs
     .map((def) => {
-      const raw = typeof d[def.key] === 'string' ? (d[def.key] as string).trim() : '';
+      const cru = d[def.key];
+      let raw = typeof cru === 'string' ? cru.trim() : '';
+      // Lista de itens "o quê + valor" (proventos / descontos da rescisão): uma linha por item.
+      if (Array.isArray(cru)) {
+        raw = cru
+          .map((it) => {
+            const o = (it && typeof it === 'object' ? it : {}) as Record<string, unknown>;
+            const descricao = typeof o.descricao === 'string' ? o.descricao.trim() : '';
+            const valor = typeof o.valor === 'string' ? o.valor.trim() : '';
+            return descricao && valor ? `${descricao} — ${valor}` : descricao || valor;
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
       if (!raw) return null;
       let value = raw;
       if (def.kind === 'date') value = formatYmd(raw);

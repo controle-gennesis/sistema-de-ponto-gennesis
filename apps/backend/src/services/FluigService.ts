@@ -1000,6 +1000,31 @@ export class FluigService {
     return { metas, unavailable: false };
   }
 
+  /**
+   * Dados atuais de solicitações de pagamento (processo G5) pelo número, direto do Fluig (dataset DS_SolicitacaoPorNumero).
+   * Não depende do espelho: acha solicitação criada hoje, de qualquer setor ou CPF/CNPJ, e inclusive cancelada.
+   * Número que não existe no Fluig simplesmente não volta na lista. Lança erro se o Fluig não responder.
+   */
+  async getSolicitacoesPorNumero(numeros: string[]): Promise<Array<Record<string, unknown>>> {
+    const ids = Array.from(new Set(numeros.map((v) => String(v || '').replace(/\D/g, '')).filter(Boolean))).slice(0, 40);
+    if (ids.length === 0) return [];
+    const datasetId = (process.env.FLUIG_SOLICITACAO_DATASET || 'DS_SolicitacaoPorNumero').trim();
+    const lista = ids.join(',');
+    const data = await this.fetchDatasetDirect(datasetId, {
+      constraints: [{ _field: 'numProces', _initialValue: lista, _finalValue: lista, _type: 1, _likeSearch: false }],
+    });
+    const rows = data?.content?.values;
+    if (!Array.isArray(rows)) throw new Error('Resposta inesperada do Fluig ao consultar a solicitação');
+    const out: Array<Record<string, unknown>> = [];
+    for (const raw of rows) {
+      const row = raw as Record<string, unknown>;
+      const erro = String(row.erro ?? '').trim();
+      if (erro) throw new Error(`Fluig: ${erro}`);
+      out.push(row);
+    }
+    return out;
+  }
+
   /** Enquanto o dataset do Fluig não aceitar lista, não tenta a consulta em lote (ms desde 1970). */
   private static batchDatasetUnsupportedUntil = 0;
 

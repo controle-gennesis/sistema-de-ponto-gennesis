@@ -1174,51 +1174,6 @@ export default function EmpreiteirosPage() {
     }
   };
 
-  const handleAttachInstallmentProof = async (
-    linkId: string,
-    installmentId: string,
-    file: File | null | undefined
-  ) => {
-    if (!viewingItem?.id || !file || !canManageCadastro) return;
-    setUploadingFile(true);
-    setSavingContractLink(true);
-    try {
-      const data = new FormData();
-      data.append('file', file);
-      const uploadRes = await api.post('/empreiteiros/upload-file', data);
-      const uploaded = uploadRes.data?.data as
-        | { url?: string; name?: string; key?: string }
-        | undefined;
-      if (!uploaded?.url) throw new Error('Upload sem URL');
-      const res = await api.patch(
-        `/empreiteiros/${viewingItem.id}/contracts/${linkId}/installments/${installmentId}`,
-        {
-          status: 'PAID',
-          proofFiles: [
-            {
-              url: uploaded.url,
-              name: uploaded.name || file.name,
-              key: uploaded.key,
-            },
-          ],
-        }
-      );
-      const row = res.data?.data as EmpreiteiroRow | undefined;
-      if (row?.id) {
-        setViewingItem(row);
-        queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
-      }
-      toast.success(res.data?.message || 'Comprovante anexado · parcela paga');
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || error.message || 'Não foi possível anexar o comprovante'
-      );
-    } finally {
-      setUploadingFile(false);
-      setSavingContractLink(false);
-    }
-  };
-
   const abrirModalNota = (linkId: string, installmentId: string | null, label: string) => {
     setInvoiceNumber('');
     setInvoiceAmount('');
@@ -2739,8 +2694,6 @@ export default function EmpreiteirosPage() {
     closeRowActionMenu: closeParcelMenu,
     isRowMenuOpen: isParcelMenuOpen,
   } = useRowActionMenu(parcelMenuRows);
-  const proofInputRef = useRef<HTMLInputElement>(null);
-  const proofTargetRef = useRef<{ linkId: string; parcelId: string } | null>(null);
   const contractLinksForMenu = viewingItem?.contracts ?? [];
   const {
     rowActionMenu: contractRowActionMenu,
@@ -2788,51 +2741,81 @@ export default function EmpreiteirosPage() {
     staleTime: 60_000,
   });
 
-  // Solicitações do Fluig da empreita (para escolher na lista ao vincular a parcela).
-  const { data: fluigSolicitacoesData, isLoading: carregandoSolicitacoesFluig } = useQuery({
-    queryKey: ['empreiteiro-fluig-solicitacoes-opcoes', viewingItem?.id],
+  // Número digitado na janela de vincular: só confere depois de uma pausa na digitação (uma consulta por número).
+  const [fluigNumeroPausado, setFluigNumeroPausado] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setFluigNumeroPausado(fluigNumeroInput.replace(/[^0-9]/g, '')), 500);
+    return () => clearTimeout(t);
+  }, [fluigNumeroInput]);
+  const numeroParaConferirNoFluig = fluigModal && fluigNumeroPausado.length >= 4 ? fluigNumeroPausado : '';
+
+  type ConferenciaSolicitacaoFluig =
+    | {
+        estado: 'ok' | 'semDados';
+        origem: 'espelho' | 'fluig';
+        solicitacao: { numero: string; titulo: string; valor: number; fase: string; favorecido: string };
+      }
+    | { estado: 'naoExiste' }
+    | { estado: 'outroDocumento'; favorecido: string }
+    | { estado: 'indisponivel' };
+
+  // O servidor acha o número no espelho ou, se não estiver lá, pergunta ao Fluig na hora e confere o CPF/CNPJ do favorecido.
+  const {
+    data: conferenciaFluig,
+    isFetching: conferindoFluig,
+    isError: erroConferenciaFluig,
+  } = useQuery({
+    queryKey: ['empreiteiro-fluig-conferencia', viewingItem?.id, numeroParaConferirNoFluig],
     queryFn: async () => {
-      const res = await api.get(`/empreiteiros/${viewingItem!.id}/fluig-solicitacoes`);
-      return (res.data?.data?.itens ?? []) as Array<{
-        numero: string;
-        titulo: string;
-        fase: string;
-        valor: number;
-        pagamento: string | null;
-      }>;
+      const res = await api.get(
+        `/empreiteiros/${viewingItem!.id}/fluig-solicitacao/${numeroParaConferirNoFluig}`
+      );
+      return res.data?.data as ConferenciaSolicitacaoFluig;
     },
-    enabled: Boolean(viewingItem?.id) && Boolean(fluigModal),
-    staleTime: 60_000,
+    enabled: Boolean(viewingItem?.id) && Boolean(numeroParaConferirNoFluig),
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 
-  const opcoesSolicitacaoFluig = useMemo(() => {
-    const jaLigadas = new Set(
-      (viewingItem?.contracts || [])
-        .flatMap((c) => c.installments || [])
-        .filter((p) => p.id !== fluigModal?.parcelId)
-        .map((p) => p.fluigRequestNumber || '')
-        .filter(Boolean),
-    );
-    const itens = (Array.isArray(fluigSolicitacoesData) ? fluigSolicitacoesData : []).filter(
-      (s) => s.numero && !jaLigadas.has(s.numero),
-    );
-    const opcoes = itens.map((s) => ({
-      value: s.numero,
-      label: `${s.numero} · ${s.titulo || 'Solicitação'}`,
-      description: `${formatMoneyBr(s.valor) || '—'} · ${s.fase ? faseExibicao(s.fase).texto : 'Sem fase'}`,
-      searchText: `${s.numero} ${s.titulo} ${s.valor}`,
-    }));
-    // Número já vinculado antes (digitado à mão) continua selecionável mesmo fora da lista.
-    if (fluigNumeroInput && !opcoes.some((o) => o.value === fluigNumeroInput)) {
-      opcoes.unshift({
-        value: fluigNumeroInput,
-        label: `${fluigNumeroInput} · (informado manualmente)`,
-        description: '',
-        searchText: fluigNumeroInput,
-      });
+  /**
+   * Resultado da conferência do número digitado:
+   * - ok: é uma solicitação deste CPF/CNPJ (mostra título, valor e fase) e libera o vínculo;
+   * - naoEncontrada: o número não existe no Fluig → bloqueia;
+   * - outroDocumento: existe, mas é de outro favorecido → bloqueia;
+   * - jaLigada: já está em outra parcela desta empreita → bloqueia;
+   * - semDados / indisponivel: não deu para conferir o favorecido → deixa vincular com aviso.
+   */
+  const verificacaoSolicitacaoFluig = useMemo(() => {
+    const numero = fluigNumeroInput.replace(/[^0-9]/g, '');
+    if (!numero) return { estado: 'vazio' as const };
+    const outraParcela = (viewingItem?.contracts || [])
+      .flatMap((c) => c.installments || [])
+      .find((p) => p.id !== fluigModal?.parcelId && p.fluigRequestNumber === numero);
+    if (outraParcela) return { estado: 'jaLigada' as const, parcela: outraParcela.number };
+    if (numero.length < 4) return { estado: 'curto' as const };
+    if (numero !== numeroParaConferirNoFluig || conferindoFluig) return { estado: 'carregando' as const };
+    if (erroConferenciaFluig || !conferenciaFluig) return { estado: 'indisponivel' as const };
+    switch (conferenciaFluig.estado) {
+      case 'ok':
+        return { estado: 'ok' as const, solicitacao: conferenciaFluig.solicitacao };
+      case 'semDados':
+        return { estado: 'semDados' as const, solicitacao: conferenciaFluig.solicitacao };
+      case 'naoExiste':
+        return { estado: 'naoEncontrada' as const };
+      case 'outroDocumento':
+        return { estado: 'outroDocumento' as const, favorecido: conferenciaFluig.favorecido };
+      default:
+        return { estado: 'indisponivel' as const };
     }
-    return opcoes;
-  }, [fluigSolicitacoesData, viewingItem, fluigModal, fluigNumeroInput]);
+  }, [
+    fluigNumeroInput,
+    numeroParaConferirNoFluig,
+    conferenciaFluig,
+    conferindoFluig,
+    erroConferenciaFluig,
+    viewingItem,
+    fluigModal,
+  ]);
 
   const abrirModalFluig = (linkId: string, parcel: ServiceInstallment) => {
     setFluigNumeroInput(parcel.fluigRequestNumber || '');
@@ -2864,6 +2847,22 @@ export default function EmpreiteirosPage() {
     const numero = fluigNumeroInput.replace(/[^0-9]/g, '');
     if (!numero) {
       toast.error('Informe o número da solicitação do Fluig');
+      return;
+    }
+    if (verificacaoSolicitacaoFluig.estado === 'jaLigada') {
+      toast.error(`Essa solicitação já está vinculada à parcela ${verificacaoSolicitacaoFluig.parcela}.`);
+      return;
+    }
+    if (verificacaoSolicitacaoFluig.estado === 'naoEncontrada') {
+      toast.error(`A solicitação ${numero} não foi encontrada no Fluig. Confira o número.`);
+      return;
+    }
+    if (verificacaoSolicitacaoFluig.estado === 'outroDocumento') {
+      toast.error(`A solicitação ${numero} é de outro favorecido, e não deste CPF/CNPJ.`);
+      return;
+    }
+    if (verificacaoSolicitacaoFluig.estado === 'curto') {
+      toast.error('Informe o número completo da solicitação do Fluig');
       return;
     }
     setSavingFluigNumero(true);
@@ -3937,6 +3936,7 @@ export default function EmpreiteirosPage() {
                                     <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Vencimento</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Status</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Fluig</th>
                                     <th className={`${cadastroListClasses.th} text-right`}>Ação</th>
                                   </tr>
                                 </thead>
@@ -3982,8 +3982,8 @@ export default function EmpreiteirosPage() {
                                                   </span>
                                                 )}
                                               </td>
-                                              <td className={`${cadastroListClasses.td} text-right`}>
-                                                <div className="flex items-center justify-end gap-1">
+                                              <td className={`${cadastroListClasses.td} text-center`}>
+                                                <div className="flex items-center justify-center gap-1.5">
                                                   {numeroFluig ? (
                                                     <a
                                                       href={buildFluigWorkflowProcessViewUrl(numeroFluig)}
@@ -4005,7 +4005,13 @@ export default function EmpreiteirosPage() {
                                                     >
                                                       <Link2 className="h-4 w-4" />
                                                     </button>
-                                                  ) : null}
+                                                  ) : (
+                                                    <span className="text-gray-400">—</span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                              <td className={`${cadastroListClasses.td} text-right`}>
+                                                <div className="flex items-center justify-end gap-1">
                                                   {canManageCadastro || (parcel.proofFiles || []).length > 0 ? (
                                                     <button
                                                       type="button"
@@ -4030,18 +4036,6 @@ export default function EmpreiteirosPage() {
                               </table>
                             </div>
                           ) : null}
-                          <input
-                            ref={proofInputRef}
-                            type="file"
-                            accept=".pdf,image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              e.target.value = '';
-                              const alvo = proofTargetRef.current;
-                              if (alvo && f) void handleAttachInstallmentProof(alvo.linkId, alvo.parcelId, f);
-                            }}
-                          />
                           {parcelMenu && parcelMenuRow && parcelMenuRow.linkId === link.id ? (
                             <RowActionMenuPortal
                               menu={parcelMenu}
@@ -4053,22 +4047,7 @@ export default function EmpreiteirosPage() {
                                   icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />,
                                   onClick: () => window.open(resolveApiMediaUrl(pf.url) || pf.url, '_blank', 'noopener,noreferrer'),
                                 })),
-                                ...(canManageCadastro
-                                  ? [
-                                      {
-                                        label: (parcelMenuRow.parcel.proofFiles || []).length
-                                          ? 'Trocar comprovante'
-                                          : parcelMenuRow.parcel.fluigRequestNumber
-                                            ? 'Anexar comprovante (do Fluig ou outro)'
-                                            : 'Anexar comprovante',
-                                        icon: <Paperclip className="h-4 w-4 shrink-0" />,
-                                        onClick: () => {
-                                          proofTargetRef.current = { linkId: link.id, parcelId: parcelMenuRow.parcel.id };
-                                          proofInputRef.current?.click();
-                                        },
-                                      },
-                                    ]
-                                  : []),
+                                // O comprovante fica na própria solicitação do Fluig (link na coluna Fluig).
                                 ...(canManageCadastro && parcelMenuRow.parcel.fluigRequestNumber
                                   ? [
                                       {
@@ -4253,37 +4232,56 @@ export default function EmpreiteirosPage() {
                             <div className="space-y-4">
                               <div>
                                 <label className={labelClass}>Solicitação do Fluig *</label>
-                                {carregandoSolicitacoesFluig || opcoesSolicitacaoFluig.length > 0 ? (
-                                  <StringSingleSelectDropdown
-                                    value={fluigNumeroInput}
-                                    onChange={(v) => setFluigNumeroInput(v)}
-                                    options={opcoesSolicitacaoFluig}
-                                    allowEmpty={false}
-                                    placeholder={
-                                      carregandoSolicitacoesFluig ? 'Buscando no Fluig…' : 'Selecione a solicitação'
-                                    }
-                                    searchPlaceholder="Buscar por número, descrição ou valor"
-                                    emptySearchMessage="Nenhuma solicitação encontrada"
-                                    wrapLabel
-                                    matchTriggerWidth
-                                    className="w-full"
-                                  />
-                                ) : (
-                                  <>
-                                    <input
-                                      type="text"
-                                      inputMode="numeric"
-                                      value={fluigNumeroInput}
-                                      onChange={(e) => setFluigNumeroInput(e.target.value.replace(/[^0-9]/g, ''))}
-                                      placeholder="Ex.: 123456"
-                                      className={inputClass}
-                                      autoFocus
-                                    />
-                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                      Nenhuma solicitação deste CPF/CNPJ foi encontrada no Fluig. Informe o número manualmente.
-                                    </p>
-                                  </>
-                                )}
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={fluigNumeroInput}
+                                  onChange={(e) => setFluigNumeroInput(e.target.value.replace(/[^0-9]/g, ''))}
+                                  placeholder="Digite o número da solicitação. Ex.: 570966"
+                                  className={inputClass}
+                                  autoFocus
+                                />
+                                {verificacaoSolicitacaoFluig.estado === 'carregando' ? (
+                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Conferindo no Fluig…</p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'ok' ? (
+                                  <p className="mt-1 text-xs text-green-700 dark:text-green-400">
+                                    ✓ {verificacaoSolicitacaoFluig.solicitacao.titulo || 'Solicitação'} ·{' '}
+                                    {formatMoneyBr(verificacaoSolicitacaoFluig.solicitacao.valor) || '—'} ·{' '}
+                                    {verificacaoSolicitacaoFluig.solicitacao.fase
+                                      ? faseExibicao(verificacaoSolicitacaoFluig.solicitacao.fase).texto
+                                      : 'Sem fase'}
+                                  </p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'semDados' ? (
+                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {verificacaoSolicitacaoFluig.solicitacao.titulo || 'Solicitação'} ·{' '}
+                                    {formatMoneyBr(verificacaoSolicitacaoFluig.solicitacao.valor) || '—'}. O Fluig não informa o
+                                    favorecido, então não deu para conferir o CPF/CNPJ.
+                                  </p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'naoEncontrada' ? (
+                                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                                    Não encontrada no Fluig. Confira o número.
+                                  </p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'outroDocumento' ? (
+                                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                                    Essa solicitação é de outro favorecido
+                                    {verificacaoSolicitacaoFluig.favorecido ? ` (${verificacaoSolicitacaoFluig.favorecido})` : ''}, e
+                                    não deste CPF/CNPJ.
+                                  </p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'jaLigada' ? (
+                                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                                    Essa solicitação já está vinculada à parcela {verificacaoSolicitacaoFluig.parcela}.
+                                  </p>
+                                ) : null}
+                                {verificacaoSolicitacaoFluig.estado === 'indisponivel' ? (
+                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    Não foi possível conferir o número no Fluig agora. Ele será vinculado como digitado.
+                                  </p>
+                                ) : null}
                               </div>
                               <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                                 <button
@@ -4295,7 +4293,15 @@ export default function EmpreiteirosPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={savingFluigNumero || !fluigNumeroInput.trim()}
+                                  disabled={
+                                    savingFluigNumero ||
+                                    !fluigNumeroInput.trim() ||
+                                    verificacaoSolicitacaoFluig.estado === 'curto' ||
+                                    verificacaoSolicitacaoFluig.estado === 'carregando' ||
+                                    verificacaoSolicitacaoFluig.estado === 'naoEncontrada' ||
+                                    verificacaoSolicitacaoFluig.estado === 'outroDocumento' ||
+                                    verificacaoSolicitacaoFluig.estado === 'jaLigada'
+                                  }
                                   onClick={() => void salvarSolicitacaoFluig()}
                                   className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                 >

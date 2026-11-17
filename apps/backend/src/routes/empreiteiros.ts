@@ -164,8 +164,11 @@ router.get('/:id/fluig-parcelas', (req, res, next) =>
 router.get('/:id/fluig-solicitacoes', (req, res, next) =>
   controller.fluigSolicitacoes(req as any, res as any, next)
 );
+router.get('/:id/fluig-solicitacao/:numero', (req, res, next) =>
+  controller.conferirSolicitacaoFluig(req as any, res as any, next)
+);
 router.get('/:id', (req, res, next) => controller.getById(req as any, res as any, next));
-router.post('/', (req, res, next) => controller.create(req as any, res as any, next));
+router.post('/',(req, res, next) => controller.create(req as any, res as any, next));
 router.post('/:id/unlink', (req, res, next) => controller.unlink(req as any, res as any, next));
 router.patch('/:id', (req, res, next) => controller.update(req as any, res as any, next));
 router.delete('/:id', (req, res, next) => controller.delete(req as any, res as any, next));

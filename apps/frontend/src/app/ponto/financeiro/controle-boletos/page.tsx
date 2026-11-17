@@ -51,6 +51,29 @@ import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
+import type { OcSupplierOption } from '@/components/oc/OcPurchaseOrderFormFields';
+
+/** Lista sem repetir nomes; mantém o valor atual (boleto antigo) mesmo que não esteja na lista, para não apagá-lo. */
+function comValorAtual(lista: string[], atual: string): string[] {
+  const valor = (atual ?? '').trim();
+  const vistos = new Set<string>();
+  const unica = lista.filter((item) => {
+    const chave = String(item).trim().toUpperCase();
+    if (!chave || vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+  return valor && !vistos.has(valor.toUpperCase()) ? [valor, ...unica] : unica;
+}
+
+/** Nome do fornecedor gravado no boleto: a razão social do cadastro (ou o nome fantasia, se faltar). */
+const boletoSupplierName = (s: OcSupplierOption): string => (s.name?.trim() || s.tradeName?.trim() || '');
+const boletoSupplierLabel = (s: OcSupplierOption): string => {
+  const nome = boletoSupplierName(s);
+  return s.code ? `${s.code} - ${nome}` : nome;
+};
 
 const PAGE_SIZE = 50;
 
@@ -441,6 +464,33 @@ function ControleBoletosPage() {
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
   // Formulário: com o polo escolhido, a lista de centros de custo mostra só os desse polo.
+  // Condições de pagamento já cadastradas no sistema (as ativas), sem repetir o nome.
+  const { data: registeredPaymentConditions } = useQuery({
+    queryKey: ['payment-conditions', 'boleto-control-form'],
+    queryFn: async () => {
+      const res = await api.get('/payment-conditions', { params: { activeOnly: 'true' } });
+      const rows = (res.data?.data || []) as Array<{ label?: string; sortOrder?: number }>;
+      const seen = new Set<string>();
+      return [...rows]
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || String(a.label ?? '').localeCompare(String(b.label ?? ''), 'pt-BR'))
+        .map((r) => String(r.label ?? '').trim())
+        .filter((label) => {
+          const key = label.toUpperCase();
+          if (!label || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Boleto antigo com uma condição que não está na lista (ex.: veio da planilha): mantém o valor para não apagar.
+  const paymentConditionOptions = (() => {
+    const base = registeredPaymentConditions ?? [];
+    const atual = form.paymentCondition.trim();
+    return atual && !base.some((l) => l.toUpperCase() === atual.toUpperCase()) ? [atual, ...base] : base;
+  })();
+
   const centrosDoPolo = (() => {
     const map = options?.costCentersByPolo ?? {};
     const key = Object.keys(map).find((k) => k.trim().toUpperCase() === form.polo.trim().toUpperCase());
@@ -862,23 +912,44 @@ function ControleBoletosPage() {
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Polo">
-              <input list="boleto-polos" value={form.polo} onChange={(e) => set('polo', e.target.value)} className={FORM_FIELD_INPUT_CLS} placeholder="POLO DF" />
-              <datalist id="boleto-polos">
-                {(options?.polos ?? []).map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
+              <StringSingleSelectDropdown
+                value={form.polo}
+                onChange={(v) => set('polo', v)}
+                options={comValorAtual(options?.polos ?? [], form.polo)}
+                allowEmpty
+                emptyOptionLabel="Nenhum"
+                placeholder="Selecione o polo..."
+                searchPlaceholder="Pesquisar polo..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="Fornecedor" className="sm:col-span-2">
-              <input value={form.supplierName} onChange={(e) => set('supplierName', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
+              <AsyncSearchSelectDropdown<OcSupplierOption>
+                value={form.supplierName}
+                selectedLabel={form.supplierName}
+                onChange={(s) => set('supplierName', boletoSupplierName(s))}
+                searchFn={searchOcSuppliers}
+                getOptionId={boletoSupplierName}
+                getOptionLabel={boletoSupplierLabel}
+                queryKeyPrefix="suppliers-boleto-form"
+                placeholder="Selecione o fornecedor..."
+                searchPlaceholder="Pesquisar fornecedor..."
+                noFocusRing
+              />
             </Field>
             <Field label="Centro de custo" className="sm:col-span-2">
-              <input list="boleto-cc" value={form.costCenterName} onChange={(e) => set('costCenterName', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
-              <datalist id="boleto-cc">
-                {(centrosDoPolo ?? options?.officialCostCenters ?? options?.costCenters ?? []).map((c, i) => (
-                  <option key={`${c}-${i}`} value={c} />
-                ))}
-              </datalist>
+              <StringSingleSelectDropdown
+                value={form.costCenterName}
+                onChange={(v) => set('costCenterName', v)}
+                options={comValorAtual(centrosDoPolo ?? options?.officialCostCenters ?? options?.costCenters ?? [], form.costCenterName)}
+                allowEmpty
+                emptyOptionLabel="Nenhum"
+                placeholder="Selecione o centro de custo..."
+                searchPlaceholder="Pesquisar centro de custo..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="OC (TOTVS)">
               <input value={form.ocNumber} onChange={(e) => set('ocNumber', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
@@ -896,7 +967,17 @@ function ControleBoletosPage() {
               <input type="date" value={form.nfEmissionDate} onChange={(e) => set('nfEmissionDate', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
             </Field>
             <Field label="Condição de pagamento" className="sm:col-span-2">
-              <input value={form.paymentCondition} onChange={(e) => set('paymentCondition', e.target.value)} placeholder="BOLETO 28 DIAS" className={FORM_FIELD_INPUT_CLS} />
+              <StringSingleSelectDropdown
+                value={form.paymentCondition}
+                onChange={(v) => set('paymentCondition', v)}
+                options={paymentConditionOptions}
+                allowEmpty
+                emptyOptionLabel="Nenhuma"
+                placeholder="Selecione a condição de pagamento..."
+                searchPlaceholder="Pesquisar condição..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="Vencimento">
               <input type="date" value={form.dueDate} onChange={(e) => set('dueDate', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
