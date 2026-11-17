@@ -4,13 +4,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, X, CheckCircle, ClipboardList, Clock, ShoppingCart, XCircle, Paperclip, Loader2 } from 'lucide-react';
+import { Pencil, X, CheckCircle, ClipboardList, Clock, RotateCcw, ShoppingCart, XCircle, Paperclip, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
-import { ListPageHeader, PageStack, pageStatCardsGrid5Class } from '@/components/ui/pageLayout';
+import { ListPageHeader, PageStack, pageStatCardsGrid6Class } from '@/components/ui/pageLayout';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { fixMojibakeFileName } from '@/lib/fixMojibakeFileName';
@@ -222,7 +222,7 @@ const RM_STAT_CARDS: {
   iconBg: string;
   iconColor: string;
   Icon: LucideIcon;
-  countKey: keyof { total: number; pending: number; approved: number; awaitingOc: number; cancelled: number };
+  countKey: keyof { total: number; pending: number; inReview: number; approved: number; awaitingOc: number; cancelled: number };
 }[] = [
   {
     filter: 'all',
@@ -239,6 +239,14 @@ const RM_STAT_CARDS: {
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: Clock,
     countKey: 'pending'
+  },
+  {
+    filter: 'inReview',
+    label: 'Correção RM',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: RotateCcw,
+    countKey: 'inReview'
   },
   {
     filter: 'approved',
@@ -865,6 +873,7 @@ export default function GerenciarMateriaisPage() {
   const stats = {
     total: normalizedRequests.length,
     pending: normalizedRequests.filter((r: MaterialRequest) => r.status === 'PENDING').length,
+    inReview: normalizedRequests.filter((r: MaterialRequest) => r.status === 'IN_REVIEW').length,
     approved: normalizedRequests.filter(
       (r: MaterialRequest) =>
         r.status === 'APPROVED' &&
@@ -918,7 +927,7 @@ export default function GerenciarMateriaisPage() {
             description="Acompanhe o status das requisições de materiais."
           />
 
-          <div className={pageStatCardsGrid5Class}>
+          <div className={pageStatCardsGrid6Class}>
             {RM_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}

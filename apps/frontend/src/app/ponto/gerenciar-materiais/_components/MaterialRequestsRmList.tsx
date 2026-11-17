@@ -14,6 +14,7 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  RotateCcw,
   Search,
   ShoppingCart,
   X,
@@ -105,6 +106,13 @@ const RM_CARD_LIST_CONFIG: Record<
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: Clock
+  },
+  inReview: {
+    title: 'Requisições em correção',
+    subtitle: 'Solicitações devolvidas ao solicitante para ajuste.',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: RotateCcw
   },
   approved: {
     title: 'Requisições aprovadas',

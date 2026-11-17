@@ -7,7 +7,7 @@ import {
 } from './search';
 import { rmHasOpenItemsForProcurement } from '@/lib/rmProcurementCoverage';
 
-export type RmCardFilter = 'all' | 'pending' | 'approved' | 'awaitingOc' | 'cancelled';
+export type RmCardFilter = 'all' | 'pending' | 'inReview' | 'approved' | 'awaitingOc' | 'cancelled';
 
 export const DEFAULT_RM_CARD_FILTER: RmCardFilter = 'all';
 
@@ -39,6 +39,7 @@ export function matchesRmCardFilter(
   }
 
   if (filter === 'pending') return request.status === 'PENDING';
+  if (filter === 'inReview') return request.status === 'IN_REVIEW';
   if (filter === 'awaitingOc') return isMaterialRequestAwaitingOc(request, orders);
 
   return true;
