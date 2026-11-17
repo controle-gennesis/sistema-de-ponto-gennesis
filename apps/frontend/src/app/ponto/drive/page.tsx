@@ -44,7 +44,9 @@ import {
   DriveSidebar,
   type DriveSidebarView,
 } from '@/components/drive/DriveSidebar';
+import { sortDriveItems, type DriveSortKey, type DriveSortState } from '@/components/drive/driveSort';
 import { DriveListView } from '@/components/drive/DriveListView';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { DriveMoveModal, type DriveMoveTarget } from '@/components/drive/DriveMoveModal';
 import { DriveSelectionBar } from '@/components/drive/DriveSelectionBar';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
@@ -62,6 +64,7 @@ import {
   isDriveItemDrag,
   startDriveItemDrag,
   type DriveDragItem,
+  type FolderFileDrop,
 } from '@/components/drive/driveItemDrag';
 import { FolderAppearanceModal } from '@/components/drive/FolderAppearanceModal';
 import { FolderIconTile } from '@/components/drive/folderAppearance';
@@ -104,6 +107,10 @@ interface DriveFolder {
   canManageShares?: boolean;
   /** Pode enviar ficheiros e criar subpastas (falso se só leitura na partilha). */
   canWrite?: boolean;
+  /** Tamanho total do conteúdo (calculado pelo servidor). */
+  sizeBytes?: number;
+  /** Só nos resultados de busca: pastas acima do item. */
+  pathFolders?: Array<{ id: string; name: string }>;
 }
 
 interface DriveFile {
@@ -114,6 +121,7 @@ interface DriveFile {
   size: number;
   mimeType: string;
   folderId: string | null;
+  pathFolders?: Array<{ id: string; name: string }>;
   ownerId: string;
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
@@ -220,6 +228,8 @@ function DrivePageContent() {
     }
   }, []);
   const [searchQuery, setSearchQuery] = useState('');
+  /** "Buscar só nesta pasta": quando ligado dentro de uma pasta, a busca fica limitada a ela. */
+  const [searchOnlyHere, setSearchOnlyHere] = useState(false);
   /** Item aberto na janela "Mover para…". */
   const [moveTarget, setMoveTarget] = useState<DriveMoveTarget | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -373,13 +383,16 @@ function DrivePageContent() {
     staleTime: 30_000,
   });
 
+  const searchScope = searchOnlyHere && isMyDriveView ? (currentFolderId ?? null) : null;
   const { data: searchResults, isLoading: loadingSearch } = useQuery<{
     folders: DriveFolder[];
     files: DriveFile[];
   }>({
-    queryKey: ['drive-search', searchQuery],
+    queryKey: ['drive-search', searchQuery, searchScope],
     queryFn: async () => {
-      const res = await api.get('/drive/search', { params: { q: searchQuery } });
+      const res = await api.get('/drive/search', {
+        params: { q: searchQuery, ...(searchScope ? { folderId: searchScope } : {}) },
+      });
       return res.data.data;
     },
     enabled: !!user && !!searchQuery.trim(),
@@ -401,24 +414,39 @@ function DrivePageContent() {
   const filtersActive = driveFiltersActive(filters);
   const ownerOk = (ownerId: string) =>
     filters.owner === 'all' || (filters.owner === 'me' ? ownerId === user?.id : ownerId !== user?.id);
+  // Ordenação (clique no título da coluna na lista). Padrão: como vem do servidor (mais recentes primeiro).
+  const [sort, setSort] = useState<DriveSortState>(null);
+  const toggleSort = useCallback((key: DriveSortKey) => {
+    setSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: 'asc' };
+      if (cur.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
+  }, []);
   const folders = useMemo(() => {
-    if (!filtersActive) return rawFolders;
-    // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
-    if (filters.type !== 'all' && filters.type !== 'folders') return [];
-    return rawFolders.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    let list = rawFolders;
+    if (filtersActive) {
+      // Qualquer tipo de arquivo escolhido esconde as pastas; "Pastas" e "Todos" as mantêm.
+      if (filters.type !== 'all' && filters.type !== 'folders') return [];
+      list = list.filter((f) => ownerOk(f.ownerId) && driveMatchesModified(f.updatedAt, filters.modified));
+    }
+    return sortDriveItems(list, sort, (f) => f.sizeBytes ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawFolders, filters, user?.id]);
+  }, [rawFolders, filters, user?.id, sort]);
   const files = useMemo(() => {
-    if (!filtersActive) return rawFiles;
-    if (filters.type === 'folders') return [];
-    return rawFiles.filter(
-      (f) =>
-        (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
-        ownerOk(f.ownerId) &&
-        driveMatchesModified(f.updatedAt, filters.modified),
-    );
+    let list = rawFiles;
+    if (filtersActive) {
+      if (filters.type === 'folders') return [];
+      list = list.filter(
+        (f) =>
+          (filters.type === 'all' || driveFileCategory(f.mimeType, f.originalName || f.name) === filters.type) &&
+          ownerOk(f.ownerId) &&
+          driveMatchesModified(f.updatedAt, filters.modified),
+      );
+    }
+    return sortDriveItems(list, sort, (f) => f.size ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawFiles, filters, user?.id]);
+  }, [rawFiles, filters, user?.id, sort]);
   /** Arquivos da pasta aberta (usado pelo upload para detectar nome repetido sem recriar callbacks). */
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -426,6 +454,11 @@ function DrivePageContent() {
   const currentFolderMeta = isMyDriveView ? (contents?.currentFolder ?? null) : null;
   /** Título da página: "Meu Drive" na raiz; dentro de uma pasta, o nome dela. */
   const nomePastaAtual = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1]!.name : 'Meu Drive';
+  /** Nome da pasta aberta lembrado durante a busca (nela a lista da pasta fica pausada e o caminho some). */
+  const nomePastaRef = useRef<{ id?: string; name: string }>({ name: '' });
+  if (breadcrumb.length > 0) nomePastaRef.current = { id: currentFolderId, name: nomePastaAtual };
+  const nomePastaBusca =
+    nomePastaRef.current.id === currentFolderId && nomePastaRef.current.name ? nomePastaRef.current.name : 'esta pasta';
   const isLoading = loadingContents || loadingSearch || loadingView;
   /** Esqueleto só depois de um instante: pastas que abrem rápido não "piscam" a tela de carregamento. */
   const showDriveSkeleton = useDelayedFlag(isLoading, 150);
@@ -820,15 +853,43 @@ function DrivePageContent() {
     },
   });
 
+  /**
+   * Tira os itens movidos das listas em cache (menos a da pasta de destino) na hora, para não reaparecerem
+   * na origem enquanto a lista é recarregada. Cancela recargas em andamento que ainda trariam o estado antigo.
+   */
+  const removerMovidosDoCache = async (items: DriveDragItem[], destinoId: string | null) => {
+    const destinoKey = destinoId ?? 'root';
+    const folderIds = new Set(items.filter((i) => i.type === 'folder').map((i) => i.id));
+    const fileIds = new Set(items.filter((i) => i.type === 'file').map((i) => i.id));
+    await queryClient.cancelQueries({ queryKey: ['drive'] });
+    await queryClient.cancelQueries({ queryKey: ['drive-view'] });
+    const limpar = (old: any) =>
+      old && Array.isArray(old.folders) && Array.isArray(old.files)
+        ? {
+            ...old,
+            folders: old.folders.filter((f: { id: string }) => !folderIds.has(f.id)),
+            files: old.files.filter((f: { id: string }) => !fileIds.has(f.id)),
+          }
+        : old;
+    queryClient
+      .getQueriesData({ queryKey: ['drive'] })
+      .forEach(([key, old]) => {
+        if (key[1] === destinoKey) return;
+        queryClient.setQueryData(key, limpar(old));
+      });
+    queryClient.setQueriesData({ queryKey: ['drive-view'] }, limpar);
+  };
+
   /** Move pasta (com o conteúdo) ou arquivo para outra pasta, ou para a raiz do Meu Drive (null). */
   const moveItemMut = useMutation({
     mutationFn: async ({ type, id, destinoId }: { type: 'folder' | 'file'; id: string; destinoId: string | null }): Promise<unknown> =>
       type === 'folder'
         ? api.patch(`/drive/folders/${id}/move`, { parentId: destinoId })
         : api.patch(`/drive/files/${id}/move`, { folderId: destinoId }),
-    onSuccess: (_res, vars) => {
+    onSuccess: async (_res, vars) => {
       toast.success(vars.type === 'folder' ? 'Pasta movida.' : 'Arquivo movido.');
       setMoveTarget(null);
+      await removerMovidosDoCache([{ type: vars.type, id: vars.id }], vars.destinoId);
       queryClient.invalidateQueries({ queryKey: ['drive'] });
       queryClient.invalidateQueries({ queryKey: ['drive-view'] });
       queryClient.invalidateQueries({ queryKey: ['drive-move-folders'] });
@@ -852,7 +913,8 @@ function DrivePageContent() {
       }
       return { ok, failed: items.length - ok };
     },
-    onSuccess: ({ ok, failed }) => {
+    onSuccess: async ({ ok, failed }, vars) => {
+      if (ok > 0) await removerMovidosDoCache(vars.items, vars.destinoId);
       if (ok > 0) toast.success(ok === 1 ? '1 item movido.' : `${ok} itens movidos.`);
       if (failed > 0) toast.error(failed === 1 ? '1 item não pôde ser movido.' : `${failed} itens não puderam ser movidos.`);
       setBulkMoveItems(null);
@@ -1160,7 +1222,7 @@ function DrivePageContent() {
   );
 
   const uploadFiles = useCallback(
-    async (droppedAll: DriveDroppedFile[]) => {
+    async (droppedAll: DriveDroppedFile[], destFolderId?: string) => {
       if (droppedAll.length === 0) {
         toast.error('Nenhum arquivo encontrado. Se arrastou uma pasta, tente de novo.');
         return;
@@ -1170,6 +1232,8 @@ function DrivePageContent() {
       const existingByName = new Map(filesRef.current.map((f) => [f.name.trim().toLowerCase(), f.id]));
       const replaceByFile = new Map<File, string>();
       for (const d of droppedAll) {
+        // Enviando para outra pasta (solto em cima dela): os nomes dela não estão carregados, então não há troca.
+        if (destFolderId !== undefined) break;
         if (d.relativePath.replace(/\\/g, '/').includes('/')) continue;
         const existingId = existingByName.get(d.file.name.trim().toLowerCase());
         if (existingId) replaceByFile.set(d.file, existingId);
@@ -1189,7 +1253,7 @@ function DrivePageContent() {
         }
       }
 
-      const rootFolderId = currentFolderId;
+      const rootFolderId = destFolderId ?? currentFolderId;
       /** path relativo da pasta (sem o nome do arquivo) → id no Drive */
       const folderIdByPath = new Map<string, string | undefined>();
       folderIdByPath.set('', rootFolderId);
@@ -1318,6 +1382,35 @@ function DrivePageContent() {
       }
     },
     [uploadFiles, canWriteInCurrentFolder],
+  );
+
+  /** Arquivo de fora solto em cima de uma pasta: envia para essa pasta. */
+  const handleDropOnFolder = useCallback(
+    async (e: React.DragEvent, folderId: string) => {
+      setIsDraggingOver(false);
+      if (!canWriteInCurrentFolder) {
+        toast.error('Não é possível enviar arquivos nesta pasta (somente leitura).');
+        return;
+      }
+      try {
+        const files = await collectFilesFromDataTransfer(e.dataTransfer);
+        await uploadFiles(files, folderId);
+      } catch {
+        toast.error('Não foi possível ler o que foi arrastado. Tente novamente.');
+      }
+    },
+    [uploadFiles, canWriteInCurrentFolder],
+  );
+
+  /** Liga as pastas das duas vistas ao envio por arrastar; some o aviso geral enquanto está sobre uma pasta. */
+  const folderFileDrop = useMemo(
+    () => ({
+      onDropFiles: (e: React.DragEvent, folderId: string) => void handleDropOnFolder(e, folderId),
+      onHover: (folderId: string | null) => {
+        if (folderId) setIsDraggingOver(false);
+      },
+    }),
+    [handleDropOnFolder],
   );
 
   // ── Download ───────────────────────────────────────────────────────────────
@@ -1475,7 +1568,7 @@ function DrivePageContent() {
       )}
       {/* Zona de drag-and-drop global */}
       <div
-        className="min-h-full"
+        className="relative min-h-[calc(100dvh-8rem)]"
         onDragOver={(e) => {
           if (isDriveItemDrag(e)) return;
           if (!canWriteInCurrentFolder) return;
@@ -1495,12 +1588,32 @@ function DrivePageContent() {
       >
         {/* Overlay drag-and-drop */}
         {isDraggingOver && canWriteInCurrentFolder && (
-          <div className="fixed inset-0 z-[2000] bg-red-600/10 border-4 border-dashed border-red-500 flex items-center justify-center pointer-events-none">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-8 shadow-xl text-center border border-gray-200 dark:border-gray-700">
-              <Upload className="h-12 w-12 text-red-600 dark:text-red-400 mx-auto mb-3" />
-              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Solte para fazer upload
-              </p>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -inset-3 z-[30] border-2 border-dashed border-red-400/80 bg-red-500/[0.04] sm:-inset-4 lg:-inset-8 dark:border-red-700/70 dark:bg-red-500/[0.07]"
+          >
+            {/* Cartão no padrão do sistema, centralizado na área, com a pasta de destino */}
+            <div
+              role="status"
+              className="absolute left-1/2 top-1/2 w-[22rem] max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+            >
+              <div className="flex items-center gap-3 p-4 sm:p-5">
+                <div className="shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                  <Upload className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
+                    Solte para enviar
+                  </h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
+                    Arquivos ou pastas, quantos quiser
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900/40 sm:px-5">
+                <span className="shrink-0 text-gray-500 dark:text-gray-400">Destino:</span>
+                <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">{nomePastaAtual}</span>
+              </div>
             </div>
           </div>
         )}
@@ -1599,6 +1712,15 @@ function DrivePageContent() {
               &ldquo;{searchQuery}&rdquo;
             </span>{' '}
             — {folders.length + files.length} item(s)
+            {isMyDriveView && currentFolderId ? (
+              <span className="ml-4 inline-flex align-middle">
+                <Checkbox
+                  checked={searchOnlyHere}
+                  onChange={setSearchOnlyHere}
+                  label={<>Buscar só em &ldquo;{nomePastaBusca}&rdquo;</>}
+                />
+              </span>
+            ) : null}
           </p>
         )}
 
@@ -1714,6 +1836,7 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            fileDrop={folderFileDrop}
             selectedKeys={selectedSet}
             onSelect={handleSelect}
             onClearSelection={clearSelection}
@@ -1726,6 +1849,8 @@ function DrivePageContent() {
           />
         ) : (
           <DriveListView
+            sort={sort}
+            onSort={toggleSort}
             folders={folders}
             files={files}
             onOpenFolder={openFolder}
@@ -1746,6 +1871,7 @@ function DrivePageContent() {
             }}
             onMove={(type, id, name) => setMoveTarget({ type, id, name })}
             onDropInto={soltarEmPasta}
+            fileDrop={folderFileDrop}
             selectedKeys={selectedSet}
             onSelect={handleSelect}
             onClearSelection={clearSelection}
@@ -2224,6 +2350,7 @@ function GridView({
   onRestore,
   onMove,
   onDropInto,
+  fileDrop,
   selectedKeys,
   onSelect,
   onClearSelection,
@@ -2248,6 +2375,8 @@ function GridView({
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
   onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  /** Arquivos de fora soltos em cima de uma pasta. */
+  fileDrop?: FolderFileDrop;
   selectedKeys: Set<string>;
   onSelect: (key: string, mods: SelectMods) => void;
   onClearSelection: () => void;
@@ -2300,7 +2429,7 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                       onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
                     }}
                     onDragEnd={() => onDragStateChange(null)}
-                    {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
+                    {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo, fileDrop) : {})}
                     onClick={(e) => {
                       e.stopPropagation();
                       setOpenMenuId(null);

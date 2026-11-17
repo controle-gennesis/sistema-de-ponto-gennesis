@@ -2537,6 +2537,8 @@ model Obra {
   id         String   @id @default(cuid())
   name       String
   contratoId String
+  /// Endereço da obra (opcional)
+  address    String?
   /// ID legado (AppSheet / importações)
   externalId String?  @unique
   isActive   Boolean  @default(true)
@@ -2561,6 +2563,9 @@ model DiarioObra {
   /// Sem atividade no dia (com o motivo em `noActivityReason`).
   noActivity       Boolean  @default(false)
   noActivityReason String?
+  /// OS do contrato escolhida ao criar o diário: SE (`divSe`) e Pasta (`folderNumber`) do pleito.
+  osDivSe          String?
+  osFolder         String?
   /// Clima, atividades, mão de obra, equipamentos, materiais, ocorrências e observações.
   content          Json     @default("{}")
   createdById      String?

@@ -68,6 +68,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
+import { ContractDetailSkeleton } from '@/components/contract/ContractDetailSkeleton';
 import { TableCheckbox } from '@/components/ui/Checkbox';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
@@ -4719,10 +4720,10 @@ export default function ContractDetailPage() {
     return (
       <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-          <div className="flex items-center justify-center min-h-[400px]">
-            {loadingContract ? (
-              <Loading message="Carregando contrato..." size="lg" />
-            ) : (
+          {loadingContract ? (
+            <ContractDetailSkeleton />
+          ) : (
+            <div className="flex items-center justify-center min-h-[400px]">
               <div className="text-center">
                 <p className="text-gray-600 dark:text-gray-400">Contrato não encontrado.</p>
                 <Link
@@ -4733,8 +4734,8 @@ export default function ContractDetailPage() {
                   Voltar para contratos
                 </Link>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </MainLayout>
       </ProtectedRoute>
     );

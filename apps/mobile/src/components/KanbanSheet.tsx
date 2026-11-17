@@ -9,8 +9,10 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
+import { X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 import { AppToastHost } from './AppToast';
@@ -30,6 +32,7 @@ export default function KanbanSheet({
   title,
   subtitle,
   icon: Icon,
+  leftHeader = false,
   overlay,
   children,
 }: {
@@ -38,6 +41,8 @@ export default function KanbanSheet({
   title: string;
   subtitle?: string;
   icon?: IconType;
+  /** Cabeçalho como nas Notificações: título à esquerda, sem ícone e com botão X. */
+  leftHeader?: boolean;
   /** Camadas por cima da folha (ex.: motivo de recusa), dentro do mesmo Modal. */
   overlay?: React.ReactNode;
   children: React.ReactNode;
@@ -179,7 +184,22 @@ export default function KanbanSheet({
               { paddingBottom: Animated.add(keyboardInset, SHEET_BOTTOM_PAD + insetBottom) },
             ]}
           >
-            {keyboardOpen ? (
+            {leftHeader ? (
+              <View style={styles.leftHero}>
+                <View style={styles.leftHeroText}>
+                  <Text style={styles.title}>{title}</Text>
+                  {subtitle ? <Text style={styles.leftSubtitle}>{subtitle}</Text> : null}
+                </View>
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={styles.roundBtn}
+                  hitSlop={8}
+                  accessibilityLabel="Fechar"
+                >
+                  <X size={18} color={C.iconStrong} strokeWidth={2.2} />
+                </TouchableOpacity>
+              </View>
+            ) : keyboardOpen ? (
               // Teclado aberto: só o título, para sobrar espaço para a lista.
               <Text style={styles.titleCompact}>{title}</Text>
             ) : (
@@ -244,6 +264,9 @@ function getStyles(C: {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    leftHero: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 18 },
+    leftHeroText: { flex: 1 },
+    leftSubtitle: { marginTop: 6, fontSize: 14, lineHeight: 20, color: C.body, paddingRight: 6 },
     hero: { alignItems: 'center', marginBottom: 20 },
     heroIcon: {
       width: 58,

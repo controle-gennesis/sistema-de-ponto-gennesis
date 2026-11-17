@@ -1,7 +1,8 @@
 {
   "cli": {
     "version": ">= 5.2.0",
-    "requireCommit": true
+    "requireCommit": true,
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -21,6 +22,7 @@
       "distribution": "internal"
     },
     "production": {
+      "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
       },

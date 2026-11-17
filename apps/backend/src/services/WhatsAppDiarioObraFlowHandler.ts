@@ -20,6 +20,7 @@ export type WhatsAppDiarioObraFlowStatus =
   | 'RDO_SELECT_CONTRATO'
   | 'RDO_SELECT_OBRA'
   | 'RDO_ASK_DATE'
+  | 'RDO_SELECT_OS'
   | 'RDO_ASK_MODE'
   | 'RDO_HUB'
   | 'RDO_ACT_TITLE'
@@ -57,6 +58,7 @@ const MODULE_KEY = pathToModuleKey('/ponto/diario-obra');
 const TZ = 'America/Sao_Paulo';
 const OBRA_PAGE_SIZE = 7;
 const CONTRATO_PAGE_SIZE = 8;
+const OS_PAGE_SIZE = 7;
 const IMAGE_EXT = /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i;
 
 const YES_WORDS = /^(sim|s|confirmar|confirmo|ok|pode|yes)$/i;
@@ -80,6 +82,8 @@ const ID = {
   newAct: 'rdo_new_act',
   moreObras: 'rdo_more_obras',
   moreContratos: 'rdo_more_ctr',
+  moreOs: 'rdo_more_os',
+  osPrefix: 'rdo_os_',
   changeContrato: 'rdo_change_ctr',
   contratoPrefix: 'rdo_ctr_',
   otherDate: 'rdo_other_date',
@@ -394,6 +398,72 @@ async function contratoListAction(
   };
 }
 
+// ---------- OS do contrato (SE e Pasta dos pleitos) ----------
+
+type OsChoice = { divSe: string; folderNumber: string; label: string; description: string };
+
+/** Rótulo da OS como no sistema: "AD-725 - 1" (SE sem o prefixo OS/SE, mais a Pasta, se houver). */
+function osLabelOf(divSe: string, folder: string): string {
+  const d = divSe.replace(/^(OS|SE)\s+/i, '').trim();
+  if (!d) return '';
+  return folder ? `${d} - ${folder}` : d;
+}
+
+const osKeyOf = (o: { divSe: string; folderNumber: string }) => `${o.divSe}|${o.folderNumber}`;
+
+/** Minúsculas e sem acento, para a busca. */
+const normSearch = (s: string) =>
+  Array.from(s.toLowerCase().normalize('NFD'))
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c < 0x300 || c > 0x36f;
+    })
+    .join('');
+
+/** Todas as OS do contrato (sem repetir), na ordem natural; `query` filtra por código ou descrição. */
+async function listOs(contratoId: string, query: string, page: number, all = false) {
+  if (!contratoId) return { rows: [] as OsChoice[], total: 0 };
+  const pleitos = await prisma.pleito.findMany({
+    where: { updatedContractId: contratoId },
+    select: { divSe: true, folderNumber: true, serviceDescription: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  const seen = new Map<string, OsChoice>();
+  for (const r of pleitos) {
+    const divSe = (r.divSe ?? '').trim();
+    const folder = (r.folderNumber ?? '').trim();
+    const label = osLabelOf(divSe, folder);
+    if (!label) continue;
+    const key = `${divSe.toLowerCase()}|${folder.toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.set(key, { divSe, folderNumber: folder, label, description: (r.serviceDescription ?? '').trim().slice(0, 140) });
+    }
+  }
+  const q = normSearch(query.trim());
+  const filtered = [...seen.values()]
+    .filter((o) => !q || normSearch(`${o.label} ${o.description}`).includes(q))
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { numeric: true }));
+  return {
+    rows: all ? filtered : filtered.slice(page * OS_PAGE_SIZE, (page + 1) * OS_PAGE_SIZE),
+    total: filtered.length,
+  };
+}
+
+async function osListAction(contratoId: string, query: string, page: number, intro?: string): Promise<SendAction> {
+  const { rows, total } = await listOs(contratoId, query, page);
+  if (rows.length === 0) {
+    return waButtons(`Não achei OS com «${query}» neste contrato. Digite outra parte do número ou da descrição, ou toque em Menu.`);
+  }
+  const items = rows.map((o) => ({
+    id: `${ID.osPrefix}${osKeyOf(o)}`.slice(0, 200),
+    title: clip(o.label, 24),
+    description: clip(o.description, 72),
+  }));
+  if ((page + 1) * OS_PAGE_SIZE < total) items.push({ id: ID.moreOs, title: 'Mais OS…', description: 'Ou digite o número da OS' });
+  const head = intro ?? 'Qual a *OS* deste diário?';
+  return waList(`${head}\n\n(Dica: digite o número da OS ou parte da descrição para buscar.)`, items, 'Ver OS');
+}
+
 async function obraListAction(
   userId: string,
   isAdmin: boolean,
@@ -430,6 +500,18 @@ async function obraListAction(
 }
 
 // ---------- Textos / ações recorrentes ----------
+
+/** Pergunta como preencher o RDO (passo a passo ou só uma parte). */
+function modeAskAction(rdoExists: boolean, intro?: string): SendAction {
+  return waButtons(
+    `${intro ? `${intro}\n\n` : ''}${rdoExists ? 'Esse dia já tem RDO em andamento — vou somar ao que já existe.' : 'RDO aberto para esse dia. 👷'}\n\nComo você quer preencher?\n• *Passo a passo*: eu te guio por todas as partes (atividades, mão de obra, equipamentos, materiais, ocorrências, observações e clima).\n• *Só uma parte*: você escolhe o que lançar.`,
+    [
+      { id: ID.modeGuided, title: 'Passo a passo' },
+      { id: ID.modePart, title: 'Só uma parte' },
+      { id: 'MENU', title: 'Menu' },
+    ],
+  );
+}
 
 function hubAction(p: Record<string, unknown>, content: Content | null, intro?: string): SendAction {
   const date = isoToBr(String(p.date));
@@ -877,17 +959,66 @@ export async function processWhatsAppDiarioObraFlow(params: {
       }
       delete p.guided;
       delete p.guideIdx;
-      return go(
-        waButtons(
-          `${row ? 'Esse dia já tem RDO em andamento — vou somar ao que já existe.' : 'RDO aberto para esse dia. 👷'}\n\nComo você quer preencher?\n• *Passo a passo*: eu te guio por todas as partes (atividades, mão de obra, equipamentos, materiais, ocorrências, observações e clima).\n• *Só uma parte*: você escolhe o que lançar.`,
-          [
-            { id: ID.modeGuided, title: 'Passo a passo' },
-            { id: ID.modePart, title: 'Só uma parte' },
-            { id: 'MENU', title: 'Menu' },
-          ],
-        ),
-        'RDO_ASK_MODE',
-      );
+      // Diário novo: se o contrato tem OS cadastradas, a OS é obrigatória (como no site e no app).
+      if (!row) {
+        const osTotal = (await listOs(String(p.contratoId || ''), '', 0)).total;
+        if (osTotal > 0) {
+          p.osQuery = '';
+          p.osPage = 0;
+          return go(await osListAction(String(p.contratoId), '', 0, 'Para abrir o RDO, escolha a *OS* deste diário:'), 'RDO_SELECT_OS');
+        }
+      }
+      return go(modeAskAction(Boolean(row)), 'RDO_ASK_MODE');
+    }
+
+    case 'RDO_SELECT_OS': {
+      const contratoId = String(p.contratoId || '');
+      const showOs = async (query: string, page: number, intro?: string) => osListAction(contratoId, query, page, intro);
+      if (!contratoId) {
+        return go((await contratoListAction(userId, isAdmin, '', 0)).action, 'RDO_SELECT_CONTRATO');
+      }
+      if (content === ID.moreOs) {
+        const total = (await listOs(contratoId, String(p.osQuery || ''), 0)).total;
+        const nextPage = Number(p.osPage || 0) + 1;
+        p.osPage = nextPage * OS_PAGE_SIZE >= total ? 0 : nextPage;
+        return stay(await showOs(String(p.osQuery || ''), Number(p.osPage)));
+      }
+      let pick: OsChoice | undefined;
+      if (content.startsWith(ID.osPrefix)) {
+        const key = textRaw.trim().slice(ID.osPrefix.length).toLowerCase();
+        const all = await listOs(contratoId, '', 0, true);
+        pick = all.rows.find((o) => osKeyOf(o).toLowerCase() === key);
+      } else {
+        // Texto livre: busca pelo número/descrição; se achar só uma, já escolhe.
+        const q = textRaw.trim().slice(0, 80);
+        if (q.length < 1) return stay(await showOs(String(p.osQuery || ''), Number(p.osPage || 0)));
+        const found = await listOs(contratoId, q, 0);
+        if (found.total === 1) pick = found.rows[0];
+        else {
+          p.osQuery = found.total ? q : '';
+          p.osPage = 0;
+          return stay(found.total ? await showOs(q, 0) : await showOs('', 0, `Não achei OS com «${q}». Escolha na lista ou digite de novo:`));
+        }
+      }
+      if (!pick) return stay(await showOs('', 0, 'OS não encontrada. Escolha na lista:'));
+      // Cria o RDO do dia já com a OS (se alguém criou nesse meio tempo, mantém o que já existe).
+      await prisma.diarioObra.upsert({
+        where: { obraId_date: { obraId, date } },
+        create: {
+          obraId,
+          date,
+          noActivity: false,
+          content: normalizeStored(null) as any,
+          osDivSe: pick.divSe,
+          osFolder: pick.folderNumber,
+          createdById: userId,
+          updatedById: userId,
+        },
+        update: {},
+      });
+      p.osDivSe = pick.divSe;
+      p.osFolder = pick.folderNumber;
+      return go(modeAskAction(false, `OS *${pick.label}* ✅`), 'RDO_ASK_MODE');
     }
 
     case 'RDO_ASK_MODE': {

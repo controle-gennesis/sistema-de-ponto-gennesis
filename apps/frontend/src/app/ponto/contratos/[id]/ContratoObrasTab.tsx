@@ -26,6 +26,7 @@ type ObraRow = {
   id: string;
   name: string;
   contratoId: string;
+  address?: string | null;
   isActive: boolean;
 };
 
@@ -47,6 +48,7 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ObraRow | null>(null);
   const [formName, setFormName] = useState('');
+  const [formAddress, setFormAddress] = useState('');
   const [deleteRow, setDeleteRow] = useState<ObraRow | null>(null);
 
   useEffect(() => {
@@ -75,13 +77,15 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
     setShowForm(false);
     setEditing(null);
     setFormName('');
+    setFormAddress('');
   };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const name = formName.trim();
-      if (editing) return api.patch(`/obras/${editing.id}`, { name, contratoId: contractId });
-      return api.post('/obras', { name, contratoId: contractId });
+      const address = formAddress.trim();
+      if (editing) return api.patch(`/obras/${editing.id}`, { name, address, contratoId: contractId });
+      return api.post('/obras', { name, address, contratoId: contractId });
     },
     onSuccess: () => {
       toast.success(editing ? 'Obra atualizada!' : 'Obra salva com sucesso!');
@@ -104,12 +108,14 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
   const openNew = () => {
     setEditing(null);
     setFormName('');
+    setFormAddress('');
     setShowForm(true);
   };
 
   const openEdit = (row: ObraRow) => {
     setEditing(row);
     setFormName(row.name || '');
+    setFormAddress(row.address || '');
     setShowForm(true);
   };
 
@@ -196,6 +202,7 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
                         ID
                       </th>
                       <th className={cadastroListClasses.th}>Nome</th>
+                      <th className={cadastroListClasses.th}>Endereço</th>
                       {showActions ? <th className={cadastroListClasses.thRight}>Ação</th> : null}
                     </tr>
                   </thead>
@@ -211,6 +218,9 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
                         </td>
                         <td className="px-3 py-4 sm:px-6">
                           <ListRowNavigableLabel className="font-medium">{it.name}</ListRowNavigableLabel>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-600 dark:text-gray-300 sm:px-6">
+                          {it.address?.trim() || '—'}
                         </td>
                         {showActions ? (
                           <RowActionMenuCell
@@ -279,6 +289,14 @@ export function ContratoObrasTab({ contractId, canManage }: { contractId: string
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="Ex.: Obra FHE - DF"
+              className="input w-full"
+            />
+            <label className="mb-2 mt-4 block text-sm font-medium text-gray-700 dark:text-gray-300">Endereço</label>
+            <input
+              type="text"
+              value={formAddress}
+              onChange={(e) => setFormAddress(e.target.value)}
+              placeholder="Ex.: SGAN 913, Asa Norte - Brasília/DF"
               className="input w-full"
             />
           </form>

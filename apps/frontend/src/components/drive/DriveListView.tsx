@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDriveMenuDismiss } from './useDriveMenuDismiss';
 import {
+  ArrowDown,
+  ArrowUp,
   Download,
   Folder,
   FolderInput,
@@ -15,7 +17,13 @@ import {
   Users,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { folderDropProps, startDriveItemDrag, type DriveDragItem } from '@/components/drive/driveItemDrag';
+import type { DriveSortKey, DriveSortState } from '@/components/drive/driveSort';
+import {
+  folderDropProps,
+  startDriveItemDrag,
+  type DriveDragItem,
+  type FolderFileDrop,
+} from '@/components/drive/driveItemDrag';
 import type { SelectMods } from '@/components/drive/driveSelection';
 import { DriveMimeIcon } from '@/components/drive/DriveMimeIcon';
 import { DriveHoverActions } from '@/components/drive/DriveFilePreviewModal';
@@ -29,7 +37,10 @@ type DriveFolder = {
   ownerId: string;
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
+  sizeBytes?: number;
   starred?: boolean;
+  /** Só nos resultados de busca: pastas acima do item (da raiz até a pasta dele). */
+  pathFolders?: Array<{ id: string; name: string }>;
   iconKey?: string | null;
   iconColor?: string | null;
   trashedAt?: string | null;
@@ -48,6 +59,7 @@ type DriveFile = {
   size: number;
   mimeType: string;
   folderId: string | null;
+  pathFolders?: Array<{ id: string; name: string }>;
   ownerId: string;
   ownerName?: string | null;
   ownerPhotoUrl?: string | null;
@@ -57,10 +69,79 @@ type DriveFile = {
   updatedAt: string;
 };
 
+/** Linha pequena com a pasta onde o item está (só aparece nos resultados de busca). */
+function PathLine({
+  path,
+  onOpen,
+}: {
+  path?: Array<{ id: string; name: string }>;
+  onOpen: (id: string) => void;
+}) {
+  if (!path) return null;
+  const last = path[path.length - 1];
+  const texto = path.length ? path.map((p) => p.name).join(' > ') : 'Meu Drive';
+  return (
+    <button
+      type="button"
+      title={last ? `Abrir a pasta: ${texto}` : texto}
+      disabled={!last}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (last) onOpen(last.id);
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="mt-0.5 block max-w-full truncate text-left text-xs text-gray-500 enabled:hover:text-red-600 enabled:hover:underline dark:text-gray-400 dark:enabled:hover:text-red-400"
+    >
+      em {texto}
+    </button>
+  );
+}
+
+function SortHeader({
+  label,
+  k,
+  sort,
+  onSort,
+  className = '',
+}: {
+  label: string;
+  k: DriveSortKey;
+  sort?: DriveSortState;
+  onSort?: (key: DriveSortKey) => void;
+  className?: string;
+}) {
+  const active = sort?.key === k;
+  const Icon = sort?.dir === 'desc' ? ArrowDown : ArrowUp;
+  return (
+    <div className={`flex min-w-0 items-center ${className}`}>
+      <button
+        type="button"
+        disabled={!onSort}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSort?.(k);
+        }}
+        aria-sort={active ? (sort?.dir === 'desc' ? 'descending' : 'ascending') : 'none'}
+        className={`group relative inline-flex items-center rounded uppercase tracking-wider transition-colors ${
+          active ? 'text-gray-900 dark:text-gray-100' : 'hover:text-gray-800 dark:hover:text-gray-200'
+        } ${onSort ? 'cursor-pointer' : 'cursor-default'}`}
+      >
+        {label}
+        <Icon
+          className={`absolute left-full top-1/2 ml-1 h-3 w-3 -translate-y-1/2 transition-opacity ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
+        />
+      </button>
+    </div>
+  );
+}
+
 /** ícone | nome | proprietário | modificado | tamanho | menu */
 const GRID_COLS = 'grid-cols-[auto,1fr,140px,150px,100px,56px]';
 
 type Props = {
+  /** Ordenação atual e troca ao clicar no título da coluna. */
+  sort?: DriveSortState;
+  onSort?: (key: DriveSortKey) => void;
   folders: DriveFolder[];
   files: DriveFile[];
   onOpenFolder: (id: string) => void;
@@ -76,6 +157,8 @@ type Props = {
   onRestore?: (type: 'folder' | 'file', id: string) => void;
   onMove?: (type: 'folder' | 'file', id: string, name: string) => void;
   onDropInto?: (items: DriveDragItem[], targetFolderId: string) => void;
+  /** Arquivos de fora soltos em cima de uma pasta. */
+  fileDrop?: FolderFileDrop;
   /** Itens selecionados (chaves `folder-ID` / `file-ID`). */
   selectedKeys: Set<string>;
   onSelect: (key: string, mods: SelectMods) => void;
@@ -238,6 +321,8 @@ function MenuFlutuante({ ancora, children }: { ancora: AncoraMenu; children: Rea
 const rowClass = `drive-item-row group relative grid ${GRID_COLS} items-center gap-4 select-none outline-none border-b border-gray-100 px-4 py-3 transition-colors last:border-0 hover:bg-gray-50 dark:border-gray-700/50 dark:hover:bg-gray-700/50 cursor-pointer`;
 
 export function DriveListView({
+  sort,
+  onSort,
   folders,
   files,
   onOpenFolder,
@@ -252,6 +337,7 @@ export function DriveListView({
   onRestore,
   onMove,
   onDropInto,
+  fileDrop,
   selectedKeys,
   onSelect,
   onClearSelection,
@@ -298,21 +384,16 @@ export function DriveListView({
         onClearSelection();
       }}
     >
-      <Card padding="none" className="!shadow-none">
+      <Card padding="none" className="overflow-hidden !shadow-none">
         <div className="table-scroll">
           <div className="drive-stagger min-w-[40rem]">
         <div
           className={`grid ${GRID_COLS} gap-4 border-b border-gray-200 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-700 dark:text-gray-400`}
         >
-          <div className="relative w-8">
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap">
-              Nome
-            </span>
-          </div>
-          <div />
-          <div className="text-center">Proprietário</div>
-          <div className="text-center">Modificado</div>
-          <div className="text-right">Tamanho</div>
+          <SortHeader label="Nome" k="name" sort={sort} onSort={onSort} className="col-span-2 justify-start" />
+          <SortHeader label="Proprietário" k="owner" sort={sort} onSort={onSort} className="justify-center" />
+          <SortHeader label="Modificado" k="modified" sort={sort} onSort={onSort} className="justify-center" />
+          <SortHeader label="Tamanho" k="size" sort={sort} onSort={onSort} className="justify-end" />
           <div className="text-center">Ação</div>
         </div>
 
@@ -335,7 +416,7 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                 onDragStateChange(items.map((i) => `${i.type}-${i.id}`));
               }}
               onDragEnd={() => onDragStateChange(null)}
-              {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo) : {})}
+              {...(!trashMode ? folderDropProps(folder.id, onDropInto, setDropAlvo, fileDrop) : {})}
               onClick={(e) => {
                 e.stopPropagation();
                 setOpenMenuId(null);
@@ -355,16 +436,19 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
                   onSelect(menuKey, { ctrl: true, shift: false });
                 }
               }}
-              className={`${rowClass} ${dropAlvo === folder.id ? '!bg-red-50 ring-1 ring-inset ring-red-300 dark:!bg-red-950/20 dark:ring-red-800' : ''} ${selectedKeys.has(menuKey) ? '!bg-red-50 dark:!bg-red-950/20' : ''}`}
+              className={`${rowClass} ${dropAlvo === folder.id ? '!bg-red-50 ring-1 ring-inset ring-red-300 dark:!bg-red-950/20 dark:ring-red-800' : ''} ${selectedKeys.has(menuKey) ? 'drive-row-selected !bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
               <FolderIconTile iconKey={folder.iconKey} color={folder.iconColor} className="drive-item-card__icon h-8 w-8 rounded-lg" />
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
-                  {folder.name}
-                </span>
-                {folder.starred && !trashMode && (
-                  <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                )}
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {folder.name}
+                  </span>
+                  {folder.starred && !trashMode && (
+                    <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                  )}
+                </div>
+                <PathLine path={folder.pathFolders} onOpen={onOpenFolder} />
               </div>
               <OwnerCell
                 ownerId={folder.ownerId}
@@ -375,7 +459,9 @@ style={draggingKeys.has(`folder-${folder.id}`) ? { opacity: 0.45 } : undefined}
               <span className="text-center text-xs text-gray-400 dark:text-gray-500">
                 {formatDate(folder.updatedAt)}
               </span>
-              <span className="text-right text-xs text-gray-400 dark:text-gray-500">—</span>
+              <span className="text-right text-xs text-gray-400 dark:text-gray-500">
+                {typeof folder.sizeBytes === 'number' ? formatBytes(folder.sizeBytes) : '—'}
+              </span>
               <button
                 type="button"
                 data-drive-menu
@@ -537,24 +623,27 @@ style={draggingKeys.has(`file-${file.id}`) ? { opacity: 0.45 } : undefined}
                   onSelect(menuKey, { ctrl: true, shift: false });
                 }
               }}
-              className={`${rowClass} ${selectedKeys.has(menuKey) ? '!bg-red-50 dark:!bg-red-950/20' : ''}`}
+              className={`${rowClass} ${selectedKeys.has(menuKey) ? 'drive-row-selected !bg-red-50 dark:!bg-red-950/20' : ''}`}
             >
               <DriveMimeIcon mimeType={file.mimeType} fileName={file.name} className="drive-item-card__icon h-8 w-8" />
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
-                  {file.name}
-                </span>
-                {file.starred && !trashMode && (
-                  <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                )}
-                {!trashMode && (
-                  <DriveHoverActions
-                    file={file}
-                    onPreview={() => onPreview(file)}
-                    onDownload={() => void onDownload(file)}
-                    className="ml-auto shrink-0 pr-1"
-                  />
-                )}
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {file.name}
+                  </span>
+                  {file.starred && !trashMode && (
+                    <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                  )}
+                  {!trashMode && (
+                    <DriveHoverActions
+                      file={file}
+                      onPreview={() => onPreview(file)}
+                      onDownload={() => void onDownload(file)}
+                      className="ml-auto shrink-0 pr-1"
+                    />
+                  )}
+                </div>
+                <PathLine path={file.pathFolders} onOpen={onOpenFolder} />
               </div>
               <OwnerCell
                 ownerId={file.ownerId}

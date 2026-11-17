@@ -3039,6 +3039,8 @@ export class KanbanService {
         mimeType: KanbanService.LINK_ATTACHMENT_MIME,
       },
     });
+    // O histórico guarda quem adicionou; ele não é apagado quando o anexo é excluído depois.
+    await this.logActivity(cardId, requesterId, 'ATTACHMENT_ADDED', { fileName, isLink: true });
 
     await prisma.kanbanCard.update({
       where: { id: cardId },
@@ -3046,6 +3048,13 @@ export class KanbanService {
     });
 
     return this.getCardById(requesterId, cardId);
+  }
+
+  /** Nome do arquivo vindo do upload: o multer lê o nome como latin1 e "ção" vira "Ã§Ã£o". Desfaz isso. */
+  private fixUploadedFileName(name: string): string {
+    if (!name || !Array.from(name).some((ch) => ch.charCodeAt(0) > 127)) return name;
+    const decoded = Buffer.from(name, 'latin1').toString('utf8');
+    return decoded.includes(String.fromCharCode(0xfffd)) ? name : decoded;
   }
 
   async addAttachments(
@@ -3060,17 +3069,19 @@ export class KanbanService {
 
     for (const file of files) {
       const upload = await chatUploadService.uploadFile(file, requesterId);
+      const fileName = this.fixUploadedFileName(file.originalname || '') || 'arquivo';
       await prisma.kanbanCardAttachment.create({
         data: {
           cardId,
           userId: requesterId,
-          fileName: file.originalname || 'arquivo',
+          fileName,
           fileUrl: upload.url,
           fileKey: upload.key,
           fileSize: upload.size,
           mimeType: upload.mimeType,
         },
       });
+      await this.logActivity(cardId, requesterId, 'ATTACHMENT_ADDED', { fileName, isLink: false });
     }
 
     await prisma.kanbanCard.update({

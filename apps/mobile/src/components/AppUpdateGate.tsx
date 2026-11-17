@@ -8,6 +8,17 @@ import { checkAppUpdate, type AppUpdateInfo } from '../services/appVersion';
 const DISMISSED_KEY = '@app_update_dismissed_version';
 const RECHECK_MS = 10 * 60 * 1000;
 
+// PRÉVIA TEMPORÁRIA: força o modal a aparecer (com dados de exemplo) para conferir o visual.
+// Troque para 'required' para ver a versão obrigatória, ou para null para voltar ao normal.
+const PREVIEW_MODE: 'optional' | 'required' | null = null;
+const PREVIEW_INFO: AppUpdateInfo = {
+  mode: 'optional',
+  currentVersion: '1.0.0',
+  latestVersion: '1.1.0',
+  storeUrl: 'https://example.com/loja',
+  message: null,
+};
+
 /**
  * Avisa quando há versão nova do app:
  * - abaixo da versão MÍNIMA: tela de atualização obrigatória (não dá pra fechar);
@@ -23,6 +34,11 @@ export default function AppUpdateGate() {
 
   const check = useCallback(async () => {
     lastCheckRef.current = Date.now();
+    if (PREVIEW_MODE) {
+      setInfo({ ...PREVIEW_INFO, mode: PREVIEW_MODE });
+      setVisible(true);
+      return;
+    }
     const result = await checkAppUpdate();
     if (!result || result.mode === 'none') {
       setVisible(false);
@@ -83,10 +99,6 @@ export default function AppUpdateGate() {
               (required
                 ? 'Esta versão do app não é mais compatível. Atualize para continuar usando.'
                 : 'Há uma versão mais nova do app, com melhorias e correções.')}
-          </Text>
-          <Text style={styles.versions}>
-            Sua versão: {info.currentVersion}
-            {info.latestVersion ? ` · Mais recente: ${info.latestVersion}` : ''}
           </Text>
 
           {info.storeUrl ? (

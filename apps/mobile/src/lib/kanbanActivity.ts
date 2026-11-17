@@ -89,6 +89,10 @@ export function describeCardActivity(
         : `reabriu a tarefa “${str('title')}”`;
     case 'CHECKLIST_REMOVED':
       return `removeu a tarefa “${str('title')}”`;
+    case 'ATTACHMENT_ADDED':
+      return d.isLink
+        ? `adicionou o link “${str('fileName')}”`
+        : `adicionou o anexo “${str('fileName')}”`;
     case 'ATTACHMENT_REMOVED':
       return d.isLink
         ? `removeu o link “${str('fileName')}”`

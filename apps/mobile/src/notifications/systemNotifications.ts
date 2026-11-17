@@ -26,6 +26,10 @@ type NotificationsModule = {
     }>;
   }) => void;
   setNotificationChannelAsync: (id: string, opts: Record<string, unknown>) => Promise<unknown>;
+  setNotificationCategoryAsync: (
+    id: string,
+    actions: Array<{ identifier: string; buttonTitle: string; options?: Record<string, unknown> }>,
+  ) => Promise<unknown>;
   getPermissionsAsync: () => Promise<{ status: string }>;
   requestPermissionsAsync: () => Promise<{ status: string }>;
   scheduleNotificationAsync: (opts: Record<string, unknown>) => Promise<unknown>;
@@ -85,6 +89,26 @@ async function ensureAndroidChannel(mod: NotificationsModule) {
   });
 }
 
+/**
+ * Botões que aparecem embaixo da notificação (iOS e Android). O id da categoria vem no push do
+ * servidor (`categoryId`). Tocar num botão abre o app na área do assunto (ver NotificationsContext).
+ */
+async function ensureNotificationCategories(mod: NotificationsModule) {
+  try {
+    await mod.setNotificationCategoryAsync('fuel-refuel', [
+      { identifier: 'inform-refuel', buttonTitle: 'Informar abastecido', options: { opensAppToForeground: true } },
+    ]);
+    await mod.setNotificationCategoryAsync('view-details', [
+      { identifier: 'view-details', buttonTitle: 'Ver detalhes', options: { opensAppToForeground: true } },
+    ]);
+    await mod.setNotificationCategoryAsync('reservation-action', [
+      { identifier: 'open-reservation', buttonTitle: 'Vistoria / devolução', options: { opensAppToForeground: true } },
+    ]);
+  } catch {
+    // sem categorias a notificação aparece normal, só sem os botões
+  }
+}
+
 export async function ensureSystemNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === 'web' || notificationsUnsupported) return false;
   const mod = getNotifications();
@@ -95,6 +119,7 @@ export async function ensureSystemNotificationPermissions(): Promise<boolean> {
       try {
         ensureHandler(mod);
         await ensureAndroidChannel(mod);
+        await ensureNotificationCategories(mod);
         const current = await mod.getPermissionsAsync();
         let status = current.status;
         if (status !== 'granted') {

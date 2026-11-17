@@ -1,20 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Check, ChevronDown, HardHat, ScrollText, Search } from 'lucide-react-native';
+import { Check, ChevronDown, ClipboardList, HardHat, ScrollText, Search } from 'lucide-react-native';
 import SheetModal, { SheetPrimaryButton } from '../SheetModal';
 import DateField from '../DateField';
 import FormFieldLabel from '../FormFieldLabel';
 import { useTheme } from '../../context/ThemeContext';
-import { fetchObras, todayIso, type ObraOption } from '../../services/diarioObra';
+import { fetchObras, fetchOsOptions, todayIso, type ObraOption, type OsOption } from '../../services/diarioObra';
 
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (obra: ObraOption, date: string) => void;
+  onConfirm: (obra: ObraOption, date: string, os: OsOption | null) => void;
 };
 
-type Pick = null | 'contrato' | 'obra';
+type Pick = null | 'contrato' | 'obra' | 'os';
+const osKeyOf = (o: { divSe: string; folderNumber: string }) => `${o.divSe}|${o.folderNumber}`;
 type ContratoOption = { id: string; name: string; number?: string };
 
 const MAX_RESULTS = 50;
@@ -36,6 +37,7 @@ export default function RdoNewSheet({ visible, onClose, onConfirm }: Props) {
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const [contratoId, setContratoId] = useState('');
   const [obraId, setObraId] = useState('');
+  const [osKey, setOsKey] = useState('');
   const [date, setDate] = useState(todayIso());
   const [pick, setPick] = useState<Pick>(null);
   const [search, setSearch] = useState('');
@@ -51,10 +53,23 @@ export default function RdoNewSheet({ visible, onClose, onConfirm }: Props) {
     if (!visible) return;
     setContratoId('');
     setObraId('');
+    setOsKey('');
     setDate(todayIso());
     setPick(null);
     setSearch('');
   }, [visible]);
+
+  // OS (SE e Pasta) do contrato escolhido.
+  const { data: osData, isLoading: loadingOs } = useQuery({
+    queryKey: ['diario-obra-os', contratoId],
+    queryFn: () => fetchOsOptions(contratoId),
+    enabled: visible && !!contratoId,
+    staleTime: 2 * 60 * 1000,
+  });
+  const osOptions = osData ?? [];
+  const osSel = osOptions.find((o) => osKeyOf(o) === osKey) ?? null;
+  // Contrato com OS cadastradas: a OS é obrigatória.
+  const osObrigatoria = osOptions.length > 0;
 
   const contratos = useMemo<ContratoOption[]>(() => {
     const map = new Map<string, ContratoOption>();
@@ -119,6 +134,60 @@ export default function RdoNewSheet({ visible, onClose, onConfirm }: Props) {
   };
 
   // ── Lista para escolher contrato ou obra ─────────────────────────────────────
+  if (pick === 'os') {
+    const lista = osOptions.filter((o) => !q || norm(`${o.label} ${o.description}`).includes(q));
+    return (
+      <SheetModal visible={visible} onClose={onClose} onBack={() => setPick(null)} title="Escolher OS" size="tall">
+        <View style={styles.searchBox}>
+          <Search size={18} color={colors.textSecondary} strokeWidth={2.2} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar OS"
+            placeholderTextColor={colors.textSecondary}
+            style={styles.searchInput}
+            autoCorrect={false}
+          />
+        </View>
+        <View style={styles.list}>
+          {lista.slice(0, MAX_RESULTS).map((o) => {
+            const active = osKey === osKeyOf(o);
+            return (
+              <TouchableOpacity
+                key={osKeyOf(o)}
+                style={[styles.option, active && styles.optionActive]}
+                activeOpacity={0.75}
+                onPress={() => {
+                  setOsKey(osKeyOf(o));
+                  setPick(null);
+                }}
+              >
+                <View style={[styles.optionIcon, active && styles.optionIconActive]}>
+                  <ClipboardList size={18} color={active ? '#fff' : colors.primary} strokeWidth={2.2} />
+                </View>
+                <View style={styles.optionText}>
+                  <Text style={styles.optionTitle} numberOfLines={2}>
+                    {o.label}
+                  </Text>
+                  {o.description ? (
+                    <Text style={styles.optionSub} numberOfLines={2}>
+                      {o.description}
+                    </Text>
+                  ) : null}
+                </View>
+                {active ? <Check size={18} color={colors.primary} strokeWidth={2.6} /> : null}
+              </TouchableOpacity>
+            );
+          })}
+          {lista.length === 0 ? <Text style={styles.empty}>Nada encontrado.</Text> : null}
+          {lista.length > MAX_RESULTS ? (
+            <Text style={styles.more}>Mostrando {MAX_RESULTS} de {lista.length}. Use a busca para refinar.</Text>
+          ) : null}
+        </View>
+      </SheetModal>
+    );
+  }
+
   if (pick) {
     const isContrato = pick === 'contrato';
     const list = isContrato ? contratosFiltrados : obrasFiltradas;
@@ -160,8 +229,9 @@ export default function RdoNewSheet({ visible, onClose, onConfirm }: Props) {
                       activeOpacity={0.75}
                       onPress={() => {
                         setContratoId(c.id);
-                        // Trocar de contrato limpa a obra se ela não for dele.
+                        // Trocar de contrato limpa a obra se ela não for dele, e a OS.
                         if (obraSel && obraSel.contratoId !== c.id) setObraId('');
+                        if (c.id !== contratoId) setOsKey('');
                         setPick(null);
                       }}
                     >
@@ -238,14 +308,29 @@ export default function RdoNewSheet({ visible, onClose, onConfirm }: Props) {
         onPress: () => openPick('obra'),
         disabled: !contratoId,
       })}
+      {selectField({
+        label: 'OS',
+        required: osObrigatoria,
+        icon: ClipboardList,
+        value: osSel ? osSel.label : '',
+        placeholder: !contratoId
+          ? 'Escolha o contrato primeiro'
+          : loadingOs
+            ? 'Carregando OS...'
+            : osObrigatoria
+              ? 'Selecionar OS do contrato'
+              : 'Nenhuma OS cadastrada neste contrato',
+        onPress: () => openPick('os'),
+        disabled: !contratoId || !osObrigatoria,
+      })}
 
       <DateField label="Dia do diário" value={date} onChange={setDate} maximumDate={new Date()} />
 
       <View style={styles.action}>
         <SheetPrimaryButton
           label="Abrir diário"
-          disabled={!contratoId || !obraSel || !date}
-          onPress={() => obraSel && onConfirm(obraSel, date)}
+          disabled={!contratoId || !obraSel || !date || (osObrigatoria && !osSel)}
+          onPress={() => obraSel && onConfirm(obraSel, date, osSel)}
         />
       </View>
     </SheetModal>

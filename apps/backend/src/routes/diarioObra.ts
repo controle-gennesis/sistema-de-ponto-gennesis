@@ -158,6 +158,51 @@ async function buildListWhere(req: AuthRequest): Promise<any | null> {
   };
 }
 
+/** Rótulo da OS como no resto do sistema: "AD-725 - 1" (SE sem o prefixo OS/SE, mais a Pasta, se houver). */
+function osLabel(divSe: string, folder: string): string {
+  const d = divSe.replace(/^(OS|SE)\s+/i, '').trim();
+  if (!d) return '';
+  return folder ? `${d} - ${folder}` : d;
+}
+
+/** OS (SE e Pasta) de um contrato, para escolher ao criar o diário. Só contratos Liberados para o usuário. */
+router.get('/os-options', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) throw createError('Usuário não autenticado', 401);
+    const contratoId = str(req.query.contratoId, 40);
+    if (!contratoId) throw createError('Informe o contrato', 400);
+    const access = await getLiberadoContractAccessForUser(req.user.id, req.user.isAdmin);
+    if (access.filter === 'none' || (access.filter === 'ids' && !access.ids.includes(contratoId))) {
+      throw createError('Sem permissão para este contrato', 403);
+    }
+    const rows = await prisma.pleito.findMany({
+      where: { updatedContractId: contratoId },
+      select: { divSe: true, folderNumber: true, serviceDescription: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const seen = new Map<string, { divSe: string; folderNumber: string; label: string; description: string }>();
+    for (const r of rows) {
+      const divSe = (r.divSe ?? '').trim();
+      const folder = (r.folderNumber ?? '').trim();
+      const label = osLabel(divSe, folder);
+      if (!label) continue;
+      const key = `${divSe.toLowerCase()}|${folder.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          divSe,
+          folderNumber: folder,
+          label,
+          description: (r.serviceDescription ?? '').trim().slice(0, 140),
+        });
+      }
+    }
+    const data = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { numeric: true }));
+    res.json({ success: true, data });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** Totais por etapa (todos, em preenchimento, finalizados, sem atividade), com os mesmos filtros da lista. */
 router.get('/stats', async (req: AuthRequest, res, next) => {
   try {
@@ -221,6 +266,9 @@ router.get('/', async (req: AuthRequest, res, next) => {
         contratoNumber: r.obra?.contrato?.number ?? '',
         noActivity: r.noActivity,
         noActivityReason: r.noActivityReason,
+        osDivSe: r.osDivSe ?? '',
+        osFolder: r.osFolder ?? '',
+        osLabel: osLabel(r.osDivSe ?? '', r.osFolder ?? ''),
         finalizedAt: r.finalizedAt,
         activities: count(c.activities),
         workers: count(c.labor?.direct) + count(c.labor?.indirect),
@@ -282,6 +330,10 @@ router.put('/:obraId/:date', async (req: AuthRequest, res, next) => {
       noActivityReason: noActivity ? str(req.body?.noActivityReason) || null : null,
       content: normalizeContent(req.body),
       updatedById: req.user?.id ?? null,
+      // A OS só muda quando vem no corpo (o salvamento automático do editor não a envia).
+      ...(req.body && 'osDivSe' in req.body
+        ? { osDivSe: str(req.body.osDivSe, 80) || null, osFolder: str(req.body.osFolder, 80) || null }
+        : {}),
     };
     const row = await prisma.diarioObra.upsert({
       where: { obraId_date: { obraId, date } },
@@ -289,6 +341,44 @@ router.put('/:obraId/:date', async (req: AuthRequest, res, next) => {
       update: data,
     });
     res.json({ success: true, data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Define ou troca só a OS do diário (SE e Pasta). Vale também para diário finalizado: é dado de identificação,
+ * não muda o conteúdo do relatório. A OS precisa ser uma das OS do contrato da obra.
+ */
+router.patch('/:obraId/:date/os', async (req: AuthRequest, res, next) => {
+  try {
+    const { obraId, date } = req.params;
+    if (!DATE_RE.test(date)) throw createError('Data inválida', 400);
+    const row = await prisma.diarioObra.findUnique({
+      where: { obraId_date: { obraId, date } },
+      select: { id: true, obra: { select: { contratoId: true } } },
+    });
+    if (!row) throw createError('Diário não encontrado', 404);
+    const divSe = str(req.body?.osDivSe, 80);
+    const folder = str(req.body?.osFolder, 80);
+    if (divSe || folder) {
+      const exists = await prisma.pleito.findFirst({
+        where: {
+          updatedContractId: row.obra.contratoId,
+          divSe: { equals: divSe, mode: 'insensitive' },
+          ...(folder
+            ? { folderNumber: { equals: folder, mode: 'insensitive' as const } }
+            : { OR: [{ folderNumber: null }, { folderNumber: '' }] }),
+        },
+        select: { id: true },
+      });
+      if (!exists) throw createError('OS não encontrada neste contrato', 400);
+    }
+    const updated = await prisma.diarioObra.update({
+      where: { id: row.id },
+      data: { osDivSe: divSe || null, osFolder: folder || null, updatedById: req.user?.id ?? null },
+    });
+    res.json({ success: true, data: updated });
   } catch (e) {
     next(e);
   }

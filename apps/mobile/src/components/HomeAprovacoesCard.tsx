@@ -4,7 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { BadgeCheck, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { usePermissions } from '../hooks/usePermissions';
-import { approvalsPendingTotal, fetchApprovalNotificationCounts } from '../services/approvals';
+import {
+  approvalsPendingTotal,
+  fetchApprovalNotificationCounts,
+  fetchEmpreiteiroPendingCount,
+} from '../services/approvals';
 import ApprovalsSheet from './ApprovalsSheet';
 
 export default function HomeAprovacoesCard() {
@@ -36,8 +40,16 @@ export default function HomeAprovacoesCard() {
     refetchInterval: 60_000,
   });
 
+  // Medições e aditivos de empreita não vêm na contagem geral: somam à parte.
+  const empreiteiroQuery = useQuery({
+    queryKey: ['approvals', 'empreiteiro-pending-count'],
+    enabled: canSeeAprovacoes && canApproveEmpreiteiroDaily,
+    queryFn: fetchEmpreiteiroPendingCount,
+    refetchInterval: 60_000,
+  });
+
   const data = countsQuery.data;
-  const total = approvalsPendingTotal(data);
+  const total = approvalsPendingTotal(data) + (empreiteiroQuery.data ?? 0);
   const hasPending = total > 0;
 
 

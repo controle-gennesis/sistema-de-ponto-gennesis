@@ -24,6 +24,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertTriangle,
   CheckCircle,
+  ChevronRight,
   Filter,
   MapPin,
   QrCode,
@@ -550,8 +551,9 @@ export default function GestaoOsListScreen() {
         subtitle="Escolha como abrir o chamado"
         icon={Wrench}
       >
+        <Text style={styles.actionSection}>Abertura</Text>
         <TouchableOpacity
-          style={[styles.actionOption, { marginBottom: 10 }]}
+          style={styles.actionOption}
           onPress={() => {
             setActionOpen(false);
             void openScanner();
@@ -565,6 +567,7 @@ export default function GestaoOsListScreen() {
             <Text style={styles.actionOptionTitle}>Escanear QR do ativo</Text>
             <Text style={styles.actionOptionSub}>Ler o código colado no equipamento</Text>
           </View>
+          <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionOption}
@@ -581,9 +584,7 @@ export default function GestaoOsListScreen() {
             <Text style={styles.actionOptionTitle}>Ocorrência não prevista</Text>
             <Text style={styles.actionOptionSub}>Registrar sem o QR do ativo</Text>
           </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionCancel} onPress={() => setActionOpen(false)}>
-          <Text style={styles.actionCancelText}>Cancelar</Text>
+          <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
         </TouchableOpacity>
       </SheetModal>
 
@@ -985,33 +986,41 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginTop: -4,
       marginBottom: 4,
     },
+    actionSection: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '700',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      marginTop: 10,
+      marginBottom: 12,
+      opacity: 0.55,
+    },
     actionOption: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 14,
-      backgroundColor: isDark ? colors.screenRoot : colors.surface,
+      backgroundColor: isDark ? colors.card : colors.surface,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 10,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
     },
     actionIconWrap: {
       width: 42,
       height: 42,
-    borderRadius: 12,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: isDark ? 'rgba(220, 38, 38, 0.18)' : 'rgba(220, 38, 38, 0.1)',
+      backgroundColor: `${colors.primary}14`,
     },
     actionCopy: { flex: 1, minWidth: 0 },
-    actionOptionTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+    actionOptionTitle: { color: colors.text, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
     actionOptionSub: {
       marginTop: 2,
       color: colors.textSecondary,
       fontSize: 12,
       fontWeight: '500',
     },
-    actionCancel: { alignItems: 'center', paddingVertical: 10 },
-    actionCancelText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
 });
