@@ -594,6 +594,14 @@ export function RmApprovalsSection() {
               <p className="mt-1 whitespace-pre-wrap text-base text-gray-900 dark:text-gray-100">{detailRequest.description || '—'}</p>
             </div>
 
+            {/* Observação da engenharia (pedido de material da FD) */}
+            {detailRequest.observacaoSolicitante?.trim() ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/20">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">Observação da engenharia</p>
+                <p className="mt-1 whitespace-pre-wrap text-base text-gray-900 dark:text-gray-100">{detailRequest.observacaoSolicitante}</p>
+              </div>
+            ) : null}
+
             {/* Associação FD (aparece automaticamente apenas se a RM tiver vínculo com FD) */}
             <RmFdAssociacaoSection materialRequestId={detailRequest.id} />
 

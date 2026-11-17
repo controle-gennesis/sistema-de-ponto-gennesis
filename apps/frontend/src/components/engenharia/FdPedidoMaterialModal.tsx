@@ -64,6 +64,8 @@ export interface FdMaterialMapping {
 
 /** Detalhamento por material: limite do campo. */
 const DETALHAMENTO_MAX = 500;
+/** Observação do pedido: mesmo limite do Histórico da OC (para onde ela vai no mapa de cotação). */
+const OBSERVACAO_PEDIDO_MAX = 500;
 
 /** Rascunho das associações, por chave do insumo da FD (persistido na meta do orçamento). */
 export type FdMaterialMap = Record<string, FdMaterialMapping[]>;
@@ -392,22 +394,36 @@ export function FdPedidoMaterialModal({
     onClose();
   }, [submitting, salvarRascunho, onClose]);
 
-  const handleSubmit = useCallback(async () => {
+  const validarPedido = useCallback((): boolean => {
     if (itensSemQuantidade.length > 0) {
       toast.error(`Informe a quantidade dos materiais do item ${itensSemQuantidade[0].item}.`);
-      return;
+      return false;
     }
     if (itensNaoIntegrais.length > 0) {
       const ins = itensNaoIntegrais[0];
       toast.error(
         `Item ${ins.item}: deve ser solicitado de forma integral (no mínimo ${fmtQtd(ins.quantidade)} ${ins.unidade}).`,
       );
-      return;
+      return false;
     }
     if (itensProntos.length === 0) {
       toast.error('Associe pelo menos um item da FD a um material.');
-      return;
+      return false;
     }
+    return true;
+  }, [itensSemQuantidade, itensNaoIntegrais, itensProntos]);
+
+  /** Antes de enviar, pergunta se a engenharia quer deixar uma observação no pedido. */
+  const [obsModalAberto, setObsModalAberto] = useState(false);
+  const [observacaoPedido, setObservacaoPedido] = useState('');
+  const abrirEnvio = useCallback(() => {
+    if (!validarPedido()) return;
+    setObservacaoPedido('');
+    setObsModalAberto(true);
+  }, [validarPedido]);
+
+  const handleSubmit = useCallback(async (observacao: string) => {
+    if (!validarPedido()) return;
     const items = itensProntos.flatMap((ins) =>
       linhasComMaterial(mappings[ins.key]).map((r) => ({
         fdItemKey: ins.key,
@@ -430,7 +446,9 @@ export function FdPedidoMaterialModal({
       const res = await api.post(`/demand-sheet-approvals/${fdApprovalId}/material-request`, {
         serviceOrderId: serviceOrderId || undefined,
         items,
+        observacao: observacao.trim().slice(0, OBSERVACAO_PEDIDO_MAX) || undefined,
       });
+      setObsModalAberto(false);
       const data = res.data?.data || {};
       const rn = data.requestNumber || 'RM criada';
       toast.success(`Requisição de material ${rn} criada com ${itensProntos.length} item(ns) da FD.`);
@@ -445,7 +463,7 @@ export function FdPedidoMaterialModal({
     } finally {
       setSubmitting(false);
     }
-  }, [itensSemQuantidade, itensNaoIntegrais, itensProntos, mappings, fdApprovalId, serviceOrderId, onDraftChange, onSuccess, itensPedidos]);
+  }, [validarPedido, itensProntos, mappings, fdApprovalId, serviceOrderId, onDraftChange, onSuccess, itensPedidos]);
 
   if (!isOpen) return null;
 
@@ -865,7 +883,7 @@ export function FdPedidoMaterialModal({
           </button>
           <button
             type="button"
-            onClick={() => void handleSubmit()}
+            onClick={abrirEnvio}
             disabled={itensProntos.length === 0 || submitting}
             title={itensProntos.length === 0 ? 'Associe pelo menos um item para enviar' : undefined}
             className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 dark:bg-red-600 dark:hover:bg-red-500"
@@ -875,6 +893,72 @@ export function FdPedidoMaterialModal({
           </button>
         </div>
       </div>
+      {obsModalAberto ? (
+        <div
+          className="fixed inset-0 z-[2100] flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !submitting) setObsModalAberto(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fd-pedido-obs-titulo"
+            className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 id="fd-pedido-obs-titulo" className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  Deseja incluir alguma observação neste pedido?
+                </h3>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Opcional. A observação fica na requisição e vai para o histórico da ordem de compra.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setObsModalAberto(false)}
+                disabled={submitting}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                aria-label="Cancelar envio"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <textarea
+              value={observacaoPedido}
+              onChange={(e) => setObservacaoPedido(e.target.value.slice(0, OBSERVACAO_PEDIDO_MAX))}
+              maxLength={OBSERVACAO_PEDIDO_MAX}
+              rows={4}
+              autoFocus
+              placeholder="Ex.: entregar no almoxarifado da obra até sexta-feira"
+              className="mt-4 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            />
+            <p className="mt-1 text-right text-xs text-gray-500 dark:text-gray-400">
+              {observacaoPedido.length}/{OBSERVACAO_PEDIDO_MAX}
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => void handleSubmit('')}
+                disabled={submitting}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Enviar sem observação
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSubmit(observacaoPedido)}
+                disabled={submitting || !observacaoPedido.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 dark:bg-red-600 dark:hover:bg-red-500"
+              >
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Enviar com observação
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppModalOverlay>
   );
 }

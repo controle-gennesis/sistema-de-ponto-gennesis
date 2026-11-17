@@ -150,6 +150,16 @@ async function ensurePaymentConditionFromTotvs(prisma: PrismaClient): Promise<vo
   `);
 }
 
+/** Observação da engenharia no pedido de material da FD (detalhes da RM e Histórico da OC no mapa). */
+async function ensureMaterialRequestObservacaoSolicitante(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'material_requests'))) return;
+  if (await columnExists(prisma, 'material_requests', 'observacaoSolicitante')) return;
+  console.warn('[Schema] Coluna material_requests.observacaoSolicitante ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "material_requests" ADD COLUMN IF NOT EXISTS "observacaoSolicitante" TEXT;
+  `);
+}
+
 async function ensureMaterialRequestItemCorrectionReviews(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'material_request_item_correction_reviews')) return;
   console.warn('[Schema] Tabela material_request_item_correction_reviews ausente — criando.');
@@ -3571,6 +3581,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureMaterialRequestCorrectionLogs(prisma);
     await ensureMaterialRequestItemCorrectionReviews(prisma);
     await ensurePaymentConditionFromTotvs(prisma);
+    await ensureMaterialRequestObservacaoSolicitante(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, ClipboardList, Download, ExternalLink, FileSpreadsheet, FileText, RotateCcw, Save, Truck, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Download, FileSpreadsheet, FileText, RotateCcw, Save, Truck, Wrench, X } from 'lucide-react';
 import {
   exportarMapaCotacao,
   type MapaCotacaoExportFd,
@@ -15,11 +15,13 @@ import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { downloadUploadFile } from '@/lib/downloadUploadFile';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { usePermissions } from '@/hooks/usePermissions';
 import { PaymentConditionSelect, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 import {
+  OC_NOTES_TOTVS_MAX,
   OC_PIX_KEY_TYPE_OPTIONS,
   OcCostCenterField,
   OcFilialField,
@@ -309,6 +311,8 @@ function MapSupplierPriceCell({
   isWinner,
   quantity,
   borderClassName = '',
+  navColuna,
+  navLinha,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -316,6 +320,9 @@ function MapSupplierPriceCell({
   isWinner: boolean;
   quantity: number;
   borderClassName?: string;
+  /** Coluna (fornecedor) e linha (item) para andar entre os preços com as setas ↑/↓. */
+  navColuna?: string;
+  navLinha?: number;
 }) {
   const unitPrice = parseMapUnitPrice(value);
   const isEmpty = unitPrice == null;
@@ -356,6 +363,8 @@ function MapSupplierPriceCell({
 
   return (
     <td
+      data-map-price-col={navColuna}
+      data-map-price-row={navLinha}
       className={`relative h-px p-0 align-middle ${borderClassName} ${
         isWinner ? 'bg-green-50 dark:bg-green-950/35' : ''
       }`}
@@ -379,6 +388,25 @@ function MapSupplierPriceCell({
                 e.preventDefault();
                 setDraft(value);
                 setEditing(false);
+              } else if (
+                (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
+                navColuna != null &&
+                navLinha != null
+              ) {
+                e.preventDefault();
+                const alvo = navLinha + (e.key === 'ArrowDown' ? 1 : -1);
+                const td = alvo < 0 ? null : document.querySelector<HTMLTableCellElement>(
+                  `td[data-map-price-col="${CSS.escape(navColuna)}"][data-map-price-row="${alvo}"]`
+                );
+                if (!td) return;
+                commit();
+                const input = td.querySelector('input');
+                if (input) {
+                  input.focus();
+                  input.select();
+                } else {
+                  td.querySelector('button')?.click();
+                }
               }
             }}
             className={`${mapClickInputCls} ${
@@ -579,6 +607,12 @@ function pixKeyInputMaxLength(pixKeyType: string): number | undefined {
   return undefined;
 }
 
+/** Descrição do orçamento como na lista de Orçamentos (nome sem o sufixo "(código)" final). */
+function descricaoOrcamentoParaOc(nome: string | null | undefined): string {
+  const n = String(nome || '').replace(/\s+/g, ' ').trim();
+  return n.replace(/\s*\([^)]+\)\s*$/, '').trim() || n;
+}
+
 function emptyPaymentDraft(filial = '1') {
   return {
     paymentType: OC_TYPE_AVISTA,
@@ -646,6 +680,9 @@ export default function MapaCotacaoPage() {
         pixKey: string;
         observations: string;
         historico: string;
+        /** Último texto preenchido automaticamente (só é trocado enquanto o usuário não editou). */
+        observationsAuto?: string;
+        historicoAuto?: string;
         /** Destino da OC (só para quem tem os dois fluxos). */
         destino?: OcDestination | null;
         amountToPayStr: string;
@@ -958,7 +995,7 @@ export default function MapaCotacaoPage() {
       document.removeEventListener('visibilitychange', recomecar);
     };
   }, []);
-  const { data: fdAssociation } = useQuery({
+  const { data: fdAssociation, isLoading: carregandoFdAssociation } = useQuery({
     queryKey: ['fd-association-by-rm', selectedRequestId],
     queryFn: async () => {
       const res = await api.get(`/demand-sheet-approvals/by-material-request/${selectedRequestId}`);
@@ -968,6 +1005,7 @@ export default function MapaCotacaoPage() {
         orcamentoId?: string | null;
         contratoId?: string | null;
         fichaDemandaPct?: number | null;
+        fdArquivo?: { name: string; url: string } | null;
         itens?: {
           fdItemKey: string;
           fdItem: string;
@@ -991,6 +1029,17 @@ export default function MapaCotacaoPage() {
       return Date.now() - fdAssocDesdeRef.current.desde < 120_000 ? 5_000 : false;
     },
   });
+  /** Orçamento que gerou a FD da RM (descrição e OS) — preenche Observações/Histórico da OC. */
+  const { data: orcamentoDaFd, isFetching: carregandoOrcamentoDaFd } = useQuery({
+    queryKey: ['fd-orcamento', fdAssociation?.fdId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/${fdAssociation!.fdId}/orcamento`);
+      return (res.data?.data ?? null) as { nome: string | null; osCodigo?: string | null } | null;
+    },
+    enabled: !!fdAssociation?.fdId,
+    staleTime: 5 * 60_000,
+  });
+  const [baixandoFd, setBaixandoFd] = useState(false);
   const [fdResumoOpen, setFdResumoOpen] = useState(false);
   useEffect(() => { setFdResumoOpen(false); }, [selectedRequestId]);
 
@@ -1613,6 +1662,71 @@ export default function MapaCotacaoPage() {
     )
   );
 
+  /** Texto padrão de Observações (cabe nos 60 do TOTVS) e Histórico (completo): centro de custo | OS | descrição do orçamento. */
+  const textoPadraoOc = useMemo(() => {
+    const cc = selectedCostCenterName;
+    const os = String(orcamentoDaFd?.osCodigo || '').trim();
+    const descricao = descricaoOrcamentoParaOc(orcamentoDaFd?.nome);
+    // Vírgula como separador (barra vertical pode não ser aceita no TOTVS).
+    const fixo = [cc, os ? `OS ${os}` : ''].filter(Boolean).join(', ');
+    const semObs = [fixo, descricao].filter(Boolean).join(', ');
+    let observacao = semObs;
+    // Histórico: + observação da engenharia no pedido da FD. Passando de 500, corta primeiro a descrição do
+    // orçamento (depois centro de custo/OS), para a observação chegar inteira.
+    const obsEng = String(selectedRequestRaw?.observacaoSolicitante || '').replace(/\s+/g, ' ').trim();
+    let historico = semObs;
+    if (obsEng) {
+      // Observação com o limite cheio (500) vai sem o rótulo, para caber inteira.
+      const sufixo = `Obs.: ${obsEng}`.length <= 500 ? `Obs.: ${obsEng}` : obsEng;
+      // Observação duas linhas abaixo do cabeçalho.
+      historico = [semObs, sufixo].filter(Boolean).join('\n\n');
+      if (historico.length > 500) {
+        const resto = 500 - sufixo.length - 2;
+        const corte = resto > 0 ? semObs.slice(0, resto).replace(/[\s,]+$/, '') : '';
+        historico = corte ? `${corte}\n\n${sufixo}` : sufixo;
+      }
+    }
+    if (observacao.length > OC_NOTES_TOTVS_MAX) {
+      const prefixo = fixo ? `${fixo}, ` : '';
+      const espaco = OC_NOTES_TOTVS_MAX - prefixo.length;
+      observacao =
+        espaco > 0 && descricao
+          ? `${prefixo}${descricao.slice(0, espaco).replace(/[\s,]+$/, '')}`
+          : fixo.slice(0, OC_NOTES_TOTVS_MAX).replace(/[\s,]+$/, '');
+    }
+    return { observacao, historico: historico.slice(0, 500) };
+  }, [selectedCostCenterName, orcamentoDaFd, selectedRequestRaw?.observacaoSolicitante]);
+  const textoPadraoOcPronto =
+    !!selectedCostCenterName && !carregandoFdAssociation && !carregandoOrcamentoDaFd;
+
+  // Ao abrir o modal Gerar OC, preenche Observações/Histórico enquanto o usuário não editou os campos.
+  useEffect(() => {
+    if (!ocModalSupplierId || !textoPadraoOcPronto) return;
+    const sid = ocModalSupplierId;
+    setPaymentDraftBySupplier((prev) => {
+      const atual = prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
+      // Intocado: nunca preenchido e vazio, ou ainda igual ao último texto automático (se o usuário apagou, fica vazio).
+      const podeObs =
+        atual.observationsAuto === undefined ? !atual.observations : atual.observations === atual.observationsAuto;
+      const podeHist =
+        atual.historicoAuto === undefined ? !atual.historico : atual.historico === atual.historicoAuto;
+      if (!podeObs && !podeHist) return prev;
+      const observations = podeObs ? textoPadraoOc.observacao : atual.observations;
+      const historico = podeHist ? textoPadraoOc.historico : atual.historico;
+      if (prev[sid] && observations === atual.observations && historico === atual.historico) return prev;
+      return {
+        ...prev,
+        [sid]: {
+          ...atual,
+          observations,
+          historico,
+          observationsAuto: podeObs ? textoPadraoOc.observacao : atual.observationsAuto,
+          historicoAuto: podeHist ? textoPadraoOc.historico : atual.historicoAuto,
+        },
+      };
+    });
+  }, [ocModalSupplierId, textoPadraoOcPronto, textoPadraoOc, suggestedTotvsFilial]);
+
   const selectedRequestLabel = useMemo(() => {
     if (!selectedRequestId) return '';
     const r = approvedRequests.find((x) => x.id === selectedRequestId);
@@ -2059,17 +2173,28 @@ export default function MapaCotacaoPage() {
                               ) : null}
                             </div>
                             <div className="flex shrink-0 items-center gap-1.5">
-                              {fdAssociation?.orcamentoId && fdAssociation?.contratoId ? (
-                                <a
-                                  href={`/ponto/orcamentos/${fdAssociation.contratoId}/${fdAssociation.orcamentoId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
-                                  title="Abrir orçamento da FD"
+                              {fdAssociation?.fdArquivo?.url ? (
+                                <button
+                                  type="button"
+                                  disabled={baixandoFd}
+                                  onClick={async () => {
+                                    const arq = fdAssociation.fdArquivo;
+                                    if (!arq?.url) return;
+                                    setBaixandoFd(true);
+                                    try {
+                                      await downloadUploadFile(arq.url, arq.name || `${fdAssociation.codFichaDemanda || 'Ficha de demanda'}.xlsx`);
+                                    } catch {
+                                      toast.error('Não foi possível baixar a ficha de demanda.');
+                                    } finally {
+                                      setBaixandoFd(false);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                                  title={`Baixar a ficha de demanda ${fdAssociation.codFichaDemanda || ''}`}
                                 >
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                  Orçamento
-                                </a>
+                                  <Download className="h-3.5 w-3.5" />
+                                  {baixandoFd ? 'Baixando...' : 'Baixar FD'}
+                                </button>
                               ) : null}
                               {fdAssociation?.fdId ? (
                                 <button
@@ -2467,6 +2592,8 @@ export default function MapaCotacaoPage() {
                                           quantity={qty}
                                           isWinner={isWinner}
                                           borderClassName={borderCls}
+                                          navColuna={supplierId}
+                                          navLinha={itemIndex}
                                           ariaLabel={`Valor unitário ${suppliers.find((x) => x.id === supplierId)?.name ?? supplierId}`}
                                           onChange={(next) => {
                                             setUnitPriceBySupplierItem((prev) => ({
@@ -3287,7 +3414,7 @@ export default function MapaCotacaoPage() {
                         },
                       }));
                     }}
-                    rows={2}
+                    rows={4}
                     placeholder="Histórico da OC (vai para o TOTVS)"
                     className={`${mapFieldCls} min-h-[4rem] resize-y`}
                   />

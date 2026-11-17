@@ -180,6 +180,25 @@ function clampFichaDemandaPct(value: unknown): number | null {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+/**
+ * Planilha da ficha de demanda anexada à FD (a gerada no lançamento pelo orçamento ou a anexada à mão).
+ * Com mais de uma, a mais recente (última da lista). Mesma regra de `inferFdAnexoKind` no front.
+ */
+function arquivoDaFichaDemanda(anexos: unknown): { name: string; url: string } | null {
+  const lista = Array.isArray(anexos) ? (anexos as Array<Record<string, unknown>>) : [];
+  const ehFd = (a: Record<string, unknown>) => {
+    const kind = String(a?.kind || '');
+    if (kind === 'fd') return true;
+    if (kind) return false;
+    const n = String(a?.name || '').toUpperCase();
+    if (/ORDEM\s*DE\s*COMPRA|ANEXO[_-]?OC|(?:^|[_-])OC(?:[_-]|\d)/.test(n)) return false;
+    return /(?:^|[^A-Z])FD(?:[^A-Z]|$)|FICHA\s*DE\s*DEMANDA|ANEXO[_-]?FD/.test(n);
+  };
+  const achado = [...lista].reverse().find((a) => ehFd(a) && String(a?.url || '').trim());
+  if (!achado) return null;
+  return { name: String(achado.name || 'Ficha de demanda.xlsx'), url: String(achado.url).trim() };
+}
+
 function extractOrcamentoRefFromAnexos(
   anexos: unknown
 ): { centroCustoId: string; orcamentoId: string; fichaDemandaPct: number | null } | null {
@@ -2585,9 +2604,12 @@ export class DemandSheetApprovalController {
           /** Detalhamento do material escrito pelo solicitante (vai para a observação do item da RM). */
           description: z.string().max(500, 'Detalhamento com no máximo 500 caracteres').optional(),
         })).min(1, 'Informe pelo menos um item'),
+        /** Observação da engenharia no pedido (vai para a RM e para o Histórico da OC no mapa). Limite = Histórico da OC. */
+        observacao: z.string().max(500, 'Observação com no máximo 500 caracteres').optional(),
       });
 
       const body = schema.parse(req.body);
+      const observacaoPedido = (body.observacao || '').trim();
 
       // Rascunhos antigos guardavam o ID do material de construção; a RM usa o espelho de engenharia (`CM-{id}`).
       const idsInformados = [...new Set(body.items.map((i) => i.materialId))];
@@ -2710,6 +2732,15 @@ export class DemandSheetApprovalController {
           notes: linha.notes.join(' | ') || undefined,
         })),
       });
+
+      // Observação da engenharia: campo próprio (fora da descrição, que aparece nas listas).
+      if (observacaoPedido) {
+        try {
+          await prisma.$executeRaw`UPDATE "material_requests" SET "observacaoSolicitante" = ${observacaoPedido} WHERE "id" = ${rm.id}`;
+        } catch (err) {
+          console.warn('[DemandSheetApproval] Falha ao gravar a observação do pedido na RM:', err);
+        }
+      }
 
       // Unidade escolhida no modal (padrão = unidade da FD). A RM grava a do cadastro; ajusta só os itens desta RM.
       for (const [materialId, linha] of linhasRm) {
@@ -2895,6 +2926,7 @@ export class DemandSheetApprovalController {
           centroCustoId: orcRef?.centroCustoId || fd.contrato?.costCenterId || null,
           cotacaoEmpreitaPreenchida,
           fichaDemandaPct: pct,
+          fdArquivo: arquivoDaFichaDemanda(fd.anexos),
         },
       });
     } catch (e: unknown) {
@@ -3215,12 +3247,14 @@ export class DemandSheetApprovalController {
       let nome: string | null = null;
       let osNumeroPasta: string | null = null;
       let osTemporaria = false;
+      let osCodigo: string | null = null;
       try {
         const index = await orcamentoService.getIndex(ref.centroCustoId);
         const entry = index.orcamentos.find((o) => o.id === ref.orcamentoId);
         nome = entry?.nome ?? null;
         // OS e nº da pasta informados na importação do orçamento (mesmo formato do orçamento: "OS - Nº123").
         const os = String(entry?.osCodigo || '').trim();
+        osCodigo = os || null;
         const pasta = String(entry?.numeroPasta || '').trim();
         osNumeroPasta = os && pasta ? `${os} - Nº${pasta}` : os || pasta || null;
         osTemporaria = entry?.osTemporaria === true;
@@ -3229,7 +3263,7 @@ export class DemandSheetApprovalController {
       }
       return res.json({
         success: true,
-        data: { nome, osNumeroPasta, osTemporaria, orcamentoId: ref.orcamentoId, centroCustoId: ref.centroCustoId },
+        data: { nome, osNumeroPasta, osCodigo, osTemporaria, orcamentoId: ref.orcamentoId, centroCustoId: ref.centroCustoId },
       });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };

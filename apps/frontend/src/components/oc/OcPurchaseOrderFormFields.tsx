@@ -755,7 +755,7 @@ export function OcPurchaseOrderFormFields({
                   }`}
                 >
                   {excede
-                    ? `${total}/${OC_NOTES_TOTVS_MAX} — o TOTVS aceita no máximo ${OC_NOTES_TOTVS_MAX} caracteres; resuma o texto`
+                    ? `${total}/${OC_NOTES_TOTVS_MAX} — só os primeiros ${OC_NOTES_TOTVS_MAX} caracteres vão para o TOTVS`
                     : `${total}/${OC_NOTES_TOTVS_MAX} caracteres para o TOTVS`}
                 </p>
               );

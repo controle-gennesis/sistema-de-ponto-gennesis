@@ -1040,6 +1040,17 @@ export default function GerenciarMateriaisPage() {
               stacked: true
             });
           }
+          if (selectedRequest.observacaoSolicitante?.trim()) {
+            infoRows.push({
+              label: 'Observação da engenharia',
+              value: (
+                <span className="whitespace-pre-wrap leading-relaxed">
+                  {selectedRequest.observacaoSolicitante}
+                </span>
+              ),
+              stacked: true
+            });
+          }
 
           return (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto p-4">
