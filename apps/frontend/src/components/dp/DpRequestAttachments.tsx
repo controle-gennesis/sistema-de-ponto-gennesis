@@ -84,7 +84,7 @@ export function DpRequestAttachments({
           ref={inputRef}
           type="file"
           className="hidden"
-          accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+          accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.zip,.rar,.7z,.txt,.csv"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) upload.mutate(file);
