@@ -43,6 +43,13 @@ import {
 } from '@/components/ui/listTableUi';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { buildOcPdfDownloadFileName, formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import { inferFdAnexoKind } from '@/lib/fichaDemandaApproval';
+import {
+  downloadQuoteMapComparisonPdf,
+  downloadQuoteMapSnapshotPdf,
+  openQuoteMapComparisonPdf,
+  openQuoteMapSnapshotPdf,
+} from '@/components/oc/quoteMapPdfDocs';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   catalogMaterialLabel,
@@ -1201,59 +1208,6 @@ function groupOcDocumentBlocks(
   return blocks;
 }
 
-async function openQuoteMapSnapshotPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/snapshot-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  window.open(blobUrl, '_blank', 'noopener,noreferrer');
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function downloadQuoteMapSnapshotPdf(
-  mapId: string,
-  orderNumber?: string | number | null,
-  supplierName?: string | null,
-  purchaseOrderId?: string
-) {
-  const response = await api.get(`/quote-maps/${mapId}/snapshot-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  const anchor = document.createElement('a');
-  anchor.href = blobUrl;
-  anchor.download = buildOcPdfDownloadFileName(
-    orderNumber != null ? String(orderNumber) : null,
-    supplierName
-  );
-  anchor.click();
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function openQuoteMapComparisonPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/comparison-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  window.open(blobUrl, '_blank', 'noopener,noreferrer');
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function downloadQuoteMapComparisonPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/comparison-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  const anchor = document.createElement('a');
-  anchor.href = blobUrl;
-  anchor.download = `mapa-cotacao-comparativo-${purchaseOrderId || mapId}.pdf`;
-  anchor.click();
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
 
 function OcDetailDocumentItem({
   label,
@@ -1268,11 +1222,14 @@ function OcDetailDocumentItem({
   onRemove,
   onReplace,
   adminBusy = false,
+  viewHref,
 }: {
   label: string;
   subtitle?: string;
   url?: string;
   fileName?: string;
+  /** Página para onde o olhinho leva (em vez de abrir o arquivo). */
+  viewHref?: string;
   pending?: boolean;
   onView?: () => void | Promise<void>;
   onDownload?: () => void | Promise<void>;
@@ -1331,7 +1288,7 @@ function OcDetailDocumentItem({
           </>
         ) : url ? (
           <>
-            <OcAttachmentActions url={url} fileName={fileName || label} variant="buttons" />
+            <OcAttachmentActions url={url} fileName={fileName || label} variant="buttons" viewHref={viewHref} />
             {onReplace ? (
               <>
                 <input
@@ -2651,6 +2608,21 @@ export function OcPurchaseOrdersPanel({
     if (!hideTabs) setInternalActiveTab(t);
   };
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
+  /** FD/orçamento da RM da OC aberta: o olhinho dos arquivos da Ficha de Demanda leva para as páginas deles. */
+  const rmIdDaOcAberta = selectedOrder?.materialRequestId || selectedOrder?.materialRequest?.id || '';
+  const { data: fdDaOcAberta } = useQuery({
+    queryKey: ['fd-association-by-rm', rmIdDaOcAberta],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${rmIdDaOcAberta}`);
+      return (res.data?.data ?? null) as {
+        fdId: string;
+        orcamentoId?: string | null;
+        contratoId?: string | null;
+      } | null;
+    },
+    enabled: !!rmIdDaOcAberta,
+    staleTime: 60_000,
+  });
   const [ocDetailTab, setOcDetailTab] = useState<OcDetailModalTab>('resumo');
   const ocDetailScrollRef = useRef<HTMLDivElement>(null);
   const lastOcDetailOrderIdRef = useRef<string | null>(null);
@@ -5610,7 +5582,7 @@ export function OcPurchaseOrdersPanel({
                 onClick={() => reopenTotvsResendMutation.mutate(totvsResendTarget.id)}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
               >
-                {reopenTotvsResendMutation.isPending ? 'Reabrindo…' : 'Reabrir para reenvio'}
+                {reopenTotvsResendMutation.isPending ? 'Reabrindo…' : 'Reabrir OC'}
               </button>
             </div>
           </div>
@@ -7006,6 +6978,17 @@ export function OcPurchaseOrdersPanel({
                 const adminBusy = adminDocumentMutation.isPending;
                 const rmId =
                   selectedOrder.materialRequestId || selectedOrder.materialRequest?.id || '';
+                /** Olhinho dos arquivos da FD: orçamento → página do orçamento; ficha → detalhes da FD. */
+                const fdDaOc = rmIdDaOcAberta === rmId ? fdDaOcAberta : null;
+                const paginaDoArquivoDaFd = (nome: string): string | undefined => {
+                  if (!fdDaOc?.fdId) return undefined;
+                  const tipo = inferFdAnexoKind({ id: '', name: nome });
+                  if (tipo === 'orcamento' && fdDaOc.orcamentoId && fdDaOc.contratoId) {
+                    return `/ponto/orcamentos/${fdDaOc.contratoId}/${fdDaOc.orcamentoId}`;
+                  }
+                  if (tipo === 'fd') return `/ponto/fds-aprovadas/${fdDaOc.fdId}`;
+                  return undefined;
+                };
 
                 const adminHandlersForDoc = (doc: OcDocumentEntry) => {
                   if (!canAdminDocs || !doc.adminKind || doc.adminKind === 'demand-sheet') {
@@ -7103,6 +7086,7 @@ export function OcPurchaseOrdersPanel({
                               subtitle={file.name}
                               url={file.url}
                               fileName={file.name}
+                              viewHref={paginaDoArquivoDaFd(file.name)}
                               adminBusy={adminBusy}
                               onReplace={
                                 canAdminDocs && rmId
@@ -7152,7 +7136,12 @@ export function OcPurchaseOrdersPanel({
                               subtitle={`Criado em ${formatDate(quoteMap.createdAt)}`}
                               onView={async () => {
                                 try {
-                                  await openQuoteMapSnapshotPdf(quoteMap.id, selectedOrder.id);
+                                  await openQuoteMapSnapshotPdf(
+                                    quoteMap.id,
+                                    selectedOrder.id,
+                                    selectedOrder.orderNumber,
+                                    selectedOrder.supplier?.name
+                                  );
                                 } catch {
                                   toast.error('Não foi possível abrir o PDF da OC.');
                                 }
@@ -7175,7 +7164,12 @@ export function OcPurchaseOrdersPanel({
                               subtitle="Fornecedores cotados neste mapa + vencedor"
                               onView={async () => {
                                 try {
-                                  await openQuoteMapComparisonPdf(quoteMap.id, selectedOrder.id);
+                                  await openQuoteMapComparisonPdf(
+                                    quoteMap.id,
+                                    selectedOrder.id,
+                                    selectedOrder.orderNumber,
+                                    selectedOrder.supplier?.name
+                                  );
                                 } catch {
                                   toast.error('Não foi possível abrir o PDF comparativo.');
                                 }
@@ -7184,7 +7178,9 @@ export function OcPurchaseOrdersPanel({
                                 try {
                                   await downloadQuoteMapComparisonPdf(
                                     quoteMap.id,
-                                    selectedOrder.id
+                                    selectedOrder.id,
+                                    selectedOrder.orderNumber,
+                                    selectedOrder.supplier?.name
                                   );
                                 } catch {
                                   toast.error('Não foi possível baixar o PDF comparativo.');
@@ -7302,7 +7298,7 @@ export function OcPurchaseOrdersPanel({
                         className="flex-1 min-w-[160px] px-3 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                       >
                         <Undo2 className="w-4 h-4 shrink-0" />
-                        Reabrir para reenvio
+                        Reabrir OC
                       </button>
                     )}
                   </>

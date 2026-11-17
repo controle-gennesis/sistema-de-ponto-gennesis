@@ -202,9 +202,10 @@ function nomeArquivo(base: string, ext: string) {
   const limpo = base
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/[^\w.-]+/g, '_')
-    .replace(/_+/g, '_');
-  return `${limpo}.${ext}`;
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${limpo || 'Mapa-cotacao'}.${ext}`;
 }
 
 /** Exporta o mapa de cotação como está na tela (PDF ou Excel, retrato ou paisagem). */

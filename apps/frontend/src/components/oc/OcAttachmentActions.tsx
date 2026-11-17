@@ -16,6 +16,8 @@ type OcAttachmentActionsProps = {
   compact?: boolean;
   /** Botões separados Ver / Baixar (sem link no nome do arquivo). */
   variant?: 'link' | 'buttons';
+  /** Com `buttons`: o olhinho leva a esta página do Conecta (nova aba) em vez de abrir o arquivo. */
+  viewHref?: string;
 };
 
 export function OcAttachmentActions({
@@ -25,7 +27,8 @@ export function OcAttachmentActions({
   className,
   linkClassName,
   compact = false,
-  variant = 'link'
+  variant = 'link',
+  viewHref
 }: OcAttachmentActionsProps) {
   const [downloading, setDownloading] = useState(false);
   const trimmed = (url || '').trim();
@@ -59,11 +62,11 @@ export function OcAttachmentActions({
     return (
       <span className={`inline-flex items-center gap-1.5 shrink-0 ${className ?? ''}`}>
         <a
-          href={href}
+          href={viewHref || href}
           target="_blank"
           rel="noopener noreferrer"
-          title="Ver"
-          aria-label={`Ver ${fileName}`}
+          title={viewHref ? 'Abrir no Conecta' : 'Ver'}
+          aria-label={viewHref ? `Abrir página de ${fileName}` : `Ver ${fileName}`}
           className={actionBtnCls}
         >
           <Eye className="h-5 w-5 shrink-0" />

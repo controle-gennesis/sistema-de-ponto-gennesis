@@ -13,7 +13,13 @@ import {
   type StockMovementAttachmentBundle,
 } from '@/lib/ocDocumentEntries';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
-import { buildOcPdfDownloadFileName, formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import {
+  downloadQuoteMapComparisonPdf,
+  downloadQuoteMapSnapshotPdf,
+  openQuoteMapComparisonPdf,
+  openQuoteMapSnapshotPdf,
+} from '@/components/oc/quoteMapPdfDocs';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 
 type LinkedOrderRef = {
@@ -30,60 +36,6 @@ function formatDate(value?: string | null) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('pt-BR');
-}
-
-async function openQuoteMapSnapshotPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/snapshot-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  window.open(blobUrl, '_blank', 'noopener,noreferrer');
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function downloadQuoteMapSnapshotPdf(
-  mapId: string,
-  orderNumber?: string | number | null,
-  supplierName?: string | null,
-  purchaseOrderId?: string
-) {
-  const response = await api.get(`/quote-maps/${mapId}/snapshot-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  const anchor = document.createElement('a');
-  anchor.href = blobUrl;
-  anchor.download = buildOcPdfDownloadFileName(
-    orderNumber != null ? String(orderNumber) : null,
-    supplierName
-  );
-  anchor.click();
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function openQuoteMapComparisonPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/comparison-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  window.open(blobUrl, '_blank', 'noopener,noreferrer');
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
-}
-
-async function downloadQuoteMapComparisonPdf(mapId: string, purchaseOrderId?: string) {
-  const response = await api.get(`/quote-maps/${mapId}/comparison-pdf`, {
-    responseType: 'blob',
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
-  });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  const anchor = document.createElement('a');
-  anchor.href = blobUrl;
-  anchor.download = `mapa-cotacao-comparativo-${purchaseOrderId || mapId}.pdf`;
-  anchor.click();
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
 }
 
 function DocSection({
@@ -237,7 +189,7 @@ function SingleOcDocuments({
                 subtitle={`Criado em ${formatDate(quoteMap.createdAt)}`}
                 onView={async () => {
                   try {
-                    await openQuoteMapSnapshotPdf(quoteMap.id, order.id);
+                    await openQuoteMapSnapshotPdf(quoteMap.id, order.id, order.orderNumber, order.supplier?.name);
                   } catch {
                     toast.error('Não foi possível abrir o PDF da OC.');
                   }
@@ -260,14 +212,14 @@ function SingleOcDocuments({
                 subtitle="Fornecedores cotados neste mapa + vencedor"
                 onView={async () => {
                   try {
-                    await openQuoteMapComparisonPdf(quoteMap.id, order.id);
+                    await openQuoteMapComparisonPdf(quoteMap.id, order.id, order.orderNumber, order.supplier?.name);
                   } catch {
                     toast.error('Não foi possível abrir o PDF comparativo.');
                   }
                 }}
                 onDownload={async () => {
                   try {
-                    await downloadQuoteMapComparisonPdf(quoteMap.id, order.id);
+                    await downloadQuoteMapComparisonPdf(quoteMap.id, order.id, order.orderNumber, order.supplier?.name);
                   } catch {
                     toast.error('Não foi possível baixar o PDF comparativo.');
                   }

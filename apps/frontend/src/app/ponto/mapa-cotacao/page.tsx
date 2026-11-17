@@ -225,16 +225,84 @@ const mapClickDisplayCls =
 
 const mapClickInputCls = `${mapFieldCls} mx-auto block max-w-[9.5rem] text-center`;
 
+/**
+ * Setas ↑/↓ nos valores do mapa: vai para a célula de cima/baixo da mesma coluna do fornecedor
+ * (preços dos itens, depois Frete e Desconto). Devolve false quando não há célula naquela direção.
+ */
+function irParaValorVizinhoMapa(coluna: string, linha: number, delta: 1 | -1): boolean {
+  const alvo = linha + delta;
+  if (alvo < 0) return false;
+  const td = document.querySelector<HTMLTableCellElement>(
+    `td[data-map-price-col="${CSS.escape(coluna)}"][data-map-price-row="${alvo}"]`
+  );
+  if (!td) return false;
+  const input = td.querySelector('input');
+  if (input) {
+    input.focus();
+    input.select();
+  } else {
+    td.querySelector('button')?.click();
+  }
+  return true;
+}
+
+/** Setas ←/→ nos valores do mapa: vai para a célula do fornecedor ao lado, na mesma linha. */
+function irParaValorAoLadoMapa(origem: HTMLElement, delta: 1 | -1): boolean {
+  const td = origem.closest('td[data-map-price-row]');
+  const linha = td?.closest('tr');
+  if (!td || !linha) return false;
+  const celulas = Array.from(linha.querySelectorAll<HTMLTableCellElement>('td[data-map-price-row]'));
+  const alvo = celulas[celulas.indexOf(td as HTMLTableCellElement) + delta];
+  if (!alvo) return false;
+  const input = alvo.querySelector('input');
+  if (input) {
+    input.focus();
+    input.select();
+  } else {
+    alvo.querySelector('button')?.click();
+  }
+  return true;
+}
+
+/** Trata as 4 setas numa célula de valor do mapa (↑/↓ mesma coluna, ←/→ fornecedor ao lado). */
+function navegarComSetasMapa(
+  e: React.KeyboardEvent<HTMLElement>,
+  coluna: string | undefined,
+  linha: number | undefined,
+  antesDeSair?: () => void
+): boolean {
+  if (coluna == null || linha == null) return false;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    antesDeSair?.();
+    irParaValorVizinhoMapa(coluna, linha, e.key === 'ArrowDown' ? 1 : -1);
+    return true;
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const origem = e.currentTarget;
+    antesDeSair?.();
+    irParaValorAoLadoMapa(origem, e.key === 'ArrowRight' ? 1 : -1);
+    return true;
+  }
+  return false;
+}
+
 function MapFreightCell({
   value,
   onChange,
   ariaLabel,
   borderClassName = '',
+  navColuna,
+  navLinha,
 }: {
   value: string;
   onChange: (next: string) => void;
   ariaLabel: string;
   borderClassName?: string;
+  /** Coluna (fornecedor) e linha (depois dos itens) para andar com as setas ↑/↓. */
+  navColuna?: string;
+  navLinha?: number;
 }) {
   const amount = parseMapUnitPrice(value);
   const isEmpty = amount == null;
@@ -264,7 +332,11 @@ function MapFreightCell({
     'absolute inset-0 flex flex-col items-center justify-center px-2 bg-transparent';
 
   return (
-    <td className={`relative h-px p-0 align-middle ${borderClassName}`}>
+    <td
+      data-map-price-col={navColuna}
+      data-map-price-row={navLinha}
+      className={`relative h-px p-0 align-middle ${borderClassName}`}
+    >
       {showInput ? (
         <div className={fillCls}>
           <input
@@ -284,6 +356,8 @@ function MapFreightCell({
                 e.preventDefault();
                 setDraft(value);
                 setEditing(false);
+              } else {
+                navegarComSetasMapa(e, navColuna, navLinha, () => commit());
               }
             }}
             className={mapClickInputCls}
@@ -293,6 +367,9 @@ function MapFreightCell({
         <button
           type="button"
           onClick={() => setEditing(true)}
+          onKeyDown={(e) => {
+            navegarComSetasMapa(e, navColuna, navLinha);
+          }}
           className={`${fillCls} text-sm font-medium tabular-nums text-gray-900 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500 dark:text-gray-100 dark:hover:bg-gray-700/40`}
           aria-label={ariaLabel}
           title="Clique para editar"
@@ -388,25 +465,8 @@ function MapSupplierPriceCell({
                 e.preventDefault();
                 setDraft(value);
                 setEditing(false);
-              } else if (
-                (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
-                navColuna != null &&
-                navLinha != null
-              ) {
-                e.preventDefault();
-                const alvo = navLinha + (e.key === 'ArrowDown' ? 1 : -1);
-                const td = alvo < 0 ? null : document.querySelector<HTMLTableCellElement>(
-                  `td[data-map-price-col="${CSS.escape(navColuna)}"][data-map-price-row="${alvo}"]`
-                );
-                if (!td) return;
-                commit();
-                const input = td.querySelector('input');
-                if (input) {
-                  input.focus();
-                  input.select();
-                } else {
-                  td.querySelector('button')?.click();
-                }
+              } else {
+                navegarComSetasMapa(e, navColuna, navLinha, () => commit());
               }
             }}
             className={`${mapClickInputCls} ${
@@ -430,6 +490,9 @@ function MapSupplierPriceCell({
             const n = parseMapUnitPrice(value);
             setDraft(n == null ? '' : maskUnitPriceInputBr(formatMapUnitPriceBR(n)));
             setEditing(true);
+          }}
+          onKeyDown={(e) => {
+            navegarComSetasMapa(e, navColuna, navLinha);
           }}
           className={`${fillCls} transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500 ${
             isWinner
@@ -1625,7 +1688,10 @@ export default function MapaCotacaoPage() {
         orientacao: exportOrientacao,
         titulo: `Mapa de cotação · ${selectedRequestLabel}`,
         subtitulo: [selectedRequestLabel, selectedCostCenterName].filter(Boolean).join(' · '),
-        arquivoBase: `Mapa_de_cotacao_${selectedRequestLabel}`,
+        // Ex.: Mapa-cotacao-RM23-MINISTERIO-DA-CULTURA-DF
+        arquivoBase: ['Mapa-cotacao', selectedRequestLabel.replace(/\s+/g, ''), selectedCostCenterName]
+          .filter((p) => p && p !== '—')
+          .join('-'),
         itens,
         fornecedores,
       });
@@ -2654,6 +2720,8 @@ export default function MapaCotacaoPage() {
                                         key={`frete-${supplierId}`}
                                         value={freightBySupplier[supplierId] ?? ''}
                                         borderClassName={borderCls}
+                                        navColuna={supplierId}
+                                        navLinha={ocItems.length}
                                         ariaLabel={`Frete ${sup?.name ?? supplierId}`}
                                         onChange={(next) => {
                                           setFreightBySupplier((prev) => ({
@@ -2687,6 +2755,8 @@ export default function MapaCotacaoPage() {
                                         key={`desconto-${supplierId}`}
                                         value={discountBySupplier[supplierId] ?? ''}
                                         borderClassName={borderCls}
+                                        navColuna={supplierId}
+                                        navLinha={ocItems.length + 1}
                                         ariaLabel={`Desconto ${sup?.name ?? supplierId}`}
                                         onChange={(next) => {
                                           setDiscountBySupplier((prev) => ({

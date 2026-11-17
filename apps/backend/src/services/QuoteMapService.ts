@@ -585,6 +585,33 @@ export class QuoteMapService {
       }
     }
 
+    // Nome completo das condições de pagamento (cadastro / TOTVS) para o PDF: "002 — 28/56 dias".
+    const condicaoPorCodigo = new Map<string, { label: string; paymentType: string }>();
+    const codigosCond = [...new Set(sections.map((s) => String(s.paymentCondition || '').trim()).filter(Boolean))];
+    if (codigosCond.length > 0) {
+      try {
+        const conds = await prisma.paymentCondition.findMany({
+          where: { code: { in: codigosCond } },
+          select: { code: true, label: true, paymentType: true },
+        });
+        for (const c of conds) condicaoPorCodigo.set(c.code, { label: c.label, paymentType: c.paymentType });
+      } catch {
+        /* sem cadastro: fica o código */
+      }
+    }
+    const condicaoPagamentoCompleta = (code?: string | null, paymentType?: string | null): string => {
+      const cod = String(code || '').trim();
+      const cad = cod ? condicaoPorCodigo.get(cod) : undefined;
+      const label = (cad?.label || '').trim();
+      if (!label) {
+        return [this.paymentConditionLabel(code), this.paymentTypeLabel(paymentType)].filter(Boolean).join(' — ');
+      }
+      const tipo = this.paymentTypeLabel(paymentType || cad?.paymentType);
+      const tipoNoNome = !tipo || label.toLowerCase().includes(tipo.toLowerCase());
+      const base = label.toLowerCase().startsWith(cod.toLowerCase()) ? label : `${cod} — ${label}`;
+      return tipoNoNome ? base : `${base} (${tipo})`;
+    };
+
     const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
       // bottom menor que a altura do rodapé → evita página em branco ao desenhar o footer
       const doc = new PDFDocument({
@@ -1008,12 +1035,7 @@ export class QuoteMapService {
         }
 
         // Pagamento e entrega — só campos preenchidos
-        const payCond = [
-          this.paymentConditionLabel(section.paymentCondition),
-          this.paymentTypeLabel(section.paymentType),
-        ]
-          .filter(Boolean)
-          .join(' — ');
+        const payCond = condicaoPagamentoCompleta(section.paymentCondition, section.paymentType);
         const deliveryDate = this.formatDateBr(section.expectedDelivery);
         const hasPaymentBlock =
           Boolean(payCond) ||
