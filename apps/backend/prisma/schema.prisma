@@ -759,6 +759,7 @@ enum DpRequestUrgency {
 // Fluxo: gestor -> DP tramita entre etapas (financeiro, contabilidade, etc.) -> conclusÃ£o.
 enum DpRequestStatus {
   WAITING_MANAGER // Aguardando aprovaÃ§Ã£o (antes do DP)
+  PENDING_DP // Pendente: chegou ao DP e ainda nao comecou a ser atendida
   IN_REVIEW_DP // Em anÃ¡lise
   IN_FINANCEIRO // Em anÃ¡lise / fila no Financeiro
   WAITING_RETURN // PendÃªncia colaborador (UI solicitante: âSua pendÃªnciaâ)
@@ -2831,6 +2832,8 @@ model EmpreiteiroTeamMember {
 /// Relatório do que a turma produziu no dia (não mistura com notas de pagamento).
 model EmpreiteiroDailyMeasurement {
   id                    String    @id @default(cuid())
+  /// Número sequencial exibido (#1, #2…), como na ficha de demanda.
+  displayNumber         Int?      @unique
   empreiteiroId         String
   /// Contrato de serviço desta entrega.
   empreiteiroContractId String?

@@ -187,6 +187,7 @@ import {
   downloadOrcamentoBrandedExcel,
   orcamentoWorkbookToFile,
   type OrcamentoExcelCabecalhoCelula,
+  type OrcamentoExcelColumn,
   type OrcamentoExcelRow,
   type OrcamentoExcelSheetSpec,
 } from '@/lib/exportOrcamentoBrandedExcel';
@@ -17536,7 +17537,7 @@ export function OrcamentoPageView({
         // Caixa dentro da largura da tabela (G–N), nas linhas 2–6, ao lado do bloco da contratada.
         return texto ? { titulo: 'Bancos', texto, colDe: 6, colAte: 13, linhaDe: 2, linhasTexto: 5 } : undefined;
       })(),
-      columns: [
+      columns: ([
         { header: 'ITEM', width: 15, align: 'center', larguraFixa: true },
         { header: 'CÓDIGO', width: 15, align: 'center', larguraFixa: true },
         { header: 'BANCO', width: 17, align: 'center', larguraFixa: true },
@@ -17553,7 +17554,10 @@ export function OrcamentoPageView({
         { header: 'VALOR TOTAL\nCOM BDI', width: 18, format: 'currency' },
         { header: 'PESO', width: 10, format: 'percent' },
         { header: 'OBSERVAÇÃO', width: 28 },
-      ],
+      ] as OrcamentoExcelColumn[]).map((col, idx): OrcamentoExcelColumn =>
+        // Colunas desmarcadas em «Colunas visíveis» da aba Orçamento saem escondidas no Excel.
+        colunasOcultasMontagem.includes(ORC_COLUNAS_EXPORT[idx] as string) ? { ...col, oculta: true } : col
+      ),
       rows,
     };
   };
