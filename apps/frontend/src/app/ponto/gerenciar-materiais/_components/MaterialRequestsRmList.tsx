@@ -474,9 +474,10 @@ export function MaterialRequestsRmList({
                           <ListRowNavigableLabel className="font-medium">
                             {request.requestNumber?.trim() || formatRmListDisplayId(request.requestNumber)}
                           </ListRowNavigableLabel>
-                          {/* Espaço da etiqueta FD sempre reservado: os códigos ficam alinhados com ou sem ela. */}
+                          {/* Espaço da etiqueta FD sempre reservado: os códigos ficam alinhados com ou sem ela.
+                              A margem esquerda (ml-6) deixa lugar para a seta vermelha que aparece ao passar o mouse na linha. */}
                           <span
-                            className={`ml-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 ${
+                            className={`ml-6 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 ${
                               fdRequestIds.has(request.id) ? '' : 'invisible'
                             }`}
                             title={fdRequestIds.has(request.id) ? 'RM criada pela Ficha de Demanda' : undefined}
