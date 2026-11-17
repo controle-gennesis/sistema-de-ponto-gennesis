@@ -164,6 +164,9 @@ router.get('/:id/fluig-parcelas', (req, res, next) =>
 router.get('/:id/fluig-solicitacoes', (req, res, next) =>
   controller.fluigSolicitacoes(req as any, res as any, next)
 );
+router.get('/contract-options', (req, res, next) =>
+  controller.contractOptions(req as any, res as any, next)
+);
 router.get('/:id/fluig-solicitacao/:numero', (req, res, next) =>
   controller.conferirSolicitacaoFluig(req as any, res as any, next)
 );

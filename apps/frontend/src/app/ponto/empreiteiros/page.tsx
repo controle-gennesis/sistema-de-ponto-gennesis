@@ -831,9 +831,10 @@ export default function EmpreiteirosPage() {
   );
 
   const { data: contratosData } = useQuery({
-    queryKey: ['contracts-para-empreitas'],
+    queryKey: ['empreiteiros-contratos-opcoes'],
+    // Todos os contratos (só id, nome e número), sem depender de o usuário ter o contrato liberado.
     queryFn: async () => {
-      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      const res = await api.get('/empreiteiros/contract-options');
       return res.data;
     },
     staleTime: 5 * 60_000,

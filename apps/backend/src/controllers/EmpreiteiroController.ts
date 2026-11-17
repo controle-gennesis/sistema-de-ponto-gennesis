@@ -2257,6 +2257,23 @@ export class EmpreiteiroController {
   }
 
   /**
+   * Contratos para escolher ao criar/editar um serviço da empreita: TODOS os contratos, sem depender de o usuário
+   * ter o contrato liberado. Só id, nome e número — nada da ficha do contrato (valores etc.).
+   */
+  async contractOptions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const data = await prisma.contract.findMany({
+        select: { id: true, name: true, number: true },
+        orderBy: { name: 'asc' },
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Confere um número de solicitação antes de ligar à parcela: acha no espelho ou, se não estiver lá, pergunta ao Fluig
    * na hora (qualquer setor, criada hoje etc.) e confere o CPF/CNPJ do favorecido com o desta empreita.
    */
