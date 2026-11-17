@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
-    "version": "1.0.13",
+    "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/logo-ios.png",
     "userInterfaceStyle": "automatic",
@@ -23,10 +23,10 @@
         "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2"
+      "buildNumber": "1"
     },
     "android": {
-      "versionCode": 14,
+      "versionCode": 15,
       "icon": "./assets/logo-android.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-android.png",
@@ -109,9 +109,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-native.png",
-          "resizeMode": "cover",
-          "backgroundColor": "#ce3736"
+          "image": "./assets/logo-auth.png",
+          "imageWidth": 104,
+          "resizeMode": "contain",
+          "backgroundColor": "#b13030"
         }
       ],
       [
@@ -125,7 +126,10 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "extraProguardRules": "-keep class androidx.work.** { *; }\n-keep class androidx.room.** { *; }\n-keep class * extends androidx.room.RoomDatabase { *; }\n-keep class androidx.startup.** { *; }"
           }
         }
       ],

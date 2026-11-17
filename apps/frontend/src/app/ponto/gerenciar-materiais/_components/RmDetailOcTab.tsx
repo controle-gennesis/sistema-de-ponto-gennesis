@@ -19,6 +19,7 @@ import {
   type PaymentConditionRow
 } from '@/components/oc/PaymentConditionSelect';
 import { isOcCoveringRmItems, isRmItemCancelled } from '@/lib/rmProcurementCoverage';
+import { isOcTotvsNaoEnviada } from '@/components/oc/ocTotvsFluxoDireto';
 import {
   catalogMaterialLabel,
   formatDateTime,
@@ -187,7 +188,12 @@ function OcCard({
     order.orderNumber && String(order.orderNumber).trim()
       ? formatOcListDisplayId(String(order.orderNumber))
       : order.id.slice(0, 8);
-  const statusLabel = purchaseOrderPhaseLabelForOrder(order).replace(/^OC\s*-\s*/i, '').trim();
+  // Fluxo TOTVS (orçamento/FD): enquanto a OC não é enviada com sucesso ao TOTVS, segue "Aguardando OC";
+  // depois de enviada, mostra a fase normal da OC. As demais OCs não mudam.
+  const aguardandoEnvioTotvs = isOcTotvsNaoEnviada(order);
+  const statusLabel = aguardandoEnvioTotvs
+    ? 'Aguardando OC'
+    : purchaseOrderPhaseLabelForOrder(order).replace(/^OC\s*-\s*/i, '').trim();
   const paymentLabel = paymentConditionDisplay(order, paymentLabelMap);
   const dateDisplayRaw = order.orderDate ? formatDateTime(order.orderDate) : null;
   const dateDisplay =
@@ -218,7 +224,14 @@ function OcCard({
             </p>
           ) : null}
         </div>
-        <span className={ocStatusBadgeClassForOrder(order)} title={statusLabel}>
+        <span
+          className={
+            aguardandoEnvioTotvs
+              ? 'inline-flex whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700/60 dark:text-gray-200'
+              : ocStatusBadgeClassForOrder(order)
+          }
+          title={aguardandoEnvioTotvs ? 'A OC ainda não foi enviada ao TOTVS' : statusLabel}
+        >
           {statusLabel}
         </span>
       </div>

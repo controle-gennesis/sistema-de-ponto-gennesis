@@ -1705,6 +1705,7 @@ function normalizeDailyStatus(value: unknown): DailyMeasurementStatus {
 
 function serializeDailyMeasurement(row: {
   id: string;
+  displayNumber?: number | null;
   empreiteiroId: string;
   empreiteiroContractId?: string | null;
   contractId?: string | null;
@@ -1744,6 +1745,7 @@ function serializeDailyMeasurement(row: {
     row.empreiteiroContract?.costCenter?.name || row.contract?.costCenter?.name || '';
   return {
     id: row.id,
+    displayNumber: row.displayNumber ?? null,
     empreiteiroId: row.empreiteiroId,
     empreiteiroContractId: row.empreiteiroContractId ?? null,
     /** Compat: id do contrato de serviço (use empreiteiroContractId). */
@@ -3586,8 +3588,13 @@ export class EmpreiteiroController {
         resolved.empreiteiroContractId
       );
 
-      const created = await prisma.empreiteiroDailyMeasurement.create({
+      // Número sequencial global (#1, #2…); se duas entregas nascerem juntas, tenta de novo com o próximo.
+      let created: Awaited<ReturnType<typeof createMeasurement>> | null = null;
+      const createMeasurement = async () => {
+      const agg = await prisma.empreiteiroDailyMeasurement.aggregate({ _max: { displayNumber: true } });
+      return prisma.empreiteiroDailyMeasurement.create({
         data: {
+          displayNumber: (agg._max.displayNumber ?? 0) + 1,
           empreiteiroId: id,
           empreiteiroContractId: resolved.empreiteiroContractId,
           contractId: resolved.systemContractId,
@@ -3604,6 +3611,15 @@ export class EmpreiteiroController {
         },
         include: dailyMeasurementInclude,
       });
+      };
+      for (let attempt = 0; attempt < 5 && !created; attempt += 1) {
+        try {
+          created = await createMeasurement();
+        } catch (e) {
+          if ((e as { code?: string })?.code !== 'P2002' || attempt === 4) throw e;
+        }
+      }
+      if (!created) throw createError('Não foi possível registrar a medição. Tente novamente.', 500);
       res.json({
         success: true,
         data: serializeDailyMeasurement(created),

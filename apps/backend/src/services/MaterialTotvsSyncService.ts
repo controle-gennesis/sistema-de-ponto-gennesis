@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { totvsCodColigada } from '../lib/ocTotvsRm';
 import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import {
   ensureConstructionMaterialTotvsAvgPaid,
@@ -32,6 +33,12 @@ type MappedProduct = {
   unit: string;
   /** true quando UNIDADE/CODUNDCONTROLE veio preenchido do RM (não é fallback). */
   unitFromTotvs: boolean;
+  /** Unidade de controle do catálogo PRODUTOS (mesma linha do IDPRD): manda sobre as outras. */
+  unitFromCatalog: boolean;
+  /** Coligada da linha (quando a consulta traz), para preferir a coligada das OCs. */
+  coligada: number | null;
+  /** Unidades vistas nas linhas repetidas do produto (para o log de divergência). */
+  unidadesVistas: string[];
   productType: string;
   isActive: boolean;
   budgetNatureCode: string | null;
@@ -135,9 +142,6 @@ function normalizeCodeKey(code: string): string {
   return t.toUpperCase();
 }
 
-function normalizeNameKey(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toUpperCase();
-}
 
 function parseIdPrd(raw: unknown): number | null {
   if (raw === null || raw === undefined || raw === '') return null;
@@ -193,6 +197,13 @@ function preferAvgPaid(
 }
 
 function preferUnit(prev: MappedProduct, next: MappedProduct): string {
+  // 1) Unidade de controle do catálogo (mesmo produto do IDPRD) — é a que o RM usa no movimento.
+  if (prev.unitFromCatalog) return prev.unit;
+  if (next.unitFromCatalog) return next.unit;
+  // 2) Linha da coligada das OCs.
+  const col = totvsCodColigada();
+  if (prev.coligada === col && next.coligada !== col && prev.unitFromTotvs) return prev.unit;
+  if (next.coligada === col && prev.coligada !== col && next.unitFromTotvs) return next.unit;
   if (next.unitFromTotvs && prev.unitFromTotvs) {
     const prevGeneric = !prev.unit || prev.unit.toUpperCase() === 'UN';
     const nextGeneric = !next.unit || next.unit.toUpperCase() === 'UN';
@@ -210,6 +221,9 @@ function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedPro
     ...next,
     unit: preferUnit(prev, next),
     unitFromTotvs: next.unitFromTotvs || prev.unitFromTotvs,
+    unitFromCatalog: prev.unitFromCatalog || next.unitFromCatalog,
+    coligada: prev.coligada ?? next.coligada,
+    unidadesVistas: [...new Set([...prev.unidadesVistas, ...next.unidadesVistas])],
     idPrd: next.idPrd ?? prev.idPrd,
     // Se qualquer linha indicar inativo (texto/flag), mantém inativo.
     isActive: prev.isActive && next.isActive,
@@ -250,7 +264,9 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
   if (!code || !name) return null;
 
   const idPrd = parseIdPrd(pickRow(row, 'IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD'));
-  const unitRaw = cell(
+  const unitCatalogo = cell(pickRow(row, 'UNIDADE_CONTROLE_CATALOGO'));
+  const coligadaRaw = Number(cell(pickRow(row, 'CODCOLIGADA', 'COLIGADA', 'COD COLIGADA')) ?? NaN);
+  const unitRaw = unitCatalogo || cell(
     pickRow(
       row,
       'CODUNDCONTROLE',
@@ -292,6 +308,9 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
     name,
     unit: (unitRaw || 'UN').toUpperCase(),
     unitFromTotvs: Boolean(unitRaw),
+    unitFromCatalog: Boolean(unitCatalogo),
+    coligada: Number.isFinite(coligadaRaw) ? coligadaRaw : null,
+    unidadesVistas: unitRaw ? [unitRaw.toUpperCase()] : [],
     productType,
     isActive: parseProdutoAtivo(row),
     budgetNatureCode,
@@ -412,7 +431,7 @@ function needsUpdate(
  * Busca PRODUTOSATIVOS no TOTVS RM e faz upsert local:
  * 1) por totvsIdPrd (IDPRD)
  * 2) por código (CODIGOPRD)
- * 3) por nome exato único (só para alinhar código sem criar duplicata)
+ * (nunca pelo nome: o RM tem muitos produtos com o mesmo nome)
  *
  * Nunca apaga materiais locais. OCs continuam apontando para o mesmo id.
  */
@@ -478,6 +497,16 @@ export async function runMaterialTotvsSync(
       mapped.push(m);
     }
 
+    // Produtos com unidades diferentes nas linhas repetidas do RM: registra no log qual foi escolhida.
+    const divergentes = mapped.filter((x) => x.unidadesVistas.length > 1);
+    if (divergentes.length > 0) {
+      const amostra = divergentes
+        .slice(0, 30)
+        .map((x) => `${x.code}: ${x.unidadesVistas.join('/')} → ${x.unit}${x.unitFromCatalog ? ' (catálogo)' : ''}`)
+        .join('; ');
+      console.warn(`[material-totvs] ${divergentes.length} produto(s) com unidades diferentes no RM. Ex.: ${amostra}`);
+    }
+
     const existing = (await prisma.constructionMaterial.findMany({
       select: {
         id: true,
@@ -501,15 +530,10 @@ export async function runMaterialTotvsSync(
 
     const byIdPrd = new Map<number, LocalMaterial>();
     const byCode = new Map<string, LocalMaterial>();
-    const byName = new Map<string, LocalMaterial[]>();
 
     for (const mat of existing) {
       if (mat.totvsIdPrd != null && mat.totvsIdPrd > 0) byIdPrd.set(mat.totvsIdPrd, mat);
       if (mat.code) byCode.set(normalizeCodeKey(mat.code), mat);
-      const nk = normalizeNameKey(mat.name);
-      const arr = byName.get(nk) ?? [];
-      arr.push(mat);
-      byName.set(nk, arr);
     }
 
     type CreateRow = {
@@ -542,6 +566,8 @@ export async function runMaterialTotvsSync(
 
     const toCreate: CreateRow[] = [];
     const toUpdate: UpdateRow[] = [];
+    /** Cadastros locais que já receberam um produto do RM nesta sincronização. */
+    const vinculados = new Set<string>();
 
     for (const m of mapped) {
       const codeKey = normalizeCodeKey(m.code);
@@ -549,18 +575,18 @@ export async function runMaterialTotvsSync(
       const byCod = byCode.get(codeKey);
       let target = byId || byCod;
 
-      // Nome exato único: alinha código errado sem criar segundo cadastro.
-      if (!target) {
-        const nameHits = byName.get(normalizeNameKey(m.name)) ?? [];
-        if (nameHits.length === 1) {
-          const only = nameHits[0];
-          const idTaken =
-            m.idPrd != null ? byIdPrd.get(m.idPrd) : undefined;
-          if (!idTaken || idTaken.id === only.id) {
-            target = only;
-          }
-        }
+      // Só identificador (IDPRD) ou código: nunca pelo nome. O RM tem muitos produtos com o mesmo
+      // nome (ex.: 09.01.0177 e 09.01.0745); casar pelo nome fazia um sobrescrever o outro.
+
+      // Cada cadastro do Conecta recebe um único produto do RM por sincronização.
+      if (target && vinculados.has(target.id)) {
+        conflicts += 1;
+        console.warn(
+          `[material-totvs] ${m.code} (IDPRD ${m.idPrd ?? '-'}) não atualizado: o cadastro já recebeu outro produto nesta sincronização`
+        );
+        continue;
       }
+      if (target) vinculados.add(target.id);
 
       // Texto INATIV* no nome → nunca criar/atualizar como ativo.
       const inactiveByText = looksInactiveText(m.name);
@@ -605,8 +631,6 @@ export async function runMaterialTotvsSync(
         };
         byCode.set(codeKey, placeholder);
         if (m.idPrd != null) byIdPrd.set(m.idPrd, placeholder);
-        const nk = normalizeNameKey(m.name);
-        byName.set(nk, [...(byName.get(nk) ?? []), placeholder]);
         continue;
       }
 

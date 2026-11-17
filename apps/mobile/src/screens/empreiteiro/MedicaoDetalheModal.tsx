@@ -104,7 +104,7 @@ export default function MedicaoDetalheModal({ visible, medicao, onClose }: Props
       <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top, width, height }}>
         <View style={styles.formHeader}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.formTitle}>Medição</Text>
+            <Text style={styles.formTitle}>{m?.displayNumber != null ? `Medição #${m.displayNumber}` : 'Medição'}</Text>
             <Text style={styles.formSubtitle}>Detalhes e registros da entrega</Text>
           </View>
           <TouchableOpacity onPress={onClose} style={styles.formCloseBtn} hitSlop={6} accessibilityLabel="Fechar">

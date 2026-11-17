@@ -41,6 +41,10 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const LOGO_SIZE = SPLASH_LOGO_SIZE;
 const BRAND = '#ce3736';
 const SHEET_TOP = Math.round(SCREEN_H * 0.4);
+/** Distância entre o rodapé e o teclado: a mesma que há entre o botão Entrar e o rodapé (styles.footer.marginTop). */
+const FOOTER_GAP = 28;
+/** Só no Android: quanto o painel sobe a menos com o teclado aberto (ajuste fino da distância até o teclado). */
+const ANDROID_KB_TRIM = 34;
 const TITLES_BLOCK_H = 58;
 // Sheet fora da tela (com folga pra sombra) enquanto a tela faz o papel de splash.
 const SHEET_OFFSCREEN_TOP = SCREEN_H + 48;
@@ -100,6 +104,8 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
   const [introDone, setIntroDone] = useState(false);
   const passwordRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
+  /** Altura real do conteúdo do formulário (para o sheet subir só o necessário com o teclado). */
+  const contentHeightRef = useRef(0);
   const {
     login,
     loginWithBiometrics,
@@ -144,10 +150,12 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
       if (showHelpRef.current) return;
       const kb = e.endCoordinates.height;
       // Expande o sheet pra cima, mantendo o formulário acima do teclado.
-      const nextTop = Math.max(
-        insets.top + 12,
-        SCREEN_H - kb - Math.min(440, SCREEN_H * 0.58),
-      );
+      // Usa a altura real do conteúdo (sem o espaço da barra inferior, que o teclado cobre), em vez de
+      // um valor fixo: assim o rodapé fica logo acima do teclado, sem sobrar espaço.
+      const contentH = contentHeightRef.current
+        ? contentHeightRef.current + FOOTER_GAP - (Platform.OS === 'android' ? ANDROID_KB_TRIM : 0)
+        : Math.min(440, SCREEN_H * 0.58);
+      const nextTop = Math.max(insets.top + 12, SCREEN_H - kb - Math.min(contentH, SCREEN_H * 0.7));
       runTop(nextTop, Platform.OS === 'ios' ? 260 : 300);
       if (Platform.OS === 'android') {
         setTimeout(() => {
@@ -165,7 +173,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
       onHide.remove();
       sheetTopAnimRef.current?.stop();
     };
-  }, [insets.top, sheetTopAnim]);
+  }, [insets.top, insets.bottom, sheetTopAnim]);
 
   const progress = useRef(new Animated.Value(0)).current;
   const titlesAnim = useRef(new Animated.Value(0)).current;
@@ -560,7 +568,14 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
               </TouchableOpacity>
             ) : null}
 
-            <Text style={styles.footer}>© {new Date().getFullYear()} Gennesis Conecta</Text>
+            <Text
+              style={styles.footer}
+              onLayout={(e) => {
+                // Fim real do conteúdo (o ScrollView estica o conteúdo até a base, então não dá pra medir por ele).
+                contentHeightRef.current = e.nativeEvent.layout.y + e.nativeEvent.layout.height;
+              }}
+            >© {new Date().getFullYear()} Gennesis Conecta
+            </Text>
           </ScrollView>
           </KeyboardAvoidingView>
         </View>
@@ -792,7 +807,7 @@ const getStyles = (bottomInset: number, isDark: boolean) => {
       fontWeight: '700',
     },
     footer: {
-      marginTop: 28,
+      marginTop: FOOTER_GAP,
       textAlign: 'center',
       fontSize: 12,
       color: '#9ca3af',

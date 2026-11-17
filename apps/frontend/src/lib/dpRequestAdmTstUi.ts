@@ -3,6 +3,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 /** Etapas do fluxo ADM/TST (filtro, feedback e badges). */
 export type AdmTstFlowStatus =
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'WAITING_RETURN'
   | 'WAITING_SUPPLIES'
@@ -11,6 +12,7 @@ export type AdmTstFlowStatus =
   | 'CANCELLED';
 
 export const ADM_TST_FLOW_STATUSES: AdmTstFlowStatus[] = [
+  'PENDING_DP',
   'IN_REVIEW_DP',
   'WAITING_RETURN',
   'WAITING_SUPPLIES',
@@ -20,6 +22,7 @@ export const ADM_TST_FLOW_STATUSES: AdmTstFlowStatus[] = [
 ];
 
 export const ADM_TST_STATUS_LABELS: Record<AdmTstFlowStatus, string> = {
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   WAITING_RETURN: 'Correção',
   WAITING_SUPPLIES: 'Aguardando Setor de Suprimentos',
@@ -29,6 +32,7 @@ export const ADM_TST_STATUS_LABELS: Record<AdmTstFlowStatus, string> = {
 };
 
 export const ADM_TST_STATUS_LABEL_CLASS: Record<AdmTstFlowStatus, string> = {
+  PENDING_DP: 'font-semibold text-slate-600 dark:text-slate-300',
   IN_REVIEW_DP: 'font-semibold text-yellow-800 dark:text-yellow-300',
   WAITING_RETURN: 'font-semibold text-amber-800 dark:text-amber-300',
   WAITING_SUPPLIES: 'font-semibold text-orange-800 dark:text-orange-300',
@@ -38,6 +42,7 @@ export const ADM_TST_STATUS_LABEL_CLASS: Record<AdmTstFlowStatus, string> = {
 };
 
 export const ADM_TST_STATUS_ROW_BADGE: Record<AdmTstFlowStatus, string> = {
+  PENDING_DP: 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300',
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   WAITING_RETURN: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   WAITING_SUPPLIES: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -48,6 +53,7 @@ export const ADM_TST_STATUS_ROW_BADGE: Record<AdmTstFlowStatus, string> = {
 
 /** Status em que a equipe ADM/TST pode registrar feedback. */
 export const ADM_TST_MAY_SEND_FEEDBACK_STATUSES: AdmTstFlowStatus[] = [
+  'PENDING_DP',
   'IN_REVIEW_DP',
   'WAITING_RETURN',
   'WAITING_SUPPLIES',

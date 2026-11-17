@@ -217,6 +217,17 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
           color: '#ffffff',
           fontSize: 10,
           fontWeight: '700',
+          // Afastado do ícone (canto superior direito, sem cobrir o desenho) e com um anel na cor da
+          // barra para separar do ícone.
+          end: -11,
+          top: -6,
+          height: 20,
+          minWidth: 20,
+          borderRadius: 10,
+          lineHeight: 16,
+          borderWidth: 2,
+          borderColor: isDark ? '#111827' : '#ffffff',
+          overflow: 'hidden',
         },
         tabBarStyle: samsung
           ? {

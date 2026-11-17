@@ -3114,6 +3114,8 @@ export default function MapaCotacaoPage() {
                         }));
                       }}
                       hideFocus
+                      // OC TOTVS: só as condições importadas do TOTVS.
+                      somenteTotvs={destinoOcDoFornecedor(draft.destino) === 'TOTVS'}
                     />
                   </div>
                 ) : null}

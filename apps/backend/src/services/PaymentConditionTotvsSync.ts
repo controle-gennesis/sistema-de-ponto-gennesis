@@ -55,6 +55,16 @@ function sameDays(a: unknown, b: number[]): boolean {
   return a.every((v, i) => Number(v) === b[i]);
 }
 
+/** Grava "fromTotvs" nas condições com estes códigos (SQL direto: não depende do Prisma Client local). */
+async function marcarCondicoesTotvs(codigos: string[]): Promise<void> {
+  if (codigos.length === 0) return;
+  try {
+    await prisma.$executeRaw`UPDATE "payment_conditions" SET "fromTotvs" = true WHERE "code" IN (${Prisma.join(codigos)}) AND "fromTotvs" = false`;
+  } catch (err) {
+    console.warn('[payment-conditions-sync] falha ao marcar condições do TOTVS:', err instanceof Error ? err.message : err);
+  }
+}
+
 async function runSync(): Promise<PaymentConditionSyncResult> {
   const rows = await fetchRmConsultaRows('CONDICOESPAGTO', 'TOTVS_RM_CONDICOESPAGTO_PATH');
 
@@ -109,6 +119,12 @@ async function runSync(): Promise<PaymentConditionSyncResult> {
       updated += 1;
     }
   }
+
+  // Marca as condições que vieram do TOTVS (só elas aparecem na OC TOTVS).
+  const codigosTotvs = rows
+    .map((row) => pickRmField(row, 'CODCPG', 'CODIGO', 'ID'))
+    .filter((c): c is string => !!c);
+  await marcarCondicoesTotvs(codigosTotvs);
 
   return { created, updated, skipped, total: rows.length, syncedAt: new Date().toISOString() };
 }

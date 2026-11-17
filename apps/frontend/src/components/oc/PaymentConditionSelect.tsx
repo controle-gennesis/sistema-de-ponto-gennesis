@@ -19,6 +19,8 @@ export type PaymentConditionRow = {
   sortOrder: number;
   isActive: boolean;
   isSystem: boolean;
+  /** Importada do TOTVS (CONDICOESPAGTO). */
+  fromTotvs?: boolean;
 };
 
 export function normalizeParcelDueDaysClient(input: unknown): number[] {
@@ -70,6 +72,8 @@ type Props = {
   className?: string;
   showCreate?: boolean;
   hideFocus?: boolean;
+  /** OC TOTVS: só as condições importadas do TOTVS (e sem criar condição nova no Conecta). */
+  somenteTotvs?: boolean;
 };
 
 export function PaymentConditionSelect({
@@ -79,9 +83,12 @@ export function PaymentConditionSelect({
   disabled,
   id,
   className,
-  showCreate = true,
-  hideFocus = false
+  showCreate: showCreateProp = true,
+  hideFocus = false,
+  somenteTotvs = false
 }: Props) {
+  // Condição criada no Conecta não existe no TOTVS: na OC TOTVS não dá para criar aqui.
+  const showCreate = showCreateProp && !somenteTotvs;
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -110,9 +117,16 @@ export function PaymentConditionSelect({
   }, [showModal, paymentType]);
 
   const options = useMemo(() => {
-    const rows = data || [];
+    const rows = (data || []).filter((r) => !somenteTotvs || r.fromTotvs);
     return [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'pt-BR'));
-  }, [data]);
+  }, [data, somenteTotvs]);
+
+  // OC TOTVS com condição que não veio do TOTVS: limpa para escolher uma do TOTVS.
+  useEffect(() => {
+    if (!somenteTotvs || isLoading || !data || !value) return;
+    if (!options.some((o) => o.code === value)) onChange('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [somenteTotvs, isLoading, data, value, options]);
 
   const dropdownOptions = useMemo((): MultiSelectSearchOption[] => {
     const list: MultiSelectSearchOption[] = options.map((o) => {
@@ -124,7 +138,7 @@ export function PaymentConditionSelect({
         searchText: `${o.label} ${o.code} ${summary}`
       };
     });
-    if (value && !options.some((o) => o.code === value)) {
+    if (value && !somenteTotvs && !options.some((o) => o.code === value)) {
       list.unshift({
         value,
         label: `${value} (legado)`,
@@ -132,7 +146,7 @@ export function PaymentConditionSelect({
       });
     }
     return list;
-  }, [options, value]);
+  }, [options, value, somenteTotvs]);
 
   const syncModalDaysLength = (n: number, prev: string[]) => {
     const next = [...prev];

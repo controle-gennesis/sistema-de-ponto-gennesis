@@ -29,7 +29,7 @@ import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { OrcamentoService } from '../services/OrcamentoService';
 import { MaterialRequestService } from '../services/MaterialRequestService';
-import type { FdCorrecaoRegistro } from '../lib/rmCorrecaoFd';
+import { itensAguardandoAprovacao, type FdCorrecaoRegistro } from '../lib/rmCorrecaoFd';
 import {
   getFdApprovalNotifyUserIds,
   notifyApprovalDecisionWhatsApp,
@@ -579,9 +579,11 @@ async function indicesPedidosEmCorrecao(itens: FdItemPedido[]): Promise<Set<numb
   if (rmIds.length === 0) return out;
   const rms = await prisma.materialRequest.findMany({
     where: { id: { in: rmIds }, OR: [{ status: 'IN_REVIEW' }, { items: { some: { status: 'IN_REVIEW' } } }] },
-    select: { id: true, status: true, items: { select: { materialId: true, status: true } } },
+    select: { id: true, status: true, items: { select: { id: true, materialId: true, status: true } } },
   });
   if (rms.length === 0) return out;
+  // Correção já enviada ao aprovador: o item volta a contar como pedido (não fica livre na FD).
+  const enviados = new Set((await itensAguardandoAprovacao(rms.map((r) => r.id))).map((m) => m.materialRequestItemId));
   const porId = new Map(rms.map((r) => [r.id, r]));
   itens.forEach((it, idx) => {
     const rm = porId.get(it.materialRequestId);
@@ -594,7 +596,7 @@ async function indicesPedidosEmCorrecao(itens: FdItemPedido[]): Promise<Set<numb
     if (mats.length === 0) return;
     const todosEmCorrecao = mats.every((mid) => {
       const doMaterial = rm.items.filter((ri) => ri.materialId === mid);
-      return doMaterial.length > 0 && doMaterial.every((ri) => ri.status === 'IN_REVIEW');
+      return doMaterial.length > 0 && doMaterial.every((ri) => ri.status === 'IN_REVIEW' && !enviados.has(ri.id));
     });
     if (todosEmCorrecao) out.add(idx);
   });

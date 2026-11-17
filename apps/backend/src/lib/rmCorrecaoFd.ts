@@ -68,8 +68,17 @@ export async function rotuloDoMaterial(materialId: string): Promise<string> {
       select: { sinapiCode: true, name: true, description: true },
     });
     if (!m) return '';
-    const nome = (m.name || m.description || '').trim();
-    const code = (m.sinapiCode || '').trim();
+    let nome = (m.name || m.description || '').trim();
+    let code = (m.sinapiCode || '').trim();
+    // Espelho do cadastro de materiais (sinapiCode "CM-<id>"): usa o código e o nome do cadastro.
+    if (code.startsWith('CM-')) {
+      const cm = await prisma.constructionMaterial.findUnique({
+        where: { id: code.slice(3) },
+        select: { code: true, name: true },
+      });
+      code = (cm?.code || '').trim();
+      nome = (cm?.name || nome).trim();
+    }
     return code && nome && code !== nome ? `${code} — ${nome}` : nome || code;
   } catch {
     return '';
@@ -121,6 +130,53 @@ export async function listarCorrecoesRm(materialRequestId: string): Promise<RmCo
       changes: Array.isArray(r.changes) ? (r.changes as FdCorrecaoAlteracao[]) : [],
       createdAt: r.createdAt.toISOString(),
     }));
+  } catch {
+    return [];
+  }
+}
+
+/* ---- Itens corrigidos aguardando o aprovador (ficam em correção, fora do mapa, até aprovar) ---- */
+
+export async function marcarItensAguardandoAprovacao(
+  materialRequestId: string,
+  itemIds: string[],
+  userId: string
+): Promise<void> {
+  for (const itemId of itemIds) {
+    await prisma.$executeRaw`
+      INSERT INTO "material_request_item_correction_reviews"
+        ("materialRequestItemId", "materialRequestId", "submittedById", "submittedAt")
+      VALUES (${itemId}, ${materialRequestId}, ${userId}, NOW())
+      ON CONFLICT ("materialRequestItemId")
+      DO UPDATE SET "submittedById" = EXCLUDED."submittedById", "submittedAt" = NOW()
+    `;
+  }
+}
+
+export async function desmarcarItensAguardandoAprovacao(itemIds: string[]): Promise<void> {
+  if (itemIds.length === 0) return;
+  await prisma.$executeRaw`
+    DELETE FROM "material_request_item_correction_reviews"
+    WHERE "materialRequestItemId" IN (${Prisma.join(itemIds)})
+  `;
+}
+
+/** IDs dos itens aguardando aprovação (de uma RM, de várias, ou de todas quando `rmIds` não vem). */
+export async function itensAguardandoAprovacao(
+  rmIds?: string[]
+): Promise<Array<{ materialRequestItemId: string; materialRequestId: string; submittedAt: Date }>> {
+  try {
+    if (rmIds && rmIds.length === 0) return [];
+    return rmIds
+      ? await prisma.$queryRaw`
+          SELECT "materialRequestItemId", "materialRequestId", "submittedAt"
+          FROM "material_request_item_correction_reviews"
+          WHERE "materialRequestId" IN (${Prisma.join(rmIds)})
+        `
+      : await prisma.$queryRaw`
+          SELECT "materialRequestItemId", "materialRequestId", "submittedAt"
+          FROM "material_request_item_correction_reviews"
+        `;
   } catch {
     return [];
   }

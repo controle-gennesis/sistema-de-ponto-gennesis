@@ -69,6 +69,8 @@ export type GeoPhoto = {
 
 export type DailyMeasurement = {
   id: string;
+  /** Número sequencial (#1, #2…). */
+  displayNumber?: number | null;
   workDate: string;
   description: string;
   contractId?: string | null;

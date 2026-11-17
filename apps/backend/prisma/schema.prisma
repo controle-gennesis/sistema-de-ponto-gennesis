@@ -759,6 +759,7 @@ enum DpRequestUrgency {
 // Fluxo: gestor -> DP tramita entre etapas (financeiro, contabilidade, etc.) -> conclusÃ£o.
 enum DpRequestStatus {
   WAITING_MANAGER // Aguardando aprovaÃ§Ã£o (antes do DP)
+  PENDING_DP // Pendente: chegou ao DP e ainda nao comecou a ser atendida
   IN_REVIEW_DP // Em anÃ¡lise
   IN_FINANCEIRO // Em anÃ¡lise / fila no Financeiro
   WAITING_RETURN // PendÃªncia colaborador (UI solicitante: âSua pendÃªnciaâ)
@@ -2213,6 +2214,8 @@ model PaymentCondition {
   sortOrder     Int      @default(0)
   isActive      Boolean  @default(true)
   isSystem      Boolean  @default(false)
+  /// Importada do TOTVS (CONDICOESPAGTO): só estas aparecem na OC TOTVS.
+  fromTotvs     Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -2829,6 +2832,8 @@ model EmpreiteiroTeamMember {
 /// Relatório do que a turma produziu no dia (não mistura com notas de pagamento).
 model EmpreiteiroDailyMeasurement {
   id                    String    @id @default(cuid())
+  /// Número sequencial exibido (#1, #2…), como na ficha de demanda.
+  displayNumber         Int?      @unique
   empreiteiroId         String
   /// Contrato de serviço desta entrega.
   empreiteiroContractId String?
@@ -6339,4 +6344,15 @@ model MaterialRequestCorrectionLog {
 
   @@index([materialRequestId])
   @@map("material_request_correction_logs")
+}
+
+/// Item da RM corrigido pelo solicitante e enviado ao aprovador (fica em correção, fora do mapa, até aprovar).
+model MaterialRequestItemCorrectionReview {
+  materialRequestItemId String   @id
+  materialRequestId     String
+  submittedById         String
+  submittedAt           DateTime @default(now())
+
+  @@index([materialRequestId])
+  @@map("material_request_item_correction_reviews")
 }

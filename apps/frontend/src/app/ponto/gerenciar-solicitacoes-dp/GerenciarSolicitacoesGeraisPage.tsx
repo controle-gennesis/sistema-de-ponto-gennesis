@@ -66,6 +66,7 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
   | 'WAITING_MANAGER'
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'IN_ACCOUNTING'
@@ -80,6 +81,7 @@ type DpRequestStatus =
 
 /** Valores permitidos ao salvar feedback do DP (próxima etapa). */
 type DpDpFeedbackNextStatus =
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'IN_ACCOUNTING'
@@ -175,6 +177,7 @@ function formatDuration(ms: number) {
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   IN_ACCOUNTING: 'Na Contabilidade',
@@ -190,6 +193,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
 
 const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+  PENDING_DP: 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300',
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_FINANCEIRO: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
   IN_ACCOUNTING: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
@@ -209,6 +213,7 @@ const DP_STATUS_FILTER_OPTIONS = buildDpStatusFilterOptions();
 const ADM_TST_STATUS_FILTER_OPTIONS = buildAdmTstStatusFilterOptions();
 
 const CAN_DP_SEND_FEEDBACK: DpRequestStatus[] = [
+  'PENDING_DP',
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
   'IN_ACCOUNTING',

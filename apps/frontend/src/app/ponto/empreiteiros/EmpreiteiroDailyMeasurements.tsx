@@ -182,6 +182,8 @@ function contractFinanceSummary(
 
 export type DailyMeasurement = {
   id: string;
+  /** Número sequencial (#1, #2…). */
+  displayNumber?: number | null;
   workDate: string;
   description: string;
   confirmedBy: string | null;
@@ -473,6 +475,7 @@ export function EmpreiteiroDailyMeasurements({
     if (!termo) return sortedItems;
     return sortedItems.filter((item) =>
       [
+        item.displayNumber != null ? String(item.displayNumber) : '',
         item.description,
         item.contratoNome,
         formatDateBr(item.workDate),
@@ -1084,6 +1087,7 @@ export function EmpreiteiroDailyMeasurements({
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-700">
                 <tr>
+                  <th className={cadastroListClasses.th}>ID</th>
                   <th className={cadastroListClasses.th}>Serviço</th>
                   {showContractColumn ? <th className={cadastroListClasses.th}>Contrato</th> : null}
                   <th className={cadastroListClasses.thCenter}>Data</th>
@@ -1101,6 +1105,9 @@ export function EmpreiteiroDailyMeasurements({
                       className={getListTableRowClassName(true)}
                       onClick={() => openDetail(item)}
                     >
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-left text-sm font-medium tabular-nums text-gray-700 dark:text-gray-300 sm:px-6">
+                        {item.displayNumber != null ? item.displayNumber : '—'}
+                      </td>
                       <td className="px-3 py-3 align-middle text-left text-sm sm:px-6">
                         <ListRowNavigableLabel className="font-medium">
                           {item.description || '—'}
@@ -1206,6 +1213,7 @@ export function EmpreiteiroDailyMeasurements({
         {detail && detailStatus ? (
           <div className="space-y-4 text-sm">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <DetailField label="ID" value={detail.displayNumber != null ? String(detail.displayNumber) : '—'} />
               <DetailField label="Serviço" value={detail.description} />
               <DetailField label="Contrato" value={detail.contratoNome || '—'} />
               <DetailField label="Data" value={formatDateBr(detail.workDate)} />

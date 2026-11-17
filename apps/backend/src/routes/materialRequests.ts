@@ -7,7 +7,12 @@ import { MaterialRequestService } from '../services/MaterialRequestService';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import { savePersistentUpload } from '../lib/persistentUpload';
-import { listarCorrecoesRm } from '../lib/rmCorrecaoFd';
+import {
+  desmarcarItensAguardandoAprovacao,
+  itensAguardandoAprovacao,
+  listarCorrecoesRm,
+  rotuloDoMaterial,
+} from '../lib/rmCorrecaoFd';
 import {
   assertUserCanApproveMaterialRequests,
   assertUserCanApproveMaterialRequestForCostCenter,
@@ -140,13 +145,151 @@ router.post("/upload-item-attachment", (req: AuthRequest, res: Response, next: N
 router.get('/minhas/correcao-count', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    // Itens com a correção já enviada ao aprovador não contam (a pendência agora é do aprovador).
+    const enviados = (await itensAguardandoAprovacao()).map((m) => m.materialRequestItemId);
     const count = await prisma.materialRequest.count({
       where: {
         requestedBy: req.user.id,
-        OR: [{ status: 'IN_REVIEW' }, { status: 'APPROVED', items: { some: { status: 'IN_REVIEW' } } }],
+        OR: [
+          { status: 'IN_REVIEW' },
+          {
+            status: 'APPROVED',
+            items: {
+              some: { status: 'IN_REVIEW', ...(enviados.length ? { id: { notIn: enviados } } : {}) },
+            },
+          },
+        ],
       },
     });
     return res.json({ success: true, data: { count } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * Itens corrigidos pelo solicitante aguardando o aprovador (RM aprovada com OC em andamento).
+ * Mesma visibilidade da aprovação de RMs (centros de custo do aprovador).
+ */
+async function rmsComCorrecaoAguardando(req: AuthRequest) {
+  const marcas = await itensAguardandoAprovacao();
+  if (marcas.length === 0) return [];
+  const scope = await getRmApproverListScopeCostCenterIds(req.user!.id, !!req.user!.isAdmin);
+  const rmIds = [...new Set(marcas.map((m) => m.materialRequestId))];
+  const rms = await prisma.materialRequest.findMany({
+    where: {
+      id: { in: rmIds },
+      status: 'APPROVED',
+      ...(scope ? { costCenterId: { in: scope } } : {}),
+    },
+    select: {
+      id: true,
+      requestNumber: true,
+      costCenterId: true,
+      costCenter: { select: { code: true, name: true } },
+      requester: { select: { name: true } },
+      demandSheet: true,
+      items: {
+        where: { id: { in: marcas.map((m) => m.materialRequestItemId) }, status: 'IN_REVIEW' },
+        select: {
+          id: true,
+          materialId: true,
+          quantity: true,
+          unit: true,
+          material: { select: { name: true, description: true, sinapiCode: true } },
+        },
+      },
+    },
+  });
+  return rms.filter((r) => r.items.length > 0);
+}
+
+router.get('/correcoes/aguardando-aprovacao', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserCanApproveMaterialRequests(req.user.id, !!req.user.isAdmin);
+    const rms = await rmsComCorrecaoAguardando(req);
+    const data = await Promise.all(
+      rms.map(async (rm) => ({
+        ...rm,
+        items: await Promise.all(
+          rm.items.map(async (it) => ({
+            id: it.id,
+            materialId: it.materialId,
+            materialLabel: (await rotuloDoMaterial(it.materialId)) || it.material?.name || it.material?.description || '',
+            quantity: Number(it.quantity),
+            unit: it.unit,
+          }))
+        ),
+        correcoes: await listarCorrecoesRm(rm.id),
+      }))
+    );
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/correcoes/aguardando-aprovacao/count', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    try {
+      await assertUserCanApproveMaterialRequests(req.user.id, !!req.user.isAdmin);
+    } catch {
+      return res.json({ success: true, data: { count: 0 } });
+    }
+    const rms = await rmsComCorrecaoAguardando(req);
+    return res.json({ success: true, data: { count: rms.length } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/** Aprovador aprova a correção: os itens saem da correção e vão para o mapa de cotação. */
+router.post('/:id/correcoes/aprovar', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const id = String(req.params.id || '').trim();
+    const rm = await prisma.materialRequest.findUnique({ where: { id }, select: { costCenterId: true } });
+    if (!rm) throw createError('Requisição não encontrada', 404);
+    await assertUserCanApproveMaterialRequestForCostCenter(req.user.id, !!req.user.isAdmin, rm.costCenterId);
+    const itemIds = (await itensAguardandoAprovacao([id])).map((m) => m.materialRequestItemId);
+    if (itemIds.length === 0) throw createError('Nenhuma correção aguardando aprovação nesta requisição', 400);
+    await prisma.materialRequestItem.updateMany({
+      where: { id: { in: itemIds }, materialRequestId: id, status: 'IN_REVIEW' },
+      data: { status: 'APPROVED' },
+    });
+    await desmarcarItensAguardandoAprovacao(itemIds);
+    await prisma.materialRequestComment.create({
+      data: {
+        materialRequestId: id,
+        userId: req.user.id,
+        content: `Correção aprovada (${itemIds.length} ${itemIds.length === 1 ? 'item' : 'itens'}). Os itens voltaram ao mapa de cotação.`,
+      },
+    });
+    return res.json({ success: true, message: 'Correção aprovada. Os itens voltaram ao mapa de cotação.' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/** Aprovador devolve a correção ao solicitante (os itens continuam em correção). */
+router.post('/:id/correcoes/devolver', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const id = String(req.params.id || '').trim();
+    const note = String(req.body?.correctionNote ?? '').trim();
+    if (!note) throw createError('Informe o que precisa ser alterado na correção', 400);
+    const rm = await prisma.materialRequest.findUnique({ where: { id }, select: { costCenterId: true } });
+    if (!rm) throw createError('Requisição não encontrada', 404);
+    await assertUserCanApproveMaterialRequestForCostCenter(req.user.id, !!req.user.isAdmin, rm.costCenterId);
+    const itemIds = (await itensAguardandoAprovacao([id])).map((m) => m.materialRequestItemId);
+    if (itemIds.length === 0) throw createError('Nenhuma correção aguardando aprovação nesta requisição', 400);
+    await desmarcarItensAguardandoAprovacao(itemIds);
+    await prisma.materialRequestComment.create({
+      data: { materialRequestId: id, userId: req.user.id, content: `Correção devolvida ao solicitante: ${note}` },
+    });
+    return res.json({ success: true, message: 'Correção devolvida ao solicitante.' });
   } catch (error) {
     return next(error);
   }
@@ -156,8 +299,11 @@ router.get('/minhas/correcao-count', async (req: AuthRequest, res: Response, nex
 router.get('/:id/correcoes', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
-    const data = await listarCorrecoesRm(String(req.params.id || '').trim());
-    return res.json({ success: true, data });
+    const rmId = String(req.params.id || '').trim();
+    const logs = await listarCorrecoesRm(rmId);
+    // Itens com correção já enviada ao aprovador (não podem ser corrigidos de novo até a decisão).
+    const aguardandoAprovacao = (await itensAguardandoAprovacao([rmId])).map((m) => m.materialRequestItemId);
+    return res.json({ success: true, data: { logs, aguardandoAprovacao } });
   } catch (error) {
     return next(error);
   }
@@ -625,6 +771,52 @@ router.patch('/:id/items/:itemId/correct-quantity', async (req: AuthRequest, res
     });
   } catch (error) {
     if (error instanceof Error && /não encontrad|Não é possível|Quantidade|Apenas o solicitante|não está|Material/.test(error.message)) {
+      const status = /Apenas o solicitante/.test(error.message) ? 403 : 400;
+      res.status(status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+/**
+ * Correção de vários itens de uma vez (botão "Salvar e reenviar"): cada item em correção recebe
+ * a quantidade e, opcionalmente, o material novo; todos voltam ao mapa de cotação.
+ */
+router.patch('/:id/items/correct-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const { id } = req.params;
+    const lista = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (lista.length === 0) throw createError('Nenhum item para corrigir', 400);
+    // Confere todas as quantidades antes de gravar qualquer item.
+    for (const it of lista) {
+      const q = Number(it?.quantity);
+      if (!it?.itemId || !Number.isFinite(q) || q <= 0) {
+        throw createError('Quantidade deve ser maior que zero em todos os itens', 400);
+      }
+    }
+    let request: unknown = null;
+    for (const it of lista) {
+      request = await materialRequestService.correctOpenItemQuantity(
+        id,
+        String(it.itemId),
+        Number(it.quantity),
+        req.user.id,
+        !!req.user.isAdmin,
+        {
+          materialId: typeof it.materialId === 'string' ? it.materialId : undefined,
+          materialLabel: typeof it.materialLabel === 'string' ? it.materialLabel : undefined,
+        }
+      );
+    }
+    res.json({
+      success: true,
+      data: request,
+      message: 'Correção enviada para aprovação.',
+    });
+  } catch (error) {
+    if (error instanceof Error && /não encontrad|Não é possível|Quantidade|Apenas o solicitante|não está|Material|Nenhum item/.test(error.message)) {
       const status = /Apenas o solicitante/.test(error.message) ? 403 : 400;
       res.status(status).json({ success: false, message: error.message });
       return;

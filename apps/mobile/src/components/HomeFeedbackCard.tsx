@@ -154,11 +154,11 @@ const getStyles = (colors: any, isDark: boolean) =>
       ...Platform.select({
         ios: {
           shadowColor: '#0f172a',
-          shadowOpacity: isDark ? 0 : 0.07,
+          shadowOpacity: 0,
           shadowRadius: 14,
           shadowOffset: { width: 0, height: 6 },
         },
-        android: { elevation: isDark ? 0 : 3 },
+        android: { elevation: 0 },
         default: {},
       }),
     },

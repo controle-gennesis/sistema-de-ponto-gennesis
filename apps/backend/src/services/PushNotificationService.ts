@@ -114,6 +114,7 @@ const RESERVATION: Record<string, [string, string]> = {
 
 const DP: Record<string, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   IN_ACCOUNTING: 'Na Contabilidade',
