@@ -18,6 +18,10 @@ export const pageStatCardsGrid3Class =
 export const pageStatCardsGrid5Class =
   'grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5';
 
+/** Variante 6 colunas em 2xl (3 por linha no lg, para não sobrar um cartão sozinho embaixo). */
+export const pageStatCardsGrid6Class =
+  'grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-6';
+
 type PageStackProps = {
   children: React.ReactNode;
   className?: string;

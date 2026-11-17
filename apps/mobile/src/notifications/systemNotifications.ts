@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { requireOptionalNativeModule } from 'expo';
 import { Platform } from 'react-native';
 import type { ActivityNotification } from './activityStorage';
 
@@ -6,14 +7,26 @@ const ANDROID_CHANNEL_ID = 'gennesis-activity';
 
 /** Expo Go: appOwnership === 'expo' (evita named export quebrado no Hermes). */
 function isExpoGo() {
-  return Constants.appOwnership === 'expo';
+  // `appOwnership` pode vir vazio nas versões novas do Expo; `executionEnvironment` é o que diz de verdade.
+  return Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 }
 
 /**
  * No Expo Go Android (SDK 53+), só importar `expo-notifications` dispara
  * addPushTokenListener e lança Error fatal. Local + push ficam só em dev/build nativo.
  */
-const notificationsUnsupported = Platform.OS === 'android' && isExpoGo();
+/** No Android, a biblioteca precisa deste módulo nativo; se ele não existe (Expo Go), nem tenta carregar. */
+function androidNotificationsNativeMissing(): boolean {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return requireOptionalNativeModule('ExpoTopicSubscriptionModule') == null;
+  } catch {
+    return true;
+  }
+}
+
+const notificationsUnsupported =
+  Platform.OS === 'android' && (isExpoGo() || androidNotificationsNativeMissing());
 
 type NotificationsModule = {
   AndroidImportance: { HIGH: number };

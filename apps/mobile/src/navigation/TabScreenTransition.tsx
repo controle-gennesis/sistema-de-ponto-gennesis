@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
-import { useIsFocused, useNavigationState } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useNavigationState } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 
 type Props = {
@@ -14,6 +14,7 @@ type Props = {
  */
 export default function TabScreenTransition({ children }: Props) {
   const focused = useIsFocused();
+  const navigation = useNavigation();
   const index = useNavigationState((s) => s.index);
   const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(focused ? 1 : 0)).current;
@@ -22,6 +23,8 @@ export default function TabScreenTransition({ children }: Props) {
   /** Só a aba inicial (já focada no mount) pula a 1ª animação. */
   const skipInitialFocused = useRef(focused);
   const wasFocusedRef = useRef(focused);
+  /** Perdeu o foco só porque uma página abriu por cima (aba não mudou): não faz o fade. */
+  const coveredRef = useRef(false);
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   // Ao perder o foco, some rápido pra não ficar sobreposta com a próxima.
@@ -32,6 +35,13 @@ export default function TabScreenTransition({ children }: Props) {
     }
     if (!wasFocusedRef.current) return;
     wasFocusedRef.current = false;
+    // Página aberta por cima da pilha (a aba continua a mesma): não some, senão ao voltar
+    // a tela reaparece em fade e o fundo pisca. Troca de aba mantém o fade de sempre.
+    const parent = navigation.getParent();
+    if (parent && !parent.isFocused()) {
+      coveredRef.current = true;
+      return;
+    }
     animRef.current?.stop();
     animRef.current = Animated.timing(opacity, {
       toValue: 0,
@@ -40,7 +50,7 @@ export default function TabScreenTransition({ children }: Props) {
       useNativeDriver: true,
     });
     animRef.current.start();
-  }, [focused, opacity]);
+  }, [focused, opacity, navigation]);
 
   useEffect(() => {
     if (!focused) return;
@@ -48,6 +58,15 @@ export default function TabScreenTransition({ children }: Props) {
     if (skipInitialFocused.current) {
       skipInitialFocused.current = false;
       prevIndexRef.current = index;
+      opacity.setValue(1);
+      translateX.setValue(0);
+      return;
+    }
+
+    if (coveredRef.current) {
+      coveredRef.current = false;
+      prevIndexRef.current = index;
+      animRef.current?.stop();
       opacity.setValue(1);
       translateX.setValue(0);
       return;

@@ -433,7 +433,7 @@ export class DpContabilidadeController {
       if (respondidoPorOutro && full?.createdByUserId) {
         void sendPushToUsers([full.createdByUserId], {
           title: 'Resposta da Contabilidade',
-          body: `${full.title}: ${body.slice(0, 120)}`,
+          body: `${full.title}\n${body.slice(0, 120)}`,
           data: { type: 'dp-contabilidade', id: existing.id },
         });
       }
@@ -559,7 +559,7 @@ export class DpContabilidadeController {
     if ((status === 'CONCLUDED' || status === 'CANCELLED') && existing.createdByUserId !== actor.id) {
       void sendPushToUsers([existing.createdByUserId], {
         title: status === 'CONCLUDED' ? `${byLabel} concluiu seu pedido` : `${byLabel} cancelou seu pedido`,
-        body: existing.title + (comment ? `: ${comment.slice(0, 120)}` : ''),
+        body: existing.title + (comment ? `\n${comment.slice(0, 120)}` : ''),
         data: { type: 'dp-contabilidade', id: existing.id },
       });
     }

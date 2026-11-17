@@ -498,7 +498,7 @@ export class FuelRefuelRequestService {
     const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
     void notifyNewPendingApprovalWhatsApp(
       queueUserIds,
-      `Solicitação de abastecimento #${updated.displayNumber} · ${updated.driverName} — aguardando Suprimentos`
+      `Solicitação de abastecimento #${updated.displayNumber} · ${updated.driverName}`
     );
 
     return updated;

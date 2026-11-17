@@ -120,6 +120,7 @@ const rejectDpRequestSchema = z
   });
 
 const DP_FEEDBACK_NEXT_STATUSES = [
+  'PENDING_DP',
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
   'IN_ACCOUNTING',
@@ -231,7 +232,7 @@ function appendStatusTransition(
   if (list.length === 0) {
     list.push({ at: row.createdAt.toISOString(), status: 'WAITING_MANAGER' });
     if (row.managerApprovedAt) {
-      list.push({ at: row.managerApprovedAt.toISOString(), status: 'IN_REVIEW_DP' });
+      list.push({ at: row.managerApprovedAt.toISOString(), status: 'PENDING_DP' });
     }
   }
   const last = list[list.length - 1];
@@ -269,7 +270,7 @@ function approverNameFromStatusHistory(history: unknown): string | null {
     if (
       entry &&
       typeof entry === 'object' &&
-      entry.status === 'IN_REVIEW_DP' &&
+      (entry.status === 'PENDING_DP' || entry.status === 'IN_REVIEW_DP') &&
       typeof entry.actorName === 'string' &&
       entry.actorName.trim()
     ) {
@@ -787,7 +788,7 @@ export class DpRequestController {
       const initialStatus = isAccountingDirect
         ? 'IN_ACCOUNTING'
         : isAdmRequest
-          ? 'IN_REVIEW_DP'
+          ? 'PENDING_DP'
           : 'WAITING_MANAGER';
 
       // Anexos do fluxo direto vão para o S3; no banco fica só a referência.
@@ -1112,7 +1113,7 @@ export class DpRequestController {
         // tratado no catch abaixo como 409.
         where: { id: requestId, status: 'WAITING_MANAGER' },
         data: {
-          status: 'IN_REVIEW_DP',
+          status: 'PENDING_DP',
           managerApprovedBy: req.user.id,
           managerApprovedAt: new Date(),
           managerApprovalComment: payload.comment || null,
@@ -1126,7 +1127,7 @@ export class DpRequestController {
               status: dpRequest.status,
             },
             dpRequest.statusHistory,
-            'IN_REVIEW_DP',
+            'PENDING_DP',
             {
               note: payload.comment || undefined,
               actorUserId: req.user.id,
@@ -1390,6 +1391,7 @@ export class DpRequestController {
         }
       } else {
         const dpMayAct: string[] = [
+          'PENDING_DP',
           'IN_REVIEW_DP',
           'IN_FINANCEIRO',
           'IN_ACCOUNTING',

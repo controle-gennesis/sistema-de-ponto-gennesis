@@ -4,16 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Modal,
   TextInput,
-  ScrollView,
-  KeyboardAvoidingView,
   Platform,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react-native';
+import SheetModal from '../SheetModal';
 import { showAppToast } from '../AppToast';
 import { useTheme } from '../../context/ThemeContext';
 import { formatDpRequestDetails } from '../../lib/formatDpRequestDetails';
@@ -67,6 +64,7 @@ function statusColor(status: DpRequestStatus, colors: any, requestType?: string 
   if (status === 'CANCELLED') return colors.error;
   if (status === 'WAITING_RETURN') return colors.warning;
   if (status.startsWith('WAITING_')) return '#f97316';
+  if (status === 'PENDING_DP') return '#64748b';
   if (status === 'IN_FINANCEIRO') return '#6366f1';
   return colors.warning;
 }
@@ -233,366 +231,248 @@ export default function ApprovalActionSheet({
     );
   };
 
-  if (!visible || !item) return null;
+  const showMedicaoActions = !!item && tab === 'medicao' && item.pending;
+  const headerTitle = !item
+    ? ''
+    : dpRaw
+      ? `Solicitação #${dpRaw.displayNumber ?? dpRaw.id.slice(0, 8)}`
+      : item.title;
 
-  const showMedicaoActions = tab === 'medicao' && item.pending;
-  const headerTitle = dpRaw
-    ? `Solicitação #${dpRaw.displayNumber ?? dpRaw.id.slice(0, 8)}`
-    : item.title;
-  const headerSubtitle = dpRaw
-    ? dpStatusLabel(dpRaw.status, dpRaw.requestType)
-    : item.subtitle;
+  // Mesma folha das outras janelas de detalhes (SheetModal); `embedded` quando já está dentro de outra folha.
+  return (
+    <SheetModal visible={visible && !!item} onClose={onClose} title={headerTitle} embedded={embedded}>
+      {item ? (
+        <View>
+          {dpRaw ? (
+            <>
+              <View style={styles.detailGrid}>
+                <DetailField
+                  styles={styles}
+                  label="Status"
+                  value={dpStatusLabel(dpRaw.status, dpRaw.requestType)}
+                  valueColor={statusColor(dpRaw.status, colors, dpRaw.requestType)}
+                />
+                <DetailField
+                  styles={styles}
+                  label="Tipo"
+                  value={DP_TYPE_LABELS[dpRaw.requestType] || dpRaw.requestType}
+                />
+                <DetailField
+                  styles={styles}
+                  label="Destino"
+                  value={destinationLabel(dpRaw.requestType)}
+                />
+                <DetailField
+                  styles={styles}
+                  label="Urgência"
+                  value={URGENCY_LABELS[dpRaw.urgency] || dpRaw.urgency}
+                />
+                <DetailField
+                  styles={styles}
+                  label="Solicitante"
+                  value={dpRaw.employee?.user?.name || '—'}
+                />
+                <DetailField
+                  styles={styles}
+                  label="Contrato"
+                  value={dpRaw.costCenter?.name || dpRaw.contract?.name || '—'}
+                />
+                <DetailField styles={styles} label="Empresa" value={dpRaw.company || '—'} />
+                <DetailField styles={styles} label="Polo" value={dpRaw.polo || '—'} />
+                {dpRaw.dpFeedback ? (
+                  <DetailField styles={styles} label="Feedback" value={dpRaw.dpFeedback} />
+                ) : null}
+                {dpRaw.requesterReturnComment ? (
+                  <DetailField
+                    styles={styles}
+                    label="Resposta do solicitante"
+                    value={dpRaw.requesterReturnComment}
+                  />
+                ) : null}
+              </View>
 
-  const sheet = (
-    <View style={[styles.detailSheet, { backgroundColor: colors.card }]}>
-      <View style={styles.detailSheetHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.detailSheetTitle} numberOfLines={2}>
-            {headerTitle}
-          </Text>
-          <Text style={styles.detailSheetSubtitle} numberOfLines={2}>
-            {headerSubtitle}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={6}>
-          <X size={18} color={colors.text} strokeWidth={2.2} />
-        </TouchableOpacity>
-      </View>
+              {detailPreview && detailPreview.items.length > 0 ? (
+                <View style={styles.detailsSection}>
+                  <Text style={styles.detailsSectionTitle}>{detailPreview.sectionTitle}</Text>
+                  {detailPreview.items.map((row, index) => (
+                    <View
+                      key={`${row.title}-${index}`}
+                      style={[
+                        styles.detailsItem,
+                        {
+                          borderLeftColor: isDark
+                            ? 'rgba(255,255,255,0.18)'
+                            : 'rgba(15,23,42,0.12)',
+                        },
+                      ]}
+                    >
+                      <Text style={styles.detailsItemTitle}>{row.title}</Text>
+                      <Text style={styles.detailsItemSubtitle}>{row.subtitle}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          ) : null}
 
-      <ScrollView
-        style={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {dpRaw ? (
-          <>
+          {fuelRaw ? (
             <View style={styles.detailGrid}>
-              <DetailField
-                styles={styles}
-                label="Status"
-                value={dpStatusLabel(dpRaw.status, dpRaw.requestType)}
-                valueColor={statusColor(dpRaw.status, colors, dpRaw.requestType)}
-              />
-              <DetailField
-                styles={styles}
-                label="Tipo"
-                value={DP_TYPE_LABELS[dpRaw.requestType] || dpRaw.requestType}
-              />
-              <DetailField
-                styles={styles}
-                label="Destino"
-                value={destinationLabel(dpRaw.requestType)}
-              />
-              <DetailField
-                styles={styles}
-                label="Urgência"
-                value={URGENCY_LABELS[dpRaw.urgency] || dpRaw.urgency}
-              />
+              <DetailField styles={styles} label="Motorista" value={fuelRaw.driverName || '—'} />
+              <DetailField styles={styles} label="Rota" value={fuelRaw.route || '—'} />
               <DetailField
                 styles={styles}
                 label="Solicitante"
-                value={dpRaw.employee?.user?.name || '—'}
+                value={fuelRaw.requester?.name || '—'}
               />
               <DetailField
                 styles={styles}
-                label="Contrato"
-                value={dpRaw.costCenter?.name || dpRaw.contract?.name || '—'}
+                label="Observações"
+                value={fuelRaw.observations || '—'}
               />
-              <DetailField styles={styles} label="Empresa" value={dpRaw.company || '—'} />
-              <DetailField styles={styles} label="Polo" value={dpRaw.polo || '—'} />
-              {dpRaw.dpFeedback ? (
-                <DetailField styles={styles} label="Feedback" value={dpRaw.dpFeedback} />
+              {item.meta ? (
+                <DetailField styles={styles} label="Info" value={item.meta} />
               ) : null}
-              {dpRaw.requesterReturnComment ? (
-                <DetailField
-                  styles={styles}
-                  label="Resposta do solicitante"
-                  value={dpRaw.requesterReturnComment}
+            </View>
+          ) : null}
+
+          {!dpRaw && !fuelRaw && !fdRaw && !aditivoRaw ? (
+            <View style={styles.detailGrid}>
+              {item.subtitle ? (
+                <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
+              ) : null}
+              {item.meta ? <DetailField styles={styles} label="Info" value={item.meta} /> : null}
+              {item.statusLabel ? (
+                <DetailField styles={styles} label="Status" value={item.statusLabel} />
+              ) : null}
+            </View>
+          ) : null}
+
+          {aditivoRaw ? (
+            <View style={styles.detailGrid}>
+              <DetailField styles={styles} label="Aditivo" value={`#${aditivoRaw.number}`} />
+              <DetailField
+                styles={styles}
+                label="Empreiteiro"
+                value={aditivoRaw.empreiteiro?.name?.trim() || '—'}
+              />
+              <DetailField styles={styles} label="Serviço" value={aditivoRaw.serviceName?.trim() || '—'} />
+              <DetailField
+                styles={styles}
+                label="Valor do aditivo"
+                value={formatApprovalMoney(aditivoRaw.amount)}
+              />
+              <DetailField
+                styles={styles}
+                label="Vigência"
+                value={aditivoRaw.effectiveDate?.trim() || '—'}
+              />
+              <DetailField styles={styles} label="Motivo" value={aditivoRaw.reason?.trim() || '—'} />
+              {aditivoRaw.servicesAdded?.trim() ? (
+                <DetailField styles={styles} label="Serviços incluídos" value={aditivoRaw.servicesAdded.trim()} />
+              ) : null}
+              {aditivoRaw.servicesRemoved?.trim() ? (
+                <DetailField styles={styles} label="Serviços removidos" value={aditivoRaw.servicesRemoved.trim()} />
+              ) : null}
+              {aditivoRaw.createdByName?.trim() ? (
+                <DetailField styles={styles} label="Lançado por" value={aditivoRaw.createdByName.trim()} />
+              ) : null}
+            </View>
+          ) : null}
+
+          {fdRaw ? (
+            <View style={styles.detailGrid}>
+              <DetailField styles={styles} label="Código da FD" value={fdRaw.codFichaDemanda?.trim() || '—'} />
+              <DetailField styles={styles} label="Pedido" value={fdRaw.codigoPedido?.trim() || '—'} />
+              <DetailField styles={styles} label="Contrato" value={fdRaw.contratoNome?.trim() || fdRaw.contrato?.name || '—'} />
+              <DetailField styles={styles} label="Obra" value={fdRaw.obra?.trim() || '—'} />
+              <DetailField
+                styles={styles}
+                label="Solicitante"
+                value={fdRaw.solicitanteNome?.trim() || fdRaw.solicitante?.name || '—'}
+              />
+              <DetailField styles={styles} label="Polo" value={fdRaw.polo?.trim() || '—'} />
+              <DetailField styles={styles} label="Nº Mov RM" value={fdRaw.numMovRm?.trim() || '—'} />
+              <DetailField styles={styles} label="ID Mov RM" value={fdRaw.idMovRm?.trim() || '—'} />
+              {fdRaw.scNumero?.trim() ? (
+                <DetailField styles={styles} label="Nº da SC" value={fdRaw.scNumero.trim()} />
+              ) : null}
+              {fdRaw.ocId?.trim() ? (
+                <DetailField styles={styles} label="ID da OC" value={fdRaw.ocId.trim()} />
+              ) : null}
+              <DetailField
+                styles={styles}
+                label="Faturamento estimado"
+                value={formatApprovalMoney(Number(fdRaw.faturamentoEstimado))}
+              />
+              <DetailField
+                styles={styles}
+                label="Custo estimado"
+                value={formatApprovalMoney(Number(fdRaw.custoEstimado))}
+              />
+              <DetailField styles={styles} label="Data/hora" value={fdRaw.dataHora?.trim() || '—'} />
+              <DetailField styles={styles} label="Observação" value={fdRaw.observacao?.trim() || '—'} />
+            </View>
+          ) : null}
+
+          {showMedicaoActions ? (
+            <>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>Valor aprovado</Text>
+                <TextInput
+                  value={medicaoAmount}
+                  onChangeText={setMedicaoAmount}
+                  keyboardType="decimal-pad"
+                  placeholder="0,00"
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.input}
                 />
-              ) : null}
-            </View>
-
-            {detailPreview && detailPreview.items.length > 0 ? (
-              <View style={styles.detailsSection}>
-                <Text style={styles.detailsSectionTitle}>{detailPreview.sectionTitle}</Text>
-                {detailPreview.items.map((row, index) => (
-                  <View
-                    key={`${row.title}-${index}`}
-                    style={[
-                      styles.detailsItem,
-                      {
-                        borderLeftColor: isDark
-                          ? 'rgba(255,255,255,0.18)'
-                          : 'rgba(15,23,42,0.12)',
-                      },
-                    ]}
-                  >
-                    <Text style={styles.detailsItemTitle}>{row.title}</Text>
-                    <Text style={styles.detailsItemSubtitle}>{row.subtitle}</Text>
-                  </View>
-                ))}
               </View>
-            ) : null}
-          </>
-        ) : null}
-
-        {fuelRaw ? (
-          <View style={styles.detailGrid}>
-            <DetailField styles={styles} label="Motorista" value={fuelRaw.driverName || '—'} />
-            <DetailField styles={styles} label="Rota" value={fuelRaw.route || '—'} />
-            <DetailField
-              styles={styles}
-              label="Solicitante"
-              value={fuelRaw.requester?.name || '—'}
-            />
-            <DetailField
-              styles={styles}
-              label="Observações"
-              value={fuelRaw.observations || '—'}
-            />
-            {item.meta ? (
-              <DetailField styles={styles} label="Info" value={item.meta} />
-            ) : null}
-          </View>
-        ) : null}
-
-        {!dpRaw && !fuelRaw && !fdRaw && !aditivoRaw ? (
-          <View style={styles.detailGrid}>
-            {item.subtitle ? (
-              <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
-            ) : null}
-            {item.meta ? <DetailField styles={styles} label="Info" value={item.meta} /> : null}
-            {item.statusLabel ? (
-              <DetailField styles={styles} label="Status" value={item.statusLabel} />
-            ) : null}
-          </View>
-        ) : null}
-
-        {aditivoRaw ? (
-          <View style={styles.detailGrid}>
-            <DetailField styles={styles} label="Aditivo" value={`Nº ${aditivoRaw.number}`} />
-            <DetailField
-              styles={styles}
-              label="Empreiteiro"
-              value={aditivoRaw.empreiteiro?.name?.trim() || '—'}
-            />
-            <DetailField styles={styles} label="Serviço" value={aditivoRaw.serviceName?.trim() || '—'} />
-            <DetailField
-              styles={styles}
-              label="Valor do aditivo"
-              value={formatApprovalMoney(aditivoRaw.amount)}
-            />
-            <DetailField
-              styles={styles}
-              label="Vigência"
-              value={aditivoRaw.effectiveDate?.trim() || '—'}
-            />
-            <DetailField styles={styles} label="Motivo" value={aditivoRaw.reason?.trim() || '—'} />
-            {aditivoRaw.servicesAdded?.trim() ? (
-              <DetailField styles={styles} label="Serviços incluídos" value={aditivoRaw.servicesAdded.trim()} />
-            ) : null}
-            {aditivoRaw.servicesRemoved?.trim() ? (
-              <DetailField styles={styles} label="Serviços removidos" value={aditivoRaw.servicesRemoved.trim()} />
-            ) : null}
-            {aditivoRaw.createdByName?.trim() ? (
-              <DetailField styles={styles} label="Lançado por" value={aditivoRaw.createdByName.trim()} />
-            ) : null}
-          </View>
-        ) : null}
-
-        {fdRaw ? (
-          <View style={styles.detailGrid}>
-            <DetailField styles={styles} label="Código da FD" value={fdRaw.codFichaDemanda?.trim() || '—'} />
-            <DetailField styles={styles} label="Pedido" value={fdRaw.codigoPedido?.trim() || '—'} />
-            <DetailField styles={styles} label="Contrato" value={fdRaw.contratoNome?.trim() || fdRaw.contrato?.name || '—'} />
-            <DetailField styles={styles} label="Obra" value={fdRaw.obra?.trim() || '—'} />
-            <DetailField
-              styles={styles}
-              label="Solicitante"
-              value={fdRaw.solicitanteNome?.trim() || fdRaw.solicitante?.name || '—'}
-            />
-            <DetailField styles={styles} label="Polo" value={fdRaw.polo?.trim() || '—'} />
-            <DetailField styles={styles} label="Nº Mov RM" value={fdRaw.numMovRm?.trim() || '—'} />
-            <DetailField styles={styles} label="ID Mov RM" value={fdRaw.idMovRm?.trim() || '—'} />
-            {fdRaw.scNumero?.trim() ? (
-              <DetailField styles={styles} label="Nº da SC" value={fdRaw.scNumero.trim()} />
-            ) : null}
-            {fdRaw.ocId?.trim() ? (
-              <DetailField styles={styles} label="ID da OC" value={fdRaw.ocId.trim()} />
-            ) : null}
-            <DetailField
-              styles={styles}
-              label="Faturamento estimado"
-              value={formatApprovalMoney(Number(fdRaw.faturamentoEstimado))}
-            />
-            <DetailField
-              styles={styles}
-              label="Custo estimado"
-              value={formatApprovalMoney(Number(fdRaw.custoEstimado))}
-            />
-            <DetailField styles={styles} label="Data/hora" value={fdRaw.dataHora?.trim() || '—'} />
-            <DetailField styles={styles} label="Observação" value={fdRaw.observacao?.trim() || '—'} />
-          </View>
-        ) : null}
-
-        {showMedicaoActions ? (
-          <>
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>Valor aprovado</Text>
-              <TextInput
-                value={medicaoAmount}
-                onChangeText={setMedicaoAmount}
-                keyboardType="decimal-pad"
-                placeholder="0,00"
-                placeholderTextColor={colors.textSecondary}
-                style={styles.input}
-              />
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>Motivo da devolução</Text>
+                <TextInput
+                  value={comment}
+                  onChangeText={setComment}
+                  placeholder="Obrigatório ao devolver"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.input, styles.inputMultiline]}
+                  multiline
+                  textAlignVertical="top"
+                />
+              </View>
+            </>
+          ) : null}
+            {showMedicaoActions ? (
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.rejectBtn]}
+                disabled={actionMutation.isPending}
+                onPress={() => confirmAction('reject')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.actionBtnText}>Devolver</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.approveBtn]}
+                disabled={actionMutation.isPending}
+                onPress={() => confirmAction('approve')}
+                activeOpacity={0.8}
+              >
+                {actionMutation.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.actionBtnText}>Aprovar</Text>
+                )}
+              </TouchableOpacity>
             </View>
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>Motivo da devolução</Text>
-              <TextInput
-                value={comment}
-                onChangeText={setComment}
-                placeholder="Obrigatório ao devolver"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.input, styles.inputMultiline]}
-                multiline
-                textAlignVertical="top"
-              />
-            </View>
-          </>
-        ) : null}
-      </ScrollView>
-
-      {showMedicaoActions ? (
-        <View style={styles.sheetActions}>
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.rejectBtn]}
-            disabled={actionMutation.isPending}
-            onPress={() => confirmAction('reject')}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.actionBtnText}>Devolver</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.approveBtn]}
-            disabled={actionMutation.isPending}
-            onPress={() => confirmAction('approve')}
-            activeOpacity={0.8}
-          >
-            {actionMutation.isPending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.actionBtnText}>Aprovar</Text>
-            )}
-          </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
-    </View>
-  );
-
-  if (embedded) {
-    return (
-      <View style={layout.embeddedRoot}>
-        <TouchableOpacity style={layout.modalBackdrop} activeOpacity={1} onPress={onClose} />
-        <View style={layout.embeddedSheetWrap} pointerEvents="box-none">
-          {sheet}
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
-      <KeyboardAvoidingView
-        style={layout.detailOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        {sheet}
-      </KeyboardAvoidingView>
-    </Modal>
+    </SheetModal>
   );
 }
 
-// Layout fora do useMemo: o Fast Refresh preserva o memo e deixaria chaves novas undefined.
-const layout = StyleSheet.create({
-  detailOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-    padding: 16,
-    paddingBottom: 28,
-  },
-  embeddedRoot: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 1100,
-    elevation: 1100,
-  },
-  embeddedSheetWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'flex-end',
-    padding: 16,
-    paddingBottom: 28,
-  },
-  modalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-});
-
 function getStyles(colors: any, isDark: boolean) {
   return StyleSheet.create({
-    detailSheet: {
-      borderRadius: 20,
-      padding: 18,
-      gap: 12,
-      maxHeight: '88%',
-    },
-    detailSheetHeader: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 12,
-      marginBottom: 4,
-    },
-    detailSheetTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-      letterSpacing: -0.3,
-      color: colors.text,
-    },
-    detailSheetSubtitle: {
-      fontSize: 13,
-      fontWeight: '500',
-      marginTop: 2,
-      color: colors.textSecondary,
-    },
-    closeBtn: {
-      width: 36,
-      height: 36,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    scroll: { maxHeight: 520 },
     detailGrid: { gap: 12 },
     detailField: { gap: 2 },
     detailLabel: {
@@ -655,7 +535,7 @@ function getStyles(colors: any, isDark: boolean) {
     sheetActions: {
       flexDirection: 'row',
       gap: 10,
-      paddingTop: 4,
+      paddingTop: 16,
     },
     actionBtn: {
       flex: 1,

@@ -45,6 +45,8 @@ export type OrcamentoExcelColumn = {
   format?: OrcamentoExcelColFormat;
   /** Não ajusta a largura ao maior texto da coluna. */
   larguraFixa?: boolean;
+  /** Coluna escondida no Excel (as fórmulas e o layout continuam iguais). */
+  oculta?: boolean;
 };
 
 export type OrcamentoExcelRowKind =
@@ -680,6 +682,10 @@ async function fillWorkbook(
       }
       const largura = Math.min(120, Math.max(col.width ?? 20, maior + 3));
       sheet.getColumn(i + 1).width = largura;
+    });
+
+    spec.columns.forEach((col, i) => {
+      if (col.oculta) sheet.getColumn(i + 1).hidden = true;
     });
 
     for (const img of spec.imagens ?? []) {

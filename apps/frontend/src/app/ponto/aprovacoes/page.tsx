@@ -144,6 +144,7 @@ const ESPELHO_PHASE_SUBTITLE: Record<EspelhoPhaseFilter, string> = {
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
   | 'WAITING_MANAGER'
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'WAITING_RETURN'

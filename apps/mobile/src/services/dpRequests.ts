@@ -5,6 +5,7 @@ export type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 
 export type DpRequestStatus =
   | 'WAITING_MANAGER'
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'WAITING_RETURN'
@@ -130,6 +131,7 @@ export const URGENCY_LABELS: Record<DpUrgency, string> = {
 
 export const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   WAITING_RETURN: 'Sua Pendência',
@@ -184,6 +186,14 @@ const ACCOUNTING_DIRECT_TYPES = new Set([
   'REALOCACAO_COLABORADOR',
   'RETIFICACAO_RECALCULO',
   'SOLICITACAO_GERAL',
+  // Têm prefixo CONTAB_ porque Admissão, Férias e Rescisão já existem no fluxo do DP (igual ao servidor).
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ATESTADO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
 ]);
 
 export function isAccountingDirectRequestType(requestType: string): boolean {

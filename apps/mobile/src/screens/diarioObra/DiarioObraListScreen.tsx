@@ -54,7 +54,7 @@ const STATUS_LABEL: Record<StatusKey, string> = {
 };
 
 const HEADING: Record<RdoFilters['status'], string> = {
-  all: 'Diários de Obra',
+  all: 'Todos os registros',
   DRAFT: 'Em preenchimento',
   FINAL: 'Finalizados',
   NONE: 'Sem atividade',
@@ -385,7 +385,7 @@ export default function DiarioObraListScreen() {
   return (
     <View style={styles.safeArea}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppHeader showBack title="Diários de Obra" onBack={() => navigation.goBack()} />
+      <AppHeader showBack title="RDO"onBack={() => navigation.goBack()} />
 
       <FlatList
         data={filtered}

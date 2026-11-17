@@ -995,6 +995,7 @@ async function ensureDpRequestAccountingDirectEnums(prisma: PrismaClient): Promi
     { enumName: 'DpRequestType', value: 'CONTAB_RESCISAO' },
     { enumName: 'DpRequestType', value: 'ADM_OUTROS' },
     { enumName: 'DpRequestStatus', value: 'IN_ACCOUNTING' },
+    { enumName: 'DpRequestStatus', value: 'PENDING_DP' },
   ];
   for (const { enumName, value } of additions) {
     const rows = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(
@@ -2278,6 +2279,33 @@ async function ensureDiarioObraOsColumns(prisma: PrismaClient): Promise<void> {
     .catch(() => undefined);
   await prisma
     .$executeRawUnsafe(`ALTER TABLE "diarios_obra" ADD COLUMN IF NOT EXISTS "osFolder" TEXT;`)
+    .catch(() => undefined);
+}
+
+/** Número sequencial (#1, #2…) das medições de entrega: coluna, numeração das antigas e índice único. */
+async function ensureMedicaoDisplayNumber(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'empreiteiro_daily_measurements'))) return;
+  await prisma
+    .$executeRawUnsafe(
+      `ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "displayNumber" INTEGER;`,
+    )
+    .catch(() => undefined);
+  await prisma
+    .$executeRawUnsafe(
+      `UPDATE "empreiteiro_daily_measurements" m
+       SET "displayNumber" = n.rn + COALESCE((SELECT MAX("displayNumber") FROM "empreiteiro_daily_measurements"), 0)
+       FROM (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY "createdAt", id) AS rn
+         FROM "empreiteiro_daily_measurements" WHERE "displayNumber" IS NULL
+       ) n
+       WHERE m.id = n.id AND m."displayNumber" IS NULL;`,
+    )
+    .catch(() => undefined);
+  await prisma
+    .$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_displayNumber_key"
+       ON "empreiteiro_daily_measurements"("displayNumber");`,
+    )
     .catch(() => undefined);
 }
 
@@ -3647,6 +3675,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureObrasTable(prisma);
     await ensureDiarioObraOsColumns(prisma);
     await ensureEmpreiteirosTable(prisma);
+    await ensureMedicaoDisplayNumber(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);
     await ensureQuoteMapDiscountColumns(prisma);

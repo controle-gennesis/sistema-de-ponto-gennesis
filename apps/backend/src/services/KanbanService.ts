@@ -710,7 +710,7 @@ function notifyCardAssigned(actorId: string, cardId: string, userIds: Array<stri
       const quadro = card.column?.board?.name?.trim();
       await sendPushToUsers(targets, {
         title: 'Você foi atribuído a um card',
-        body: `${quem} atribuiu você a "${card.title}"${quadro ? ` em ${quadro}` : ''}`,
+        body: `${card.title}\n${quem}${quadro ? ` · ${quadro}` : ''}`,
         data: { kind: 'kanban-assigned', cardId },
       });
     } catch {

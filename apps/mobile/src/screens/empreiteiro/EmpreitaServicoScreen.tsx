@@ -312,7 +312,10 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
                             )}
                           </View>
                           <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[styles.medDataText, { color: colors.text }]}>{formatDateBr(m.workDate)}</Text>
+                            <Text style={[styles.medDataText, { color: colors.text }]}>
+                              {m.displayNumber != null ? `#${m.displayNumber} · ` : ''}
+                              {formatDateBr(m.workDate)}
+                            </Text>
                             <Text
                               style={[styles.medDescricao, { color: colors.textSecondary, marginTop: 4 }]}
                               numberOfLines={2}

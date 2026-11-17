@@ -60,7 +60,7 @@ export default function PunchRemindersSheet({ visible, onClose, onChange }: Prop
   };
 
   const hours = (value?: string) => (value ? value.slice(0, 5) : '--:--');
-  const trackColor = { false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' };
+  const trackColor = { false: isDark ? '#4b5563' : '#d1d5db', true: '#fca5a5' };
 
   return (
     <SheetModal
@@ -91,7 +91,7 @@ export default function PunchRemindersSheet({ visible, onClose, onChange }: Prop
             disabled={!supported}
             onValueChange={(enabled) => void apply({ ...prefs, enabled })}
             trackColor={trackColor}
-            thumbColor={prefs.enabled ? colors.primary : '#f4f4f5'}
+            thumbColor={prefs.enabled ? colors.primary : isDark ? '#9ca3af' : '#f4f4f5'}
           />
         </View>
       </View>
@@ -129,7 +129,7 @@ export default function PunchRemindersSheet({ visible, onClose, onChange }: Prop
                   value={prefs[kind.pref]}
                   onValueChange={(value) => void apply({ ...prefs, [kind.pref]: value })}
                   trackColor={trackColor}
-                  thumbColor={prefs[kind.pref] ? colors.primary : '#f4f4f5'}
+                  thumbColor={prefs[kind.pref] ? colors.primary : isDark ? '#9ca3af' : '#f4f4f5'}
                 />
               </View>
             ))}

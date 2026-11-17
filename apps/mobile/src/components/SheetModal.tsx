@@ -18,6 +18,11 @@ import { ArrowLeft, X, type LucideIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 
 const BRAND = '#ce3736';
+
+// Fora do useMemo dos estilos: o Fast Refresh preserva o memo e deixaria chaves novas undefined.
+const embeddedStyles = StyleSheet.create({
+  root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1100, elevation: 1100 },
+});
 const SHEET_BOTTOM_PAD = Platform.OS === 'ios' ? 26 : 18;
 
 type Props = {
@@ -35,6 +40,8 @@ type Props = {
   scroll?: boolean;
   /** Espaço embaixo da folha; use 0 quando o conteúdo já traz o próprio rodapé com margem. */
   bottomPad?: number;
+  /** Desenha a folha por cima da tela atual, sem abrir um Modal (para usar dentro de outro Modal/folha). */
+  embedded?: boolean;
   /** Desenhado por cima de tudo, na tela inteira (ex.: seletor de opções, avisos). */
   overlay?: React.ReactNode;
   children: React.ReactNode;
@@ -55,6 +62,7 @@ export default function SheetModal({
   onBack,
   scroll = true,
   bottomPad,
+  embedded = false,
   overlay,
   children,
 }: Props) {
@@ -133,14 +141,10 @@ export default function SheetModal({
               if (visibleRef.current) move(0, e?.duration || 220);
             }),
           ]
-        : [
-            Keyboard.addListener('keyboardDidShow', (e) => {
-              if (visibleRef.current) move(e.endCoordinates.height, 200);
-            }),
-            Keyboard.addListener('keyboardDidHide', () => {
-              if (visibleRef.current) move(0, 160);
-            }),
-          ];
+        : // Android: o app usa softwareKeyboardLayoutMode "pan", em que o próprio sistema já empurra a
+          // janela do Modal pra cima até o campo ficar visível. Somar a altura do teclado aqui subia a
+          // folha duas vezes (ela "pulava" pro topo). Então no Android não há inset manual.
+          [];
     return () => subs.forEach((sub) => sub.remove());
   }, [keyboardInset, windowHeight]);
 
@@ -155,15 +159,8 @@ export default function SheetModal({
       ? { height: Math.round(windowHeight * 0.92) }
       : { maxHeight: Math.round(windowHeight * 0.9) };
 
-  return (
-    <Modal
-      visible={mounted}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
-      <View style={styles.overlay}>
+  const body = (
+    <View style={styles.overlay}>
         <Animated.View
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdrop }]}
@@ -219,6 +216,26 @@ export default function SheetModal({
         </Animated.View>
         {overlay}
       </View>
+  );
+
+  if (embedded) {
+    if (!mounted) return null;
+    return (
+      <View style={embeddedStyles.root} pointerEvents="box-none">
+        {body}
+      </View>
+    );
+  }
+
+  return (
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      {body}
     </Modal>
   );
 }

@@ -139,6 +139,18 @@ export async function notifyRequesterCancelledWhatsApp(params: {
 }
 
 /**
+ * Texto do push em linhas: «Solicitação de abastecimento #424 · Motorista: Fulano» vira duas linhas
+ * («Solicitação de abastecimento #424» e «Fulano»), sem o rótulo antes do nome.
+ */
+function pushBodyFromSubjectLine(subjectLine: string): string {
+  return subjectLine
+    .split(/\s+[·—–]\s+/)
+    .map((part) => part.replace(/^(Motorista|Solicitante|Obra|Fornecedor):\s*/i, '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
  * Avisa os aprovadores de uma nova pendência: push no celular (app) sempre; WhatsApp
  * (template «nova_solicitacao_pendente») só se estiver ligado e houver telefone cadastrado. Nunca lança.
  */
@@ -149,7 +161,7 @@ export async function notifyNewPendingApprovalWhatsApp(
   // Push no app: independe do interruptor do WhatsApp.
   void sendPushToUsers(userIds, {
     title: 'Nova solicitação para aprovar',
-    body: subjectLine,
+    body: pushBodyFromSubjectLine(subjectLine),
     data: { kind: 'approval-pending' },
   });
   try {

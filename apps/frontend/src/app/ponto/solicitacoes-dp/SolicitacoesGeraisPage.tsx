@@ -61,6 +61,7 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
   | 'WAITING_MANAGER'
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'IN_ACCOUNTING'
@@ -271,6 +272,7 @@ function matchesStage(r: { status: DpRequestStatus; requestType: string }, filte
 const STAGE_TABS: { filter: StageCardFilter; label: string }[] = [
   { filter: 'all', label: 'Todos' },
   { filter: 'WAITING_MANAGER', label: 'Aguardando Aprovação' },
+  { filter: 'PENDING_DP', label: 'Pendente' },
   { filter: 'IN_REVIEW_DP', label: 'Em Análise' },
   { filter: 'IN_FINANCEIRO', label: 'No Financeiro' },
   { filter: 'WAITING_RETURN', label: 'Sua Pendência' },
@@ -334,6 +336,7 @@ function setIndexedFileState(
 
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   IN_ACCOUNTING: 'Na Contabilidade',
@@ -349,6 +352,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
 
 const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+  PENDING_DP: 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300',
   IN_REVIEW_DP: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   IN_FINANCEIRO: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
   IN_ACCOUNTING: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',

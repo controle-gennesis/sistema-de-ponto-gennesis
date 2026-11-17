@@ -14,6 +14,7 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  RotateCcw,
   Search,
   ShoppingCart,
   X,
@@ -105,6 +106,13 @@ const RM_CARD_LIST_CONFIG: Record<
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: Clock
+  },
+  inReview: {
+    title: 'Requisições em correção',
+    subtitle: 'Solicitações devolvidas ao solicitante para ajuste.',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: RotateCcw
   },
   approved: {
     title: 'Requisições aprovadas',
@@ -474,9 +482,10 @@ export function MaterialRequestsRmList({
                           <ListRowNavigableLabel className="font-medium">
                             {request.requestNumber?.trim() || formatRmListDisplayId(request.requestNumber)}
                           </ListRowNavigableLabel>
-                          {/* Espaço da etiqueta FD sempre reservado: os códigos ficam alinhados com ou sem ela. */}
+                          {/* Espaço da etiqueta FD sempre reservado: os códigos ficam alinhados com ou sem ela.
+                              A margem esquerda (ml-6) deixa lugar para a seta vermelha que aparece ao passar o mouse na linha. */}
                           <span
-                            className={`ml-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 ${
+                            className={`ml-6 inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 ${
                               fdRequestIds.has(request.id) ? '' : 'invisible'
                             }`}
                             title={fdRequestIds.has(request.id) ? 'RM criada pela Ficha de Demanda' : undefined}

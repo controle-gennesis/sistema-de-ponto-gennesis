@@ -278,6 +278,7 @@ function statusColor(status: DpRequestStatus, colors: any, requestType?: string 
   if (status === 'CANCELLED') return colors.error;
   if (status === 'WAITING_RETURN') return colors.warning;
   if (status.startsWith('WAITING_')) return '#f97316';
+  if (status === 'PENDING_DP') return '#64748b';
   if (status === 'IN_FINANCEIRO') return '#6366f1';
   return colors.warning;
 }

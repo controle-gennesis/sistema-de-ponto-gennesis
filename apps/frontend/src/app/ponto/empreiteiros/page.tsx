@@ -1,5 +1,6 @@
 'use client';
 
+import { FileQuickPreviewModal, type QuickPreviewFile } from '@/components/ui/FileQuickPreviewModal';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -618,6 +619,8 @@ export default function EmpreiteirosPage() {
   const [medicaoEmpreitaId, setMedicaoEmpreitaId] = useState<string | null>(null);
   const [medicaoContractFilterId, setMedicaoContractFilterId] = useState<string | null>(null);
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; alt: string } | null>(null);
+  /** Prévia (sem baixar) do arquivo anexado a um aditivo. */
+  const [addendumFilePreview, setAddendumFilePreview] = useState<QuickPreviewFile | null>(null);
   const [editingItem, setEditingItem] = useState<EmpreiteiroRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [showDeleteId, setShowDeleteId] = useState<string | null>(null);
@@ -4351,18 +4354,19 @@ export default function EmpreiteirosPage() {
                               <table className={`${cadastroListClasses.table} text-sm`}>
                                 <thead className="border-b border-gray-200 dark:border-gray-700">
                                   <tr>
-                                    <th className={`${cadastroListClasses.th} text-center`}>Nº</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>ID</th>
                                     <th className={cadastroListClasses.th}>Motivo</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Valor</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Data</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Status</th>
+                                    <th className={`${cadastroListClasses.th} text-center`}>Arquivo</th>
                                     <th className={`${cadastroListClasses.th} text-center`}>Ação</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                                   {(link.addenda || []).map((ad) => (
                                     <tr key={ad.id}>
-                                      <td className={`${cadastroListClasses.td} text-center font-medium`}>{ad.number}º</td>
+                                      <td className={`${cadastroListClasses.td} text-center font-medium`}>{ad.number}</td>
                                       <td className={cadastroListClasses.td}>
                                         <p className="text-gray-900 dark:text-gray-100">{ad.reason}</p>
                                         {[
@@ -4379,18 +4383,6 @@ export default function EmpreiteirosPage() {
                                               {line}
                                             </p>
                                           ))}
-                                        {(ad.files || []).map((file, fi) => (
-                                          <a
-                                            key={`${file.url}-${fi}`}
-                                            href={resolveApiMediaUrl(file.url) || file.url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="mt-0.5 inline-flex items-center gap-1 text-xs text-red-700 hover:underline dark:text-red-300"
-                                          >
-                                            <Paperclip className="h-3 w-3" />
-                                            {file.name || 'contrato atualizado'}
-                                          </a>
-                                        ))}
                                       </td>
                                       <td
                                         className={`${cadastroListClasses.td} whitespace-nowrap text-center font-semibold tabular-nums ${
@@ -4418,6 +4410,31 @@ export default function EmpreiteirosPage() {
                                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
                                             Aprovado
                                           </span>
+                                        )}
+                                      </td>
+                                      <td className={`${cadastroListClasses.td} text-center`}>
+                                        {(ad.files || []).length > 0 ? (
+                                          <div className="flex items-center justify-center gap-1">
+                                            {(ad.files || []).map((file, fi) => (
+                                              <button
+                                                key={`${file.url}-${fi}`}
+                                                type="button"
+                                                onClick={() =>
+                                                  setAddendumFilePreview({
+                                                    url: file.url,
+                                                    name: file.name || 'contrato atualizado',
+                                                  })
+                                                }
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-700 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                                                aria-label={`Visualizar ${file.name || 'contrato atualizado'}`}
+                                                title={file.name || 'contrato atualizado'}
+                                              >
+                                                <Paperclip className="h-4 w-4" />
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400">—</span>
                                         )}
                                       </td>
                                       <td className={`${cadastroListClasses.td} text-center`}>
@@ -4462,7 +4479,7 @@ export default function EmpreiteirosPage() {
                           <Modal
                             isOpen={addingAddendumForId === link.id}
                             onClose={resetAddendumForm}
-                            title={editingAddendum ? `Corrigir Aditivo nº ${editingAddendum.number}` : 'Novo Aditivo'}
+                            title={editingAddendum ? `Corrigir Aditivo ${editingAddendum.number}` : 'Novo Aditivo'}
                             size="lg"
                           >
                             <div className="space-y-4">
@@ -5768,6 +5785,7 @@ export default function EmpreiteirosPage() {
           </div>
         ) : null}
 
+        <FileQuickPreviewModal file={addendumFilePreview} onClose={() => setAddendumFilePreview(null)} />
         {previewPhoto && typeof document !== 'undefined'
           ? createPortal(
               <div

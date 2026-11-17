@@ -18,6 +18,86 @@ export type PushPayload = {
   categoryId?: string;
 };
 
+/** Categorias de aviso que a pessoa pode ligar/desligar no Perfil do app. */
+export const PUSH_CATEGORIES = [
+  { key: 'approvals', label: 'Aprovações pendentes', description: 'Quando chega algo para você aprovar' },
+  { key: 'fuel', label: 'Abastecimento', description: 'Andamento das suas solicitações de combustível' },
+  { key: 'reservation', label: 'Frota', description: 'Andamento das suas reservas de veículo' },
+  { key: 'dp', label: 'Solicitações internas', description: 'Mudanças de status das suas solicitações' },
+  { key: 'dp-messages', label: 'Mensagens das solicitações', description: 'Novas mensagens nas solicitações' },
+  { key: 'accounting', label: 'Atendimento contábil', description: 'Andamento dos atendimentos da contabilidade' },
+  { key: 'workorder', label: 'Chamados', description: 'Mudanças de status dos chamados' },
+  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card' },
+] as const;
+
+const CATEGORY_KEYS: ReadonlySet<string> = new Set(PUSH_CATEGORIES.map((c) => c.key));
+
+/** Descobre a categoria de um aviso pelo `data` do payload (sem categoria = sempre envia). */
+function categoryOfPayload(data?: Record<string, unknown>): string | null {
+  const id = String(data?.kind ?? data?.type ?? '');
+  switch (id) {
+    case 'approval-pending':
+      return 'approvals';
+    case 'fuel':
+      return 'fuel';
+    case 'reservation':
+      return 'reservation';
+    case 'dp':
+      return 'dp';
+    case 'dp-request-message':
+      return 'dp-messages';
+    case 'dp-contabilidade':
+      return 'accounting';
+    case 'workorder':
+      return 'workorder';
+    case 'kanban-assigned':
+      return 'kanban';
+    default:
+      return null;
+  }
+}
+
+async function mutedCategories(userId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ category: string }>>`
+    SELECT "category" FROM "push_muted_categories" WHERE "userId" = ${userId}
+  `;
+  return rows.map((r) => r.category);
+}
+
+/** Lista as categorias com o estado (ligada/desligada) do usuário. */
+export async function getPushPreferences(userId: string) {
+  const muted = new Set(await mutedCategories(userId).catch(() => [] as string[]));
+  return PUSH_CATEGORIES.map((c) => ({ ...c, enabled: !muted.has(c.key) }));
+}
+
+export async function setPushPreference(userId: string, category: string, enabled: boolean) {
+  if (!CATEGORY_KEYS.has(category)) throw new Error('Categoria inválida');
+  if (enabled) {
+    await prisma.$executeRaw`DELETE FROM "push_muted_categories" WHERE "userId" = ${userId} AND "category" = ${category}`;
+  } else {
+    await prisma.$executeRaw`
+      INSERT INTO "push_muted_categories" ("userId", "category") VALUES (${userId}, ${category})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
+/** Tira dos destinatários quem desativou essa categoria. Se a consulta falhar, envia a todos. */
+async function withoutMuted(userIds: string[], category: string | null): Promise<string[]> {
+  if (!category || !userIds.length) return userIds;
+  try {
+    const rows = await prisma.$queryRaw<Array<{ userId: string }>>`
+      SELECT "userId" FROM "push_muted_categories"
+      WHERE "category" = ${category} AND "userId" = ANY(${userIds}::text[])
+    `;
+    if (!rows.length) return userIds;
+    const muted = new Set(rows.map((r) => r.userId));
+    return userIds.filter((id) => !muted.has(id));
+  } catch {
+    return userIds;
+  }
+}
+
 export function isValidExpoPushToken(token: unknown): token is string {
   return typeof token === 'string' && EXPO_TOKEN_RE.test(token);
 }
@@ -53,7 +133,10 @@ type ExpoTicket = { status: 'ok' | 'error'; details?: { error?: string } };
 /** Envia pra todos os aparelhos dos usuários. Nunca lança: push não pode derrubar a operação. */
 export async function sendPushToUsers(userIds: Array<string | null | undefined>, payload: PushPayload) {
   try {
-    const ids = [...new Set(userIds.filter((id): id is string => !!id))];
+    const ids = await withoutMuted(
+      [...new Set(userIds.filter((id): id is string => !!id))],
+      categoryOfPayload(payload.data),
+    );
     const tokens = (await tokensForUsers(ids)).filter(isValidExpoPushToken);
     if (!tokens.length) return;
 
@@ -114,6 +197,7 @@ const RESERVATION: Record<string, [string, string]> = {
 
 const DP: Record<string, string> = {
   WAITING_MANAGER: 'Aguardando Aprovação',
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   IN_ACCOUNTING: 'Na Contabilidade',
@@ -125,6 +209,23 @@ const DP: Record<string, string> = {
   WAITING_PAYMENT: 'Aguardando Pagamento',
   CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
+};
+
+/** Título do aviso de cada etapa da solicitação interna (curto, no mesmo padrão dos demais). */
+const DP_TITLE: Record<string, string> = {
+  WAITING_MANAGER: 'Solicitação aguardando aprovação',
+  PENDING_DP: 'Solicitação pendente',
+  IN_REVIEW_DP: 'Solicitação em análise',
+  IN_FINANCEIRO: 'Solicitação no Financeiro',
+  IN_ACCOUNTING: 'Solicitação na Contabilidade',
+  WAITING_RETURN: 'Você tem uma pendência',
+  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
+  WAITING_RETURN_ADM_TST: 'Pendência com ADM/TST',
+  WAITING_RETURN_ENGINEERING: 'Pendência com a Engenharia',
+  WAITING_SUPPLIES: 'Solicitação aguardando Suprimentos',
+  WAITING_PAYMENT: 'Solicitação aguardando pagamento',
+  CONCLUDED: 'Solicitação finalizada',
+  CANCELLED: 'Solicitação cancelada',
 };
 
 const WORK_ORDER: Record<string, string> = {
@@ -172,10 +273,10 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
       const entityId = String(row.id ?? '');
       switch (model) {
         case 'FuelRefuelRequest': {
-          const [title, what] = FUEL[status] ?? ['Atualização de combustível', 'atualizada'];
+          const [title] = FUEL[status] ?? ['Atualização de combustível'];
           await sendPushToUsers([row.requesterId as string], {
             title,
-            body: `A solicitação${ref(row.displayNumber)} está ${what}`,
+            body: `Solicitação de abastecimento${ref(row.displayNumber)}`,
             data: { kind: 'fuel', entityId, status },
             // Liberado para abastecer: o motorista já vê o botão "Informar abastecido".
             ...(status === 'AWAITING_REFUEL'
@@ -187,10 +288,10 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           break;
         }
         case 'VehicleReservation': {
-          const [title, what] = RESERVATION[status] ?? ['Atualização de reserva', 'atualizada'];
+          const [title] = RESERVATION[status] ?? ['Atualização de reserva'];
           await sendPushToUsers([row.createdById as string], {
             title,
-            body: `A reserva${ref(row.code)} está ${what}`,
+            body: `Reserva${ref(row.code)}`,
             data: { kind: 'reservation', entityId, status },
             // Aprovada (devolução) ou aguardando vistoria: botão direto para a reserva.
             ...(status === 'APPROVED' || status === 'COMPLETED'
@@ -206,10 +307,9 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
             where: { id: String(row.employeeId ?? '') },
             select: { userId: true },
           });
-          const label = DP[status] ?? status;
           await sendPushToUsers([employee?.userId], {
-            title: `Solicitação: ${label.toLowerCase()}`,
-            body: `A solicitação${ref(row.displayNumber)} agora está: ${label.toLowerCase()}`,
+            title: DP_TITLE[status] ?? `Solicitação ${(DP[status] ?? status).toLowerCase()}`,
+            body: `Solicitação${ref(row.displayNumber)}`,
             data: { kind: 'dp', entityId, status },
           });
           break;
@@ -218,8 +318,8 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           const label = WORK_ORDER[status] ?? status;
           const code = row.osNumber != null ? `OS ${row.osNumber}` : row.displayNumber;
           await sendPushToUsers([row.requesterId as string, row.assigneeId as string], {
-            title: `Chamado: ${label.toLowerCase()}`,
-            body: `O chamado${ref(code, '')} agora está: ${label.toLowerCase()}`,
+            title: `Chamado ${label.toLowerCase()}`,
+            body: `Chamado${ref(code, '')}`,
             data: { kind: 'workorder', entityId, status },
           });
           break;

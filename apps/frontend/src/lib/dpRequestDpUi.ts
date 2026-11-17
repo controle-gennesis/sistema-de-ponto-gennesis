@@ -3,6 +3,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 /** Etapas do feedback do Departamento Pessoal. */
 export type DpFlowFeedbackStatus =
+  | 'PENDING_DP'
   | 'IN_REVIEW_DP'
   | 'IN_FINANCEIRO'
   | 'IN_ACCOUNTING'
@@ -15,6 +16,7 @@ export type DpFlowFeedbackStatus =
 
 /** "Pendência contábil" saiu das etapas selecionáveis; o rótulo segue para solicitações antigas nessa etapa. */
 export const DP_FLOW_FEEDBACK_STATUSES: DpFlowFeedbackStatus[] = [
+  'PENDING_DP',
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
   'IN_ACCOUNTING',
@@ -26,6 +28,7 @@ export const DP_FLOW_FEEDBACK_STATUSES: DpFlowFeedbackStatus[] = [
 ];
 
 export const DP_STATUS_LABELS: Record<DpFlowFeedbackStatus, string> = {
+  PENDING_DP: 'Pendente',
   IN_REVIEW_DP: 'Em Análise',
   IN_FINANCEIRO: 'No Financeiro',
   IN_ACCOUNTING: 'Na Contabilidade',
@@ -38,6 +41,7 @@ export const DP_STATUS_LABELS: Record<DpFlowFeedbackStatus, string> = {
 };
 
 export const DP_STATUS_LABEL_CLASS: Record<DpFlowFeedbackStatus, string> = {
+  PENDING_DP: 'font-semibold text-slate-600 dark:text-slate-300',
   IN_REVIEW_DP: 'font-semibold text-yellow-800 dark:text-yellow-300',
   IN_FINANCEIRO: 'font-semibold text-indigo-800 dark:text-indigo-300',
   IN_ACCOUNTING: 'font-semibold text-indigo-800 dark:text-indigo-300',

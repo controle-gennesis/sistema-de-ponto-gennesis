@@ -163,7 +163,6 @@ export default function Menu({ visible, onClose }: MenuProps) {
   );
 
   const links = [
-    { key: 'home', label: 'Início', icon: Home, onPress: () => go('Home') },
     { key: 'tasks', label: 'Tasks', icon: SquareKanban, onPress: () => go('KanbanBoard') },
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => go('DiarioObra') }]

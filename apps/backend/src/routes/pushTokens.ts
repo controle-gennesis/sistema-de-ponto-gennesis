@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate, type AuthRequest } from '../middleware/auth';
 import {
+  getPushPreferences,
+  setPushPreference,
   isValidExpoPushToken,
   registerPushToken,
   removePushToken,
@@ -34,6 +36,28 @@ router.delete('/', async (req: AuthRequest, res, next) => {
     return res.json({ success: true });
   } catch (error) {
     return next(error);
+  }
+});
+
+/** Quais tipos de aviso a pessoa recebe (Perfil do app). */
+router.get('/preferences', async (req: AuthRequest, res, next) => {
+  try {
+    return res.json({ success: true, data: await getPushPreferences(req.user!.id) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.put('/preferences', async (req: AuthRequest, res, next) => {
+  try {
+    const { category, enabled } = req.body ?? {};
+    if (typeof category !== 'string' || typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'Dados inválidos' });
+    }
+    await setPushPreference(req.user!.id, category, enabled);
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error instanceof Error ? error.message : 'Erro' });
   }
 });
 
