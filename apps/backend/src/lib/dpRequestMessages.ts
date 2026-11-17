@@ -267,13 +267,24 @@ export async function getDpRequestUnreadMessages(req: AuthRequest, res: Response
 
 // ───────── Documentos anexados ─────────
 
-const ALLOWED_EXT = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx'];
+const ALLOWED_EXT = [
+  '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx',
+  // pasta compactada e texto simples (Bloco de Notas)
+  '.zip', '.rar', '.7z', '.txt', '.csv',
+];
 
 function isAllowedFile(name: string, mime: string): boolean {
   const n = name.toLowerCase();
   const m = mime.toLowerCase();
   if (ALLOWED_EXT.some((e) => n.endsWith(e))) return true;
-  return m.includes('pdf') || m.startsWith('image/') || m.includes('msword') || m.includes('officedocument');
+  return (
+    m.includes('pdf') ||
+    m.startsWith('image/') ||
+    m.includes('msword') ||
+    m.includes('officedocument') ||
+    m.includes('zip') ||
+    m === 'text/plain'
+  );
 }
 
 function serializeAttachment(a: {
@@ -323,7 +334,7 @@ export async function postDpRequestAttachment(req: AuthRequest, res: Response, n
     if (!canAccess(mods, row)) throw createError('Sem permissão para anexar documentos nesta solicitação.', 403);
     const originalName = fixMulterOriginalName(file.originalname) || 'documento';
     if (!isAllowedFile(originalName, file.mimetype || '')) {
-      throw createError('Envie PDF, imagem, Word ou Excel.', 400);
+      throw createError('Envie PDF, imagem, Word, Excel, texto (.txt) ou pasta compactada (.zip, .rar, .7z).', 400);
     }
     const author = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true, email: true } });
     const authorName = (author?.name || author?.email || 'Usuário').trim();
