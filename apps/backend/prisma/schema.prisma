@@ -2213,6 +2213,8 @@ model PaymentCondition {
   sortOrder     Int      @default(0)
   isActive      Boolean  @default(true)
   isSystem      Boolean  @default(false)
+  /// Importada do TOTVS (CONDICOESPAGTO): só estas aparecem na OC TOTVS.
+  fromTotvs     Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

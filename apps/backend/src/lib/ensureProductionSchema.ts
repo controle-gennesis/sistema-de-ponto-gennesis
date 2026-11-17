@@ -137,6 +137,19 @@ async function ensureMaterialRequestCorrectionLogs(prisma: PrismaClient): Promis
   `);
 }
 
+/** Condição importada do TOTVS (só estas aparecem na OC TOTVS). Na criação, marca as já importadas (código numérico = CODCPG). */
+async function ensurePaymentConditionFromTotvs(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'payment_conditions'))) return;
+  if (await columnExists(prisma, 'payment_conditions', 'fromTotvs')) return;
+  console.warn('[Schema] Coluna payment_conditions.fromTotvs ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "payment_conditions" ADD COLUMN IF NOT EXISTS "fromTotvs" BOOLEAN NOT NULL DEFAULT false;
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "payment_conditions" SET "fromTotvs" = true WHERE "code" ~ '^[0-9]+$';
+  `);
+}
+
 async function ensureMaterialRequestItemCorrectionReviews(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'material_request_item_correction_reviews')) return;
   console.warn('[Schema] Tabela material_request_item_correction_reviews ausente — criando.');
@@ -3557,6 +3570,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureQuoteMapDrafts(prisma);
     await ensureMaterialRequestCorrectionLogs(prisma);
     await ensureMaterialRequestItemCorrectionReviews(prisma);
+    await ensurePaymentConditionFromTotvs(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

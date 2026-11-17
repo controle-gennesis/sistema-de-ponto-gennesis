@@ -1044,6 +1044,16 @@ export class TotvsRmRelatorioFinService {
     return '';
   }
 
+  /** Unidade de controle do produto na linha do catálogo (vazio se a consulta não trouxer). */
+  private pickProdutoUnidadeControle(row: Record<string, unknown>): string {
+    const keys = Object.keys(row);
+    for (const alias of ['CODUNDCONTROLE', 'UNIDADECONTROLE', 'UNDCONTROLE', 'CODUND', 'UNIDADE']) {
+      const hit = keys.find((k) => k.toUpperCase().replace(/[\s_./-]+/g, '') === alias);
+      if (hit != null && row[hit] != null && String(row[hit]).trim()) return String(row[hit]).trim().toUpperCase();
+    }
+    return '';
+  }
+
   private pickProdutoCodigo(row: Record<string, unknown>): string {
     const keys = Object.keys(row);
     for (const alias of [
@@ -1127,11 +1137,17 @@ export class TotvsRmRelatorioFinService {
     try {
       const catalogRows = await this.fetchRowsForPath(catalogPath);
       const idByCode = new Map<string, string>();
+      /** Unidade de controle do MESMO produto (linha) de onde vem o IDPRD — é a que o RM usa no movimento. */
+      const unidadeByCode = new Map<string, string>();
       for (const cr of catalogRows) {
         if (!cr || typeof cr !== 'object') continue;
         const code = this.pickProdutoCodigo(cr as Record<string, unknown>);
         const idPrd = this.pickProdutoIdPrd(cr as Record<string, unknown>);
-        if (code && idPrd && !idByCode.has(code)) idByCode.set(code, idPrd);
+        if (code && idPrd && !idByCode.has(code)) {
+          idByCode.set(code, idPrd);
+          const und = this.pickProdutoUnidadeControle(cr as Record<string, unknown>);
+          if (und) unidadeByCode.set(code, und);
+        }
       }
       let enriched = 0;
       const merged = rows.map((row) => {
@@ -1139,10 +1155,11 @@ export class TotvsRmRelatorioFinService {
         const idPrd = code ? idByCode.get(code) : undefined;
         if (!idPrd) return row;
         enriched += 1;
-        return { ...row, IDPRD: idPrd };
+        const und = code ? unidadeByCode.get(code) : undefined;
+        return { ...row, IDPRD: idPrd, ...(und ? { UNIDADE_CONTROLE_CATALOGO: und } : {}) };
       });
       console.log(
-        `[TOTVS RM] IDPRD complementado via PRODUTOS: ${enriched}/${rows.length} (path=${catalogPath})`
+        `[TOTVS RM] IDPRD complementado via PRODUTOS: ${enriched}/${rows.length}, unidade de controle do catálogo em ${unidadeByCode.size} produto(s) (path=${catalogPath})`
       );
       rows = merged;
     } catch (err) {

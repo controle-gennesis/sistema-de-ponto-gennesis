@@ -5754,6 +5754,8 @@ export function OcPurchaseOrdersPanel({
             <OcPurchaseOrderFormFields
               mode="edit"
               values={editOcForm}
+              // OC do fluxo TOTVS: só condições de pagamento importadas do TOTVS.
+              ocTotvs={!!selectedOrder.totvsFluxoDireto}
               costCenterLabel={formatOcCostCenterLabel(selectedOrder.materialRequest?.costCenter)}
                   costCenterId={selectedOrder.materialRequest?.costCenter?.id}
               stockLocationLabel={formatOcStockLocationLabel(
@@ -6155,6 +6157,7 @@ export function OcPurchaseOrdersPanel({
               ) : null}
 
               {ocDetailTab === 'materiais' ? (
+                <>
                 <OcOrderMaterialsTable
                   order={selectedOrder}
                   canReturnItem={canReturnOcItemOnOrder(selectedOrder)}
@@ -6168,6 +6171,24 @@ export function OcPurchaseOrdersPanel({
                     setReturnItemTarget({ orderId: selectedOrder.id, item });
                   }}
                 />
+                {/* Voltar todos os itens de uma vez (a OC é cancelada e os itens voltam ao mapa de cotação). */}
+                {canReturnOcItemOnOrder(selectedOrder) && (selectedOrder.items?.length ?? 0) > 1 ? (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReturnOrderToMapReason('');
+                        setReturnOrderToMapTarget(selectedOrder);
+                      }}
+                      disabled={returnOrderToQuoteMapMutation.isPending || returnItemToRmMutation.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                    >
+                      <Undo2 className="h-4 w-4 shrink-0" />
+                      Voltar todos os itens ao mapa de cotação
+                    </button>
+                  </div>
+                ) : null}
+                </>
               ) : null}
               {ocDetailTab === 'pagamento' ? (
               <>

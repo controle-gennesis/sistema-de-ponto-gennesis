@@ -328,6 +328,8 @@ type OcPurchaseOrderFormFieldsProps = {
   onItemChange?: (index: number, patch: Partial<OcFormLineItem>) => void;
   supplierField?: SupplierFieldProps;
   parseMoneyInput?: (value: string) => number | null;
+  /** OC do fluxo TOTVS: a condição de pagamento só lista as importadas do TOTVS. */
+  ocTotvs?: boolean;
 };
 
 function itemsSubtotal(items: OcFormLineItem[]): number {
@@ -350,7 +352,8 @@ export function OcPurchaseOrderFormFields({
   onChange,
   onItemChange,
   supplierField,
-  parseMoneyInput
+  parseMoneyInput,
+  ocTotvs = false
 }: OcPurchaseOrderFormFieldsProps) {
   const isEdit = mode === 'edit';
   const isAvista = values.paymentType === 'AVISTA';
@@ -613,6 +616,7 @@ export function OcPurchaseOrderFormFields({
               paymentType="BOLETO"
               value={values.paymentCondition}
               onChange={(code) => onChange?.({ paymentCondition: code })}
+              somenteTotvs={ocTotvs}
             />
           ) : (
             <div className={ocFieldReadonlyCls}>

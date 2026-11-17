@@ -145,7 +145,17 @@ export class PaymentConditionController {
         where,
         orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }]
       });
-      res.json({ success: true, data: rows });
+      // Origem TOTVS (coluna lida por SQL direto, para não depender do Prisma Client gerado).
+      let doTotvs = new Set<string>();
+      try {
+        const marcadas = await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "payment_conditions" WHERE "fromTotvs" = true
+        `;
+        doTotvs = new Set(marcadas.map((m) => m.id));
+      } catch {
+        /* coluna ainda não criada */
+      }
+      res.json({ success: true, data: rows.map((r) => ({ ...r, fromTotvs: doTotvs.has(r.id) })) });
     } catch (error) {
       next(error);
     }

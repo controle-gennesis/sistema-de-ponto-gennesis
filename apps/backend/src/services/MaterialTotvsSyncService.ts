@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { totvsCodColigada } from '../lib/ocTotvsRm';
 import { agendarSincronizacaoTotvs } from '../lib/totvsSyncSchedule';
 import {
   ensureConstructionMaterialTotvsAvgPaid,
@@ -32,6 +33,12 @@ type MappedProduct = {
   unit: string;
   /** true quando UNIDADE/CODUNDCONTROLE veio preenchido do RM (não é fallback). */
   unitFromTotvs: boolean;
+  /** Unidade de controle do catálogo PRODUTOS (mesma linha do IDPRD): manda sobre as outras. */
+  unitFromCatalog: boolean;
+  /** Coligada da linha (quando a consulta traz), para preferir a coligada das OCs. */
+  coligada: number | null;
+  /** Unidades vistas nas linhas repetidas do produto (para o log de divergência). */
+  unidadesVistas: string[];
   productType: string;
   isActive: boolean;
   budgetNatureCode: string | null;
@@ -190,6 +197,13 @@ function preferAvgPaid(
 }
 
 function preferUnit(prev: MappedProduct, next: MappedProduct): string {
+  // 1) Unidade de controle do catálogo (mesmo produto do IDPRD) — é a que o RM usa no movimento.
+  if (prev.unitFromCatalog) return prev.unit;
+  if (next.unitFromCatalog) return next.unit;
+  // 2) Linha da coligada das OCs.
+  const col = totvsCodColigada();
+  if (prev.coligada === col && next.coligada !== col && prev.unitFromTotvs) return prev.unit;
+  if (next.coligada === col && prev.coligada !== col && next.unitFromTotvs) return next.unit;
   if (next.unitFromTotvs && prev.unitFromTotvs) {
     const prevGeneric = !prev.unit || prev.unit.toUpperCase() === 'UN';
     const nextGeneric = !next.unit || next.unit.toUpperCase() === 'UN';
@@ -207,6 +221,9 @@ function mergeMappedProduct(prev: MappedProduct, next: MappedProduct): MappedPro
     ...next,
     unit: preferUnit(prev, next),
     unitFromTotvs: next.unitFromTotvs || prev.unitFromTotvs,
+    unitFromCatalog: prev.unitFromCatalog || next.unitFromCatalog,
+    coligada: prev.coligada ?? next.coligada,
+    unidadesVistas: [...new Set([...prev.unidadesVistas, ...next.unidadesVistas])],
     idPrd: next.idPrd ?? prev.idPrd,
     // Se qualquer linha indicar inativo (texto/flag), mantém inativo.
     isActive: prev.isActive && next.isActive,
@@ -247,7 +264,9 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
   if (!code || !name) return null;
 
   const idPrd = parseIdPrd(pickRow(row, 'IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD'));
-  const unitRaw = cell(
+  const unitCatalogo = cell(pickRow(row, 'UNIDADE_CONTROLE_CATALOGO'));
+  const coligadaRaw = Number(cell(pickRow(row, 'CODCOLIGADA', 'COLIGADA', 'COD COLIGADA')) ?? NaN);
+  const unitRaw = unitCatalogo || cell(
     pickRow(
       row,
       'CODUNDCONTROLE',
@@ -289,6 +308,9 @@ function mapRmRow(row: Record<string, unknown>): MappedProduct | null {
     name,
     unit: (unitRaw || 'UN').toUpperCase(),
     unitFromTotvs: Boolean(unitRaw),
+    unitFromCatalog: Boolean(unitCatalogo),
+    coligada: Number.isFinite(coligadaRaw) ? coligadaRaw : null,
+    unidadesVistas: unitRaw ? [unitRaw.toUpperCase()] : [],
     productType,
     isActive: parseProdutoAtivo(row),
     budgetNatureCode,
@@ -473,6 +495,16 @@ export async function runMaterialTotvsSync(
       seenCodes.add(codeKey);
       if (m.idPrd != null) seenIdPrd.add(m.idPrd);
       mapped.push(m);
+    }
+
+    // Produtos com unidades diferentes nas linhas repetidas do RM: registra no log qual foi escolhida.
+    const divergentes = mapped.filter((x) => x.unidadesVistas.length > 1);
+    if (divergentes.length > 0) {
+      const amostra = divergentes
+        .slice(0, 30)
+        .map((x) => `${x.code}: ${x.unidadesVistas.join('/')} → ${x.unit}${x.unitFromCatalog ? ' (catálogo)' : ''}`)
+        .join('; ');
+      console.warn(`[material-totvs] ${divergentes.length} produto(s) com unidades diferentes no RM. Ex.: ${amostra}`);
     }
 
     const existing = (await prisma.constructionMaterial.findMany({
