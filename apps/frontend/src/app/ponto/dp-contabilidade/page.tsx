@@ -709,13 +709,12 @@ export default function DpContabilidadePage() {
                       <table className="w-full text-sm">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
-                            <th className={cadastroListClasses.th}>ID</th>
-                            <th className={cadastroListClasses.th}>Título</th>
-                            <th className={cadastroListClasses.thCenter}>Tipo</th>
+                            <th className={cadastroListClasses.thCenter}>ID</th>
+                            <th className={cadastroListClasses.th}>Solicitante</th>
                             <th className={cadastroListClasses.thCenter}>Unidade</th>
-                            <th className={cadastroListClasses.thCenter}>Solicitante</th>
-                            <th className={cadastroListClasses.thCenter}>Aberta em</th>
+                            <th className={cadastroListClasses.thCenter}>Tipo</th>
                             <th className={cadastroListClasses.thCenter}>Status</th>
+                            <th className={cadastroListClasses.thCenter}>Aberta em</th>
                             <th className={cadastroListClasses.thRight}>Ação</th>
                           </tr>
                         </thead>
@@ -729,32 +728,26 @@ export default function DpContabilidadePage() {
                               }}
                               className={getListTableRowClassName(true)}
                             >
-                              <td className="px-3 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                              <td className="px-3 py-3 text-center align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                                 <ListRowNavigableLabel className="font-medium tabular-nums">
                                   {row.displayNumber}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className="max-w-[280px] px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {row.title}
-                              </td>
-                              <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {TYPE_LABELS[row.requestType]}
-                              </td>
-                              <td className="max-w-[240px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {row.source?.costCenterName || row.contractName || '—'}
-                              </td>
-                              <td className="px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <span>{row.createdByName || '—'}</span>
+                              <td className="max-w-[240px] px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="truncate">{row.createdByName || '—'}</span>
                                   {row.sector?.trim() ? (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    <span className="truncate text-xs text-gray-500 dark:text-gray-400">
                                       {row.sector}
                                     </span>
                                   ) : null}
                                 </div>
                               </td>
-                              <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
-                                {formatDateTimeBr(row.createdAt, '—')}
+                              <td className="max-w-[240px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                {row.source?.costCenterName || row.contractName || '—'}
+                              </td>
+                              <td className="px-3 py-3 align-middle text-center text-sm font-medium text-gray-900 dark:text-gray-100 sm:px-6">
+                                {TYPE_LABELS[row.requestType]}
                               </td>
                               <td className="px-3 py-3 align-middle text-center sm:px-6">
                                 <span
@@ -762,6 +755,9 @@ export default function DpContabilidadePage() {
                                 >
                                   {isReturned(row) ? RETURNED_LABEL : STATUS_LABELS[row.status]}
                                 </span>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                                {formatDateTimeBr(row.createdAt, '—')}
                               </td>
                               <RowActionMenuCell
                                 isOpen={isRowMenuOpen(row.id)}
