@@ -8,6 +8,7 @@ import { parseDateInput } from '../utils/dateInput';
 import { assertContractModulePermission, assertLiberadoContractAccess } from '../lib/contractAccess';
 import { resolvePleitoCreateCore } from '../utils/pleitoCreateHelpers';
 import { OrcamentoService } from '../services/OrcamentoService';
+import { propagateOsChangeToDiarios } from '../lib/diarioObraOsSync';
 const toDec = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -440,6 +441,9 @@ export class ContractPleitoController {
             data: { osTemporariasAnteriores: anteriores as unknown as Prisma.InputJsonValue },
           });
         }
+        if (tempAnterior) {
+          await propagateOsChangeToDiarios(contractId, tempAnterior, existing);
+        }
         const row = await prisma.pleito.findUnique({ where: { id: existing.id } });
         return res.status(200).json({
           success: true,
@@ -615,6 +619,9 @@ export class ContractPleitoController {
       };
 
       const row = await prisma.pleito.create({ data });
+      if (tempAnterior && !osTemporaria) {
+        await propagateOsChangeToDiarios(contractId, tempAnterior, row);
+      }
       return res.status(201).json({
         success: true,
         data: { ...serializePleito(row), action: 'created' as const },
