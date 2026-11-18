@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { WebSocket } from 'ws';
 import { prisma } from '../lib/prisma';
 import { KanbanService } from '../services/KanbanService';
+import { userIsAdministrator } from '../lib/kanbanAccess';
 
 const kanbanService = new KanbanService();
 
@@ -30,6 +31,8 @@ type Presence = {
   cardId: string | null;
   /** `viewing`: só olhando o quadro; `editing`: cartão aberto; `dragging`: arrastando o cartão. */
   state: 'viewing' | 'editing' | 'dragging';
+  /** Administrador: vê os outros, mas não aparece para ninguém. */
+  hidden?: boolean;
 };
 
 const rooms = new Map<string, Map<PresenceSocket, Presence>>();
@@ -48,6 +51,7 @@ function str(value: unknown, max = 200): string | null {
 function listPresences(room: Map<PresenceSocket, Presence>): Presence[] {
   const byUser = new Map<string, Presence>();
   for (const presence of room.values()) {
+    if (presence.hidden) continue;
     const prev = byUser.get(presence.userId);
     if (!prev || presence.cardId || !prev.cardId) byUser.set(presence.userId, presence);
   }
@@ -102,7 +106,9 @@ export async function registerKanbanSocket(ws: PresenceSocket, userId: string, u
     color: colorFor(userId),
     cardId: null,
     state: 'viewing',
+    hidden: await userIsAdministrator(userId).catch(() => false),
   };
+  if (ws.readyState !== WebSocket.OPEN) return;
   room.set(ws, presence);
 
   send(ws, { type: 'presence:list', selfId: userId, users: listPresences(room) });
