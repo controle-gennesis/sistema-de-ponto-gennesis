@@ -635,9 +635,8 @@ function SolicitacoesFerramentasPage() {
   ];
 
   const listHeader = LIST_HEADER_BY_FILTER[statusFilter];
-  // A partir da cotação a SC já existe: mostra o ID da SC na lista.
-  const showScId =
-    statusFilter === 'QUOTATION' ||
+  // O ID da OC é informado ao sair da cotação: mostra na lista a partir de Pagamento.
+  const showOcId =
     statusFilter === 'AWAITING_PAYMENT' ||
     statusFilter === 'AWAITING_RECEIPT' ||
     statusFilter === 'COMPLETED';
@@ -787,7 +786,7 @@ function SolicitacoesFerramentasPage() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className={cadastroListClasses.th}>ID</th>
-                      {showScId ? <th className={cadastroListClasses.th}>ID da SC</th> : null}
+                      {showOcId ? <th className={cadastroListClasses.th}>OC</th> : null}
                       <th className={cadastroListClasses.th}>Solicitação</th>
                       <th className={cadastroListClasses.thCenter}>Solicitante</th>
                       <th className={cadastroListClasses.thCenter}>Contrato / Obra</th>
@@ -809,9 +808,9 @@ function SolicitacoesFerramentasPage() {
                             {formatCadastroListId(row.code, listRange.startItem + index)}
                           </ListRowNavigableLabel>
                         </td>
-                        {showScId ? (
+                        {showOcId ? (
                           <td className={cadastroListClasses.tdMono}>
-                            <span className="font-mono">{row.scId || '—'}</span>
+                            <span className="font-mono">{row.ocId || '—'}</span>
                           </td>
                         ) : null}
                         <td className={`${cadastroListClasses.tdTruncate} max-w-[26rem] lg:max-w-[40rem]`}>

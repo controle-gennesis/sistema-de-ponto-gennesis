@@ -559,7 +559,7 @@ export class ToolRentalRequestController {
         const matchedUserIds = await findUserIdsMatchingSearch(term);
         const searchOr: Record<string, unknown>[] = [
           { code: { contains: term, mode: 'insensitive' } },
-          { scId: { contains: term, mode: 'insensitive' } },
+          { ocId: { contains: term, mode: 'insensitive' } },
           { scNumber: { contains: term, mode: 'insensitive' } },
           { titulo: { contains: term, mode: 'insensitive' } },
           { obra: { contains: term, mode: 'insensitive' } },
