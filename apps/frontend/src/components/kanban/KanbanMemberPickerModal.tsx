@@ -19,8 +19,9 @@ export interface KanbanPickerUser {
   profilePhotoUrl?: string | null;
 }
 
-async function fetchKanbanPickerUsers(): Promise<KanbanPickerUser[]> {
-  const res = await api.get('/kanban/picker-users');
+/** Com `cardId`, só quem tem acesso ao quadro daquele card. */
+export async function fetchKanbanPickerUsers(cardId?: string): Promise<KanbanPickerUser[]> {
+  const res = await api.get('/kanban/picker-users', { params: cardId ? { cardId } : undefined });
   return res.data.data;
 }
 
@@ -33,6 +34,8 @@ export interface KanbanMemberPickerModalProps {
   /** Usuário logado — exibido como "Atribuir a mim" quando ainda não está no card. */
   currentUser?: KanbanPickerUser | null;
   elevated?: boolean;
+  /** Card que vai receber a pessoa: limita a lista a quem tem acesso ao quadro dele. */
+  cardId?: string;
 }
 
 function UserRow({
@@ -77,12 +80,13 @@ export function KanbanMemberPickerModal({
   currentUserId,
   currentUser,
   elevated = true,
+  cardId,
 }: KanbanMemberPickerModalProps) {
   const [search, setSearch] = useState('');
 
   const { data: users = [], isLoading, isError } = useQuery({
-    queryKey: ['kanban-member-picker-users', 'include-self'],
-    queryFn: fetchKanbanPickerUsers,
+    queryKey: ['kanban-member-picker-users', 'include-self', cardId ?? 'all'],
+    queryFn: () => fetchKanbanPickerUsers(cardId),
     enabled: isOpen,
     staleTime: 60_000,
   });
@@ -192,11 +196,6 @@ export function KanbanMemberPickerModal({
           ))}
       </div>
 
-      {currentUserId && (
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-          Selecione você ou outro colaborador para atribuir ao card.
-        </p>
-      )}
     </Modal>
   );
 }

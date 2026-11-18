@@ -3,6 +3,12 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  KanbanCommentText,
+  KanbanMentionTextarea,
+  mentionedIdsInText,
+  useKanbanMentionUsers,
+} from './KanbanMention';
+import {
   Loader2,
   ListChecks,
   Trash2,
@@ -351,6 +357,14 @@ function buildCardTimeline(
   );
 }
 
+function removeDraft(key: string) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* ignora */
+  }
+}
+
 export interface KanbanCardModalCurrentUser {
   id: string;
   name: string;
@@ -457,6 +471,10 @@ export function KanbanCardModal({
 
   const [newTask, setNewTask] = useState('');
   const [commentText, setCommentText] = useState('');
+  /** Pessoas marcadas (@) no comentário em edição: id -> nome. */
+  const mentionPickedRef = useRef<Map<string, string>>(new Map());
+  const mentionUsers = useKanbanMentionUsers(true, cardId && !isOptimisticKanbanCardId(cardId) ? cardId : undefined);
+  const commentsScrollRef = useRef<HTMLDivElement>(null);
   const [hideDone, setHideDone] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -1056,11 +1074,15 @@ export function KanbanCardModal({
   function cancelDescriptionEdit() {
     setDescription(descriptionBeforeEditRef.current);
     setIsEditingDescription(false);
+    if (cardId) removeDraft(`kanban:draft:desc:${cardId}`);
   }
 
   async function saveDescription() {
     const ok = saveMeta({ description });
-    if (ok) setIsEditingDescription(false);
+    if (ok) {
+      setIsEditingDescription(false);
+      if (cardId) removeDraft(`kanban:draft:desc:${cardId}`);
+    }
   }
 
   const pickerCurrentUser: KanbanPickerUser | null = currentUser
@@ -1466,6 +1488,33 @@ export function KanbanCardModal({
     }
   }
 
+  /** Colar (Ctrl+V) uma imagem no card vira anexo. A descrição tem o seu próprio tratamento (imagem no texto). */
+  async function handlePasteImages(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (e.defaultPrevented || !isDetail || !cardId) return;
+    const images = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
+    if (images.length === 0) return;
+    if (!canDeleteAttachments) return;
+    if (isOptimisticKanbanCardId(cardId)) {
+      toast.error('Aguarde o card ser salvo');
+      return;
+    }
+    e.preventDefault();
+    const stamp = Date.now();
+    const named = images.map((f, i) => {
+      if (f.name && f.name !== 'image.png') return f;
+      const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      return new File([f], `imagem-colada-${stamp}-${i + 1}.${ext}`, { type: f.type });
+    });
+    const toastId = toast.loading(named.length > 1 ? 'Enviando imagens…' : 'Enviando imagem…');
+    try {
+      const detail = await uploadKanbanAttachments(cardId, named);
+      syncDetailFromApi(detail);
+      toast.success(named.length > 1 ? 'Imagens anexadas' : 'Imagem anexada', { id: toastId });
+    } catch {
+      toast.error('Não foi possível anexar a imagem', { id: toastId });
+    }
+  }
+
   async function handlePostComment() {
     if (!cardId || !commentText.trim() || !card) return;
     if (isOptimisticKanbanCardId(cardId)) {
@@ -1474,8 +1523,15 @@ export function KanbanCardModal({
     }
     setPostingComment(true);
     try {
-      const comment = await createKanbanComment(cardId, commentText.trim());
+      const text = commentText.trim();
+      const comment = await createKanbanComment(
+        cardId,
+        text,
+        mentionedIdsInText(text, mentionPickedRef.current),
+      );
       setCommentText('');
+      mentionPickedRef.current = new Map();
+      clearCommentDraft(cardId);
       const next = normalizeKanbanCardDetail({
         ...card,
         comments: card.comments + 1,
@@ -1533,6 +1589,75 @@ export function KanbanCardModal({
     () => (card ? buildCardTimeline(card, labelPresets) : []),
     [card, labelPresets],
   );
+  const mentionNames = useMemo(() => mentionUsers.map((u) => u.name), [mentionUsers]);
+
+  // Abre/atualiza a conversa já rolada até o comentário mais recente (o campo fica embaixo).
+  const lastTimelineId = timeline.length ? String(timeline[timeline.length - 1].id) : '';
+  useLayoutEffect(() => {
+    const el = commentsScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [cardId, lastTimelineId, showActivityDetails]);
+
+  // Rascunho do comentário: sobrevive a recarga, remontagem do modal e troca de card.
+  const commentDraftKey = cardId ? `kanban:draft:comment:${cardId}` : null;
+  useEffect(() => {
+    mentionPickedRef.current = new Map();
+    if (!commentDraftKey) {
+      setCommentText('');
+      return;
+    }
+    try {
+      setCommentText(window.localStorage.getItem(commentDraftKey) ?? '');
+    } catch {
+      setCommentText('');
+    }
+  }, [commentDraftKey]);
+  useEffect(() => {
+    if (!commentDraftKey) return;
+    try {
+      if (commentText) window.localStorage.setItem(commentDraftKey, commentText);
+      else window.localStorage.removeItem(commentDraftKey);
+    } catch {
+      /* sem armazenamento: segue sem rascunho */
+    }
+  }, [commentDraftKey, commentText]);
+  function clearCommentDraft(id: string) {
+    removeDraft(`kanban:draft:comment:${id}`);
+  }
+
+  // Rascunho da descrição: enquanto edita, guarda; ao reabrir o card, volta para a edição de onde parou.
+  const descDraftKey = cardId && isDetail ? `kanban:draft:desc:${cardId}` : null;
+  const descRestoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!descDraftKey || !isEditingDescription) return;
+    try {
+      window.localStorage.setItem(descDraftKey, description);
+    } catch {
+      /* sem armazenamento: segue sem rascunho */
+    }
+  }, [descDraftKey, isEditingDescription, description]);
+  useEffect(() => {
+    if (!descDraftKey) {
+      descRestoredForRef.current = null;
+      return;
+    }
+    if (!card || card.id !== cardId) return;
+    if (descRestoredForRef.current === descDraftKey) return;
+    descRestoredForRef.current = descDraftKey;
+    try {
+      const draft = window.localStorage.getItem(descDraftKey);
+      if (draft != null && draft !== card.description) {
+        descriptionBeforeEditRef.current = card.description;
+        setDescription(draft);
+        setIsEditingDescription(true);
+      } else if (draft != null) {
+        window.localStorage.removeItem(descDraftKey);
+      }
+    } catch {
+      /* ignora */
+    }
+  }, [descDraftKey, card, cardId]);
+
   const showChecklistPanel = checklistEnabled && isDetail;
   const hasMaterialsPanel = materialsEnabled && cardMaterials.length > 0;
   const draftTotal = draftTasks.length;
@@ -1755,6 +1880,7 @@ export function KanbanCardModal({
         elevated
         onClose={() => setShowMemberPicker(false)}
         excludeUserIds={members.map((m) => m.userId)}
+        cardId={cardId && !isOptimisticKanbanCardId(cardId) ? cardId : undefined}
         currentUserId={currentUserId}
         currentUser={pickerCurrentUser}
         onSelect={assignMember}
@@ -1875,6 +2001,7 @@ export function KanbanCardModal({
         </div>
       ) : (
         <div
+          onPaste={handlePasteImages}
           className={clsx(
             'flex flex-1 min-h-0 flex-col overflow-hidden',
             // As colunas sempre ocupam a altura do modal: com `items-start` a coluna da esquerda crescia
@@ -2424,27 +2551,10 @@ export function KanbanCardModal({
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="mb-3 shrink-0">
-                  <textarea
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Escrever um comentário..."
-                    rows={2}
-                    className={clsx(kanbanTextarea, 'mb-2 !min-h-0 py-2 text-sm')}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full"
-                    onClick={handlePostComment}
-                    loading={postingComment}
-                    disabled={!commentText.trim()}
-                  >
-                    Comentar
-                  </Button>
-                </div>
-                <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+                <div
+                  ref={commentsScrollRef}
+                  className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+                >
                   {timeline.length === 0 ? (
                     <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
                       Nenhuma atividade ainda.
@@ -2555,7 +2665,7 @@ export function KanbanCardModal({
                             </div>
                           </div>
                           <p className="mt-1 text-sm leading-snug text-gray-600 break-words whitespace-pre-wrap dark:text-gray-300">
-                            {comment.content}
+                            <KanbanCommentText content={comment.content} names={mentionNames} />
                           </p>
                         </div>
                       </div>
@@ -2563,6 +2673,29 @@ export function KanbanCardModal({
                     })}
                     </div>
                   )}
+                </div>
+                <div className="shrink-0 border-t border-gray-100 pt-3 dark:border-gray-800">
+                  <KanbanMentionTextarea
+                    value={commentText}
+                    onChange={setCommentText}
+                    onPick={(u) => mentionPickedRef.current.set(u.id, u.name)}
+                    users={mentionUsers}
+                    placeholder="Escrever um comentário... (@ para marcar alguém)"
+                    rows={2}
+                    className="mb-2"
+                    onSubmitShortcut={handlePostComment}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={handlePostComment}
+                    loading={postingComment}
+                    disabled={!commentText.trim()}
+                  >
+                    Comentar
+                  </Button>
                 </div>
 
             </div>

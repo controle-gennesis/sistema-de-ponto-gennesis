@@ -719,6 +719,57 @@ function notifyCardAssigned(actorId: string, cardId: string, userIds: Array<stri
   })();
 }
 
+/**
+ * Avisa por push quem foi marcado (@) num comentário. Só avisa quem tem acesso ao card
+ * e nunca o autor. Best-effort: não pode derrubar o comentário.
+ */
+function notifyCommentMentions(
+  actorId: string,
+  cardId: string,
+  commentId: string,
+  mentionedUserIds: string[],
+  content: string,
+  assertAccess: (userId: string, cardId: string) => Promise<unknown>,
+) {
+  const targets = [...new Set(mentionedUserIds.filter((u) => !!u && u !== actorId))].slice(0, 20);
+  if (targets.length === 0) return;
+  void (async () => {
+    try {
+      const allowed: string[] = [];
+      for (const id of targets) {
+        try {
+          await assertAccess(id, cardId);
+          allowed.push(id);
+        } catch {
+          /* sem acesso ao card: não avisa */
+        }
+      }
+      if (allowed.length === 0) return;
+      // Fica registrado para aparecer no sino (web e app) até a pessoa abrir o card.
+      await prisma.kanbanCommentMention
+        .createMany({
+          data: allowed.map((userId) => ({ commentId, cardId, userId })),
+          skipDuplicates: true,
+        })
+        .catch(() => undefined);
+      const [card, actor] = await Promise.all([
+        prisma.kanbanCard.findUnique({ where: { id: cardId }, select: { title: true } }),
+        prisma.user.findUnique({ where: { id: actorId }, select: { name: true } }),
+      ]);
+      if (!card) return;
+      const quem = actor?.name?.trim() || 'Alguém';
+      await sendPushToUsers(allowed, {
+        title: `${quem} marcou você num comentário`,
+        body: `${card.title}
+${content.trim().slice(0, 120)}`,
+        data: { kind: 'kanban-mention', cardId },
+      });
+    } catch {
+      /* push é best-effort */
+    }
+  })();
+}
+
 export class KanbanService {
   private boardAccessSelect = {
     id: true,
@@ -2662,7 +2713,37 @@ export class KanbanService {
     await prisma.kanbanCard.delete({ where: { id } });
   }
 
-  async listPickerUsers(_requesterId: string) {
+  /** Chave do quadro de setor a que o usuário pertence (mesma regra de `getUserDepartment`). */
+  private departmentKeyOfEmployee(
+    employee: { department?: string | null; costCenter?: string | null } | null | undefined,
+  ): string {
+    if (isEmployeeUnbUser(employee?.costCenter)) return KANBAN_UNB_DEPARTMENT_KEY;
+    const key = normalizeDepartmentKey(employee?.department?.trim() || 'Sem setor');
+    return key === KANBAN_UNB_DEPARTMENT_KEY ? 'SETOR_UNB' : key;
+  }
+
+  /**
+   * Pessoas que podem ser atribuídas/marcadas. Com `cardId` (ou `boardId`), só quem tem acesso àquele
+   * quadro: dono e convidados nos quadros personalizados; quem é do setor (ou do UNB) nos demais.
+   * Sem escopo, mantém o comportamento antigo (todos os usuários ativos).
+   */
+  async listPickerUsers(requesterId: string, scope: { cardId?: string; boardId?: string } = {}) {
+    let board: { id: string; departmentKey: string; isCustom: boolean; createdById: string | null } | null =
+      null;
+    if (scope.cardId) {
+      const card = await prisma.kanbanCard.findUnique({
+        where: { id: scope.cardId },
+        include: { column: { include: { board: { select: this.boardAccessSelect } } } },
+      });
+      board = card?.column.board ?? null;
+    } else if (scope.boardId) {
+      board = await prisma.kanbanBoard.findUnique({
+        where: { id: scope.boardId },
+        select: this.boardAccessSelect,
+      });
+    }
+    if (board) await this.assertBoardAccess(requesterId, board, 'read');
+
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
@@ -2673,18 +2754,38 @@ export class KanbanService {
         email: true,
         cpf: true,
         profilePhotoUrl: true,
-        employee: { select: { position: true } },
+        employee: { select: { position: true, department: true, costCenter: true } },
       },
       orderBy: { name: 'asc' },
     });
+
+    let allowed: Set<string> | null = null;
+    if (board?.isCustom) {
+      const shares = await prisma.kanbanBoardShare.findMany({
+        where: { boardId: board.id },
+        select: { userId: true },
+      });
+      allowed = new Set(shares.map((s) => s.userId));
+      if (board.createdById) allowed.add(board.createdById);
+    }
+    const boardKey = board && !board.isCustom ? board.departmentKey : null;
+
     return users
       .filter((u) => !isKanbanHiddenPickerUser(u))
+      .filter((u) => {
+        if (allowed) return allowed.has(u.id);
+        if (boardKey) return this.departmentKeyOfEmployee(u.employee) === boardKey;
+        return true;
+      })
       .map(({ employee: _e, ...u }) => u);
   }
 
   async addCardMember(requesterId: string, cardId: string, userId: string) {
     await this.assertCardAccess(requesterId, cardId);
-    const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      include: { column: { include: { board: { select: this.boardAccessSelect } } } },
+    });
     if (!card) throw new Error('Card não encontrado');
 
     const user = await prisma.user.findUnique({
@@ -2700,6 +2801,9 @@ export class KanbanService {
     if (!user?.isActive || isKanbanHiddenPickerUser(user)) {
       throw new Error('Usuário não encontrado');
     }
+    // Só dá para atribuir quem tem acesso ao quadro do card.
+    const target = await this.resolveBoardAccessForUser(userId, card.column.board);
+    if (!target.canRead) throw new Error('Essa pessoa não tem acesso a este quadro');
 
     const alreadyMember = await prisma.kanbanCardMember.findUnique({
       where: { cardId_userId: { cardId, userId } },
@@ -2762,12 +2866,54 @@ export class KanbanService {
     return { count: items.length, items };
   }
 
-  /** Marca as atribuições como vistas: de um card, ou de todos quando não informado. */
+  /** Comentários em que a pessoa foi marcada (@) e ainda não abriu o card (sino de notificações). */
+  async listUnreadMentions(userId: string) {
+    const rows = await prisma.kanbanCommentMention.findMany({
+      where: { userId, unread: true, comment: { card: { archivedAt: null } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        createdAt: true,
+        comment: {
+          select: {
+            id: true,
+            content: true,
+            author: { select: { name: true } },
+            card: {
+              select: {
+                id: true,
+                title: true,
+                column: { select: { board: { select: { name: true, departmentKey: true } } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const items = rows.map((r) => ({
+      cardId: r.comment.card.id,
+      title: r.comment.card.title,
+      boardName: r.comment.card.column?.board?.name ?? '',
+      departmentKey: r.comment.card.column?.board?.departmentKey ?? '',
+      authorName: r.comment.author?.name ?? '',
+      preview: r.comment.content.slice(0, 120),
+      mentionedAt: r.createdAt,
+    }));
+    return { count: items.length, items };
+  }
+
+  /** Marca as atribuições e menções como vistas: de um card, ou de todos quando não informado. */
   async markAssignmentsRead(userId: string, cardId?: string) {
     await prisma.kanbanCardMember.updateMany({
       where: { userId, unread: true, ...(cardId ? { cardId } : {}) },
       data: { unread: false },
     });
+    await prisma.kanbanCommentMention
+      .updateMany({
+        where: { userId, unread: true, ...(cardId ? { cardId } : {}) },
+        data: { unread: false },
+      })
+      .catch(() => undefined);
   }
 
   async getCardById(userId: string, id: string) {
@@ -2962,7 +3108,12 @@ export class KanbanService {
     await this.logActivity(item.cardId, userId, 'CHECKLIST_REMOVED', { title: item.title });
   }
 
-  async createComment(requesterId: string, cardId: string, content: string) {
+  async createComment(
+    requesterId: string,
+    cardId: string,
+    content: string,
+    mentionedUserIds: string[] = [],
+  ) {
     await this.assertCardAccess(requesterId, cardId);
     const comment = await prisma.kanbanCardComment.create({
       data: {
@@ -2974,6 +3125,9 @@ export class KanbanService {
         author: { select: { id: true, name: true, profilePhotoUrl: true } },
       },
     });
+    notifyCommentMentions(requesterId, cardId, comment.id, mentionedUserIds, comment.content, (u, c) =>
+      this.assertCardAccess(u, c),
+    );
     return {
       id: comment.id,
       content: comment.content,

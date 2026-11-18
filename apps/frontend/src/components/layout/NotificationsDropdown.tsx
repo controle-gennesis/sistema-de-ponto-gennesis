@@ -17,6 +17,7 @@ import {
   Fuel,
   HardHat,
   KanbanSquare,
+  AtSign,
   MessageCircle,
   Package,
   PackageCheck,
@@ -46,19 +47,20 @@ type NotificationItem = {
   Icon: LucideIcon;
 };
 
-type NotificationGroup = 'approval' | 'operation' | 'other';
+type NotificationGroup = 'approval' | 'operation' | 'kanban' | 'other';
 
 const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
   approval: 'Aprovações',
   operation: 'Compras, estoque e frota',
+  kanban: 'Tasks',
   other: 'Chamados e mensagens',
 };
 
-const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = ['approval', 'operation', 'other'];
+const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = ['approval', 'operation', 'kanban', 'other'];
 
 const APPROVAL_IDS = new Set(['dp', 'espelho', 'fd', 'fuel', 'rm', 'oc', 'medicao']);
+const KANBAN_IDS = new Set(['kanban-assigned', 'kanban-mention']);
 const OPERATION_IDS = new Set([
-  'kanban-assigned',
   'fd-compras',
   'fd-reprovadas',
   'rm-correcao',
@@ -72,6 +74,7 @@ const OPERATION_IDS = new Set([
 
 function notificationGroupOf(id: string): NotificationGroup {
   if (APPROVAL_IDS.has(id)) return 'approval';
+  if (KANBAN_IDS.has(id)) return 'kanban';
   if (OPERATION_IDS.has(id)) return 'operation';
   return 'other';
 }
@@ -89,6 +92,11 @@ const NOTIFICATION_GROUP_STYLE: Record<
     tile: 'bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300',
     pill: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:ring-amber-800/60',
     dot: 'bg-amber-500',
+  },
+  kanban: {
+    tile: 'bg-violet-50 text-violet-600 dark:bg-violet-900/25 dark:text-violet-300',
+    pill: 'bg-violet-50 text-violet-800 ring-1 ring-inset ring-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:ring-violet-800/60',
+    dot: 'bg-violet-500',
   },
   other: {
     tile: 'bg-sky-50 text-sky-600 dark:bg-sky-900/25 dark:text-sky-300',
@@ -125,9 +133,18 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     queryFn: async () => {
       const res = await api.get('/kanban/assigned-notifications');
       const d = res.data?.data as
-        | { count?: number; items?: Array<{ cardId: string; departmentKey: string }> }
+        | {
+            count?: number;
+            items?: Array<{ cardId: string; departmentKey: string }>;
+            mentions?: { count?: number; items?: Array<{ cardId: string; departmentKey: string }> };
+          }
         | undefined;
-      return { count: Number(d?.count ?? 0) || 0, items: d?.items ?? [] };
+      return {
+        count: Number(d?.count ?? 0) || 0,
+        items: d?.items ?? [],
+        mentionCount: Number(d?.mentions?.count ?? 0) || 0,
+        mentionItems: d?.mentions?.items ?? [],
+      };
     },
     refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
@@ -551,6 +568,22 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: KanbanSquare,
       });
     }
+    if ((kanbanAssigned?.mentionCount ?? 0) > 0) {
+      const ultimo = kanbanAssigned!.mentionItems[0];
+      list.push({
+        id: 'kanban-mention',
+        title: 'Menções no Kanban',
+        description:
+          kanbanAssigned!.mentionCount === 1
+            ? 'Você foi marcado em um comentário'
+            : 'Você foi marcado em comentários',
+        count: kanbanAssigned!.mentionCount,
+        href: ultimo
+          ? `/ponto/kanban?departmentKey=${encodeURIComponent(ultimo.departmentKey)}&cardId=${encodeURIComponent(ultimo.cardId)}`
+          : '/ponto/kanban',
+        Icon: AtSign,
+      });
+    }
     if (chatUnreadCount > 0) {
       list.push({
         id: 'chat',
@@ -841,7 +874,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
                                       href={item.href}
                                       onClick={() => {
                                         setOpen(false);
-                                        if (item.id === 'kanban-assigned') {
+                                        if (item.id === 'kanban-assigned' || item.id === 'kanban-mention') {
                                           window.setTimeout(
                                             () =>
                                               void queryClient.invalidateQueries({

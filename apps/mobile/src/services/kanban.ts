@@ -287,8 +287,12 @@ export async function deleteChecklistItem(id: string): Promise<void> {
   }
 }
 
-export async function createKanbanComment(cardId: string, content: string) {
-  const res = await api.post(`/api/kanban/cards/${cardId}/comments`, { content });
+export async function createKanbanComment(
+  cardId: string,
+  content: string,
+  mentionedUserIds: string[] = [],
+) {
+  const res = await api.post(`/api/kanban/cards/${cardId}/comments`, { content, mentionedUserIds });
   return readApiData<KanbanCardComment>(res);
 }
 
@@ -379,8 +383,11 @@ export type KanbanPickerUser = {
   profilePhotoUrl?: string | null;
 };
 
-export async function fetchKanbanPickerUsers(): Promise<KanbanPickerUser[]> {
-  const res = await api.get('/api/kanban/picker-users');
+/** Com `cardId`, só quem tem acesso ao quadro daquele card. */
+export async function fetchKanbanPickerUsers(cardId?: string): Promise<KanbanPickerUser[]> {
+  const res = await api.get(
+    cardId ? `/api/kanban/picker-users?cardId=${encodeURIComponent(cardId)}` : '/api/kanban/picker-users',
+  );
   return (await readApiData<KanbanPickerUser[]>(res)) || [];
 }
 

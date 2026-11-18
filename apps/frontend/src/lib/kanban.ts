@@ -1124,8 +1124,8 @@ export async function deleteChecklistItem(id: string) {
   await api.delete(`/kanban/checklist-items/${id}`);
 }
 
-export async function createKanbanComment(cardId: string, content: string) {
-  const res = await api.post(`/kanban/cards/${cardId}/comments`, { content });
+export async function createKanbanComment(cardId: string, content: string, mentionedUserIds: string[] = []) {
+  const res = await api.post(`/kanban/cards/${cardId}/comments`, { content, mentionedUserIds });
   return res.data.data as KanbanCardComment;
 }
 

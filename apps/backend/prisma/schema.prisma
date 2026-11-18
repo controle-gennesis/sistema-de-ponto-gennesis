@@ -3991,12 +3991,30 @@ model KanbanCardComment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  author User       @relation("KanbanCardCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  card     KanbanCard             @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  author   User                   @relation("KanbanCardCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  mentions KanbanCommentMention[]
 
   @@index([cardId])
   @@index([userId])
   @@map("kanban_card_comments")
+}
+
+/// Pessoa marcada (@) num comentário do card. `unread` alimenta o sino de notificações.
+model KanbanCommentMention {
+  id        String   @id @default(cuid())
+  commentId String
+  cardId    String
+  userId    String
+  createdAt DateTime @default(now())
+  unread    Boolean  @default(true)
+
+  comment KanbanCardComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([userId, unread])
+  @@index([cardId])
+  @@map("kanban_comment_mentions")
 }
 
 model KanbanCardAttachment {

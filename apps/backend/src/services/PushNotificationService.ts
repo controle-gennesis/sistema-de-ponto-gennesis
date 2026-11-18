@@ -26,7 +26,7 @@ export const PUSH_CATEGORIES = [
   { key: 'dp', label: 'Solicitações internas', description: 'Mudanças de status das suas solicitações' },
   { key: 'dp-messages', label: 'Mensagens das solicitações', description: 'Novas mensagens nas solicitações' },
   { key: 'workorder', label: 'Chamados', description: 'Mudanças de status dos chamados' },
-  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card' },
+  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card ou marcado num comentário' },
 ] as const;
 
 const CATEGORY_KEYS: ReadonlySet<string> = new Set(PUSH_CATEGORIES.map((c) => c.key));
@@ -50,6 +50,7 @@ function categoryOfPayload(data?: Record<string, unknown>): string | null {
     case 'workorder':
       return 'workorder';
     case 'kanban-assigned':
+    case 'kanban-mention':
       return 'kanban';
     default:
       return null;

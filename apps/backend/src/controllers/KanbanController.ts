@@ -54,7 +54,9 @@ export class KanbanController {
     try {
       const userId = requireUserId(req, next);
       if (!userId) return;
-      const users = await kanbanService.listPickerUsers(userId);
+      const cardId = typeof req.query.cardId === 'string' ? req.query.cardId : undefined;
+      const boardId = typeof req.query.boardId === 'string' ? req.query.boardId : undefined;
+      const users = await kanbanService.listPickerUsers(userId, { cardId, boardId });
       res.json({ success: true, data: users });
     } catch (error) {
       handleKanbanError(error, next);
@@ -462,8 +464,11 @@ export class KanbanController {
     try {
       const userId = requireUserId(req, next);
       if (!userId) return;
-      const data = await kanbanService.listUnreadAssignments(userId);
-      res.json({ success: true, data });
+      const [data, mentions] = await Promise.all([
+        kanbanService.listUnreadAssignments(userId),
+        kanbanService.listUnreadMentions(userId).catch(() => ({ count: 0, items: [] })),
+      ]);
+      res.json({ success: true, data: { ...data, mentions } });
     } catch (error) {
       handleKanbanError(error, next);
     }
@@ -821,12 +826,16 @@ export class KanbanController {
     try {
       const userId = requireUserId(req, next);
       if (!userId) return;
-      const { content } = req.body;
+      const { content, mentionedUserIds } = req.body;
       if (!content?.trim()) return next(createError('Comentário não pode ser vazio', 400));
+      const mentions = Array.isArray(mentionedUserIds)
+        ? mentionedUserIds.filter((v: unknown): v is string => typeof v === 'string')
+        : [];
       const comment = await kanbanService.createComment(
         userId,
         req.params.cardId,
         content,
+        mentions,
       );
       res.status(201).json({ success: true, data: comment });
     } catch (error) {
