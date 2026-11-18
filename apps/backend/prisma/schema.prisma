@@ -871,6 +871,8 @@ model DpRequest {
   /// Motivo informado pelo DP ao cancelar a solicitaÃ§Ã£o.
   dpCancellationReason   String?
   dpHandledBy            String?
+  /// Hora extra concluída: PAGO_FINANCEIRO (financeiro pagou) ou CREDITADO_BANCO (DP creditou no banco de horas).
+  dpResultado            String?
   // (MVP) sem relaÃ§Ã£o explÃ­cita com User: mantemos sÃ³ o userId em dpHandledBy.
 
   // Metadados

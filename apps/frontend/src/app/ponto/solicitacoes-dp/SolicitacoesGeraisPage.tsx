@@ -57,6 +57,8 @@ import {
 import { COMPANIES_LIST } from '@/constants/payrollFilters';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
+import { ColaboradoresLinha } from '@/components/dp/ColaboradoresLinha';
+import { AtestadoEditavel } from '@/components/dp/AtestadoEditavel';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -140,6 +142,10 @@ type DpRequest = {
   dpConclusionComment?: string | null;
   dpConcludedAt?: string | null;
   details?: Record<string, unknown> | null;
+  /** Nomes dos colaboradores citados na solicitação (HE, atestado etc.), para as listas. */
+  colaboradoresNomes?: string[];
+  /** Hora extra concluída: PAGO_FINANCEIRO ou CREDITADO_BANCO. */
+  dpResultado?: string | null;
   statusHistory?: unknown;
 };
 
@@ -914,6 +920,9 @@ export function SolicitacoesGeraisPage() {
         if (!atestados.length) throw new Error('Informe ao menos um atestado');
         for (let i = 0; i < atestados.length; i++) {
           const file = atestadoFiles[i];
+          if (!String(atestados[i].codigoAtestado ?? '').trim()) {
+            throw new Error(`Informe o código do atestado do item ${i + 1}`);
+          }
           if (!file) throw new Error(`Anexe o atestado do item ${i + 1}`);
           atestados[i] = {
             ...atestados[i],
@@ -929,6 +938,9 @@ export function SolicitacoesGeraisPage() {
         if (!horasExtras.length) throw new Error('Informe ao menos uma solicitação de hora extra');
         for (let i = 0; i < horasExtras.length; i++) {
           const file = horaExtraFiles[i];
+          if (!String(horasExtras[i].tipoHoraExtra ?? '').trim()) {
+            throw new Error(`Informe o tipo da hora extra do item ${i + 1} (pagamento ou banco de horas)`);
+          }
           if (!file) throw new Error(`Anexe a autorização de hora extra do item ${i + 1}`);
           horasExtras[i] = {
             ...horasExtras[i],
@@ -1047,6 +1059,19 @@ export function SolicitacoesGeraisPage() {
       label: 'Tipo',
       value: TYPE_LABELS[r.requestType] ?? r.requestType,
     },
+    ...(r.requestType === 'HORA_EXTRA' && r.dpResultado
+      ? [
+          {
+            label: 'Atendimento da hora extra',
+            value:
+              r.dpResultado === 'PAGO_FINANCEIRO'
+                ? 'Pago pelo financeiro'
+                : r.dpResultado === 'CREDITADO_BANCO'
+                  ? 'Creditado no banco de horas'
+                  : r.dpResultado,
+          },
+        ]
+      : []),
     {
       label: 'Destino',
       value: getRequestDestinationLabel(r.requestType),
@@ -1289,8 +1314,9 @@ export function SolicitacoesGeraisPage() {
                                       {r.displayNumber ?? '—'}
                                     </ListRowNavigableLabel>
                                   </td>
-                                  <td className="max-w-[180px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                    {r.solicitanteNome || '—'}
+                                  <td className="max-w-[220px] px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                                    <div className="truncate">{r.solicitanteNome || '—'}</div>
+                                    <ColaboradoresLinha nomes={r.colaboradoresNomes} />
                                   </td>
                                   <td className="max-w-[200px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                     {getRequestContratoLabel(r)}
@@ -1736,6 +1762,17 @@ export function SolicitacoesGeraisPage() {
                     details={historyRequest.details}
                     employeeNameById={employeeNameByIdForDetail}
                   />
+
+                  {historyRequest.requestType === 'ATESTADO_MEDICO' && historyRequest.status !== 'CANCELLED' ? (
+                    <AtestadoEditavel
+                      requestId={historyRequest.id}
+                      details={historyRequest.details}
+                      employeeNameById={employeeNameByIdForDetail}
+                      onSaved={(details) =>
+                        setHistoryRequest((prev) => (prev ? { ...prev, details } : prev))
+                      }
+                    />
+                  ) : null}
 
                   {historyFeedbackText ? (
                     <DpRequestHistorySectionCard

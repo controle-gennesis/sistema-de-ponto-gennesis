@@ -974,10 +974,19 @@ type AtestadoRow = {
   dataInicial: string;
   dataFinal: string;
   numeroDias: string;
+  codigoAtestado: string;
+  observacao: string;
 };
 
 function emptyAtestadoRow(): AtestadoRow {
-  return { employeeId: '', dataInicial: '', dataFinal: '', numeroDias: '' };
+  return {
+    employeeId: '',
+    dataInicial: '',
+    dataFinal: '',
+    numeroDias: '',
+    codigoAtestado: '',
+    observacao: '',
+  };
 }
 
 export function AtestadoMedicoRepeatableFields({
@@ -998,6 +1007,8 @@ export function AtestadoMedicoRepeatableFields({
       dataInicial: String(row.dataInicial ?? ''),
       dataFinal: String(row.dataFinal ?? ''),
       numeroDias: String(row.numeroDias ?? ''),
+      codigoAtestado: String(row.codigoAtestado ?? ''),
+      observacao: String(row.observacao ?? ''),
     }),
     emptyAtestadoRow,
     (legacyDetails) => {
@@ -1006,7 +1017,14 @@ export function AtestadoMedicoRepeatableFields({
       const dataInicial = String(legacyDetails.dataInicial ?? '');
       const dataFinal = String(legacyDetails.dataFinal ?? '');
       const numeroDias = String(legacyDetails.numeroDias ?? '');
-      return employeeIds.map((employeeId) => ({ employeeId, dataInicial, dataFinal, numeroDias }));
+      return employeeIds.map((employeeId) => ({
+        employeeId,
+        dataInicial,
+        dataFinal,
+        numeroDias,
+        codigoAtestado: String(legacyDetails.codigoAtestado ?? ''),
+        observacao: String(legacyDetails.observacao ?? ''),
+      }));
     }
   );
 
@@ -1062,6 +1080,27 @@ export function AtestadoMedicoRepeatableFields({
               unit="dia(s)"
               placeholder="Ex.: 3"
               onChange={(qty) => updateItem(index, { numeroDias: qty > 0 ? String(qty) : '' })}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Código do atestado (CID) *</label>
+            <input
+              type="text"
+              className={fieldBox}
+              value={row.codigoAtestado}
+              maxLength={40}
+              onChange={(e) => updateItem(index, { codigoAtestado: e.target.value })}
+              placeholder="Ex.: J11 ou CID-10 do atestado"
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Observação</label>
+            <textarea
+              className={taCls}
+              value={row.observacao}
+              maxLength={1000}
+              onChange={(e) => updateItem(index, { observacao: e.target.value })}
+              placeholder="Alguma informação adicional sobre o atestado (opcional)"
             />
           </div>
           <DpFileAttachmentField
@@ -1158,15 +1197,21 @@ export function RetificacaoAlocacaoRepeatableFields({
   );
 }
 
+export const TIPO_HORA_EXTRA_OPTIONS = [
+  { value: 'PAGAMENTO', label: 'Pagamento (financeiro paga)' },
+  { value: 'BANCO_HORAS', label: 'Banco de horas (DP credita)' },
+];
+
 type HoraExtraRow = {
   employeeIds: string[];
+  tipoHoraExtra: string;
   justificativa: string;
   inicioPeriodo: string;
   fimPeriodo: string;
 };
 
 function emptyHoraExtraRow(): HoraExtraRow {
-  return { employeeIds: [], justificativa: '', inicioPeriodo: '', fimPeriodo: '' };
+  return { employeeIds: [], tipoHoraExtra: '', justificativa: '', inicioPeriodo: '', fimPeriodo: '' };
 }
 
 export function HoraExtraRepeatableFields({
@@ -1191,6 +1236,7 @@ export function HoraExtraRepeatableFields({
           : [];
       return {
         employeeIds,
+        tipoHoraExtra: String(row.tipoHoraExtra ?? ''),
         justificativa: String(row.justificativa ?? ''),
         inicioPeriodo: String(row.inicioPeriodo ?? range.inicio),
         fimPeriodo: String(row.fimPeriodo ?? range.fim),
@@ -1205,6 +1251,7 @@ export function HoraExtraRepeatableFields({
       return [
         {
           employeeIds,
+          tipoHoraExtra: String(legacyDetails.tipoHoraExtra ?? ''),
           justificativa,
           inicioPeriodo: range.inicio,
           fimPeriodo: range.fim,
@@ -1256,6 +1303,14 @@ export function HoraExtraRepeatableFields({
               noFocusRing
             />
           </div>
+          <SearchSelectField
+            label="Tipo da hora extra *"
+            value={row.tipoHoraExtra}
+            onChange={(tipoHoraExtra) => patchRow(index, { tipoHoraExtra })}
+            options={TIPO_HORA_EXTRA_OPTIONS}
+            placeholder="Pagamento ou banco de horas..."
+            allowEmpty={false}
+          />
           <div>
             <label className={labelCls}>Justificativa *</label>
             <textarea
