@@ -61,6 +61,8 @@ import {
   DpRequestHistoryTimeline,
   type DpRequestHistoryMetaField,
 } from '@/lib/dpRequestHistoryModal';
+import { ColaboradoresLinha } from '@/components/dp/ColaboradoresLinha';
+import { AtestadoEditavel } from '@/components/dp/AtestadoEditavel';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -145,6 +147,10 @@ type DpRequest = {
   dpConcludedAt?: string | null;
   createdAt: string;
   details?: Record<string, unknown> | null;
+  /** Nomes dos colaboradores citados na solicitação (HE, atestado etc.), para as listas. */
+  colaboradoresNomes?: string[];
+  /** Hora extra concluída: PAGO_FINANCEIRO ou CREDITADO_BANCO. */
+  dpResultado?: string | null;
   statusHistory?: unknown;
   employee?: { costCenter?: string | null } | null;
   /** Finalizada em tipo que vai à Contabilidade, mas sem pedido lá (envio automático falhou). */
@@ -433,6 +439,8 @@ export function GerenciarSolicitacoesGeraisPage({
   const [dpFeedback, setDpFeedback] = useState<Record<string, string>>({});
   const [dpNextStatus, setDpNextStatus] = useState<Record<string, DpDpFeedbackNextStatus>>({});
   const [dpCancellationReason, setDpCancellationReason] = useState<Record<string, string>>({});
+  /** Hora extra ao concluir: PAGO_FINANCEIRO ou CREDITADO_BANCO. */
+  const [dpResultado, setDpResultado] = useState<Record<string, string>>({});
   const [historyRequest, setHistoryRequest] = useState<DpRequest | null>(null);
   /** Aviso exibido antes de enviar à Contabilidade (com opção de não mostrar de novo). */
   const [sendNoticeFor, setSendNoticeFor] = useState<DpRequest | null>(null);
@@ -663,18 +671,21 @@ export function GerenciarSolicitacoesGeraisPage({
       nextStatus,
       responsibleNote,
       cancellationReason,
+      resultado,
     }: {
       id: string;
       feedback: string;
       nextStatus: DpDpFeedbackNextStatus;
       responsibleNote?: string;
       cancellationReason?: string;
+      resultado?: string;
     }) => {
       const res = await api.put(`/solicitacoes-dp/${id}/dp-feedback`, {
         feedback,
         nextStatus,
         responsibleNote: responsibleNote?.trim() || undefined,
         cancellationReason: cancellationReason?.trim() || undefined,
+        resultado: resultado || undefined,
       });
       return res.data as {
         data: DpRequest;
@@ -734,6 +745,12 @@ export function GerenciarSolicitacoesGeraisPage({
       toast.error('Informe o motivo do cancelamento');
       return;
     }
+    const resultado =
+      nextStatus === 'CONCLUDED' && r.requestType === 'HORA_EXTRA' ? dpResultado[r.id] || '' : undefined;
+    if (nextStatus === 'CONCLUDED' && r.requestType === 'HORA_EXTRA' && !resultado) {
+      toast.error('Informe se a hora extra foi paga pelo financeiro ou creditada no banco de horas');
+      return;
+    }
     if (
       scope === 'DP' &&
       nextStatus === 'CONCLUDED' &&
@@ -751,6 +768,7 @@ export function GerenciarSolicitacoesGeraisPage({
       nextStatus,
       responsibleNote: saverName || undefined,
       cancellationReason,
+      resultado,
     });
   };
 
@@ -792,6 +810,19 @@ export function GerenciarSolicitacoesGeraisPage({
       label: 'Tipo',
       value: TYPE_LABELS[r.requestType] ?? r.requestType,
     },
+    ...(r.requestType === 'HORA_EXTRA' && r.dpResultado
+      ? [
+          {
+            label: 'Atendimento da hora extra',
+            value:
+              r.dpResultado === 'PAGO_FINANCEIRO'
+                ? 'Pago pelo financeiro'
+                : r.dpResultado === 'CREDITADO_BANCO'
+                  ? 'Creditado no banco de horas'
+                  : r.dpResultado,
+          },
+        ]
+      : []),
     {
       label: 'Status',
       value: (
@@ -1006,6 +1037,7 @@ export function GerenciarSolicitacoesGeraisPage({
                                     {r.sectorSolicitante}
                                   </div>
                                 ) : null}
+                                <ColaboradoresLinha nomes={r.colaboradoresNomes} />
                               </td>
                               <td className="max-w-[200px] px-3 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                 {getContratoColunaLabel(r)}
@@ -1205,6 +1237,20 @@ export function GerenciarSolicitacoesGeraisPage({
                     employeeNameById={employeeNameByIdForDetail}
                   />
 
+                  {historyRequest.requestType === 'ATESTADO_MEDICO' && historyRequest.status !== 'CANCELLED' ? (
+                    <AtestadoEditavel
+                      requestId={historyRequest.id}
+                      details={historyRequest.details}
+                      employeeNameById={employeeNameByIdForDetail}
+                      onSaved={(details) => {
+                        setHistoryRequest((prev) => (prev ? { ...prev, details } : prev));
+                        void queryClient.invalidateQueries({
+                          queryKey: [scopeConfig.queryKeyPrefix, 'detalhes', historyRequest.id],
+                        });
+                      }}
+                    />
+                  ) : null}
+
                   <DpRequestAttachments requestId={historyRequest.id} currentUserId={(user as { id?: string } | undefined)?.id ?? null} />
 
                   {sentToAccounting(historyRequest) && historyRequest.status === 'CONCLUDED' ? (
@@ -1257,6 +1303,25 @@ export function GerenciarSolicitacoesGeraisPage({
                             noFocusRing
                           />
                         </div>
+                        {historyRequest.requestType === 'HORA_EXTRA' &&
+                        (dpNextStatus[historyRequest.id] ?? historyRequest.status) === 'CONCLUDED' ? (
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                              Como a hora extra foi atendida *
+                            </label>
+                            <select
+                              value={dpResultado[historyRequest.id] ?? historyRequest.dpResultado ?? ''}
+                              onChange={(e) =>
+                                setDpResultado((p) => ({ ...p, [historyRequest.id]: e.target.value }))
+                              }
+                              className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
+                            >
+                              <option value="">Selecione...</option>
+                              <option value="PAGO_FINANCEIRO">Pago pelo financeiro</option>
+                              <option value="CREDITADO_BANCO">Creditado no banco de horas</option>
+                            </select>
+                          </div>
+                        ) : null}
                         {(dpNextStatus[historyRequest.id] ?? historyRequest.status) === 'CANCELLED' ? (
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">

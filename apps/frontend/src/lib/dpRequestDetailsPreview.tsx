@@ -527,6 +527,8 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
             dataInicial: d.dataInicial,
             dataFinal: d.dataFinal,
             numeroDias: d.numeroDias,
+            codigoAtestado: d.codigoAtestado,
+            observacao: d.observacao,
             anexoAtestado: d.anexoAtestado,
           });
     return (
@@ -536,9 +538,14 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           items={atestados}
           employeeNameById={employeeNameById}
           personItemCls={personItemCls}
-          formatSubtitle={(row) =>
-            `${formatYmdToBr(row.dataInicial)} à ${formatYmdToBr(row.dataFinal)} — ${renderValueOrDash(toTrimmedString(row.numeroDias))} dia(s)`
-          }
+          formatSubtitle={(row) => {
+            const base = `${formatYmdToBr(row.dataInicial)} à ${formatYmdToBr(row.dataFinal)} — ${renderValueOrDash(toTrimmedString(row.numeroDias))} dia(s)`;
+            const codigo = toTrimmedString(row.codigoAtestado);
+            const obs = toTrimmedString(row.observacao);
+            return [base, codigo ? `Código: ${codigo}` : '', obs ? `Obs.: ${obs}` : '']
+              .filter(Boolean)
+              .join(' — ');
+          }}
           getAttachment={(row) => row.anexoAtestado ?? d.anexoAtestado}
         />
       </div>
@@ -571,6 +578,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
         ? parseObjectArray(d, 'horasExtras')
         : legacyEmployeeRows({
             datas: d.datas,
+            tipoHoraExtra: d.tipoHoraExtra,
             justificativa: d.justificativa,
             anexoAutorizacao: d.anexoAutorizacao,
           });
@@ -592,7 +600,14 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
                   ? formatDateTimeLocalToBr(rawDatas)
                   : '—';
             const just = toTrimmedString(row.justificativa);
-            return just ? `${periodo} — ${just}` : periodo;
+            const tipoRaw = toTrimmedString(row.tipoHoraExtra);
+            const tipo =
+              tipoRaw === 'PAGAMENTO'
+                ? 'Pagamento'
+                : tipoRaw === 'BANCO_HORAS'
+                  ? 'Banco de horas'
+                  : '';
+            return [tipo, periodo, just].filter(Boolean).join(' — ');
           }}
         />
       </div>

@@ -68,6 +68,7 @@ import {
   isAdmTstRequestType,
   STATUS_LABELS,
   submitRequesterReturn,
+  updateAtestadoDetails,
   URGENCY_LABELS,
   type DpEligibleCostCenter,
   type DpRequest,
@@ -308,6 +309,10 @@ type FormRow = {
   valores: string;
   observacoes: string;
   punicao: 'ADVERTENCIA' | 'SUSPENSAO';
+  /** Atestado: código (CID). */
+  codigoAtestado: string;
+  /** Hora extra: pagamento ou banco de horas. */
+  tipoHoraExtra: '' | 'PAGAMENTO' | 'BANCO_HORAS';
   tipoAviso: string;
   tipoRescisao: string;
   funcaoAntigo: string;
@@ -350,6 +355,8 @@ function emptyFormRow(employeeId = ''): FormRow {
     valores: '',
     observacoes: '',
     punicao: 'ADVERTENCIA',
+    codigoAtestado: '',
+    tipoHoraExtra: '',
     tipoAviso: '',
     tipoRescisao: '',
     funcaoAntigo: '',
@@ -472,6 +479,11 @@ export default function DpRequestsScreen() {
   const deferDetailToast = useDeferredToast(Boolean(detail));
   const [returnComment, setReturnComment] = useState('');
   const [returning, setReturning] = useState(false);
+  /** Atestado aberto: código e observação editáveis (um item por atestado). */
+  const [atestadoEdits, setAtestadoEdits] = useState<
+    Array<{ employeeId: string; codigoAtestado: string; observacao: string }>
+  >([]);
+  const [atestadoSaving, setAtestadoSaving] = useState<number | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const deferCreateToast = useDeferredToast(createOpen);
@@ -901,12 +913,17 @@ export default function DpRequestsScreen() {
           if (!row.dataInicial || !row.dataFinal || !row.numeroDias.trim()) {
             throw new Error(`Item ${i + 1}: informe o período e o nº de dias`);
           }
+          if (!row.codigoAtestado.trim()) {
+            throw new Error(`Item ${i + 1}: informe o código do atestado`);
+          }
           if (!row.attachment) throw new Error(`Item ${i + 1}: anexe o atestado`);
           return {
             employeeId: requireEmp(row, i),
             dataInicial: row.dataInicial,
             dataFinal: row.dataFinal,
             numeroDias: row.numeroDias.trim(),
+            codigoAtestado: row.codigoAtestado.trim(),
+            ...(row.observacoes.trim() ? { observacao: row.observacoes.trim() } : {}),
             anexoAtestado: row.attachment,
           };
         }),
@@ -919,9 +936,13 @@ export default function DpRequestsScreen() {
           if (!row.justificativa.trim() || !row.dataInicial || !row.dataFinal) {
             throw new Error(`Item ${i + 1}: informe justificativa e o período`);
           }
+          if (!row.tipoHoraExtra) {
+            throw new Error(`Item ${i + 1}: informe o tipo (pagamento ou banco de horas)`);
+          }
           if (!row.attachment) throw new Error(`Item ${i + 1}: anexe a autorização`);
           return {
             employeeId: requireEmp(row, i),
+            tipoHoraExtra: row.tipoHoraExtra,
             justificativa: row.justificativa.trim(),
             datas: `${row.dataInicial} - ${row.dataFinal}`,
             anexoAutorizacao: row.attachment,
@@ -1026,6 +1047,44 @@ export default function DpRequestsScreen() {
       notifyCreateError(e?.message || 'Falha ao criar');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Ao abrir um atestado, carrega código e observação para edição.
+  useEffect(() => {
+    if (!detail || detail.requestType !== 'ATESTADO_MEDICO') {
+      setAtestadoEdits([]);
+      return;
+    }
+    const d = (detail.details ?? {}) as Record<string, unknown>;
+    const list = Array.isArray(d.atestados) ? (d.atestados as Record<string, unknown>[]) : null;
+    setAtestadoEdits(
+      (list ?? [d]).map((r) => ({
+        employeeId: String(r.employeeId ?? ''),
+        codigoAtestado: String(r.codigoAtestado ?? ''),
+        observacao: String(r.observacao ?? ''),
+      })),
+    );
+  }, [detail]);
+
+  const saveAtestado = async (index: number) => {
+    if (!detail) return;
+    const row = atestadoEdits[index];
+    if (!row) return;
+    setAtestadoSaving(index);
+    try {
+      const details = await updateAtestadoDetails(detail.id, {
+        employeeId: row.employeeId || undefined,
+        codigoAtestado: row.codigoAtestado,
+        observacao: row.observacao,
+      });
+      if (details) setDetail((prev) => (prev ? { ...prev, details } : prev));
+      showAppToast({ type: 'success', text1: 'Atestado atualizado' });
+      await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
+    } catch (e: any) {
+      showAppToast({ type: 'error', text1: e?.message || 'Não foi possível atualizar o atestado' });
+    } finally {
+      setAtestadoSaving(null);
     }
   };
 
@@ -1202,6 +1261,13 @@ export default function DpRequestsScreen() {
                   <Text style={styles.cardRoute} numberOfLines={2}>
                     {DP_TYPE_LABELS[row.requestType] || row.requestType}
                   </Text>
+                  {row.colaboradoresNomes && row.colaboradoresNomes.length > 0 ? (
+                    <Text style={styles.cardSub} numberOfLines={1}>
+                      {row.colaboradoresNomes.length > 2
+                        ? `${row.colaboradoresNomes.slice(0, 2).join(', ')} +${row.colaboradoresNomes.length - 2}`
+                        : row.colaboradoresNomes.join(', ')}
+                    </Text>
+                  ) : null}
                   <View style={styles.cardFooter}>
                     <Text style={styles.cardMeta} numberOfLines={1}>
                       {destinationLabel(row.requestType)}
@@ -1298,6 +1364,20 @@ export default function DpRequestsScreen() {
                           {detail.polo || '—'}
                         </Text>
                       </View>
+                      {detail.requestType === 'HORA_EXTRA' && detail.dpResultado ? (
+                        <View style={styles.detailField}>
+                          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                            Atendimento da hora extra
+                          </Text>
+                          <Text style={[styles.detailValue, { color: colors.text }]}>
+                            {detail.dpResultado === 'PAGO_FINANCEIRO'
+                              ? 'Pago pelo financeiro'
+                              : detail.dpResultado === 'CREDITADO_BANCO'
+                                ? 'Creditado no banco de horas'
+                                : detail.dpResultado}
+                          </Text>
+                        </View>
+                      ) : null}
                       {detail.dpFeedback ? (
                         <View style={styles.detailField}>
                           <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
@@ -1350,6 +1430,61 @@ export default function DpRequestsScreen() {
                       </View>
                     ) : null}
     
+                    {detail.requestType === 'ATESTADO_MEDICO' &&
+                    detail.status !== 'CANCELLED' &&
+                    atestadoEdits.length > 0 ? (
+                      <View style={styles.detailsSection}>
+                        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>
+                          Código e observação do atestado
+                        </Text>
+                        {atestadoEdits.map((row, index) => (
+                          <View key={`${row.employeeId}-${index}`} style={{ marginBottom: 12 }}>
+                            {atestadoEdits.length > 1 ? (
+                              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                                {`Atestado ${index + 1}`}
+                              </Text>
+                            ) : null}
+                            <Field
+                              label="Código do atestado (CID)"
+                              value={row.codigoAtestado}
+                              onChange={(codigoAtestado) =>
+                                setAtestadoEdits((p) =>
+                                  p.map((r, i) => (i === index ? { ...r, codigoAtestado } : r)),
+                                )
+                              }
+                              styles={styles}
+                              colors={colors}
+                              isDark={isDark}
+                            />
+                            <Field
+                              label="Observação"
+                              value={row.observacao}
+                              onChange={(observacao) =>
+                                setAtestadoEdits((p) =>
+                                  p.map((r, i) => (i === index ? { ...r, observacao } : r)),
+                                )
+                              }
+                              styles={styles}
+                              colors={colors}
+                              isDark={isDark}
+                              multiline
+                            />
+                            <TouchableOpacity
+                              style={styles.primaryBtn}
+                              onPress={() => void saveAtestado(index)}
+                              disabled={atestadoSaving === index}
+                            >
+                              {atestadoSaving === index ? (
+                                <ActivityIndicator color="#fff" />
+                              ) : (
+                                <Text style={styles.primaryBtnText}>Salvar</Text>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+
                     {detail.status === 'WAITING_RETURN' ? (
                       <View style={styles.returnBox}>
                         <Text style={styles.returnTitle}>Sua pendência — responda ao DP</Text>
@@ -2117,6 +2252,25 @@ export default function DpRequestsScreen() {
                                   isDark={isDark}
                                   keyboardType="number-pad"
                                 />
+                                <Field
+                                  label="Código do atestado (CID)"
+                                  required
+                                  value={row.codigoAtestado}
+                                  onChange={(codigoAtestado) => updateRow(index, { codigoAtestado })}
+                                  styles={styles}
+                                  colors={colors}
+                                  isDark={isDark}
+                                  placeholder="Ex.: J11"
+                                />
+                                <Field
+                                  label="Observação"
+                                  value={row.observacoes}
+                                  onChange={(observacoes) => updateRow(index, { observacoes })}
+                                  styles={styles}
+                                  colors={colors}
+                                  isDark={isDark}
+                                  multiline
+                                />
                                 <AttachButton
                                   label={
                                     row.attachment
@@ -2138,6 +2292,25 @@ export default function DpRequestsScreen() {
 
                             {requestType === 'HORA_EXTRA' ? (
                               <>
+                                <FormFieldLabel label="Tipo da hora extra" required style={styles.fieldLabel} />
+                                <View style={styles.segRow}>
+                                  {(['PAGAMENTO', 'BANCO_HORAS'] as const).map((t) => (
+                                    <TouchableOpacity
+                                      key={t}
+                                      style={[styles.segBtn, row.tipoHoraExtra === t && styles.segBtnActive]}
+                                      onPress={() => updateRow(index, { tipoHoraExtra: t })}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.segText,
+                                          row.tipoHoraExtra === t && styles.segTextActive,
+                                        ]}
+                                      >
+                                        {t === 'PAGAMENTO' ? 'Pagamento' : 'Banco de horas'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
                                 <Field
                                   label="Justificativa"
                                   required

@@ -79,6 +79,9 @@ const atestadoItemSchema = z.object({
   dataInicial: str,
   dataFinal: str,
   numeroDias: numeroDiasField,
+  /** Código do atestado (CID). Opcional no servidor: atestados antigos e os do WhatsApp não têm. */
+  codigoAtestado: z.string().max(40).optional(),
+  observacao: z.string().max(1000).optional(),
   anexoAtestado: dpAttachmentSchema,
 });
 
@@ -88,8 +91,12 @@ const retificacaoItemSchema = z.object({
   justificativa: str,
 });
 
+export const TIPOS_HORA_EXTRA = ['PAGAMENTO', 'BANCO_HORAS'] as const;
+
 const horaExtraItemSchema = z.object({
   employeeIds: z.array(str).min(1).max(50),
+  /** Pagamento (financeiro paga) ou banco de horas (DP credita). Opcional: HE antigas não têm. */
+  tipoHoraExtra: z.enum(TIPOS_HORA_EXTRA).optional(),
   justificativa: str,
   datas: str,
   anexoAutorizacao: dpAttachmentSchema,
