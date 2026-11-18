@@ -329,6 +329,8 @@ export class ContractController {
       const rows = await prisma.userContractPermission.findMany({
         where: {
           contractId,
+          // Só quem tem a caixa «Liberado» marcada: a linha de permissão pode existir com tudo em "Não".
+          accessLiberado: true,
           user: { isActive: true },
         },
         select: {
