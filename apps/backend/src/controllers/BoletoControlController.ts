@@ -402,7 +402,8 @@ export class BoletoControlController {
       const [rows, total, sumAll, sumPago, sumVencer, sumVencido] = await Promise.all([
         prisma.boletoControlEntry.findMany({
           where,
-          orderBy: [{ costCenterName: { sort: 'asc', nulls: 'last' } }, { dueDate: 'desc' }, { createdAt: 'desc' }],
+          // Mais recente cadastrado primeiro. Boletos criados juntos (ex.: importação) desempatam por vencimento.
+          orderBy: [{ createdAt: 'desc' }, { dueDate: 'desc' }, { id: 'desc' }],
           skip: (page - 1) * limit,
           take: limit,
         }),
@@ -607,7 +608,10 @@ export class BoletoControlController {
   async importSpreadsheet(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.file) throw createError('Arquivo não enviado', 400);
-      const updateExisting = String(req.body?.updateExisting ?? '') === 'true';
+      // "Deixar igual à planilha" (deleteMissing) também atualiza as linhas existentes.
+      const deleteMissing = String(req.body?.deleteMissing ?? '') === 'true';
+      const previewOnly = String(req.body?.previewOnly ?? '') === 'true';
+      const updateExisting = deleteMissing || String(req.body?.updateExisting ?? '') === 'true';
 
       let parsed;
       try {
@@ -646,6 +650,40 @@ export class BoletoControlController {
           select: { importKey: true },
         });
         found.forEach((f) => f.importKey && existingKeys.add(f.importKey));
+      }
+
+      // Boletos do sistema que não estão na planilha (só calculado quando o usuário pediu para apagar).
+      let missing: Array<{ id: string; value: unknown; supplierName: string | null; costCenterName: string | null; nfNumber: string | null }> = [];
+      if (deleteMissing) {
+        // Linha da planilha que falhou na leitura não pode causar exclusão do boleto correspondente.
+        if (parsed.errors.length > 0) {
+          throw createError(
+            `A planilha tem ${parsed.errors.length} linha(s) com erro. Corrija antes de usar "Deixar igual à planilha", para não apagar boletos por engano.`,
+            400
+          );
+        }
+        const keySet = new Set(keys);
+        const all = await prisma.boletoControlEntry.findMany({
+          select: { id: true, importKey: true, value: true, supplierName: true, costCenterName: true, nfNumber: true },
+        });
+        missing = all.filter((a) => !a.importKey || !keySet.has(a.importKey));
+      }
+      if (previewOnly) {
+        res.json({
+          success: true,
+          data: {
+            preview: true,
+            wouldDelete: missing.length,
+            wouldDeleteValue: missing.reduce((sum, m) => sum + Number(m.value ?? 0), 0),
+            sample: missing.slice(0, 8).map((m) => ({
+              supplierName: m.supplierName,
+              costCenterName: m.costCenterName,
+              nfNumber: m.nfNumber,
+              value: Number(m.value ?? 0),
+            })),
+          },
+        });
+        return;
       }
 
       const toData = (e: (typeof parsed.entries)[number]) => ({
@@ -696,9 +734,20 @@ export class BoletoControlController {
         }
       }
 
+      let deleted = 0;
+      if (deleteMissing && missing.length) {
+        for (let i = 0; i < missing.length; i += 500) {
+          const dr = await prisma.boletoControlEntry.deleteMany({
+            where: { id: { in: missing.slice(i, i + 500).map((m) => m.id) } },
+          });
+          deleted += dr.count;
+        }
+      }
+
       res.json({
         success: true,
         data: {
+          deleted,
           read: parsed.entries.length,
           created,
           updated,
@@ -728,7 +777,8 @@ export class BoletoControlController {
       const stWhere = statusWhere(f.status, today);
       const rows = await prisma.boletoControlEntry.findMany({
         where: { AND: stWhere ? [...and, stWhere] : and },
-        orderBy: [{ costCenterName: { sort: 'asc', nulls: 'last' } }, { dueDate: 'asc' }, { createdAt: 'asc' }],
+        // Mesma ordem da lista: mais recente cadastrado primeiro.
+        orderBy: [{ createdAt: 'desc' }, { dueDate: 'desc' }, { id: 'desc' }],
       });
 
       const br = (d: Date | null) => {

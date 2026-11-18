@@ -17,11 +17,11 @@ const EXTRA_PAGE_TITLES: Record<
     category: 'Engenharia',
     href: '/ponto/relatorios-fotograficos',
   },
-  '/ponto/financeiro/dashboard-boletos': {
+  '/ponto/controle-boletos/dashboard': {
     title: 'Dashboard Boletos',
-    category: 'Financeiro',
-    parent: { label: 'Controle de Boletos', href: '/ponto/financeiro/controle-boletos' },
-    href: '/ponto/financeiro/dashboard-boletos',
+    category: 'Suprimentos',
+    parent: { label: 'Controle de Boletos', href: '/ponto/controle-boletos' },
+    href: '/ponto/controle-boletos/dashboard',
   },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
   '/ponto/avaliacoes-sistema': { title: 'Avaliações do Sistema', category: 'Principal' },

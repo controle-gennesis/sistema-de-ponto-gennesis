@@ -662,6 +662,48 @@ body::-webkit-scrollbar:vertical {
   }
 }
 
+/* Dashboards: colunas que crescem de baixo para cima, valores e linhas de tabela que aparecem em sequência */
+@keyframes chart-col-grow {
+  from {
+    transform: scaleY(0);
+    opacity: 0.35;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+.chart-col-grow {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation-name: chart-col-grow;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: backwards;
+}
+@keyframes chart-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.chart-fade-in {
+  animation: chart-fade-in 450ms ease-out backwards;
+}
+.chart-row-in {
+  animation: chart-fade-in 450ms ease-out backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-col-grow,
+  .chart-fade-in,
+  .chart-row-in {
+    animation: none;
+  }
+}
+
 /* Badge de mensagens não lidas (botão Conversas): pulinho leve a cada poucos segundos */
 @keyframes chat-unread-badge-nudge {
   0%,

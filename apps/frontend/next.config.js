@@ -40,6 +40,17 @@ const nextConfig = {
         destination: '/ponto/painel-do-sistema',
         permanent: true,
       },
+      // Controle de Boletos saiu de Financeiro e foi para Suprimentos: endereços antigos (favoritos, links salvos).
+      {
+        source: '/ponto/financeiro/controle-boletos',
+        destination: '/ponto/controle-boletos',
+        permanent: true,
+      },
+      {
+        source: '/ponto/financeiro/dashboard-boletos',
+        destination: '/ponto/controle-boletos/dashboard',
+        permanent: true,
+      },
       {
         source: '/ponto/espelho-nf/codigos-tributarios',
         destination: '/ponto/codigos-tributarios',

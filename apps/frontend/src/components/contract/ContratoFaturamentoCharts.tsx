@@ -40,6 +40,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { ContratoResumoGraficoMeta, visaoGeralKpis, type ContratoVisaoGeral } from './ContratoResumoVisaoGeral';
 import { formatCpfInput } from '@/lib/cpf';
 import api from '@/lib/api';
+import { FadeInTopLabel, growingColumnShape, useAnimatedNumber, type ChartLabelProps } from '@/lib/chartAnimation';
 
 export type ContratoFaturamentoInsightPoint = {
   label: string;
@@ -187,7 +188,8 @@ function ProgressoGaugeCard({
   const billedSafe = Math.max(0, Number(billed) || 0);
   const totalSafe = Math.max(0, Number(total) || 0);
   const pending = Math.max(0, totalSafe - billedSafe);
-  const pct = totalSafe > 0 ? Math.max(0, Math.min(100, (billedSafe / totalSafe) * 100)) : 0;
+  const pctTarget = totalSafe > 0 ? Math.max(0, Math.min(100, (billedSafe / totalSafe) * 100)) : 0;
+  const pct = useAnimatedNumber(pctTarget, 0, 1200);
   const pctRounded = Math.round(pct);
   const track = isDark ? '#374151' : '#e5e7eb';
   const hatch = isDark ? '#6b7280' : '#cbd5e1';
@@ -244,7 +246,7 @@ function ProgressoGaugeCard({
                   strokeWidth="32"
                   strokeLinecap="round"
                   pathLength={100}
-                  strokeDasharray={`${pendingLen} 100`}
+                  strokeDasharray={`${pendingLen} 1000`}
                   strokeDashoffset={-pct}
                 />
               ) : null}
@@ -256,7 +258,7 @@ function ProgressoGaugeCard({
                   strokeWidth="32"
                   strokeLinecap="round"
                   pathLength={100}
-                  strokeDasharray={`${pct} ${100 - pct}`}
+                  strokeDasharray={`${pct} 1000`}
                 />
               ) : null}
               {/* Caps hachurados nas pontas quando o pendente cobre as extremidades
@@ -304,6 +306,7 @@ function ProgressoGaugeCard({
 function FaturamentoProfitCard({ insight }: { insight: ContratoFaturamentoInsight }) {
   const { isDark } = useTheme();
   const uid = React.useId().replace(/:/g, '');
+  const totalShown = useAnimatedNumber(insight.total, 0, 1200);
   const deltaPct = useMemo(() => {
     if (insight.previousTotal === 0) {
       return insight.total > 0 ? 100 : 0;
@@ -328,7 +331,7 @@ function FaturamentoProfitCard({ insight }: { insight: ContratoFaturamentoInsigh
               Faturamento
             </h3>
             <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-gray-900 dark:text-gray-50 sm:text-3xl">
-              {formatCurrency(insight.total)}
+              {formatCurrency(totalShown)}
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
@@ -404,6 +407,8 @@ function FaturamentoProfitCard({ insight }: { insight: ContratoFaturamentoInsigh
               <Area
                 type="monotone"
                 dataKey="anterior"
+                animationDuration={1300}
+                animationEasing="ease-out"
                 stroke={anteriorStroke}
                 strokeWidth={2.5}
                 fill={`url(#fat-anterior-${uid})`}
@@ -418,6 +423,9 @@ function FaturamentoProfitCard({ insight }: { insight: ContratoFaturamentoInsigh
               <Area
                 type="monotone"
                 dataKey="atual"
+                animationBegin={200}
+                animationDuration={1300}
+                animationEasing="ease-out"
                 stroke={atualStroke}
                 strokeWidth={2.75}
                 fill={`url(#fat-atual-${uid})`}
@@ -582,7 +590,13 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
                   />
                 )}
               />
-              <Bar dataKey="value" radius={[10, 10, 4, 4]} maxBarSize={48} background={{ fill: 'transparent' }}>
+              <Bar
+                dataKey="value"
+                maxBarSize={48}
+                background={{ fill: 'transparent' }}
+                shape={growingColumnShape('value', 10)}
+                isAnimationActive={false}
+              >
                 {data.map((item) => (
                   <Cell
                     key={item.key}
@@ -593,12 +607,13 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
                 ))}
                 <LabelList
                   dataKey="value"
-                  position="top"
-                  offset={8}
-                  fill={labelFill}
-                  fontSize={11}
-                  fontWeight={600}
-                  formatter={(value) => formatCurrencyCompact(Number(value) || 0)}
+                  content={(labelProps) => (
+                    <FadeInTopLabel
+                      {...(labelProps as unknown as ChartLabelProps)}
+                      color={labelFill}
+                      format={(v) => formatCurrencyCompact(v)}
+                    />
+                  )}
                 />
               </Bar>
             </BarChart>
@@ -690,7 +705,8 @@ function SegmentedSemiGauge({
   const { isDark } = useTheme();
   const segments = 44;
   const clamped = Math.max(0, Math.min(100, percent));
-  const filledCount = Math.round((clamped / 100) * segments);
+  const clampedShown = useAnimatedNumber(clamped, 0, 1200);
+  const filledCount = Math.round((clampedShown / 100) * segments);
   const cx = 100;
   const cy = 108;
   const outerR = 86;
@@ -1090,18 +1106,23 @@ function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
               <Bar
                 dataKey="metaIdeal"
                 fill={`url(#meta-ideal-${uid})`}
-                radius={[6, 6, 0, 0]}
+                shape={growingColumnShape('metaIdeal', 6)}
+                isAnimationActive={false}
                 maxBarSize={16}
               />
               <Bar
                 dataKey="metaReal"
                 fill={`url(#meta-real-${uid})`}
-                radius={[6, 6, 0, 0]}
+                shape={growingColumnShape('metaReal', 6)}
+                isAnimationActive={false}
                 maxBarSize={16}
               />
               <Line
                 type="monotone"
                 dataKey="faturado"
+                animationBegin={500}
+                animationDuration={1200}
+                animationEasing="ease-out"
                 stroke="#2563eb"
                 strokeWidth={2.75}
                 dot={{ r: 3.5, fill: '#2563eb', strokeWidth: 2, stroke: '#fff' }}

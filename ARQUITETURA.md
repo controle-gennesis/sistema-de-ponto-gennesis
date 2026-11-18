@@ -330,7 +330,8 @@ usuário, criptografada), `GoogleCalendarConnection`.
 | Ordens de Compra | `ponto/ordem-de-compra` (`components/oc/OcPurchaseOrdersPanel.tsx`, ~8.000 linhas) |
 | Mapa de Cotação / Requisições | `ponto/mapa-cotacao`, `ponto/gerenciar-materiais`, `ponto/solicitar-materiais` |
 | Estoque / Entregas | `ponto/estoque`, `ponto/controle-entregas`, `ponto/entregas-logistica` |
-| Financeiro | `ponto/financeiro/controle-financeiro`, `.../controle-boletos`, `.../dashboard-boletos`, `.../receitas` |
+| Financeiro | `ponto/financeiro/controle-financeiro`, `ponto/financeiro/receitas` |
+| Controle de Boletos (menu Suprimentos) | `ponto/controle-boletos`, `ponto/controle-boletos/dashboard` |
 | Espelhos de NF | `ponto/espelho-nf`, `ponto/financeiro/espelhos-aprovados` |
 | Licitações / PNCP | `ponto/licitacoes`, `ponto/licitacoes-pncp` |
 | Responsáveis Técnicos / Anuidades / ARTs | `ponto/responsaveis-tecnicos`, `ponto/controle-anuidade`, `ponto/controle-pagamentos-art` |

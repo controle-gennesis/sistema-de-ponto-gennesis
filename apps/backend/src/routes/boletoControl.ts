@@ -9,13 +9,14 @@ const router = Router();
 const controller = new BoletoControlController();
 
 router.use(authenticate);
-router.use(requireModuleAccess(pathToModuleKey('/ponto/financeiro/controle-boletos')));
+router.use(requireModuleAccess(pathToModuleKey('/ponto/controle-boletos')));
 
 router.get('/options', (req, res, next) => controller.options(req, res, next));
 router.get('/dashboard', (req, res, next) => controller.dashboard(req, res, next));
-router.get('/managers', (req, res, next) => controller.listManagers(req, res, next));
-router.put('/managers', (req, res, next) => controller.upsertManager(req, res, next));
-router.delete('/managers/:id', (req, res, next) => controller.removeManager(req, res, next));
+// Gestores por centro de custo: só administrador (a tela também esconde o menu para os demais).
+router.get('/managers', requireAdministrator, (req, res, next) => controller.listManagers(req, res, next));
+router.put('/managers', requireAdministrator, (req, res, next) => controller.upsertManager(req, res, next));
+router.delete('/managers/:id', requireAdministrator, (req, res, next) => controller.removeManager(req, res, next));
 router.get('/export', requireAdministrator, (req, res, next) => controller.exportSpreadsheet(req, res, next));
 router.get('/', (req, res, next) => controller.list(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));
