@@ -358,16 +358,30 @@ async function fetchGoogleEventsForCalendar(
   return items;
 }
 
+const calendarMetaCache = new Map<
+  string,
+  { at: number; calendars: GoogleCalendarListEntry[]; colors: GoogleColorMaps }
+>();
+
 export async function syncGoogleCalendarEvents(
   userId: string,
   from: Date,
   to: Date
 ): Promise<{ imported: number; updated: number; skipped: number; calendars: number }> {
   const accessToken = await getValidAccessToken(userId);
-  const [calendars, colorMaps] = await Promise.all([
-    listGoogleCalendars(accessToken),
-    fetchGoogleColorMaps(accessToken),
-  ]);
+  // Lista de agendas e cores mudam raramente: guarda por 5 min para a sincronização de poucos
+  // segundos consultar só os eventos (poupa a cota da API do Google).
+  let meta = calendarMetaCache.get(userId);
+  if (!meta || Date.now() - meta.at > 5 * 60 * 1000) {
+    const [cals, cols] = await Promise.all([
+      listGoogleCalendars(accessToken),
+      fetchGoogleColorMaps(accessToken),
+    ]);
+    meta = { at: Date.now(), calendars: cals, colors: cols };
+    calendarMetaCache.set(userId, meta);
+  }
+  const calendars = meta.calendars;
+  const colorMaps = meta.colors;
 
   let imported = 0;
   let updated = 0;
@@ -398,6 +412,14 @@ export async function syncGoogleCalendarEvents(
       });
 
       if (existing) {
+        // Só grava se algo mudou (a sincronização roda a cada 30 s; não regrava tudo à toa).
+        const unchanged =
+          existing.title === title &&
+          (existing.description ?? '') === description &&
+          existing.startAt.getTime() === times.startAt.getTime() &&
+          existing.endAt.getTime() === times.endAt.getTime() &&
+          existing.color === color;
+        if (unchanged) continue;
         await prisma.plannerEvent.update({
           where: { id: existing.id },
           data: {
