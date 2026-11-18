@@ -811,11 +811,16 @@ export class DpRequestController {
       try {
       created = await prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${DP_DISPLAY_NUMBER_ADVISORY_LOCK})`);
-        const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
+        // Contabilidade e Solicitações Internas têm cada uma a sua numeração.
+        const agg = await tx.dpRequest.aggregate({
+          where: { contabDireta: isAccountingDirect },
+          _max: { displayNumber: true },
+        });
         const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
         return tx.dpRequest.create({
           data: {
             displayNumber: nextDisplay,
+            contabDireta: isAccountingDirect,
             employeeId: employee.id,
             urgency: validated.urgency,
             requestType: validated.requestType,

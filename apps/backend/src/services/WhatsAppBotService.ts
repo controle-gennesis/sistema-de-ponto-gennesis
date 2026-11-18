@@ -679,7 +679,7 @@ export class WhatsAppBotService {
 
     await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lock})`);
-      const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
+      const agg = await tx.dpRequest.aggregate({ where: { contabDireta: false }, _max: { displayNumber: true } });
       const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
       await tx.dpRequest.create({
         data: {

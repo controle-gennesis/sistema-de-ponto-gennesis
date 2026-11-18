@@ -815,7 +815,11 @@ model DpRequest {
   messageReads  DpRequestCommentRead[]
   attachments   DpRequestAttachment[]
   /// NÃºmero legÃ­vel sequencial (1, 2, 3â¦) para exibiÃ§Ã£o e busca.
-  displayNumber Int    @unique
+  displayNumber Int
+  /// true = solicitação direta da Contabilidade: tem numeração própria (1, 2, 3…), separada das internas.
+  contabDireta Boolean @default(false)
+  /// Número que a solicitação tinha antes de a Contabilidade ganhar numeração própria.
+  displayNumberLegacy Int?
 
   // Solicitante
   employeeId String
@@ -876,6 +880,7 @@ model DpRequest {
   @@index([employeeId])
   @@index([status])
   @@index([costCenterId])
+  @@unique([contabDireta, displayNumber])
   @@map("dp_requests")
 }
 
