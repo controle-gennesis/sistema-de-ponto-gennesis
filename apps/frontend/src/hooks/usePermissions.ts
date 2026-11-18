@@ -180,6 +180,7 @@ export function usePermissions() {
     resumo: boolean;
     fluig?: boolean;
     obras?: boolean;
+    comprador?: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};

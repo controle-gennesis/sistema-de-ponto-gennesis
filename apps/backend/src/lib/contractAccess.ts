@@ -120,6 +120,19 @@ export async function getAssignedContractIds(
 }
 
 /**
+ * Contratos em que a pessoa é Comprador (coluna «Comprador» nas permissões).
+ * Vale só para ver RMs e OCs no Mapa de Cotação — não libera a ficha do contrato.
+ */
+export async function getCompradorContractIds(userId: string, isAdmin: boolean): Promise<string[]> {
+  if (isAdmin) return [];
+  const rows = await prisma.userContractPermission.findMany({
+    where: { userId, accessComprador: true },
+    select: { contractId: true },
+  });
+  return rows.map((r) => r.contractId);
+}
+
+/**
  * CCs dos contratos explicitamente liberados.
  * `null` = não restringir (admin ou sem contratos cadastrados).
  */

@@ -78,6 +78,7 @@ type ContractPermRow = {
   accessResumo: boolean;
   accessFluig: boolean;
   accessObras: boolean;
+  accessComprador: boolean;
 };
 
 async function loadUserContractPermissionRows(userId: string): Promise<ContractPermRow[]> {
@@ -98,6 +99,7 @@ async function loadUserContractPermissionRows(userId: string): Promise<ContractP
         ...(canPleitosFat ? { accessPleitos: true, accessFaturamento: true, accessResumo: true } : {}),
         ...(prismaModelHasField('UserContractPermission', 'accessFluig') ? { accessFluig: true } : {}),
         ...(prismaModelHasField('UserContractPermission', 'accessObras') ? { accessObras: true } : {}),
+        ...(prismaModelHasField('UserContractPermission', 'accessComprador') ? { accessComprador: true } : {}),
       },
     })
   );
@@ -128,6 +130,7 @@ async function loadUserContractPermissionRows(userId: string): Promise<ContractP
     accessObras: canPleitosFat
       ? Boolean((r as { accessObras?: boolean }).accessObras === true)
       : false,
+    accessComprador: Boolean((r as { accessComprador?: boolean }).accessComprador === true),
   }));
 }
 
@@ -145,6 +148,7 @@ function contractFlagsFromRows(rows: ContractPermRow[]) {
       resumo: boolean;
       fluig: boolean;
       obras: boolean;
+      comprador: boolean;
     }
   > = {};
   for (const r of rows) {
@@ -159,6 +163,7 @@ function contractFlagsFromRows(rows: ContractPermRow[]) {
       resumo: r.accessResumo,
       fluig: r.accessFluig,
       obras: r.accessObras,
+      comprador: r.accessComprador,
     };
   }
   return contractModuleFlags;
@@ -578,6 +583,8 @@ router.get('/contract-users', requirePermissionManagerOrAdministrator, async (re
       where: {
         userId: { in: userIds },
         contractId,
+        // Só quem tem o contrato Liberado (a linha pode existir só com Comprador, por exemplo).
+        accessLiberado: true,
       },
       select: { userId: true },
     });
@@ -801,6 +808,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       resumo?: boolean;
       fluig?: boolean;
       obras?: boolean;
+      comprador?: boolean;
     };
     const rawModuleFlags: Record<string, ContractFlags> =
       req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
@@ -866,7 +874,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
               flags?.reunioes ||
               flags?.pleitos ||
               flags?.faturamento ||
-              flags?.resumo
+              flags?.resumo ||
+              flags?.comprador
           )
         )
         .map(([id]) => id);
@@ -1099,6 +1108,9 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
                   : {}),
                 ...(prismaModelHasField('UserContractPermission', 'accessObras')
                   ? { accessObras: flags.obras === true }
+                  : {}),
+                ...(prismaModelHasField('UserContractPermission', 'accessComprador')
+                  ? { accessComprador: flags.comprador === true }
                   : {}),
               };
             }),

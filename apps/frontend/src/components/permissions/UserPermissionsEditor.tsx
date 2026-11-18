@@ -69,6 +69,8 @@ type ContractModuleFlags = {
   resumo: boolean;
   fluig: boolean;
   obras: boolean;
+  /** Comprador: vê as RMs e OCs do contrato só no Mapa de Cotação, sem precisar do Liberado. */
+  comprador: boolean;
 };
 
 const emptyContractModuleFlags = (): ContractModuleFlags => ({
@@ -80,6 +82,7 @@ const emptyContractModuleFlags = (): ContractModuleFlags => ({
   resumo: false,
   fluig: false,
   obras: false,
+  comprador: false,
 });
 
 /** Quem tinha a coluna Orçamento antiga passa a ter Ver em Orçamentos na matriz Acesso. */
@@ -197,7 +200,7 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .sort()
     .map((id) => {
       const f = flags[id];
-      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}${f.obras ? 1 : 0}`;
+      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}${f.obras ? 1 : 0}${f.comprador ? 1 : 0}`;
     })
     .join(',');
 }
@@ -1654,7 +1657,8 @@ export function UserPermissionsEditor({
 
   const setContractModuleFlag = (contractId: string, key: keyof ContractModuleFlags, value: boolean) => {
     // Flags por contrato exigem Liberado — escopo operacional unificado.
-    if (value) {
+    // Exceção: Comprador existe justamente para NÃO exigir o Liberado (só vale no Mapa de Cotação).
+    if (value && key !== 'comprador') {
       setSelectedContractIds((prev) => new Set(prev).add(contractId));
     }
     setContractModuleFlags((prev) => {
@@ -1669,7 +1673,8 @@ export function UserPermissionsEditor({
         !nextFlags.faturamento &&
         !nextFlags.resumo &&
         !nextFlags.fluig &&
-        !nextFlags.obras
+        !nextFlags.obras &&
+        !nextFlags.comprador
       ) {
         const next = { ...prev };
         delete next[contractId];
@@ -2685,6 +2690,13 @@ export function UserPermissionsEditor({
                         >
                           Obras
                         </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Vê as RMs e OCs deste contrato só no Mapa de Cotação, sem precisar do Liberado"
+                        >
+                          Comprador
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
@@ -2832,6 +2844,15 @@ export function UserPermissionsEditor({
                                   checked={flags.obras}
                                   onCheckedChange={(next) => setContractModuleFlag(c.id, 'obras', next)}
                                   aria-label={`Obras — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.comprador === true}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'comprador', next)}
+                                  aria-label={`Comprador — ${c.name}`}
                                 />
                               </div>
                             </td>
