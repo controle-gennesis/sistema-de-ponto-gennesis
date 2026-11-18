@@ -885,6 +885,16 @@ export class KanbanService {
     throw new Error(KANBAN_FORBIDDEN);
   }
 
+  /** Usado pelo canal em tempo real: o usuário pode ver este quadro? (mesma regra das rotas) */
+  async userCanReadBoard(userId: string, boardId: string): Promise<boolean> {
+    const board = await prisma.kanbanBoard.findUnique({
+      where: { id: boardId },
+      select: this.boardAccessSelect,
+    });
+    if (!board) return false;
+    return (await this.resolveBoardAccessForUser(userId, board)).canRead;
+  }
+
   private async assertBoardAccessByKey(
     userId: string,
     departmentKey: string,

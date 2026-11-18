@@ -5,6 +5,7 @@ import { ChatType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ChatService } from '../services/ChatService';
 import { registerOrcamentoSocket } from './orcamentoPresence';
+import { registerKanbanSocket } from './kanbanPresence';
 
 const chatService = new ChatService();
 
@@ -329,6 +330,10 @@ export function attachCallSignaling(server: Server): void {
       ws.userId = decoded.id;
       if (url.searchParams.get('channel') === 'orcamento') {
         void registerOrcamentoSocket(ws, decoded.id, url);
+        return;
+      }
+      if (url.searchParams.get('channel') === 'kanban') {
+        void registerKanbanSocket(ws, decoded.id, url);
         return;
       }
       if (isUpdatesChannel) {

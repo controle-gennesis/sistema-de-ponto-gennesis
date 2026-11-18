@@ -4,11 +4,14 @@ import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { KanbanController } from '../controllers/KanbanController';
 import { authenticate, requireAdministrator } from '../middleware/auth';
+import { kanbanChangeNotifier } from '../realtime/kanbanPresence';
 
 const router = Router();
 const controller = new KanbanController();
 
 router.use(authenticate);
+// Depois de qualquer alteração, avisa quem está com o quadro aberto (atualização ao vivo).
+router.use(kanbanChangeNotifier);
 
 router.get('/boards', (req, res, next) => controller.listBoards(req, res, next));
 router.post('/boards', (req, res, next) => controller.createBoard(req, res, next));
