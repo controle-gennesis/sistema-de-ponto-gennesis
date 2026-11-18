@@ -1117,14 +1117,33 @@ export class DriveService {
   }
 
   async getStorageUsage(userId: string): Promise<{ usedBytes: number; quotaBytes: number }> {
-    const agg = await prisma.driveFile.aggregate({
-      where: { ownerId: userId, ...NOT_TRASHED },
-      _sum: { size: true },
-    });
-    return {
-      usedBytes: agg._sum.size ?? 0,
-      quotaBytes: DRIVE_QUOTA_BYTES,
-    };
+    // Conta os arquivos do usuário e também os de dentro das pastas que ele é dono
+    // (mesmo que o arquivo tenha sido enviado/registrado por outro dono), igual ao tamanho exibido nas pastas.
+    try {
+      const rows = await prisma.$queryRaw<Array<{ total: bigint | number | null }>>`
+        WITH RECURSIVE tree AS (
+          SELECT id FROM drive_folders WHERE "ownerId" = ${userId} AND "trashedAt" IS NULL
+          UNION
+          SELECT c.id FROM drive_folders c
+          JOIN tree t ON c."parentId" = t.id
+          WHERE c."trashedAt" IS NULL
+        )
+        SELECT COALESCE(SUM(fl."size"), 0)::bigint AS total
+        FROM drive_files fl
+        WHERE fl."trashedAt" IS NULL
+          AND (fl."ownerId" = ${userId} OR fl."folderId" IN (SELECT id FROM tree))`;
+      return {
+        usedBytes: Number(rows[0]?.total ?? 0),
+        quotaBytes: DRIVE_QUOTA_BYTES,
+      };
+    } catch (err) {
+      console.error('[drive] falha ao calcular armazenamento', err);
+      const agg = await prisma.driveFile.aggregate({
+        where: { ownerId: userId, ...NOT_TRASHED },
+        _sum: { size: true },
+      });
+      return { usedBytes: agg._sum.size ?? 0, quotaBytes: DRIVE_QUOTA_BYTES };
+    }
   }
 
   async setFolderStarred(id: string, userId: string, starred: boolean) {
