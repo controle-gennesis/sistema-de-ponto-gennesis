@@ -140,7 +140,19 @@ async function getValidAccessToken(userId: string): Promise<string> {
 
   if (!needsRefresh) return conn.accessToken;
 
-  const tokens = await refreshAccessToken(conn.refreshToken);
+  let tokens: TokenResponse;
+  try {
+    tokens = await refreshAccessToken(conn.refreshToken);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    // O Google recusou o acesso guardado (venceu ou foi revogado): a conexão não volta sozinha.
+    // Remove para a tela voltar a mostrar "Conectar" em vez de parecer conectada e não sincronizar.
+    if (/bad request|invalid_grant|expired|revoked/i.test(msg)) {
+      await prisma.googleCalendarConnection.deleteMany({ where: { userId } });
+      throw new Error('Acesso ao Google Agenda venceu. Conecte novamente.');
+    }
+    throw e;
+  }
   await saveGoogleTokens(userId, tokens, conn.refreshToken);
   return tokens.access_token;
 }
