@@ -157,7 +157,42 @@ export class StockShortfallService {
   async syncForOrderNumber(orderNumber: string): Promise<void> {
     const trimmed = orderNumber.trim();
     if (!trimmed) return;
+    // Várias entradas da mesma OC chegam juntas: os recálculos rodam um depois do outro,
+    // para o último enxergar todas as entradas (senão um furo velho pode sobrar).
+    const prev = this.syncChains.get(trimmed) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.syncForOrderNumberNow(trimmed));
+    this.syncChains.set(trimmed, next);
+    try {
+      await next;
+    } finally {
+      if (this.syncChains.get(trimmed) === next) this.syncChains.delete(trimmed);
+    }
+  }
 
+  private syncChains = new Map<string, Promise<void>>();
+  private lastOpenRefreshAt = 0;
+
+  /** Reconfere as OCs com furo aberto (poucas), para limpar registros que já foram totalmente recebidos. */
+  private async refreshOpenOrders(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastOpenRefreshAt < 15_000) return;
+    this.lastOpenRefreshAt = now;
+    const rows = await prisma.stockShortfall.findMany({
+      where: { status: StockShortfallStatus.ABERTO },
+      select: { orderNumber: true },
+      distinct: ['orderNumber'],
+      take: 100
+    });
+    for (const r of rows) {
+      try {
+        await this.syncForOrderNumber(r.orderNumber);
+      } catch (err) {
+        console.error('[StockShortfall] refreshOpenOrders', r.orderNumber, err);
+      }
+    }
+  }
+
+  private async syncForOrderNumberNow(trimmed: string): Promise<void> {
     const po = await prisma.purchaseOrder.findUnique({
       where: { orderNumber: trimmed },
       include: {
@@ -479,6 +514,9 @@ export class StockShortfallService {
     skipRebuild?: boolean;
   }) {
     /** Rebuild/sync fica nas mutações de estoque — GET de listagem deve ser rápido. */
+    if (!params.skipRebuild && params.status !== 'RESOLVIDO') {
+      await this.refreshOpenOrders();
+    }
     const limit = Math.min(params.limit ?? 200, 500);
     const where: Prisma.StockShortfallWhereInput = {};
 
