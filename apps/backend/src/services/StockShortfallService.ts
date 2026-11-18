@@ -211,6 +211,14 @@ export class StockShortfallService {
       where: { isActive: true },
       select: { id: true, name: true, unit: true, category: true }
     });
+    // Cadastros duplicados (mesmo nome, ids diferentes): a entrada pode ter sido lançada em qualquer um deles.
+    const idsByNormName = new Map<string, string[]>();
+    for (const cm of await prisma.constructionMaterial.findMany({ select: { id: true, name: true } })) {
+      const k = normalizeMaterialName(cm.name);
+      const arr = idsByNormName.get(k) ?? [];
+      arr.push(cm.id);
+      idsByNormName.set(k, arr);
+    }
     const cmByNormName = new Map<string, ConstructionMaterialRef>();
     const cmById = new Map<string, ConstructionMaterialRef>();
     for (const cm of constructionMaterials) {
@@ -242,7 +250,11 @@ export class StockShortfallService {
       if (!label) continue;
       const ordered = Number(item.quantity);
       if (!Number.isFinite(ordered) || ordered <= 0) continue;
-      const received = sumByConstructionMaterial.get(cm.id) || 0;
+      const sameNameIds = idsByNormName.get(normalizeMaterialName(cm.name)) ?? [cm.id];
+      const received = [...new Set([cm.id, ...sameNameIds])].reduce(
+        (sum, id) => sum + (sumByConstructionMaterial.get(id) || 0),
+        0
+      );
       const gap = Math.max(0, Math.round((ordered - received) * 1000) / 1000);
       lines.push({
         constructionMaterialId: cm.id,
