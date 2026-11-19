@@ -40,13 +40,16 @@ function acharColuna(keys: string[], padroes: RegExp[]): string | null {
 
 /** Mesmos rótulos da tela Gestão de Solicitações (Fluig). */
 function rotuloEtapaG3(bruto: string): string {
+  // Às vezes o espelho traz só o número da atividade do G3 (sem nome).
+  if (/^\s*(Etapa\s*)?4\s*$/i.test(bruto)) return 'Aprovação da Diretoria';
   if (/Etapa\s*108\b/i.test(bruto)) return 'Análise Controladoria';
   if (/Etapa\s*117\b/i.test(bruto)) return 'Validação de Frete';
   if (/Etapa\s*10\b/i.test(bruto)) return 'Finalizada';
   const l = normalizar(bruto);
   if (/gestor\s+de\s+compras/.test(l) || /aprovacao\s+do\s+compras/.test(l)) return 'Aprovação do Compras';
   if (/setor\s+tecnico/.test(l)) return 'Aprovação do Setor Técnico';
-  if (/diretoria/.test(l)) return 'Aprovação da Diretoria';
+  if (/diretoria|\bdir\b\.?/.test(l)) return 'Aprovação da Diretoria';
+  if (/gestor\s+do\s+contrato|gestor\s+de\s+contrato/.test(l)) return 'Aprovação do Gestor do Contrato';
   if (/estoque/.test(l)) return 'Aprovação de Estoque';
   if (/recotacao/.test(l)) return 'Recotação';
   if (/finalizada/.test(l)) return 'Finalizada';
@@ -93,7 +96,14 @@ async function fasesDoDataset(
     const etapaCol = acharColuna(keys, [/^etapa_?atual$/i, /^fase_?atual$/i, /^status$/i]);
     if (!idCol || !etapaCol) continue;
     const idMov = Number(textoCelula(row[idCol]).replace(/\D/g, ''));
-    const etapa = textoCelula(row[etapaCol]);
+    let etapa = textoCelula(row[etapaCol]);
+    // Etapa só com o número da atividade: usa o nome do status da aprovação do próprio processo no Fluig.
+    if (/^\s*(Etapa\s*)?\d+\s*$/i.test(etapa)) {
+      // Só colunas "status ... aprov" (ex.: Status da Aprovação) — nunca "Data da Aprovação".
+      const statusAprovCol = acharColuna(keys, [/^status[\s_-]*(da[\s_-]*)?aprov/i, /status.*aprov/i]);
+      const nome = statusAprovCol ? textoCelula(row[statusAprovCol]) : '';
+      if (nome && !/^\s*\d+\s*$/.test(nome) && !/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(nome)) etapa = nome;
+    }
     if (!Number.isInteger(idMov) || idMov <= 0 || !etapa) continue;
     fases.set(idMov, rotulo(etapa));
   }

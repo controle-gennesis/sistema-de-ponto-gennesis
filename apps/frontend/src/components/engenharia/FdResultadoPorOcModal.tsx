@@ -8,7 +8,7 @@ import api from '@/lib/api';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import type { FdInsumoLine } from '@/components/engenharia/FdPedidoMaterialModal';
 import {
-  OC_STATUS,
+  statusOcResumo,
   fmtMoeda,
   type ItemResumo,
   type OcPagaResumo,
@@ -67,11 +67,7 @@ export type BlocoOc = {
 type ItemSemOc = { fdItemKey: string; fdItem: string; descricao: string; orcado: number; rms: string[] };
 
 function faseDaOc(oc: OcResumo): string {
-  if (oc.fluigFase?.etapa) {
-    if (oc.fluigFase.fluxo === 'G4' && oc.fluigFase.etapa === 'Finalizada') return 'Pagamento finalizado';
-    return oc.fluigFase.etapa;
-  }
-  return OC_STATUS[oc.status] ?? oc.status;
+  return statusOcResumo(oc);
 }
 
 /** Monta o resultado por OC: orçado do item da FD repartido pelo custo de cada OC no item. */

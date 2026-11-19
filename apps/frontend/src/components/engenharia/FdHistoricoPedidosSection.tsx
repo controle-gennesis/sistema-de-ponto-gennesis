@@ -6,7 +6,7 @@ import { ClipboardList, FileText, History, Loader2, ShoppingCart } from 'lucide-
 import api from '@/lib/api';
 import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import {
-  OC_STATUS,
+  statusOcResumo,
   RM_STATUS,
   ocsEnviadasTotvs,
   type ItemResumo,
@@ -158,7 +158,7 @@ export function FdHistoricoPedidosSection({
                                 OC {formatOcListDisplayId(oc.orderNumber)}
                               </p>
                               <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                {OC_STATUS[oc.status] ?? oc.status}
+                                {statusOcResumo(oc)}
                               </p>
                             </div>
                           </div>

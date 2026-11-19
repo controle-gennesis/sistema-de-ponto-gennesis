@@ -127,6 +127,8 @@ import {
 } from '@/components/oc/ocPaymentBoleto';
 import {
   purchaseOrderPhaseLabel,
+  etapaFluigDaOc,
+  type OcFluigFase,
 } from '@/components/oc/ocStatusLabels';
 import {
   isOcFluxoDiretoTotvs,
@@ -240,6 +242,8 @@ export interface PurchaseOrder {
   stockLocation?: { id?: string | null; code?: string | null; name?: string | null } | null;
   totvsDestination?: string | null;
   totvsIdMov?: number | null;
+  /** Etapa atual no Fluig (G3/G4), pelo espelho — OC enviada ao TOTVS. */
+  fluigFase?: OcFluigFase | null;
   totvsNumMovimento?: string | null;
   /** OC reaberta para ajuste e reenvio ao TOTVS (ex.: cancelada no Fluig). */
   totvsResendOpenAt?: string | null;
@@ -7278,6 +7282,12 @@ export function OcPurchaseOrdersPanel({
                       {selectedOrder.totvsNumMovimento
                         ? ` · ${selectedOrder.totvsNumMovimento}`
                         : ''}
+                      {etapaFluigDaOc(selectedOrder) ? (
+                        <span className="mt-0.5 block text-xs font-semibold text-emerald-900 dark:text-emerald-100">
+                          {selectedOrder.fluigFase?.fluxo === 'G4' ? 'Fluig G4 (pagamento)' : 'Fluig G3 (aprovação)'}:{' '}
+                          {etapaFluigDaOc(selectedOrder)}
+                        </span>
+                      ) : null}
                       {(selectedOrder.totvsPreviousMovs || []).length > 0 ? (
                         <span className="mt-0.5 block text-xs font-normal text-emerald-700/80 dark:text-emerald-300/80">
                           IdMov anteriores:{' '}

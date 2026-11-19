@@ -842,6 +842,42 @@ export interface UpdatePurchaseOrderDetailsData {
 /** Histórico da OC: até 500 caracteres (vai para o TOTVS em TMOVHISTORICO.HISTORICOLONGO). */
 export const OC_HISTORICO_MAX = 500;
 
+function formatBrl(n: number): string {
+  return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Dilui o desconto da OC nos preços unitários (proporcional ao valor de cada item), com 4 casas.
+ * A sobra de arredondamento vai para o item de menor quantidade, para o total bater com o mapa.
+ */
+export function diluirDescontoNosItens<T extends { quantidade: number; precoUnitario: number }>(
+  itens: T[],
+  desconto: number
+): { items: T[]; aplicado: boolean; desconto: number; totalOriginal: number; totalComDesconto: number } {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
+  const totalOriginal = r2(itens.reduce((s, it) => s + it.quantidade * it.precoUnitario, 0));
+  const d = r2(Number(desconto) || 0);
+  if (!(d > 0) || !(totalOriginal > 0) || d >= totalOriginal) {
+    return { items: itens, aplicado: false, desconto: 0, totalOriginal, totalComDesconto: totalOriginal };
+  }
+  const alvo = r2(totalOriginal - d);
+  const fator = alvo / totalOriginal;
+  const novos = itens.map((it) => ({ ...it, precoUnitario: r4(it.precoUnitario * fator) }));
+  const soma = novos.reduce((s, it) => s + it.quantidade * it.precoUnitario, 0);
+  const sobra = alvo - soma;
+  if (Math.abs(sobra) >= 0.00005 && novos.length > 0) {
+    let idx = 0;
+    novos.forEach((it, i) => {
+      if (it.quantidade < novos[idx].quantidade) idx = i;
+    });
+    const ajustado = r4(novos[idx].precoUnitario + sobra / novos[idx].quantidade);
+    if (ajustado > 0) novos[idx] = { ...novos[idx], precoUnitario: ajustado };
+  }
+  const totalComDesconto = r2(novos.reduce((s, it) => s + it.quantidade * it.precoUnitario, 0));
+  return { items: novos, aplicado: true, desconto: d, totalOriginal, totalComDesconto };
+}
+
 function limitarHistoricoOc(texto: string | null | undefined): string | null {
   const t = String(texto ?? '').trim();
   if (!t) return null;
@@ -2696,9 +2732,22 @@ export class PurchaseOrderService {
       filial,
       codLoc,
       valorFrete,
-      items,
+      items: itensOriginais,
       bancoAgPix,
     } = prep.dados;
+
+    // Desconto da OC: o 1.1.26 não usa TMOV.VALORDESC, então vai diluído nos preços dos itens (frete fica igual).
+    // Os preços originais continuam na OC do Conecta; no TOTVS o histórico registra original × com desconto.
+    const desconto = Number((order as { discountAmount?: unknown }).discountAmount ?? 0);
+    const diluicao = diluirDescontoNosItens(itensOriginais, desconto);
+    const items = diluicao.items;
+    const historicoBase = (order.historico || '').trim();
+    const registroDesconto = diluicao.aplicado
+      ? `Desconto de ${formatBrl(diluicao.desconto)} diluído nos preços dos itens. ` +
+        `Valor original dos itens: ${formatBrl(diluicao.totalOriginal)}; com desconto: ${formatBrl(diluicao.totalComDesconto)}` +
+        (Number(valorFrete) > 0 ? ` (+ frete ${formatBrl(Number(valorFrete))}).` : '.')
+      : '';
+    const historicoTotvs = [historicoBase, registroDesconto].filter(Boolean).join('\n\n') || null;
 
     const totvsCreds = await userTotvsCredentialService.getCredentialsForUser(userId);
     if (!totvsCreds) {
@@ -2727,7 +2776,7 @@ export class PurchaseOrderService {
         dataEmissao: order.orderDate,
         dataEntrega: order.expectedDelivery,
         observacao: order.notes,
-        historico: (order.historico || '').trim() || null,
+        historico: historicoTotvs,
         bancoAgPix: bancoAgPix || null,
         items,
       },

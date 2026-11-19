@@ -707,8 +707,8 @@ export function MaterialRequestsRmList({
                   </Link>
                 )}
               {(requestForMenu.status === 'IN_REVIEW' ||
-                // Administrador cancela a RM em qualquer fase.
-                (isAdministrator && requestForMenu.status !== 'CANCELLED')) &&
+                // Cancelar RM só antes da aprovação do gestor (Pendente) ou em correção.
+                requestForMenu.status === 'PENDING') &&
                 canUserCancelMaterialRequest(
                   requestForMenu,
                   currentUserId,

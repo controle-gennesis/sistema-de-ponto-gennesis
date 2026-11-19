@@ -33,6 +33,8 @@ export type MaterialRequestOcListRow = {
   /** Dica ao passar o mouse (ex.: fluxo do Fluig). */
   statusTitle?: string;
   statusBadgeClassName: string;
+  /** IdMov do TOTVS (OC já enviada ao RM). */
+  totvsIdMov?: number | null;
 };
 
 const RM_POST_APPROVAL = new Set(['APPROVED', 'PARTIALLY_FULFILLED', 'FULFILLED']);
@@ -124,7 +126,8 @@ export function materialRequestOcListRows(
         idTitle: fullNumber || undefined,
         status: totvs.status,
         statusTitle: totvs.title,
-        statusBadgeClassName: totvs.badge
+        statusBadgeClassName: totvs.badge,
+        totvsIdMov: po.totvsIdMov ?? null
       };
     }
     return {

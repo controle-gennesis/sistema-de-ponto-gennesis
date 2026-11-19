@@ -28,9 +28,36 @@ export function purchaseOrderPhaseLabel(status: string): string {
  * Rótulo de fase alinhado às abas do fluxo OC.
  * `APPROVED` + ainda em Anexar Boleto → "Anexar Boleto" (não "Pagamento").
  */
+export type OcFluigFase = { fluxo: 'G3' | 'G4'; etapa: string };
+
+/**
+ * Etapa da OC enviada ao TOTVS conforme o Fluig (G3 aprovação / G4 pagamento), lida do espelho.
+ * Cancelada/reprovada no Conecta ou sem fase no espelho: null (vale o status do Conecta).
+ */
+export function etapaFluigDaOc(order: {
+  status?: string | null;
+  fluigFase?: OcFluigFase | null;
+}): string | null {
+  if (order.status === 'CANCELLED' || order.status === 'REJECTED') return null;
+  const fase = order.fluigFase;
+  if (!fase?.etapa) return null;
+  if (fase.fluxo === 'G4' && /finalizad/i.test(fase.etapa)) return 'Pagamento finalizado';
+  return fase.etapa;
+}
+
+/** Rótulo da OC: etapa do Fluig quando a OC está no TOTVS/Fluig; senão o status do Conecta. */
+export function ocStatusLabelComFluig(order: {
+  status: string;
+  fluigFase?: OcFluigFase | null;
+}): string {
+  return etapaFluigDaOc(order) ?? purchaseOrderPhaseLabel(order.status);
+}
+
 export function purchaseOrderPhaseLabelForOrder(
-  order: OrderBoletoPhasePick & { status: string }
+  order: OrderBoletoPhasePick & { status: string; fluigFase?: OcFluigFase | null }
 ): string {
+  const etapaFluig = etapaFluigDaOc(order);
+  if (etapaFluig) return etapaFluig;
   if (showInAttachBoletoTab(order)) return 'Anexar Boleto';
   return purchaseOrderPhaseLabel(order.status);
 }
