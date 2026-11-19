@@ -1,6 +1,6 @@
 {
   "name": "@sistema-ponto/mobile",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "App mobile para sistema de controle de ponto",
   "main": "index.js",
   "scripts": {

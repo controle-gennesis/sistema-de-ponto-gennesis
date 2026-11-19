@@ -10,6 +10,7 @@ import {
   Inbox,
   ListChecks,
   SquareKanban,
+  FileSignature,
   Wrench,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -57,6 +58,9 @@ export default function HomeQuickAccess() {
       icon: ListChecks,
       onPress: () => navigation.navigate('Tarefas'),
     },
+    ...(can('ponto_contratos')
+      ? [{ key: 'contratos', label: 'Contratos', icon: FileSignature, onPress: () => navigation.navigate('Contratos') }]
+      : []),
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => navigation.navigate('DiarioObra') }]
       : []),

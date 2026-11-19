@@ -3,9 +3,12 @@
 import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast';
 import {
   BarChart3,
   Briefcase,
+  FileSpreadsheet,
   Filter,
   Paperclip,
   Plus,
@@ -346,6 +349,44 @@ export default function ProcessosAtivosPage() {
   const filtersActive =
     statusFilter !== 'all' || Object.values(listFilters).some((value) => value !== '');
   const totalFiltered = rows.length;
+
+  /** Exporta para Excel todos os processos que estão na lista com os filtros e a busca aplicados (não só a página). */
+  const exportarExcel = () => {
+    if (rows.length === 0) {
+      toast.error('Não há processos para exportar com os filtros atuais.');
+      return;
+    }
+    const dados = rows.map((row) => ({
+      Reclamante: cellText(row.reclamante),
+      'Nº Processo': cellText(row.numeroProcesso),
+      'Data Abertura': cellText(row.dataAbertura),
+      'Data Acordo': cellText(row.dataAcordo),
+      Status: formatProcessoStatus(row.status, row.statusProcesso),
+      Contrato: resolveContratoNome(row.contrato) || '',
+      Empresa: cellText(row.empresa),
+      Polo: cellText(row.polo),
+      Tribunal: cellText(row.tribunal),
+      Vara: cellText(row.vara),
+      Função: cellText(row.funcao),
+      Objeto: cellText(row.objeto),
+      Advogado: cellText(row.advogado),
+      'Representante do autor': cellText(row.representanteAutor),
+      Arquivos: arquivosCount(row),
+      'Arquivos pendentes': arquivosPendentesCount(row),
+    }));
+    const ws = XLSX.utils.json_to_sheet(dados);
+    ws['!cols'] = [
+      { wch: 32 }, { wch: 26 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 26 }, { wch: 20 },
+      { wch: 12 }, { wch: 22 }, { wch: 18 }, { wch: 22 }, { wch: 40 }, { wch: 26 }, { wch: 28 },
+      { wch: 10 }, { wch: 16 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+    const hoje = new Date();
+    const stamp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Processos_Juridico_${stamp}.xlsx`);
+    toast.success(`${rows.length} processo${rows.length === 1 ? '' : 's'} exportado${rows.length === 1 ? '' : 's'}`);
+  };
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const paginatedRows = rows.slice(startIndex, startIndex + ITEMS_PER_PAGE);
@@ -479,6 +520,15 @@ export default function ProcessosAtivosPage() {
                       </button>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={exportarExcel}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label="Exportar para Excel"
+                    title="Exportar para Excel"
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                  </button>
                   <JuridicoImportMenu onAction={setImportAction} />
                   <button
                     type="button"

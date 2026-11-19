@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { buildContractOverview } from '../lib/contractOverview';
 import { parseDateInput } from '../utils/dateInput';
 import {
   assertContractAccess,
@@ -286,6 +287,32 @@ export class ContractController {
   /**
    * Obter contrato por ID
    */
+  /**
+   * Resumo / visão geral do contrato (mesmos números da aba Resumo do web).
+   * Mesma autorização de GET /:contractId/billings (assertContractAccess).
+   */
+  async getOverviewSummary(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { contractId } = req.params;
+      await assertContractAccess(req, contractId);
+
+      const yearRaw = req.query.year;
+      let year: number | undefined;
+      if (yearRaw !== undefined && yearRaw !== '') {
+        const y = Number(Array.isArray(yearRaw) ? yearRaw[0] : yearRaw);
+        if (!Number.isInteger(y) || y < 1900 || y > 2200) {
+          throw createError('Ano inválido', 400);
+        }
+        year = y;
+      }
+
+      const data = await buildContractOverview(contractId, year);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getContractById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
