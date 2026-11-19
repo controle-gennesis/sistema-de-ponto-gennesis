@@ -1181,7 +1181,7 @@ export default function DpRequestsScreen() {
             <Search size={16} color={colors.textSecondary} strokeWidth={2} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar tipo, nº, contrato..."
+              placeholder="Buscar..."
               placeholderTextColor={colors.textSecondary}
               value={search}
               onChangeText={setSearch}

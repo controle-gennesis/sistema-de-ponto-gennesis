@@ -1030,7 +1030,7 @@ export default function FuelRequestsScreen() {
             <Search size={16} color={colors.textSecondary} strokeWidth={2} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar placa, rota, status..."
+              placeholder="Buscar..."
               placeholderTextColor={colors.textSecondary}
               value={searchTerm}
               onChangeText={setSearchTerm}

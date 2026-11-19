@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
@@ -68,11 +68,12 @@ export default function HomeTarefasResumo() {
 
       <View style={styles.grid}>
         {cards.map(({ key, label, value, Icon }) => (
-          <TouchableOpacity
+          <Pressable
             key={key}
-            style={styles.card}
+            // Sem «apagar» o cartão ao tocar: o toque deixava o cartão no estado apertado (mais vermelho)
+            // ao navegar, e ele só clareava de novo quando a tela inicial voltava.
+            style={({ pressed }) => [styles.card, pressed && { transform: [{ scale: 0.98 }] }]}
             onPress={() => open(key)}
-            activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel={`${label}: ${value} tarefa${value === 1 ? '' : 's'}`}
           >
@@ -88,15 +89,14 @@ export default function HomeTarefasResumo() {
               <Text style={styles.count}>{String(value).padStart(2, '0')}</Text>
               <Text style={styles.countUnit}>{value === 1 ? 'Tarefa' : 'Tarefas'}</Text>
             </View>
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </View>
 
       <View style={styles.footer}>
         <Text style={styles.footerTitle}>Todas as tarefas</Text>
-        <TouchableOpacity
+        <Pressable
           onPress={() => open()}
-          activeOpacity={0.7}
           hitSlop={8}
           accessibilityLabel="Ver todas as tarefas"
         >
@@ -104,7 +104,7 @@ export default function HomeTarefasResumo() {
             <Text style={styles.footerLink}>Ver tudo</Text>
             <ChevronRight size={15} color="rgba(255,255,255,0.85)" strokeWidth={2.4} />
           </View>
-        </TouchableOpacity>
+        </Pressable>
       </View>
     </View>
   );

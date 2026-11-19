@@ -64,7 +64,7 @@ import {
   Wrench,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
-import AppHeader from '../components/AppHeader';
+import AppHeader, { HeaderIconButton } from '../components/AppHeader';
 import UserAvatar from '../components/UserAvatar';
 import { PersonPickerListRow } from '../components/PersonPickerUi';
 import { formatCpfDisplay } from '../lib/cpf';
@@ -651,10 +651,21 @@ export default function AgendaScreen() {
 
   const connectGoogle = useCallback(async () => {
     try {
-      if (!googleStatus?.configured) {
+      // Pergunta de novo ao servidor na hora: não decide pelo estado antigo (que pode ter falhado ao carregar).
+      const fresh = await googleStatusQuery.refetch();
+      if (fresh.isError || !fresh.data) {
+        Toast.show({
+          type: 'error',
+          text1: 'Não consegui falar com o servidor',
+          text2: 'Verifique a internet e tente de novo.',
+        });
+        return;
+      }
+      if (!fresh.data.configured) {
         Toast.show({
           type: 'error',
           text1: 'Google Agenda ainda não foi configurado no servidor',
+          text2: 'Peça para o time de TI ativar a integração.',
         });
         return;
       }
@@ -665,7 +676,7 @@ export default function AgendaScreen() {
       awaitingGoogle.current = false;
       Toast.show({ type: 'error', text1: e?.message || 'Não foi possível abrir o Google' });
     }
-  }, [googleStatus?.configured]);
+  }, [googleStatusQuery]);
 
   const afterGoogleConnected = useCallback(async () => {
     awaitingGoogle.current = false;
@@ -1550,24 +1561,17 @@ export default function AgendaScreen() {
         rightAction={
           mode === 'agenda' ? (
             canWrite ? (
-              <TouchableOpacity
-                onPress={openCreateEvent}
-                hitSlop={8}
-                accessibilityLabel="Novo evento"
-                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Plus size={24} color={colors.text} strokeWidth={2.4} />
-              </TouchableOpacity>
+              <HeaderIconButton onPress={openCreateEvent} accessibilityLabel="Novo evento">
+                <Plus size={22} color={colors.text} strokeWidth={2.4} />
+              </HeaderIconButton>
             ) : undefined
           ) : (
-            <TouchableOpacity
+            <HeaderIconButton
               onPress={() => (activeList ? openCreateTask() : openNewList())}
-              hitSlop={8}
               accessibilityLabel="Nova tarefa"
-              style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
             >
-              <Plus size={24} color={colors.text} strokeWidth={2.4} />
-            </TouchableOpacity>
+              <Plus size={22} color={colors.text} strokeWidth={2.4} />
+            </HeaderIconButton>
           )
         }
       />

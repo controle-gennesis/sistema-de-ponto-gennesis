@@ -10,7 +10,8 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
-import { LogOut, Settings } from 'lucide-react-native';
+import { SquarePen } from 'lucide-react-native';
+import GlassBg from '../components/GlassBg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -61,13 +62,6 @@ export default function HomeScreen() {
 
   const goProfile = () => {
     (navigation as any).navigate('Profile');
-  };
-
-  const confirmLogout = () => {
-    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sair', style: 'destructive', onPress: () => void logout() },
-    ]);
   };
 
   const onRefresh = useCallback(async () => {
@@ -134,12 +128,6 @@ export default function HomeScreen() {
               borderColor={isDark ? colors.border : 'rgba(15, 23, 42, 0.08)'}
               borderWidth={StyleSheet.hairlineWidth * 1.5}
             />
-            {/* Anel (cor do fundo) + miolo vermelho: sem borda, pra não sangrar o vermelho no Android. */}
-            <View style={styles.settingsBadgeRing}>
-              <View style={styles.settingsBadge}>
-                <Settings size={11} color="#fff" strokeWidth={2.4} />
-              </View>
-            </View>
           </TouchableOpacity>
           <View style={styles.greetingTextWrap}>
             <Text style={styles.greetingEyebrow}>{greetingPrefix()},</Text>
@@ -148,14 +136,18 @@ export default function HomeScreen() {
             </Text>
           </View>
           <TouchableOpacity
-            onPress={confirmLogout}
+            onPress={goProfile}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="Sair"
+            accessibilityLabel="Editar perfil"
             hitSlop={8}
-            style={styles.logoutBtn}
+            style={styles.editBtn}
           >
-            <LogOut size={20} color={colors.primary} strokeWidth={2} />
+            {/* Fundo translúcido liso: o vidro real piscava ao voltar para esta tela. */}
+            <View style={styles.editBtnInner}>
+              <GlassBg radius={23} />
+              <SquarePen size={20} color={colors.text} strokeWidth={2} />
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -190,30 +182,25 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 28,
     },
     greetingTextWrap: { flex: 1, minWidth: 0 },
-    settingsBadgeRing: {
-      position: 'absolute',
-      right: -3,
-      bottom: -3,
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: colors.appShell,
-      alignItems: 'center',
-      justifyContent: 'center',
+    editBtn: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      shadowColor: '#000',
+      shadowOpacity: 0.07,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
     },
-    settingsBadge: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: colors.primary,
+    editBtnInner: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    logoutBtn: {
-      width: 44,
-      height: 44,
-      alignItems: 'center',
-      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.7)',
     },
     greetingEyebrow: {
       fontSize: 13,
