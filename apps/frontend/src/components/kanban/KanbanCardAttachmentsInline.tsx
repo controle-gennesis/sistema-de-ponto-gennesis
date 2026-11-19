@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Paperclip,
   FileText,
@@ -30,6 +30,44 @@ import type { KanbanDraftAttachment, KanbanDraftLink } from './KanbanAttachments
 function attachmentIcon(mimeType: string) {
   if (mimeType.startsWith('image/')) return FileImage;
   return FileText;
+}
+
+/** Miniatura da imagem anexada; sem conseguir carregar, cai para o ícone. */
+function AttachmentThumb({
+  src,
+  file,
+  Icon,
+}: {
+  src?: string | null;
+  file?: File;
+  Icon: React.ComponentType<{ className?: string }>;
+}) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const url = file ? objectUrl : src;
+  if (!url || failed) {
+    return (
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-700">
+        <Icon className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
+      </span>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-10 w-10 shrink-0 rounded-md border border-gray-200 object-cover dark:border-gray-700"
+      referrerPolicy="no-referrer"
+    />
+  );
 }
 
 type InlineItem = {
@@ -268,6 +306,12 @@ export function KanbanCardAttachmentsInline({
                 >
                   {item.isLink ? (
                     <KanbanLinkFavicon url={getItemLinkUrl(item)} size="sm" />
+                  ) : (item.mimeType ?? '').startsWith('image/') ? (
+                    <AttachmentThumb
+                      src={resolveApiMediaUrl(item.fileUrl ?? null)}
+                      file={item.draftFile}
+                      Icon={Icon}
+                    />
                   ) : (
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-700">
                       <Icon className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />

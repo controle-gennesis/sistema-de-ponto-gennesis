@@ -57,6 +57,9 @@ router.post('/', (req, res, next) =>
 );
 
 // Rotas de faturamento e andamento da OS (devem vir antes de /:id para não conflitar)
+router.get('/:contractId/overview-summary', (req, res, next) =>
+  contractController.getOverviewSummary(req, res, next)
+);
 router.get('/:contractId/billings', (req, res, next) =>
   billingController.getBillingsByContract(req, res, next)
 );

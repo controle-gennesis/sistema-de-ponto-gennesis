@@ -131,7 +131,7 @@ export async function handleGoogleOAuthCallback(userId: string, code: string) {
   await saveGoogleTokens(userId, tokens, existing?.refreshToken);
 }
 
-async function getValidAccessToken(userId: string): Promise<string> {
+export async function getValidAccessToken(userId: string): Promise<string> {
   const conn = await prisma.googleCalendarConnection.findUnique({ where: { userId } });
   if (!conn) throw new Error('Google Calendar não conectado');
 
@@ -140,7 +140,20 @@ async function getValidAccessToken(userId: string): Promise<string> {
 
   if (!needsRefresh) return conn.accessToken;
 
-  const tokens = await refreshAccessToken(conn.refreshToken);
+  let tokens: TokenResponse;
+  try {
+    tokens = await refreshAccessToken(conn.refreshToken);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    // O Google recusou o acesso guardado (venceu ou foi revogado): a conexão não volta sozinha.
+    // Remove para a tela voltar a mostrar "Conectar" em vez de parecer conectada e não sincronizar.
+    if (/bad request|invalid_grant|expired|revoked/i.test(msg)) {
+      await prisma.googleCalendarConnection.deleteMany({ where: { userId } });
+      await prisma.googleCalendarWatch.deleteMany({ where: { userId } });
+      throw new Error('Acesso ao Google Agenda venceu. Conecte novamente.');
+    }
+    throw e;
+  }
   await saveGoogleTokens(userId, tokens, conn.refreshToken);
   return tokens.access_token;
 }
@@ -155,7 +168,7 @@ type GoogleEvent = {
   end?: { dateTime?: string; date?: string; timeZone?: string };
 };
 
-type GoogleCalendarListEntry = {
+export type GoogleCalendarListEntry = {
   id?: string;
   summary?: string;
   primary?: boolean;
@@ -280,7 +293,7 @@ function stableGoogleEventId(calendarId: string, eventId: string, isPrimary: boo
   return `${calendarId}::${eventId}`;
 }
 
-async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
+export async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
   const calendars: GoogleCalendarListEntry[] = [];
   let pageToken: string | undefined;
   do {
@@ -346,16 +359,30 @@ async function fetchGoogleEventsForCalendar(
   return items;
 }
 
+const calendarMetaCache = new Map<
+  string,
+  { at: number; calendars: GoogleCalendarListEntry[]; colors: GoogleColorMaps }
+>();
+
 export async function syncGoogleCalendarEvents(
   userId: string,
   from: Date,
   to: Date
 ): Promise<{ imported: number; updated: number; skipped: number; calendars: number }> {
   const accessToken = await getValidAccessToken(userId);
-  const [calendars, colorMaps] = await Promise.all([
-    listGoogleCalendars(accessToken),
-    fetchGoogleColorMaps(accessToken),
-  ]);
+  // Lista de agendas e cores mudam raramente: guarda por 5 min para a sincronização de poucos
+  // segundos consultar só os eventos (poupa a cota da API do Google).
+  let meta = calendarMetaCache.get(userId);
+  if (!meta || Date.now() - meta.at > 5 * 60 * 1000) {
+    const [cals, cols] = await Promise.all([
+      listGoogleCalendars(accessToken),
+      fetchGoogleColorMaps(accessToken),
+    ]);
+    meta = { at: Date.now(), calendars: cals, colors: cols };
+    calendarMetaCache.set(userId, meta);
+  }
+  const calendars = meta.calendars;
+  const colorMaps = meta.colors;
 
   let imported = 0;
   let updated = 0;
@@ -386,6 +413,14 @@ export async function syncGoogleCalendarEvents(
       });
 
       if (existing) {
+        // Só grava se algo mudou (a sincronização roda a cada 30 s; não regrava tudo à toa).
+        const unchanged =
+          existing.title === title &&
+          (existing.description ?? '') === description &&
+          existing.startAt.getTime() === times.startAt.getTime() &&
+          existing.endAt.getTime() === times.endAt.getTime() &&
+          existing.color === color;
+        if (unchanged) continue;
         await prisma.plannerEvent.update({
           where: { id: existing.id },
           data: {
@@ -442,7 +477,7 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function autoSyncWindow(): { from: Date; to: Date } {
+export function autoSyncWindow(): { from: Date; to: Date } {
   const from = new Date();
   from.setHours(0, 0, 0, 0);
   from.setDate(from.getDate() - 14);

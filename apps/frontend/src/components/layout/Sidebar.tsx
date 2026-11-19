@@ -1154,14 +1154,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/financeiro/controle-financeiro'))
           },
           {
-            name: 'Controle de Boletos',
-            section: 'Controle',
-            href: '/ponto/financeiro/controle-boletos',
-            icon: Banknote,
-            description: 'Boletos por fornecedor, vencimento e confirmação de pagamento',
-            permission: isAdministrator || can(pk('/ponto/financeiro/controle-boletos'))
-          },
-          {
             name: 'Receitas',
             section: 'Controle',
             href: '/ponto/financeiro/receitas',
@@ -1531,6 +1523,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: FileText,
             description: 'Listar e gerenciar ordens de compra',
             permission: isAdministrator || can(pk('/ponto/ordem-de-compra'))
+          },
+          {
+            name: 'Controle de Boletos',
+            section: 'Compras',
+            href: '/ponto/controle-boletos',
+            icon: Banknote,
+            description: 'Boletos por fornecedor, vencimento e confirmação de pagamento',
+            permission: isAdministrator || can(pk('/ponto/controle-boletos'))
           },
           {
             name: 'Controle de Entregas',

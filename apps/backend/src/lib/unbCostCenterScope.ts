@@ -6,6 +6,7 @@ import {
 } from './unbBranding';
 import {
   getAssignedContractIds,
+  getCompradorContractIds,
   getCostCenterIdsForContractAccess,
   getExplicitContractCostCenterScope,
 } from './contractAccess';
@@ -268,7 +269,67 @@ export async function assertCostCenterAllowedForStockUser(
  * Listagem de OC/RM: quem tem contratos cadastrados vê só esses CCs
  * (não todos os centros UNB). Sem módulo Contratos, mantém gestor + UNB.
  */
+/** Opções das regras de RM/OC que valem só quando a chamada vem do Mapa de Cotação. */
+export type OcRmScopeOptions = { paraMapaCotacao?: boolean };
+
+/**
+ * CCs dos contratos em que a pessoa é Comprador. Contrato UNB leva junto o catálogo UNB inteiro
+ * (mesma regra de quem tem contrato UNB liberado). Quem já tem a UNB liberada não depende disto.
+ */
+export async function getCompradorCostCenterScope(
+  userId: string,
+  isAdmin: boolean,
+): Promise<{ costCenterIds: string[]; expandUnbLabels: boolean }> {
+  const contractIds = await getCompradorContractIds(userId, isAdmin);
+  if (contractIds.length === 0) return { costCenterIds: [], expandUnbLabels: false };
+  const contracts = await prisma.contract.findMany({
+    where: { id: { in: contractIds } },
+    select: {
+      name: true,
+      number: true,
+      costCenterId: true,
+      costCenter: { select: { name: true, code: true, company: true, polo: true } },
+    },
+  });
+  const ids = new Set<string>(
+    contracts.map((c) => c.costCenterId).filter((id): id is string => Boolean(id)),
+  );
+  const hasUnbContract = contracts.some(
+    (row) =>
+      isUnbRelatedLabel(row.name) ||
+      isUnbRelatedLabel(row.number) ||
+      isUnbCostCenterRecord(row.costCenter),
+  );
+  if (hasUnbContract) {
+    for (const id of await getUnbCostCenterIds()) ids.add(id);
+  }
+  return { costCenterIds: [...ids], expandUnbLabels: hasUnbContract };
+}
+
 export async function getUserOcRmListCostCenterScope(
+  userId: string,
+  isAdmin: boolean,
+  gestorScope: string[] | null,
+  options?: OcRmScopeOptions,
+): Promise<{
+  scopeCostCenterIds: string[] | null;
+  expandUnbLabels: boolean;
+}> {
+  const base = await getUserOcRmListCostCenterScopeBase(userId, isAdmin, gestorScope);
+  // Mapa de Cotação: o Comprador também vê as RMs/OCs dos contratos em que é Comprador (sem precisar do Liberado).
+  if (options?.paraMapaCotacao && base.scopeCostCenterIds !== null) {
+    const comprador = await getCompradorCostCenterScope(userId, isAdmin);
+    if (comprador.costCenterIds.length > 0) {
+      return {
+        scopeCostCenterIds: [...new Set([...base.scopeCostCenterIds, ...comprador.costCenterIds])],
+        expandUnbLabels: base.expandUnbLabels || comprador.expandUnbLabels,
+      };
+    }
+  }
+  return base;
+}
+
+async function getUserOcRmListCostCenterScopeBase(
   userId: string,
   isAdmin: boolean,
   gestorScope: string[] | null,
@@ -295,6 +356,24 @@ export async function getUserOcRmListCostCenterScope(
 }
 
 export async function assertCostCenterAllowedForOcRmUser(
+  userId: string,
+  isAdmin: boolean,
+  costCenterId: string | null | undefined,
+  options?: OcRmScopeOptions,
+): Promise<void> {
+  try {
+    await assertCostCenterAllowedForOcRmUserBase(userId, isAdmin, costCenterId);
+  } catch (error) {
+    // Mapa de Cotação: o Comprador também pode agir nas RMs dos contratos em que é Comprador.
+    if (options?.paraMapaCotacao && costCenterId && !isAdmin) {
+      const comprador = await getCompradorCostCenterScope(userId, isAdmin);
+      if (comprador.costCenterIds.includes(costCenterId)) return;
+    }
+    throw error;
+  }
+}
+
+async function assertCostCenterAllowedForOcRmUserBase(
   userId: string,
   isAdmin: boolean,
   costCenterId: string | null | undefined,

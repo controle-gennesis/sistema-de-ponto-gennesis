@@ -273,7 +273,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             boardName?: string;
             assignedAt?: string;
           }>;
+          const mentionItems = (kJson?.data?.mentions?.items ?? []) as Array<{
+            cardId: string;
+            title: string;
+            boardName?: string;
+            authorName?: string;
+            preview?: string;
+            mentionedAt?: string;
+          }>;
           const pendentes = new Set(items.map((i) => i.cardId));
+          const mencionados = new Set(mentionItems.map((i) => i.cardId));
           const agora = new Date().toISOString();
           setNotifications((curr) => {
             const known = new Set(curr.map((c) => c.id));
@@ -291,13 +300,32 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
                 detectedAt: agora,
                 read: false,
               }));
+            // Menções em comentários: um aviso por comentário em que a pessoa foi marcada.
+            const novasMencoes: ActivityNotification[] = mentionItems
+              .filter((i) => !known.has(`kanban-mention:${i.cardId}:${i.mentionedAt ?? ''}`))
+              .map((i) => ({
+                id: `kanban-mention:${i.cardId}:${i.mentionedAt ?? ''}`,
+                entityId: i.cardId,
+                kind: 'kanban' as const,
+                status: 'MENTIONED',
+                title: `${i.authorName || 'Alguém'} marcou você num comentário`,
+                body: `"${i.title}"${i.preview ? `
+${i.preview}` : ''}`,
+                displayCode: null,
+                updatedAt: i.mentionedAt || agora,
+                detectedAt: agora,
+                read: false,
+              }));
             // Card já aberto (saiu da lista do servidor) deixa de contar como novo.
-            const atualizadas = curr.map((c) =>
-              c.kind === 'kanban' && !c.read && !pendentes.has(c.entityId) ? { ...c, read: true } : c,
-            );
-            const changed = novas.length > 0 || atualizadas.some((c, i) => c !== curr[i]);
+            const atualizadas = curr.map((c) => {
+              if (c.kind !== 'kanban' || c.read) return c;
+              const pend = c.status === 'MENTIONED' ? mencionados : pendentes;
+              return pend.has(c.entityId) ? c : { ...c, read: true };
+            });
+            const changed =
+              novas.length > 0 || novasMencoes.length > 0 || atualizadas.some((c, i) => c !== curr[i]);
             if (!changed) return curr;
-            const merged = [...novas, ...atualizadas];
+            const merged = [...novas, ...novasMencoes, ...atualizadas];
             void saveFeed(merged);
             return merged;
           });
@@ -391,7 +419,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     // Tocar num push abre direto a aba do assunto; sem dado, abre a lista de notificações.
     return addNotificationOpenListener((data) => {
       if (
-        data?.kind === 'kanban-assigned' &&
+        (data?.kind === 'kanban-assigned' || data?.kind === 'kanban-mention') &&
         typeof data.cardId === 'string' &&
         navigationRef.isReady()
       ) {

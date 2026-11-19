@@ -72,6 +72,10 @@ export type DpRequest = {
   prazoInicio?: string | null;
   prazoFim?: string | null;
   details?: Record<string, unknown> | null;
+  /** Nomes dos colaboradores citados na solicitação (HE, atestado etc.). */
+  colaboradoresNomes?: string[];
+  /** Hora extra concluída: PAGO_FINANCEIRO ou CREDITADO_BANCO. */
+  dpResultado?: string | null;
   createdAt: string;
   requesterReturnComment?: string | null;
   dpFeedback?: string | null;
@@ -255,6 +259,16 @@ export async function createDpRequest(payload: {
   }
   const json = await res.json();
   return json.data as DpRequest;
+}
+
+/** Código (CID) e observação do atestado: quem abriu ou o DP pode atualizar depois de criado. */
+export async function updateAtestadoDetails(
+  id: string,
+  payload: { employeeId?: string; codigoAtestado: string; observacao: string },
+): Promise<Record<string, unknown> | null> {
+  const res = await api.put(`/api/solicitacoes-dp/${id}/atestado`, payload);
+  const data = await readApiData<{ id: string; details?: Record<string, unknown> | null }>(res);
+  return data?.details ?? null;
 }
 
 export async function submitRequesterReturn(id: string, comment: string): Promise<DpRequest> {

@@ -79,6 +79,9 @@ const atestadoItemSchema = z.object({
   dataInicial: str,
   dataFinal: str,
   numeroDias: numeroDiasField,
+  /** Código do atestado (CID). Opcional no servidor: atestados antigos e os do WhatsApp não têm. */
+  codigoAtestado: z.string().max(40).optional(),
+  observacao: z.string().max(1000).optional(),
   anexoAtestado: dpAttachmentSchema,
 });
 
@@ -88,8 +91,12 @@ const retificacaoItemSchema = z.object({
   justificativa: str,
 });
 
+export const TIPOS_HORA_EXTRA = ['PAGAMENTO', 'BANCO_HORAS'] as const;
+
 const horaExtraItemSchema = z.object({
   employeeIds: z.array(str).min(1).max(50),
+  /** Pagamento (financeiro paga) ou banco de horas (DP credita). Opcional: HE antigas não têm. */
+  tipoHoraExtra: z.enum(TIPOS_HORA_EXTRA).optional(),
   justificativa: str,
   datas: str,
   anexoAutorizacao: dpAttachmentSchema,
@@ -426,6 +433,9 @@ const contabFeriasDetails = z
     }
   });
 
+const itemDescricaoValor = z.object({ descricao: z.string(), valor: z.string() });
+const itensDescricaoValorField = z.array(itemDescricaoValor).max(20).optional();
+
 const contabRescisaoDetails = z
   .object({
     employeeId: str,
@@ -434,6 +444,10 @@ const contabRescisaoDetails = z
     dataDemissao: str,
     ultimoDiaTrabalhado: str,
     possuiProventoDesconto: simNao,
+    // Itens "o quê + valor" (ex.: { descricao: 'Vale transporte', valor: 'R$ 320,00' }; horas: '20:00').
+    proventos: itensDescricaoValorField,
+    descontos: itensDescricaoValorField,
+    // Formato antigo (um tipo + um valor): continua aceito para solicitações já criadas.
     proventoDesconto: strOpt,
     valor: strOpt,
     observacoes: str,
@@ -441,13 +455,33 @@ const contabRescisaoDetails = z
   })
   .superRefine((data, ctx) => {
     if (data.possuiProventoDesconto === 'SIM') {
-      if (!data.proventoDesconto?.trim()) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['proventoDesconto'], message: 'Informe se é provento ou desconto' });
-      }
-      if (!data.valor?.trim()) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['valor'], message: 'Informe o valor' });
+      const linhas = [...(data.proventos ?? []), ...(data.descontos ?? [])].filter(
+        (l) => l.descricao.trim() || l.valor.trim()
+      );
+      const temFormatoAntigo = !!(data.proventoDesconto?.trim() && data.valor?.trim());
+      if (linhas.length === 0 && !temFormatoAntigo) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['proventos'],
+          message: 'Informe ao menos um provento ou desconto (o que é e o valor)',
+        });
+      } else if (linhas.some((l) => !l.descricao.trim() || !l.valor.trim())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['proventos'],
+          message: 'Preencha a descrição e o valor de cada provento ou desconto',
+        });
       }
     }
+  })
+  // Guarda só as linhas preenchidas (e só quando "Possui provento ou desconto?" = Sim).
+  .transform((data) => {
+    const manter = (lista?: { descricao: string; valor: string }[]) =>
+      (lista ?? [])
+        .map((l) => ({ descricao: l.descricao.trim(), valor: l.valor.trim() }))
+        .filter((l) => l.descricao || l.valor);
+    const sim = data.possuiProventoDesconto === 'SIM';
+    return { ...data, proventos: sim ? manter(data.proventos) : [], descontos: sim ? manter(data.descontos) : [] };
   });
 
 /** Anexo de "Outros" (ADM): chega em Base64 e o servidor grava no S3; o tipo do arquivo é opcional. */

@@ -25,9 +25,8 @@ export const PUSH_CATEGORIES = [
   { key: 'reservation', label: 'Frota', description: 'Andamento das suas reservas de veículo' },
   { key: 'dp', label: 'Solicitações internas', description: 'Mudanças de status das suas solicitações' },
   { key: 'dp-messages', label: 'Mensagens das solicitações', description: 'Novas mensagens nas solicitações' },
-  { key: 'accounting', label: 'Atendimento contábil', description: 'Andamento dos atendimentos da contabilidade' },
   { key: 'workorder', label: 'Chamados', description: 'Mudanças de status dos chamados' },
-  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card' },
+  { key: 'kanban', label: 'Tasks', description: 'Quando você é atribuído a um card ou marcado num comentário' },
 ] as const;
 
 const CATEGORY_KEYS: ReadonlySet<string> = new Set(PUSH_CATEGORIES.map((c) => c.key));
@@ -51,6 +50,7 @@ function categoryOfPayload(data?: Record<string, unknown>): string | null {
     case 'workorder':
       return 'workorder';
     case 'kanban-assigned':
+    case 'kanban-mention':
       return 'kanban';
     default:
       return null;
@@ -133,6 +133,8 @@ type ExpoTicket = { status: 'ok' | 'error'; details?: { error?: string } };
 /** Envia pra todos os aparelhos dos usuários. Nunca lança: push não pode derrubar a operação. */
 export async function sendPushToUsers(userIds: Array<string | null | undefined>, payload: PushPayload) {
   try {
+    // Atendimento da Contabilidade não vai para o celular (a tela nem existe no app).
+    if (payload.data?.type === 'dp-contabilidade') return;
     const ids = await withoutMuted(
       [...new Set(userIds.filter((id): id is string => !!id))],
       categoryOfPayload(payload.data),
@@ -241,6 +243,22 @@ const WORK_ORDER: Record<string, string> = {
   CANCELLED: 'Cancelada',
 };
 
+const ACCOUNTING_DIRECT_TYPES: ReadonlySet<string> = new Set([
+  'CONVENCAO_COLETIVA',
+  'FECHAMENTO_FOLHA',
+  'IMPOSTOS_ENCARGOS',
+  'REALOCACAO_COLABORADOR',
+  'RETIFICACAO_RECALCULO',
+  'SOLICITACAO_GERAL',
+  'CONTAB_ADMISSAO',
+  'CONTAB_AFASTAMENTO',
+  'CONTAB_ATESTADO',
+  'CONTAB_ALTERACAO_FUNCAO',
+  'CONTAB_ALTERACAO_SALARIAL',
+  'CONTAB_FERIAS',
+  'CONTAB_RESCISAO',
+]);
+
 const WATCHED_MODELS = new Set(['FuelRefuelRequest', 'VehicleReservation', 'DpRequest', 'GestaoOsWorkOrder']);
 
 function statusFromArgs(args: unknown): string | null {
@@ -303,6 +321,8 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           break;
         }
         case 'DpRequest': {
+          // Solicitações diretas da Contabilidade não geram aviso no celular.
+          if (ACCOUNTING_DIRECT_TYPES.has(String(row.requestType ?? ''))) break;
           const employee = await prisma.employee.findUnique({
             where: { id: String(row.employeeId ?? '') },
             select: { userId: true },

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { propagateOsChangeToDiarios } from '../lib/diarioObraOsSync';
 import { parseDateInput } from '../utils/dateInput';
 import { parseMedicaoFaturamento } from '../utils/contractBillingMedicao';
 import { ensureContractBillingMeasurementColumns } from '../lib/ensureProductionSchema';
@@ -471,6 +472,9 @@ export class PleitoController {
 
         return updated;
       });
+
+      // Mudou a OS (SE/Pasta): os diários de obra que apontavam para a antiga passam para a nova.
+      await propagateOsChangeToDiarios(existing.updatedContractId, existing, row);
 
       res.json({ success: true, data: serializePleito(row), message: 'Atualizado com sucesso' });
     } catch (error) {

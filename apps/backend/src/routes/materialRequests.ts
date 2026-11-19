@@ -344,7 +344,10 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       );
     }
     const { scopeCostCenterIds, expandUnbLabels } = req.user?.id
-      ? await getUserOcRmListCostCenterScope(req.user.id, !!req.user.isAdmin, gestorScope)
+      ? await getUserOcRmListCostCenterScope(req.user.id, !!req.user.isAdmin, gestorScope, {
+          // Mapa de Cotação: o Comprador também vê as RMs dos contratos em que é Comprador.
+          paraMapaCotacao: String(req.query.paraMapaCotacao ?? '') === '1',
+        })
       : { scopeCostCenterIds: null as string[] | null, expandUnbLabels: false };
 
     const listFilters: Parameters<MaterialRequestService['listMaterialRequests']>[0] = {
@@ -466,6 +469,8 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
       req.user.id,
       !!req.user.isAdmin,
       existing.costCenterId,
+      // Mapa de Cotação: o Comprador pode devolver para correção a RM dos contratos em que é Comprador.
+      { paraMapaCotacao: req.body?.paraMapaCotacao === true && status === 'IN_REVIEW' },
     );
 
     if (status === 'IN_REVIEW') {
@@ -664,6 +669,8 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
         req.user.id,
         !!req.user.isAdmin,
         request.costCenterId,
+        // Mapa de Cotação: o Comprador também abre a RM dos contratos em que é Comprador.
+        { paraMapaCotacao: String(req.query.paraMapaCotacao ?? '') === '1' },
       );
     }
 

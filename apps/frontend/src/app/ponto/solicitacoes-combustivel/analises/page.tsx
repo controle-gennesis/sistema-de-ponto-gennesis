@@ -89,6 +89,101 @@ const CHART_PALETTE = [
   '#334155',
 ];
 
+/** Intervalo entre o início da animação de uma barra e a seguinte (ms). */
+const BAR_STAGGER_MS = 110;
+/** Duração do crescimento de cada barra e da subida do valor (ms). */
+const BAR_GROW_MS = 850;
+
+type BarShapeProps = {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  index?: number;
+  fill?: string;
+  payload?: Record<string, unknown>;
+};
+
+/**
+ * Barra que cresce da esquerda para a direita, uma depois da outra (a animação é CSS, em globals.css).
+ * Anima de novo quando o valor da barra muda (ex.: trocou o período).
+ */
+function growingBarShape(valueKey: string) {
+  return function GrowingBar(props: unknown) {
+    const p = props as BarShapeProps;
+    const x = Number(p.x ?? 0);
+    const y = Number(p.y ?? 0);
+    const width = Math.max(0, Number(p.width ?? 0));
+    const height = Math.max(0, Number(p.height ?? 0));
+    const index = Number(p.index ?? 0);
+    const radius = Math.min(6, height / 2, width);
+    const value = String(p.payload?.[valueKey] ?? width);
+    return (
+      <g
+        key={`${index}-${value}`}
+        className="chart-bar-grow"
+        style={{ animationDelay: `${index * BAR_STAGGER_MS}ms`, animationDuration: `${BAR_GROW_MS}ms` }}
+      >
+        <path
+          d={`M${x},${y} H${x + width - radius} Q${x + width},${y} ${x + width},${y + radius} V${y + height - radius} Q${x + width},${y + height} ${x + width - radius},${y + height} H${x} Z`}
+          fill={p.fill}
+        />
+      </g>
+    );
+  };
+}
+
+type CountUpLabelProps = {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string | null;
+  index?: number;
+};
+
+/** Valor ao lado da barra que sobe de zero até o total, no mesmo ritmo da barra. */
+function CountUpLabel({
+  x,
+  y,
+  width,
+  height,
+  value,
+  index = 0,
+  color,
+  format,
+}: CountUpLabelProps & { color: string; format: (v: number) => string }) {
+  const target = Number(value ?? 0);
+  const [shown, setShown] = React.useState(0);
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setShown(target);
+      return;
+    }
+    let frame = 0;
+    let start = 0;
+    const delay = index * BAR_STAGGER_MS;
+    const tick = (now: number) => {
+      if (!start) start = now;
+      const t = Math.min(1, Math.max(0, (now - start - delay) / BAR_GROW_MS));
+      const eased = 1 - Math.pow(1 - t, 3);
+      setShown(target * eased);
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    setShown(0);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [target, index]);
+  const left = Number(x ?? 0) + Number(width ?? 0) + 6;
+  const middle = Number(y ?? 0) + Number(height ?? 0) / 2;
+  return (
+    <text x={left} y={middle} dy={4} fill={color} fontSize={11}>
+      {format(shown)}
+    </text>
+  );
+}
+
 function toNum(v: string | number | null | undefined): number | null {
   if (v == null) return null;
   const n = Number(v);
@@ -274,6 +369,7 @@ function WeeklyQuotaPanel({
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <th className="py-2 pr-3">Contrato</th>
+                <th className="w-[26%] py-2 px-3">Uso da cota</th>
                 <th className="py-2 px-3 text-right">Cota</th>
                 <th className="py-2 px-3 text-right">Urgência</th>
                 <th className="py-2 px-3 text-right">Usado</th>
@@ -309,20 +405,42 @@ function WeeklyQuotaPanel({
                           </div>
                         ))}
                       </div>
-                      {!g.unlimited && g.weeklyBudgetReais ? (
-                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
-                          <div
-                            className={`h-full rounded-full transition-[width] duration-500 ${
-                              over
-                                ? 'bg-red-500'
-                                : usedPct >= 80
-                                  ? 'bg-amber-500'
-                                  : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${barPct}%` }}
-                          />
+                      {quotaContractNames(g).length > 1 ? (
+                        <div className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+                          Dividem a mesma cota
                         </div>
                       ) : null}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      {!g.unlimited && g.weeklyBudgetReais ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-2.5 min-w-[80px] flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
+                            <div
+                              className={`h-full rounded-full transition-[width] duration-700 ${
+                                over || usedPct >= 90
+                                  ? 'bg-red-500'
+                                  : usedPct >= 70
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${barPct}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`w-10 shrink-0 text-right text-xs font-medium tabular-nums ${
+                              over || usedPct >= 90
+                                ? 'text-red-600 dark:text-red-400'
+                                : usedPct >= 70
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            {Math.round(usedPct)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
                       {g.unlimited ? 'Sem limite' : formatCurrency(g.weeklyBudgetReais ?? 0)}
@@ -343,9 +461,11 @@ function WeeklyQuotaPanel({
                       className={`whitespace-nowrap py-2.5 pl-3 text-right text-sm font-semibold tabular-nums ${
                         g.unlimited
                           ? 'text-gray-500 dark:text-gray-400'
-                          : over
+                          : over || usedPct >= 90
                             ? 'text-red-600 dark:text-red-400'
-                            : 'text-emerald-600 dark:text-emerald-400'
+                            : usedPct >= 70
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-emerald-600 dark:text-emerald-400'
                       }`}
                     >
                       {g.unlimited ? '—' : formatCurrency(remaining ?? 0)}
@@ -480,6 +600,8 @@ function UrgencyByContractChart({
                 radius={[0, 6, 6, 0]}
                 maxBarSize={22}
                 cursor="pointer"
+                isAnimationActive={false}
+                shape={growingBarShape('urgencia')}
                 onClick={(data) => {
                   const payload = data as { group?: FuelQuotaGroup; payload?: { group?: FuelQuotaGroup } };
                   const group = payload.payload?.group ?? payload.group;
@@ -491,9 +613,13 @@ function UrgencyByContractChart({
                 ))}
                 <LabelList
                   dataKey="urgencia"
-                  position="right"
-                  formatter={(value) => formatCurrency(Number(value ?? 0))}
-                  style={{ fill: theme.chartTick, fontSize: 11 }}
+                  content={(labelProps) => (
+                    <CountUpLabel
+                      {...(labelProps as CountUpLabelProps)}
+                      color={theme.chartTick}
+                      format={formatCurrency}
+                    />
+                  )}
                 />
               </Bar>
             </BarChart>
@@ -1364,6 +1490,8 @@ function AnalisesCombustivelContent() {
                     radius={[0, 6, 6, 0]}
                     maxBarSize={22}
                     cursor="pointer"
+                    isAnimationActive={false}
+                    shape={growingBarShape('gasto')}
                     onClick={(data) => {
                       const payload = data as {
                         key?: string;
@@ -1439,6 +1567,8 @@ function AnalisesCombustivelContent() {
                     stroke="#2563eb"
                     fill="url(#fuelSpendGrad)"
                     strokeWidth={2.5}
+                    animationDuration={1600}
+                    animationEasing="ease-out"
                   />
                   <Line
                     yAxisId="liters"
@@ -1448,6 +1578,8 @@ function AnalisesCombustivelContent() {
                     stroke="#0f766e"
                     strokeWidth={2}
                     dot={{ r: 3 }}
+                    animationDuration={1600}
+                    animationEasing="ease-out"
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -1487,6 +1619,8 @@ function AnalisesCombustivelContent() {
                     strokeWidth={2.5}
                     dot={{ r: 4, fill: '#c2410c' }}
                     activeDot={{ r: 6 }}
+                    animationDuration={1600}
+                    animationEasing="ease-out"
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1516,6 +1650,8 @@ function AnalisesCombustivelContent() {
                     paddingAngle={3}
                     stroke={theme.pieStroke}
                     strokeWidth={2}
+                    animationDuration={1100}
+                    animationEasing="ease-out"
                   >
                     {insights.vehiclePie.map((_, i) => (
                       <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />

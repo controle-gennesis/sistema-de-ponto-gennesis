@@ -145,7 +145,7 @@ export async function notifyRequesterCancelledWhatsApp(params: {
 function pushBodyFromSubjectLine(subjectLine: string): string {
   return subjectLine
     .split(/\s+[·—–]\s+/)
-    .map((part) => part.replace(/^(Motorista|Solicitante|Obra|Fornecedor):\s*/i, '').trim())
+    .map((part) => part.replace(/^(Motorista|Solicitante|Obra|Fornecedor|Contrato):\s*/i, '').trim())
     .filter(Boolean)
     .join('\n');
 }
@@ -247,7 +247,8 @@ export async function getDpApprovalNotifyUserIds(params: {
   if (contractIds.size === 0) return [];
 
   const rows = await prisma.userContractPermission.findMany({
-    where: { userId: { in: [...eligible] }, contractId: { in: [...contractIds] } },
+    // Só quem tem o contrato Liberado: a linha de permissão pode existir sem isso (ex.: só Comprador).
+    where: { userId: { in: [...eligible] }, contractId: { in: [...contractIds] }, accessLiberado: true },
     select: { userId: true },
   });
   return [...new Set(rows.map((r) => r.userId))];

@@ -772,7 +772,8 @@ export default function MapaCotacaoPage() {
     queryKey: ['material-requests-approved-map'],
     queryFn: async () => {
       const res = await api.get('/material-requests', {
-        params: { status: 'APPROVED', limit: 200, summary: '1' },
+        // paraMapaCotacao: o Comprador também vê as RMs dos contratos em que é Comprador.
+        params: { status: 'APPROVED', limit: 200, summary: '1', paraMapaCotacao: '1' },
       });
       return res.data;
     },
@@ -783,7 +784,9 @@ export default function MapaCotacaoPage() {
   const { data: ordersData } = useQuery({
     queryKey: ['purchase-orders', 'list-summary'],
     queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 500, summary: '1' } });
+      const res = await api.get('/purchase-orders', {
+        params: { limit: 500, summary: '1', paraMapaCotacao: '1' },
+      });
       return res.data;
     },
     staleTime: 30_000,
@@ -1030,7 +1033,9 @@ export default function MapaCotacaoPage() {
   const { data: selectedRequestFull, isLoading: loadingSelectedRequest } = useQuery({
     queryKey: ['material-request-detail', selectedRequestId],
     queryFn: async () => {
-      const res = await api.get(`/material-requests/${selectedRequestId}`);
+      const res = await api.get(`/material-requests/${selectedRequestId}`, {
+        params: { paraMapaCotacao: '1' },
+      });
       return (res.data?.data ?? res.data) as MaterialRequest;
     },
     enabled: !!selectedRequestId,
@@ -1806,6 +1811,7 @@ export default function MapaCotacaoPage() {
       const res = await api.patch(`/material-requests/${id}/status`, {
         status: 'IN_REVIEW',
         correctionNote: note,
+        paraMapaCotacao: true,
       });
       return res.data as { message?: string };
     },

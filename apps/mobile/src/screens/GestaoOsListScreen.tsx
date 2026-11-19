@@ -313,7 +313,7 @@ export default function GestaoOsListScreen() {
           <Search size={16} color={colors.textSecondary} strokeWidth={2} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Buscar OS, status, local..."
+            placeholder="Buscar..."
             placeholderTextColor={colors.textSecondary}
             value={search}
             onChangeText={setSearch}

@@ -838,7 +838,7 @@ export default function VehicleReservationsScreen() {
             <Search size={16} color={colors.textSecondary} strokeWidth={2} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar motorista, placa, status..."
+              placeholder="Buscar..."
               placeholderTextColor={colors.textSecondary}
               value={searchTerm}
               onChangeText={setSearchTerm}

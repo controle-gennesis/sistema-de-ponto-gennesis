@@ -10,7 +10,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckSquare, Star } from 'lucide-react-native';
+import { CheckSquare, ChevronRight, Star } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import {
   fetchPlannerTaskLists,
@@ -130,10 +130,16 @@ export default function HomeTarefasCard() {
     },
   });
 
-  const openTarefas = () => navigation.navigate('Agenda', { mode: 'tasks' });
+  const openTarefas = () => navigation.navigate('Tarefas');
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={openTarefas}
+      activeOpacity={0.84}
+      accessibilityRole="button"
+      accessibilityLabel="Abrir tarefas"
+    >
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.iconWrap}>
@@ -150,6 +156,7 @@ export default function HomeTarefasCard() {
             </Text>
           </View>
         </View>
+        <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />
       </View>
 
       {isLoading ? (
@@ -231,7 +238,7 @@ export default function HomeTarefasCard() {
           ) : null}
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 }
 

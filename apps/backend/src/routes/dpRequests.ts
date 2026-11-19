@@ -65,6 +65,8 @@ router.get(
 );
 router.post('/', requireModuleAccess(myModule), controller.createRequest.bind(controller));
 router.put('/:id/requester-return', requireModuleAccess(myModule), controller.requesterReturn.bind(controller));
+/** Código e observação do atestado: quem abriu ou o DP (a checagem é feita dentro). */
+router.put('/:id/atestado', controller.updateAtestado.bind(controller));
 
 // Aprovações (gestor/aprovador)
 router.get('/aprovacoes', requireDpApproverAccess, controller.getWaitingManagerApprovals.bind(controller));

@@ -121,6 +121,7 @@ model User {
   plannerAgendaSharesReceived               PlannerAgendaShare[]                 @relation("PlannerAgendaShareSharedWith")
   plannerAgendaSharesCreated                PlannerAgendaShare[]                 @relation("PlannerAgendaShareCreatedBy")
   googleCalendarConnection                  GoogleCalendarConnection?            @relation("GoogleCalendarConnectionUser")
+  googleCalendarWatches                     GoogleCalendarWatch[]
   demandSheetApprovalsCreated               DemandSheetApproval[]                @relation("DemandSheetApprovalCreator")
   demandSheetApprovalsAsSolicitante         DemandSheetApproval[]                @relation("DemandSheetApprovalSolicitante")
   demandSheetApprovalsManagerApproved       DemandSheetApproval[]                @relation("DemandSheetApprovalManager")
@@ -815,7 +816,11 @@ model DpRequest {
   messageReads  DpRequestCommentRead[]
   attachments   DpRequestAttachment[]
   /// NÃºmero legÃ­vel sequencial (1, 2, 3â¦) para exibiÃ§Ã£o e busca.
-  displayNumber Int    @unique
+  displayNumber Int
+  /// true = solicitação direta da Contabilidade: tem numeração própria (1, 2, 3…), separada das internas.
+  contabDireta Boolean @default(false)
+  /// Número que a solicitação tinha antes de a Contabilidade ganhar numeração própria.
+  displayNumberLegacy Int?
 
   // Solicitante
   employeeId String
@@ -867,6 +872,8 @@ model DpRequest {
   /// Motivo informado pelo DP ao cancelar a solicitaÃ§Ã£o.
   dpCancellationReason   String?
   dpHandledBy            String?
+  /// Hora extra concluída: PAGO_FINANCEIRO (financeiro pagou) ou CREDITADO_BANCO (DP creditou no banco de horas).
+  dpResultado            String?
   // (MVP) sem relaÃ§Ã£o explÃ­cita com User: mantemos sÃ³ o userId em dpHandledBy.
 
   // Metadados
@@ -876,6 +883,7 @@ model DpRequest {
   @@index([employeeId])
   @@index([status])
   @@index([costCenterId])
+  @@unique([contabDireta, displayNumber])
   @@map("dp_requests")
 }
 
@@ -3193,6 +3201,9 @@ model UserContractPermission {
   accessFluig               Boolean  @default(false)
   /// Aba Obras do contrato (lista de obras e Diários de Obra).
   accessObras               Boolean  @default(false)
+  /// Comprador: vê as RMs e OCs deste contrato só no Mapa de Cotação, sem precisar do Liberado
+  /// (não abre a ficha do contrato e não aparece nas pessoas do contrato).
+  accessComprador           Boolean  @default(false)
   updatedBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
@@ -3920,6 +3931,23 @@ model GoogleCalendarConnection {
   @@map("google_calendar_connections")
 }
 
+/// Canal de aviso do Google Agenda (push): o Google chama o servidor quando um evento muda.
+model GoogleCalendarWatch {
+  id         String   @id @default(cuid())
+  userId     String
+  calendarId String
+  channelId  String   @unique
+  resourceId String
+  expiration DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiration])
+  @@map("google_calendar_watches")
+}
+
 model KanbanCardMember {
   id        String   @id @default(cuid())
   cardId    String
@@ -3983,12 +4011,30 @@ model KanbanCardComment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  author User       @relation("KanbanCardCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  card     KanbanCard             @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  author   User                   @relation("KanbanCardCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  mentions KanbanCommentMention[]
 
   @@index([cardId])
   @@index([userId])
   @@map("kanban_card_comments")
+}
+
+/// Pessoa marcada (@) num comentário do card. `unread` alimenta o sino de notificações.
+model KanbanCommentMention {
+  id        String   @id @default(cuid())
+  commentId String
+  cardId    String
+  userId    String
+  createdAt DateTime @default(now())
+  unread    Boolean  @default(true)
+
+  comment KanbanCardComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([userId, unread])
+  @@index([cardId])
+  @@map("kanban_comment_mentions")
 }
 
 model KanbanCardAttachment {

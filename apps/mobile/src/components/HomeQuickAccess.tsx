@@ -10,6 +10,7 @@ import {
   Inbox,
   ListChecks,
   SquareKanban,
+  FileSignature,
   Wrench,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -49,14 +50,17 @@ export default function HomeQuickAccess() {
       key: 'agenda',
       label: 'Agenda',
       icon: CalendarDays,
-      onPress: () => navigation.navigate('Agenda', { mode: 'agenda' }),
+      onPress: () => navigation.navigate('Agenda'),
     },
     {
       key: 'tarefas',
       label: 'Tarefas',
       icon: ListChecks,
-      onPress: () => navigation.navigate('Agenda', { mode: 'tasks' }),
+      onPress: () => navigation.navigate('Tarefas'),
     },
+    ...(can('ponto_contratos')
+      ? [{ key: 'contratos', label: 'Contratos', icon: FileSignature, onPress: () => navigation.navigate('Contratos') }]
+      : []),
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => navigation.navigate('DiarioObra') }]
       : []),

@@ -3,6 +3,8 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -25,6 +27,7 @@ import {
   Calculator,
   Clock,
   CreditCard,
+  Gauge,
   ReceiptText,
   Filter,
   FilterX,
@@ -48,6 +51,16 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
 import api from '@/lib/api';
+import {
+  BAR_STAGGER_MS,
+  CountUpLabel,
+  type ChartLabelProps,
+  FadeInTopLabel,
+  growingBarShape,
+  growingColumnShape,
+  rowInStyle,
+  useAnimatedNumber,
+} from '@/lib/chartAnimation';
 
 type Bucket = {
   key: string;
@@ -114,11 +127,64 @@ function useChartTheme() {
   };
 }
 
-function SectionTitle({ icon: Icon, title, subtitle }: { icon: LucideIcon; title: string; subtitle?: string }) {
+/** Tooltip clara (fundo branco), igual à dos gráficos da página de contrato. */
+function ChartLightTooltip({
+  active,
+  label,
+  rows,
+}: {
+  active?: boolean;
+  label?: React.ReactNode;
+  rows: Array<{ key: string; name: string; value: string; color: string }>;
+}) {
+  if (!active || rows.length === 0) return null;
+  return (
+    <div className="min-w-[168px] rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-gray-900 shadow-lg">
+      <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
+      {rows.map((row) => (
+        <div key={row.key} className="flex items-center justify-between gap-4 py-0.5">
+          <span className="inline-flex items-center gap-2 text-xs text-gray-500">
+            <span className="h-3 w-0.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} aria-hidden />
+            {row.name}
+          </span>
+          <span className="text-xs font-semibold tabular-nums text-gray-900">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Degradês das barras (um por cor), como nos gráficos de contrato. */
+function BarGradients({ idPrefix, colors, horizontal = false }: { idPrefix: string; colors: string[]; horizontal?: boolean }) {
+  return (
+    <defs>
+      {colors.map((c, i) => (
+        <linearGradient key={`${c}-${i}`} id={`${idPrefix}-${i}`} x1="0" y1="0" x2={horizontal ? 1 : 0} y2={horizontal ? 0 : 1}>
+          <stop offset="0%" stopColor={c} stopOpacity={horizontal ? 0.6 : 0.95} />
+          <stop offset="100%" stopColor={c} stopOpacity={horizontal ? 1 : 0.55} />
+        </linearGradient>
+      ))}
+    </defs>
+  );
+}
+
+function SectionTitle({
+  icon: Icon,
+  title,
+  subtitle,
+  iconBg = 'bg-red-100 dark:bg-red-900/30',
+  iconColor = 'text-red-600 dark:text-red-400',
+}: {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+  iconBg?: string;
+  iconColor?: string;
+}) {
   return (
     <div className={cadastroListClasses.cardHeaderIconRow}>
-      <div className="shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-        <Icon className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" aria-hidden />
+      <div className={`shrink-0 rounded-lg p-2 sm:p-3 ${iconBg}`}>
+        <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${iconColor}`} aria-hidden />
       </div>
       <div className="min-w-0">
         <h2 className="truncate text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">{title}</h2>
@@ -134,17 +200,21 @@ function ChartCard({
   subtitle,
   className,
   children,
+  iconBg,
+  iconColor,
 }: {
   icon: LucideIcon;
   title: string;
   subtitle?: string;
   className?: string;
   children: React.ReactNode;
+  iconBg?: string;
+  iconColor?: string;
 }) {
   return (
     <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
       <CardHeader className={cadastroListClasses.cardHeader}>
-        <SectionTitle icon={icon} title={title} subtitle={subtitle} />
+        <SectionTitle icon={icon} title={title} subtitle={subtitle} iconBg={iconBg} iconColor={iconColor} />
       </CardHeader>
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>{children}</CardContent>
     </Card>
@@ -158,6 +228,7 @@ function ChartEmpty({ icon }: { icon: LucideIcon }) {
 /** Barras horizontais de valor total (ranking). */
 function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon; color?: string }) {
   const theme = useChartTheme();
+  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={icon} />;
   const max = Math.max(...data.map((d) => d.value), 1);
   const height = Math.max(220, data.length * 38 + 16);
@@ -169,6 +240,7 @@ function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon;
     <div className="w-full" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 2, right: rightMargin, bottom: 2, left: 0 }} barCategoryGap="18%">
+          <BarGradients idPrefix={`rk-${uid}`} colors={data.map((d, i) => color ?? CHART_PALETTE[i % CHART_PALETTE.length])} horizontal />
           <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} horizontal={false} />
           <XAxis type="number" hide domain={[0, max]} />
           <YAxis
@@ -182,17 +254,28 @@ function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon;
             tickFormatter={(v: string) => truncate(v, labelMax)}
           />
           <Tooltip
-            contentStyle={theme.tipStyle}
-            labelStyle={theme.tipLabelStyle}
-            itemStyle={theme.tipItemStyle}
-            cursor={{ fill: theme.barCursor }}
-            formatter={(value, _n, item) => [`${brl(Number(value ?? 0))} · ${(item.payload as Bucket).count} boletos`, 'Total']}
+            cursor={{ fill: theme.barCursor, radius: 8 }}
+            content={({ active, payload }) => {
+              const b = payload?.[0]?.payload as Bucket | undefined;
+              return (
+                <ChartLightTooltip
+                  active={active}
+                  label={b?.label}
+                  rows={b ? [{ key: 'v', name: `Total · ${b.count} boletos`, value: brl(b.value), color: String(payload?.[0]?.color || '#64748b') }] : []}
+                />
+              );
+            }}
           />
-          <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26} animationDuration={650}>
+          <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26} isAnimationActive={false} shape={growingBarShape('value')}>
             {data.map((d, i) => (
-              <Cell key={d.key} fill={color ?? CHART_PALETTE[i % CHART_PALETTE.length]} />
+              <Cell key={d.key} fill={`url(#rk-${uid}-${i})`} />
             ))}
-            <LabelList dataKey="value" position="right" offset={8} fill={theme.chartLabel} fontSize={11} formatter={(v) => brlCompact(Number(v ?? 0))} />
+            <LabelList
+              dataKey="value"
+              content={(labelProps) => (
+                <CountUpLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
+              )}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -203,6 +286,8 @@ function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon;
 function DonutChart({ data, icon }: { data: Bucket[]; icon: LucideIcon }) {
   const theme = useChartTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
+  const totalShown = useAnimatedNumber(total, 0, 1100);
+  const [hover, setHover] = useState<number | null>(null);
   if (!data.length || total <= 0) return <ChartEmpty icon={icon} />;
   const slices = data.map((d, i) => ({ ...d, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
   return (
@@ -222,23 +307,24 @@ function DonutChart({ data, icon }: { data: Bucket[]; icon: LucideIcon }) {
               stroke={theme.pieStroke}
               strokeWidth={3}
               cornerRadius={3}
-              animationDuration={650}
+              animationDuration={1100}
+              animationEasing="ease-out"
+              onMouseEnter={(_, i) => setHover(i)}
+              onMouseLeave={() => setHover(null)}
             >
               {slices.map((s) => (
-                <Cell key={s.key} fill={s.color} />
+                <Cell key={s.key} fill={s.color} fillOpacity={hover === null || hover === slices.indexOf(s) ? 1 : 0.45} />
               ))}
             </Pie>
-            <Tooltip
-              contentStyle={theme.tipStyle}
-              labelStyle={theme.tipLabelStyle}
-              itemStyle={theme.tipItemStyle}
-              formatter={(value, name) => [brl(Number(value ?? 0)), name]}
-            />
           </PieChart>
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-base font-bold leading-none tabular-nums text-gray-900 dark:text-gray-100">{brlCompact(total)}</span>
-          <span className="mt-1 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Total</span>
+          <span className="max-w-[80px] truncate text-base font-bold leading-none tabular-nums text-gray-900 dark:text-gray-100">
+            {hover !== null && slices[hover] ? brlCompact(slices[hover].value) : brlCompact(totalShown)}
+          </span>
+          <span className="mt-1 max-w-[80px] truncate text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {hover !== null && slices[hover] ? slices[hover].label : "Total"}
+          </span>
         </div>
       </div>
       <ul className="min-w-0 flex-1 space-y-2.5">
@@ -263,26 +349,36 @@ function DonutChart({ data, icon }: { data: Bucket[]; icon: LucideIcon }) {
 /** Colunas empilhadas por mês de vencimento: pago / à vencer / vencido. */
 function MonthlyChart({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
+  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={CalendarRange} />;
   const rows = data.map((d) => ({ ...d, mes: monthLabel(d.key) }));
   return (
     <div className="h-[320px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 12, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
+          <BarGradients idPrefix={`mo-${uid}`} colors={[STATUS_COLORS.pago, STATUS_COLORS.aVencer, STATUS_COLORS.vencido]} />
           <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
           <XAxis dataKey="mes" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 11 }} interval={0} angle={rows.length > 14 ? -45 : 0} textAnchor={rows.length > 14 ? 'end' : 'middle'} height={rows.length > 14 ? 48 : 28} />
           <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
           <Tooltip
-            contentStyle={theme.tipStyle}
-            labelStyle={theme.tipLabelStyle}
-            itemStyle={theme.tipItemStyle}
-            cursor={{ fill: theme.barCursor }}
-            formatter={(value, name) => [brl(Number(value ?? 0)), name]}
+            cursor={{ fill: theme.barCursor, radius: 8 }}
+            content={({ active, label, payload }) => (
+              <ChartLightTooltip
+                active={active}
+                label={label}
+                rows={(payload ?? []).map((e) => ({
+                  key: String(e.dataKey),
+                  name: String(e.name),
+                  value: brl(Number(e.value) || 0),
+                  color: STATUS_COLORS[String(e.dataKey) as keyof typeof STATUS_COLORS] ?? '#64748b',
+                }))}
+              />
+            )}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="pago" name="Pago" stackId="s" fill={STATUS_COLORS.pago} animationDuration={650} />
-          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={STATUS_COLORS.aVencer} animationDuration={650} />
-          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={STATUS_COLORS.vencido} radius={[4, 4, 0, 0]} animationDuration={650} />
+          <Bar dataKey="pago" name="Pago" stackId="s" fill={`url(#mo-${uid}-0)`} isAnimationActive={false} shape={growingColumnShape('pago', 0)} />
+          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={`url(#mo-${uid}-1)`} isAnimationActive={false} shape={growingColumnShape('aVencer', 0)} />
+          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={`url(#mo-${uid}-2)`} radius={[4, 4, 0, 0]} isAnimationActive={false} shape={growingColumnShape('vencido', 4)} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -291,6 +387,7 @@ function MonthlyChart({ data }: { data: Bucket[] }) {
 
 function PaymentTypeBlock({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
+  const uid = React.useId().replace(/:/g, '');
   const total = data.reduce((s, d) => s + d.value, 0);
   const totalCount = data.reduce((s, d) => s + d.count, 0);
   if (!totalCount) return <ChartEmpty icon={CreditCard} />;
@@ -299,15 +396,30 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
       <div className="h-[260px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
+            <BarGradients idPrefix={`pt-${uid}`} colors={data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length])} />
+            <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 14)} />
             <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
-            <Tooltip contentStyle={theme.tipStyle} labelStyle={theme.tipLabelStyle} itemStyle={theme.tipItemStyle} cursor={{ fill: theme.barCursor }} formatter={(value) => [brl(Number(value ?? 0)), 'Valor']} />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={56} animationDuration={650}>
+            <Tooltip
+              cursor={{ fill: theme.barCursor, radius: 8 }}
+              content={({ active, label, payload }) => (
+                <ChartLightTooltip
+                  active={active}
+                  label={label}
+                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: String(e.color || '#64748b') }))}
+                />
+              )}
+            />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={56} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
               {data.map((d, i) => (
-                <Cell key={d.key} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
+                <Cell key={d.key} fill={`url(#pt-${uid}-${i})`} />
               ))}
-              <LabelList dataKey="value" position="top" fill={theme.chartLabel} fontSize={11} formatter={(v) => (Number(v) > 0 ? brlCompact(Number(v)) : '')} />
+              <LabelList
+                dataKey="value"
+                content={(labelProps) => (
+                  <FadeInTopLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
+                )}
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -323,8 +435,8 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
-            {data.map((d) => (
-              <tr key={d.key} className="text-xs text-gray-900 dark:text-gray-100">
+            {data.map((d, rowIndex) => (
+              <tr key={d.key} className="chart-row-in text-xs text-gray-900 dark:text-gray-100" style={rowInStyle(rowIndex)}>
                 <td className="px-2 py-3 font-medium">{d.label}</td>
                 <td className="px-2 py-3 text-center tabular-nums">{d.count.toLocaleString('pt-BR')}</td>
                 <td className="px-2 py-3 text-right tabular-nums">{brl(d.value)}</td>
@@ -340,18 +452,39 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
 
 function ConditionBlock({ data, total }: { data: Bucket[]; total: number }) {
   const theme = useChartTheme();
+  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={ReceiptText} />;
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
+            <BarGradients idPrefix={`cd-${uid}`} colors={['#0f766e']} />
+            <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 12)} />
             <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
-            <Tooltip contentStyle={theme.tipStyle} labelStyle={theme.tipLabelStyle} itemStyle={theme.tipItemStyle} cursor={{ fill: theme.barCursor }} formatter={(value) => [brl(Number(value ?? 0)), 'Valor']} />
-            <Bar dataKey="value" fill="#0f766e" radius={[6, 6, 0, 0]} maxBarSize={48} animationDuration={650}>
-              <LabelList dataKey="value" position="top" fill={theme.chartLabel} fontSize={10} formatter={(v) => brlCompact(Number(v ?? 0))} />
+            <Tooltip
+              cursor={{ fill: theme.barCursor, radius: 8 }}
+              content={({ active, label, payload }) => (
+                <ChartLightTooltip
+                  active={active}
+                  label={label}
+                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: '#0f766e' }))}
+                />
+              )}
+            />
+            <Bar dataKey="value" fill={`url(#cd-${uid}-0)`}radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
+              <LabelList
+                dataKey="value"
+                content={(labelProps) => (
+                  <FadeInTopLabel
+                    {...(labelProps as unknown as ChartLabelProps)}
+                    color={theme.chartLabel}
+                    fontSize={10}
+                    format={brlCompact}
+                  />
+                )}
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -367,8 +500,8 @@ function ConditionBlock({ data, total }: { data: Bucket[]; total: number }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
-            {data.map((d) => (
-              <tr key={d.key} className="text-xs text-gray-900 dark:text-gray-100">
+            {data.map((d, rowIndex) => (
+              <tr key={d.key} className="chart-row-in text-xs text-gray-900 dark:text-gray-100" style={rowInStyle(rowIndex)}>
                 <td className="px-2 py-3 font-medium">{d.label}</td>
                 <td className="px-2 py-3 text-center tabular-nums">{d.count.toLocaleString('pt-BR')}</td>
                 <td className="px-2 py-3 text-right tabular-nums">{brl(d.value)}</td>
@@ -412,10 +545,10 @@ function MonthlySummaryTable({ rows, polos }: { rows: Dashboard['byMonthPolo']; 
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
-          {rows.map((r) => {
+          {rows.map((r, rowIndex) => {
             const l = line(r);
             return (
-              <tr key={r.key} className="text-xs text-gray-900 dark:text-gray-100">
+              <tr key={r.key} className="chart-row-in text-xs text-gray-900 dark:text-gray-100" style={rowInStyle(rowIndex)}>
                 <td className="px-2 py-3 font-medium">{monthLabel(r.key)}</td>
                 {polos.map((p) => (
                   <td key={p} className={td}>{brl(r.polos[p]?.value ?? 0)}</td>
@@ -464,8 +597,8 @@ function CostCenterTable({ data, total }: { data: Bucket[]; total: number }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
-          {data.map((d) => (
-            <tr key={d.key} className="text-xs text-gray-900 dark:text-gray-100">
+          {data.map((d, rowIndex) => (
+            <tr key={d.key} className="chart-row-in text-xs text-gray-900 dark:text-gray-100" style={rowInStyle(rowIndex)}>
               <td className="px-2 py-3 font-medium">{d.label}</td>
               <td className="px-2 py-3 text-center tabular-nums">{d.count.toLocaleString('pt-BR')}</td>
               <td className="px-2 py-3 text-right tabular-nums">{brl(d.value)}</td>
@@ -475,6 +608,169 @@ function CostCenterTable({ data, total }: { data: Bucket[]; total: number }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Destaque do topo: total em boletos e evolução por mês de vencimento (mesmo desenho do Faturamento de contrato). */
+function TotalAreaCard({ total, paidPct, byMonth }: { total: number; paidPct: number; byMonth: Bucket[] }) {
+  const theme = useChartTheme();
+  const { isDark } = useTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const totalShown = useAnimatedNumber(total, 0, 1200);
+  const stroke = '#60a5fa';
+  const series = byMonth.filter((b) => b.key !== 'sem-data').map((b) => ({ mes: monthLabel(b.key), value: b.value, pago: b.pago }));
+  return (
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col`}>
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-5`}>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">Total em boletos</h3>
+            <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-gray-900 dark:text-gray-50 sm:text-3xl">{brl(totalShown)}</p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+              <CircleCheck className="h-3.5 w-3.5" aria-hidden />
+              {paidPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% pago
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">por mês de vencimento</span>
+          </div>
+        </div>
+        <div className="mt-5 h-[240px] w-full min-w-0">
+          {series.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 12, right: 10, left: 0, bottom: 4 }}>
+                <defs>
+                  <linearGradient id={`tot-${uid}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={stroke} stopOpacity={0.28} />
+                    <stop offset="75%" stopColor={stroke} stopOpacity={0.06} />
+                    <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="mes" tick={{ fontSize: 11, fill: theme.chartTick }} interval="preserveStartEnd" minTickGap={14} axisLine={false} tickLine={false} tickMargin={8} />
+                <YAxis tick={{ fontSize: 11, fill: theme.chartTick }} axisLine={false} tickLine={false} width={56} tickFormatter={(v) => brlCompact(Number(v) || 0)} domain={[0, (max: number) => Math.max(Number(max) || 0, 1)]} />
+                <Tooltip
+                  cursor={{ stroke: isDark ? '#6b7280' : '#cbd5e1', strokeDasharray: '4 4', strokeWidth: 1 }}
+                  content={({ active, label, payload }) => (
+                    <ChartLightTooltip
+                      active={active}
+                      label={label}
+                      rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor no mês', value: brl(Number(e.value) || 0), color: stroke }))}
+                    />
+                  )}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={stroke}
+                  strokeWidth={2.75}
+                  fill={`url(#tot-${uid})`}
+                  dot={false}
+                  animationDuration={1300}
+                  animationEasing="ease-out"
+                  activeDot={{ r: 5, strokeWidth: 2, stroke: isDark ? '#1f2937' : '#fff', fill: stroke }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <ChartEmpty icon={CalendarRange} />
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Semicírculo com a parte já paga do total (visual do card Progresso de contrato). */
+function PaidGaugeCard({ paid, total }: { paid: number; total: number }) {
+  const { isDark } = useTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const target = total > 0 ? Math.max(0, Math.min(100, (paid / total) * 100)) : 0;
+  const pct = useAnimatedNumber(target, 0, 1200);
+  const open = Math.max(0, total - paid);
+  const track = isDark ? '#374151' : '#e5e7eb';
+  const hatch = isDark ? '#6b7280' : '#cbd5e1';
+  const pendingLen = Math.max(0, 100 - pct);
+  const arc = 'M 28 100 A 72 72 0 0 1 172 100';
+  return (
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+        <SectionTitle icon={Gauge} title="Progresso" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" />
+      </CardHeader>
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <div className="mx-auto w-full max-w-[220px]">
+            <svg viewBox="0 12 200 112" className="h-auto w-full" role="img" aria-label={`${Math.round(pct)}% pago`}>
+              <defs>
+                <pattern id={`hatch-${uid}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(42)">
+                  <rect width="6" height="6" fill={track} />
+                  <line x1="0" y1="0" x2="0" y2="6" stroke={hatch} strokeWidth="2.4" />
+                </pattern>
+              </defs>
+              <path d={arc} fill="none" stroke={track} strokeWidth="32" strokeLinecap="butt" pathLength={100} />
+              {pendingLen > 0.4 ? (
+                <path d={arc} fill="none" stroke={`url(#hatch-${uid})`} strokeWidth="32" strokeLinecap="round" pathLength={100} strokeDasharray={`${pendingLen} 1000`} strokeDashoffset={-pct} />
+              ) : null}
+              {pct > 0.4 ? (
+                <path d={arc} fill="none" stroke="#16a34a" strokeWidth="32" strokeLinecap="round" pathLength={100} strokeDasharray={`${pct} 1000`} />
+              ) : null}
+              <text x="100" y="80" textAnchor="middle" fill={isDark ? '#f9fafb' : '#111827'} style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>
+                {Math.round(pct)}%
+              </text>
+              <text x="100" y="98" textAnchor="middle" fill="#9ca3af" style={{ fontSize: 10 }}>
+                pago
+              </text>
+            </svg>
+          </div>
+        </div>
+        <div className="grid shrink-0 grid-cols-2 gap-2.5">
+          <div className="rounded-xl bg-emerald-50/80 px-3 py-2.5 dark:bg-emerald-900/20">
+            <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">Pago</p>
+            <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">{brl(paid)}</p>
+          </div>
+          <div className="rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/60">
+            <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Em aberto</p>
+            <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{brl(open)}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Cartão de indicador cujo valor e quantidade sobem até o total, um cartão depois do outro. */
+function AnimatedKpiCard({
+  index,
+  label,
+  value,
+  count,
+  isAverage,
+  icon,
+  iconBg,
+  iconColor,
+  loading,
+}: {
+  index: number;
+  label: string;
+  value: number;
+  count: number;
+  isAverage: boolean;
+  icon: LucideIcon;
+  iconBg: string;
+  iconColor: string;
+  loading: boolean;
+}) {
+  const valueShown = useAnimatedNumber(value, index * BAR_STAGGER_MS, 1000);
+  const countShown = Math.round(useAnimatedNumber(count, index * BAR_STAGGER_MS, 1000));
+  return (
+    <FilterStatCard
+      label={label}
+      count={brl(valueShown)}
+      subtitle={isAverage ? 'média por boleto' : `${countShown.toLocaleString('pt-BR')} ${count === 1 ? 'boleto' : 'boletos'}`}
+      icon={icon}
+      iconBg={iconBg}
+      iconColor={iconColor}
+      loading={loading}
+    />
   );
 }
 
@@ -526,7 +822,7 @@ function DashboardBoletosPage() {
 
   const t = data?.totals;
   const kpis = [
-    { key: 'all', label: 'Total em boletos', count: t?.all.count ?? 0, value: t?.all.value ?? 0, Icon: Wallet, bg: 'bg-blue-100 dark:bg-blue-900/30', color: 'text-blue-600 dark:text-blue-300' },
+    { key: 'aberto', label: 'Em aberto', count: (t?.A_VENCER.count ?? 0) + (t?.VENCIDO.count ?? 0), value: (t?.A_VENCER.value ?? 0) + (t?.VENCIDO.value ?? 0), Icon: Wallet, bg: 'bg-blue-100 dark:bg-blue-900/30', color: 'text-blue-600 dark:text-blue-300' },
     { key: 'pago', label: 'Pagos', count: t?.PAGO.count ?? 0, value: t?.PAGO.value ?? 0, Icon: CircleCheck, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-600 dark:text-emerald-300' },
     { key: 'avencer', label: 'À vencer', count: t?.A_VENCER.count ?? 0, value: t?.A_VENCER.value ?? 0, Icon: Clock, bg: 'bg-amber-100 dark:bg-amber-900/30', color: 'text-amber-600 dark:text-amber-300' },
     { key: 'vencido', label: 'Vencidos', count: t?.VENCIDO.count ?? 0, value: t?.VENCIDO.value ?? 0, Icon: AlertTriangle, bg: 'bg-red-100 dark:bg-red-900/30', color: 'text-red-600 dark:text-red-300' },
@@ -542,13 +838,28 @@ function DashboardBoletosPage() {
           description="Indicadores de pagos, à vencer e vencidos por polo, gestor, centro de custo e mês de vencimento"
         />
 
+        {!isError ? (
+          <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+            <div className="h-full lg:col-span-2">
+              <TotalAreaCard
+                total={t?.all.value ?? 0}
+                paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
+                byMonth={data?.byMonth ?? []}
+              />
+            </div>
+            <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
-          {kpis.map((k) => (
-            <FilterStatCard
+          {kpis.map((k, i) => (
+            <AnimatedKpiCard
               key={k.key}
+              index={i}
               label={k.label}
-              count={brl(k.value)}
-              subtitle={k.key === 'media' ? 'média por boleto' : `${k.count.toLocaleString('pt-BR')} ${k.count === 1 ? 'boleto' : 'boletos'}`}
+              value={k.value}
+              count={k.count}
+              isAverage={k.key === 'media'}
               icon={k.Icon}
               iconBg={k.bg}
               iconColor={k.color}
@@ -624,39 +935,39 @@ function DashboardBoletosPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ChartCard icon={CalendarRange} title="Valor por mês de vencimento" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
+            <ChartCard icon={CalendarRange} title="Valor por mês de vencimento" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
               <MonthlyChart data={data.byMonth} />
             </ChartCard>
 
-            <ChartCard icon={CalendarRange} title="Resumo mensal por polo" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-2">
+            <ChartCard icon={CalendarRange} title="Resumo mensal por polo" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-2">
               <MonthlySummaryTable rows={data.byMonthPolo ?? []} polos={data.byPolo.map((p) => p.label)} />
             </ChartCard>
 
-            <ChartCard icon={CreditCard} title="Total por tipo de pagamento" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
+            <ChartCard icon={CreditCard} title="Total por tipo de pagamento" iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
               <PaymentTypeBlock data={data.byPaymentType ?? []} />
             </ChartCard>
 
-            <ChartCard icon={ReceiptText} title="Principais condições de pagamento" subtitle="8 maiores por valor" className="lg:col-span-2">
+            <ChartCard icon={ReceiptText} title="Principais condições de pagamento" iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600 dark:text-teal-400" subtitle="8 maiores por valor" className="lg:col-span-2">
               <ConditionBlock data={data.byCondition ?? []} total={data.totals.all.value} />
             </ChartCard>
 
-            <ChartCard icon={Banknote} title="Valor por polo" subtitle="Distribuição do valor total">
+            <ChartCard icon={Banknote} title="Valor por polo" iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" subtitle="Distribuição do valor total">
               <DonutChart data={data.byPolo} icon={Banknote} />
             </ChartCard>
 
-            <ChartCard icon={UserCog} title="Valor por gestor" subtitle="Centros de custo agrupados pelo gestor do contrato">
+            <ChartCard icon={UserCog} title="Valor por gestor" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Centros de custo agrupados pelo gestor do contrato">
               <RankBarChart data={data.byManager} icon={UserCog} />
             </ChartCard>
 
-            <ChartCard icon={Wallet} title="Valor por centro de custo" subtitle="10 maiores">
+            <ChartCard icon={Wallet} title="Valor por centro de custo" iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" subtitle="10 maiores">
               <RankBarChart data={data.byCostCenter.slice(0, 10)} icon={Wallet} color="#1e40af" />
             </ChartCard>
 
-            <ChartCard icon={Truck} title="Valor por fornecedor" subtitle="10 maiores">
+            <ChartCard icon={Truck} title="Valor por fornecedor" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" subtitle="10 maiores">
               <RankBarChart data={data.bySupplier.slice(0, 10)} icon={Truck} color="#0f766e" />
             </ChartCard>
 
-            <ChartCard icon={Wallet} title="Todos os centros de custo" subtitle="Total no período, com % do período" className="lg:col-span-2">
+            <ChartCard icon={Wallet} title="Todos os centros de custo" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Total no período, com % do período" className="lg:col-span-2">
               <CostCenterTable data={data.byCostCenter} total={data.totals.all.value} />
             </ChartCard>
           </div>
@@ -668,7 +979,7 @@ function DashboardBoletosPage() {
 
 export default function DashboardBoletosRoute() {
   return (
-    <ProtectedRoute route="/ponto/financeiro/dashboard-boletos">
+    <ProtectedRoute route="/ponto/controle-boletos/dashboard">
       <DashboardBoletosPage />
     </ProtectedRoute>
   );

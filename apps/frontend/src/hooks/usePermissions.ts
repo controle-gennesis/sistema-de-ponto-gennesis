@@ -180,6 +180,7 @@ export function usePermissions() {
     resumo: boolean;
     fluig?: boolean;
     obras?: boolean;
+    comprador?: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
@@ -970,10 +971,10 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || can(pk('/ponto/financeiro/controle-financeiro')),
-    '/ponto/financeiro/controle-boletos':
-      isAdministrator || can(pk('/ponto/financeiro/controle-boletos')),
-    '/ponto/financeiro/dashboard-boletos':
-      isAdministrator || can(pk('/ponto/financeiro/controle-boletos')),
+    '/ponto/controle-boletos':
+      isAdministrator || can(pk('/ponto/controle-boletos')),
+    '/ponto/controle-boletos/dashboard':
+      isAdministrator || can(pk('/ponto/controle-boletos')),
     '/ponto/financeiro/receitas': isAdministrator || can(pk('/ponto/financeiro/receitas')),
     '/ponto/financeiro/espelhos-aprovados':
       isAdministrator || can(pk('/ponto/financeiro/espelhos-aprovados')),

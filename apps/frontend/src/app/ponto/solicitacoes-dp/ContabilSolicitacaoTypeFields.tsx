@@ -124,6 +124,95 @@ function TextField({
   );
 }
 
+type ItemDescricaoValor = { descricao: string; valor: string };
+const MAX_ITENS_DESCRICAO_VALOR = 20;
+
+/** Lê uma lista de { descricao, valor } dos detalhes (vazia se não existir). */
+function itensDescricaoValor(details: Record<string, unknown>, key: string): ItemDescricaoValor[] {
+  const raw = details[key];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((it) => {
+    const o = (it && typeof it === 'object' ? it : {}) as Record<string, unknown>;
+    return {
+      descricao: typeof o.descricao === 'string' ? o.descricao : '',
+      valor: typeof o.valor === 'string' ? o.valor : '',
+    };
+  });
+}
+
+/** Lista de itens "o quê + valor" lado a lado (ex.: Vale transporte | R$ 320,00). */
+function DescricaoValorList({
+  label,
+  itens,
+  onChange,
+  descricaoPlaceholder,
+  valorPlaceholder,
+  addLabel,
+  moedaNoValor,
+}: {
+  label: string;
+  itens: ItemDescricaoValor[];
+  onChange: (next: ItemDescricaoValor[]) => void;
+  descricaoPlaceholder: string;
+  valorPlaceholder: string;
+  addLabel: string;
+  moedaNoValor?: boolean;
+}) {
+  const rows = itens.length > 0 ? itens : [{ descricao: '', valor: '' }];
+  const update = (i: number, patch: Partial<ItemDescricaoValor>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const remove = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+  const add = () => onChange([...rows, { descricao: '', valor: '' }]);
+
+  return (
+    <div className="md:col-span-2">
+      <label className={labelCls}>{label}</label>
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <input
+              type="text"
+              value={row.descricao}
+              onChange={(e) => update(i, { descricao: e.target.value })}
+              placeholder={descricaoPlaceholder}
+              aria-label={`${label} — descrição ${i + 1}`}
+              className={`${fieldBox} min-w-0 flex-1`}
+            />
+            <input
+              type="text"
+              value={row.valor}
+              onChange={(e) => update(i, { valor: moedaNoValor ? maskCurrencyInputBrOrEmpty(e.target.value) : e.target.value })}
+              placeholder={valorPlaceholder}
+              aria-label={`${label} — valor ${i + 1}`}
+              className={`${fieldBox} w-40 shrink-0 sm:w-52`}
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              disabled={rows.length === 1 && !row.descricao && !row.valor}
+              title="Remover item"
+              aria-label={`Remover item ${i + 1} de ${label.toLowerCase()}`}
+              className="mt-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-gray-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+      {rows.length < MAX_ITENS_DESCRICAO_VALOR ? (
+        <button
+          type="button"
+          onClick={add}
+          className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-red-600 dark:text-gray-300 dark:hover:text-red-400"
+        >
+          <Plus className="h-4 w-4" />
+          {addLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function TextAreaField({
   label,
   value,
@@ -597,14 +686,26 @@ export function ContabilSolicitacaoTypeFields({
           <div className="hidden md:block" />
           {possui === 'SIM' ? (
             <>
-              <div>
-                <label className={labelCls}>Provento / desconto <span className="text-red-600">*</span></label>
-                <div className="flex gap-2">
-                  <ButtonSeg active={text('proventoDesconto') === 'Provento'} onClick={() => patchDetails({ proventoDesconto: 'Provento' })} label="Provento" />
-                  <ButtonSeg active={text('proventoDesconto') === 'Desconto'} onClick={() => patchDetails({ proventoDesconto: 'Desconto' })} label="Desconto" />
-                </div>
-              </div>
-              <TextField label="Valor" value={text('valor')} onChange={(v) => patchDetails({ valor: maskCurrencyInputBrOrEmpty(v) })} required placeholder="R$ 0,00" />
+              <DescricaoValorList
+                label="Proventos"
+                itens={itensDescricaoValor(details, 'proventos')}
+                onChange={(next) => patchDetails({ proventos: next })}
+                descricaoPlaceholder="Ex.: Horas extras 50%"
+                valorPlaceholder="Ex.: 20:00 ou R$ 100,00"
+                addLabel="Adicionar provento"
+              />
+              <DescricaoValorList
+                label="Descontos"
+                itens={itensDescricaoValor(details, 'descontos')}
+                onChange={(next) => patchDetails({ descontos: next })}
+                descricaoPlaceholder="Ex.: Vale transporte"
+                valorPlaceholder="R$ 0,00"
+                addLabel="Adicionar desconto"
+                moedaNoValor
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 md:col-span-2">
+                Preencha ao menos um item, informando o que deve ser pago ou descontado e o valor (ou as horas) de cada um.
+              </p>
             </>
           ) : null}
           <TextAreaField label="Solicitação / observações" value={text('observacoes')} onChange={set('observacoes')} required placeholder="Descreva a solicitação com o máximo de detalhes" />

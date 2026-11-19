@@ -51,6 +51,29 @@ import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
+import type { OcSupplierOption } from '@/components/oc/OcPurchaseOrderFormFields';
+
+/** Lista sem repetir nomes; mantém o valor atual (boleto antigo) mesmo que não esteja na lista, para não apagá-lo. */
+function comValorAtual(lista: string[], atual: string): string[] {
+  const valor = (atual ?? '').trim();
+  const vistos = new Set<string>();
+  const unica = lista.filter((item) => {
+    const chave = String(item).trim().toUpperCase();
+    if (!chave || vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+  return valor && !vistos.has(valor.toUpperCase()) ? [valor, ...unica] : unica;
+}
+
+/** Nome do fornecedor gravado no boleto: a razão social do cadastro (ou o nome fantasia, se faltar). */
+const boletoSupplierName = (s: OcSupplierOption): string => (s.name?.trim() || s.tradeName?.trim() || '');
+const boletoSupplierLabel = (s: OcSupplierOption): string => {
+  const nome = boletoSupplierName(s);
+  return s.code ? `${s.code} - ${nome}` : nome;
+};
 
 const PAGE_SIZE = 50;
 
@@ -87,7 +110,14 @@ type ListResponse = {
   summary: Summary;
 };
 
+type DeletePreview = {
+  wouldDelete: number;
+  wouldDeleteValue: number;
+  sample: Array<{ supplierName: string | null; costCenterName: string | null; nfNumber: string | null; value: number }>;
+};
+
 type ImportResult = {
+  deleted?: number;
   read: number;
   created: number;
   updated: number;
@@ -207,6 +237,9 @@ function ControleBoletosPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [updateExisting, setUpdateExisting] = useState(false);
+  const [deleteMissing, setDeleteMissing] = useState(false);
+  const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [exporting, setExporting] = useState(false);
   const [managersOpen, setManagersOpen] = useState(false);
@@ -371,17 +404,43 @@ function ControleBoletosPage() {
       if (!importFile) throw new Error('Selecione um arquivo');
       const fd = new FormData();
       fd.append('file', importFile);
-      fd.append('updateExisting', updateExisting ? 'true' : 'false');
+      fd.append('updateExisting', updateExisting || deleteMissing ? 'true' : 'false');
+      fd.append('deleteMissing', deleteMissing ? 'true' : 'false');
       const res = await api.post('/boleto-control/import', fd);
       return res.data?.data as ImportResult;
     },
     onSuccess: (data) => {
+      setDeletePreview(null);
       setImportResult(data);
       refresh();
       toast.success(`Importação concluída: ${data.created} novas linhas.`);
     },
     onError: (e) => toast.error(errMessage(e, 'Não foi possível importar a planilha.')),
   });
+
+  /** Com "deixar igual à planilha", mostra quantos boletos serão apagados e pede confirmação antes. */
+  const startImport = async () => {
+    if (!deleteMissing) {
+      importMutation.mutate();
+      return;
+    }
+    if (!importFile) return;
+    setPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', importFile);
+      fd.append('deleteMissing', 'true');
+      fd.append('previewOnly', 'true');
+      const res = await api.post('/boleto-control/import', fd);
+      const preview = res.data?.data as DeletePreview;
+      if (preview.wouldDelete > 0) setDeletePreview(preview);
+      else importMutation.mutate();
+    } catch (e) {
+      toast.error(errMessage(e, 'Não foi possível conferir a planilha.'));
+    } finally {
+      setPreviewing(false);
+    }
+  };
 
   const openNew = () => {
     setForm(emptyForm());
@@ -422,6 +481,8 @@ function ControleBoletosPage() {
     setImportFile(null);
     setImportResult(null);
     setUpdateExisting(false);
+    setDeleteMissing(false);
+    setDeletePreview(null);
   };
 
   const stats: Array<{
@@ -441,6 +502,33 @@ function ControleBoletosPage() {
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
   // Formulário: com o polo escolhido, a lista de centros de custo mostra só os desse polo.
+  // Condições de pagamento já cadastradas no sistema (as ativas), sem repetir o nome.
+  const { data: registeredPaymentConditions } = useQuery({
+    queryKey: ['payment-conditions', 'boleto-control-form'],
+    queryFn: async () => {
+      const res = await api.get('/payment-conditions', { params: { activeOnly: 'true' } });
+      const rows = (res.data?.data || []) as Array<{ label?: string; sortOrder?: number }>;
+      const seen = new Set<string>();
+      return [...rows]
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || String(a.label ?? '').localeCompare(String(b.label ?? ''), 'pt-BR'))
+        .map((r) => String(r.label ?? '').trim())
+        .filter((label) => {
+          const key = label.toUpperCase();
+          if (!label || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Boleto antigo com uma condição que não está na lista (ex.: veio da planilha): mantém o valor para não apagar.
+  const paymentConditionOptions = (() => {
+    const base = registeredPaymentConditions ?? [];
+    const atual = form.paymentCondition.trim();
+    return atual && !base.some((l) => l.toUpperCase() === atual.toUpperCase()) ? [atual, ...base] : base;
+  })();
+
   const centrosDoPolo = (() => {
     const map = options?.costCentersByPolo ?? {};
     const key = Object.keys(map).find((k) => k.trim().toUpperCase() === form.polo.trim().toUpperCase());
@@ -484,7 +572,7 @@ function ControleBoletosPage() {
           <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
             <button
               type="button"
-              onClick={() => router.push('/ponto/financeiro/dashboard-boletos')}
+              onClick={() => router.push('/ponto/controle-boletos/dashboard')}
               aria-label="Dashboard"
               title="Dashboard"
               className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
@@ -550,6 +638,7 @@ function ControleBoletosPage() {
                     <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                   ) : null}
                 </button>
+                {isAdministrator ? (
                 <div ref={actionsRef} className="relative shrink-0">
                   <button
                     type="button"
@@ -567,8 +656,6 @@ function ControleBoletosPage() {
                       role="menu"
                       className="absolute right-0 top-full z-40 mt-1.5 min-w-[240px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
                     >
-                      {isAdministrator ? (
-                        <>
                       <button
                         type="button"
                         role="menuitem"
@@ -594,8 +681,6 @@ function ControleBoletosPage() {
                         <Upload className="h-4 w-4 shrink-0 text-gray-500" />
                         Importar planilha
                       </button>
-                        </>
-                      ) : null}
                       <button
                         type="button"
                         role="menuitem"
@@ -611,6 +696,7 @@ function ControleBoletosPage() {
                     </div>
                   ) : null}
                 </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={openNew}
@@ -862,23 +948,44 @@ function ControleBoletosPage() {
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Polo">
-              <input list="boleto-polos" value={form.polo} onChange={(e) => set('polo', e.target.value)} className={FORM_FIELD_INPUT_CLS} placeholder="POLO DF" />
-              <datalist id="boleto-polos">
-                {(options?.polos ?? []).map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
+              <StringSingleSelectDropdown
+                value={form.polo}
+                onChange={(v) => set('polo', v)}
+                options={comValorAtual(options?.polos ?? [], form.polo)}
+                allowEmpty
+                emptyOptionLabel="Nenhum"
+                placeholder="Selecione o polo..."
+                searchPlaceholder="Pesquisar polo..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="Fornecedor" className="sm:col-span-2">
-              <input value={form.supplierName} onChange={(e) => set('supplierName', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
+              <AsyncSearchSelectDropdown<OcSupplierOption>
+                value={form.supplierName}
+                selectedLabel={form.supplierName}
+                onChange={(s) => set('supplierName', boletoSupplierName(s))}
+                searchFn={searchOcSuppliers}
+                getOptionId={boletoSupplierName}
+                getOptionLabel={boletoSupplierLabel}
+                queryKeyPrefix="suppliers-boleto-form"
+                placeholder="Selecione o fornecedor..."
+                searchPlaceholder="Pesquisar fornecedor..."
+                noFocusRing
+              />
             </Field>
             <Field label="Centro de custo" className="sm:col-span-2">
-              <input list="boleto-cc" value={form.costCenterName} onChange={(e) => set('costCenterName', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
-              <datalist id="boleto-cc">
-                {(centrosDoPolo ?? options?.officialCostCenters ?? options?.costCenters ?? []).map((c, i) => (
-                  <option key={`${c}-${i}`} value={c} />
-                ))}
-              </datalist>
+              <StringSingleSelectDropdown
+                value={form.costCenterName}
+                onChange={(v) => set('costCenterName', v)}
+                options={comValorAtual(centrosDoPolo ?? options?.officialCostCenters ?? options?.costCenters ?? [], form.costCenterName)}
+                allowEmpty
+                emptyOptionLabel="Nenhum"
+                placeholder="Selecione o centro de custo..."
+                searchPlaceholder="Pesquisar centro de custo..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="OC (TOTVS)">
               <input value={form.ocNumber} onChange={(e) => set('ocNumber', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
@@ -896,7 +1003,17 @@ function ControleBoletosPage() {
               <input type="date" value={form.nfEmissionDate} onChange={(e) => set('nfEmissionDate', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
             </Field>
             <Field label="Condição de pagamento" className="sm:col-span-2">
-              <input value={form.paymentCondition} onChange={(e) => set('paymentCondition', e.target.value)} placeholder="BOLETO 28 DIAS" className={FORM_FIELD_INPUT_CLS} />
+              <StringSingleSelectDropdown
+                value={form.paymentCondition}
+                onChange={(v) => set('paymentCondition', v)}
+                options={paymentConditionOptions}
+                allowEmpty
+                emptyOptionLabel="Nenhuma"
+                placeholder="Selecione a condição de pagamento..."
+                searchPlaceholder="Pesquisar condição..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </Field>
             <Field label="Vencimento">
               <input type="date" value={form.dueDate} onChange={(e) => set('dueDate', e.target.value)} className={FORM_FIELD_INPUT_CLS} />
@@ -1050,7 +1167,7 @@ function ControleBoletosPage() {
                 {importFile ? importFile.name : 'Escolher arquivo'}
               </button>
               <label className="flex cursor-pointer items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input type="checkbox" checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300" />
+                <input type="checkbox" checked={updateExisting || deleteMissing} disabled={deleteMissing} onChange={(e) => setUpdateExisting(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300" />
                 <span>
                   Atualizar as linhas que já existem
                   <span className="block text-xs text-gray-500 dark:text-gray-400">
@@ -1058,18 +1175,51 @@ function ControleBoletosPage() {
                   </span>
                 </span>
               </label>
+              <label className="flex cursor-pointer items-start gap-2 text-gray-700 dark:text-gray-200">
+                <input type="checkbox" checked={deleteMissing} onChange={(e) => { setDeleteMissing(e.target.checked); setDeletePreview(null); }} className="mt-0.5 h-4 w-4 rounded border-gray-300" />
+                <span>
+                  Deixar igual à planilha (apagar o que não está nela)
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">
+                    Atualiza as linhas existentes e apaga do sistema os boletos que não estão na planilha. Antes de apagar, mostramos quantos são e pedimos confirmação. Desmarcado, nada é apagado.
+                  </span>
+                </span>
+              </label>
+              {deletePreview ? (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-red-900 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-200">
+                  <p className="font-semibold">
+                    {deletePreview.wouldDelete.toLocaleString('pt-BR')} boleto(s) no sistema não estão na planilha e serão apagados
+                    ({deletePreview.wouldDeleteValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}). Isso não pode ser desfeito.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs">
+                    {deletePreview.sample.map((m, i) => (
+                      <li key={i}>
+                        {m.supplierName || '—'} · {m.costCenterName || '—'} · NF {m.nfNumber || '—'} · {m.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </li>
+                    ))}
+                    {deletePreview.wouldDelete > deletePreview.sample.length ? <li>e mais {deletePreview.wouldDelete - deletePreview.sample.length}…</li> : null}
+                  </ul>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => setDeletePreview(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-200">
+                      Voltar
+                    </button>
+                    <button type="button" onClick={() => importMutation.mutate()} disabled={importMutation.isPending} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60">
+                      Confirmar e apagar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button type="button" onClick={closeImport} className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
                   Cancelar
                 </button>
                 <button
                   type="button"
-                  disabled={!importFile || importMutation.isPending}
-                  onClick={() => importMutation.mutate()}
+                  disabled={!importFile || importMutation.isPending || previewing || !!deletePreview}
+                  onClick={() => void startImport()}
                   className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  {importMutation.isPending ? 'Importando…' : 'Importar'}
+                  {importMutation.isPending || previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {importMutation.isPending ? 'Importando…' : previewing ? 'Conferindo…' : 'Importar'}
                 </button>
               </div>
             </>
@@ -1081,6 +1231,7 @@ function ControleBoletosPage() {
                   ['Novas', importResult.created],
                   [updateExisting ? 'Atualizadas' : 'Já existiam', updateExisting ? importResult.updated : importResult.skippedExisting],
                   ['Em branco', importResult.blankRows],
+                  ...(deleteMissing ? [['Apagadas', importResult.deleted ?? 0]] : []),
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-lg border border-gray-200 p-3 text-center dark:border-gray-700">
                     <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{String(value)}</p>
@@ -1151,7 +1302,7 @@ function ControleBoletosPage() {
 
 export default function Page() {
   return (
-    <ProtectedRoute route="/ponto/financeiro/controle-boletos">
+    <ProtectedRoute route="/ponto/controle-boletos">
       <ControleBoletosPage />
     </ProtectedRoute>
   );

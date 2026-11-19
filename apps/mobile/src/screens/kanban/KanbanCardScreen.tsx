@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -8,6 +9,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Image,
   Platform,
   Linking,
 } from 'react-native';
@@ -31,6 +33,7 @@ import {
   Calendar,
   Clock,
   Paperclip,
+  Camera,
   Link as LinkIcon,
   ExternalLink,
   ListChecks,
@@ -63,7 +66,9 @@ import {
   isKanbanLinkAttachment,
   moveKanbanCard,
   PRIORITY_LABEL,
+  fetchKanbanPickerUsers,
   type KanbanCardLabel,
+  type KanbanPickerUser,
   type Priority,
   updateChecklistItem,
   updateKanbanCard,
@@ -72,6 +77,29 @@ import {
 import type { RootStackParamList } from '../../../App';
 
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical'];
+
+/** "@algo" no fim do texto: começo da marcação de uma pessoa. */
+const MENTION_TOKEN_RE = new RegExp('(^|\\s)@([^\\n@]{0,30})$');
+
+function escapeRe(v: string): string {
+  return v.split('').map((ch) => (/[.*+?^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch)).join('');
+}
+
+/** Texto do comentário com os "@Nome" destacados. */
+function renderMentions(content: string, names: string[], style: any): React.ReactNode {
+  const list = [...new Set(names.filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (list.length === 0) return content;
+  const re = new RegExp(`(@(?:${list.map(escapeRe).join('|')}))(?![\\p{L}\\p{N}])`, 'gu');
+  return content.split(re).map((part, i) =>
+    part.startsWith('@') && list.includes(part.slice(1)) ? (
+      <Text key={i} style={style}>
+        {part}
+      </Text>
+    ) : (
+      part
+    ),
+  );
+}
 
 function labelTextColor(background: string): string {
   const hex = background.replace('#', '').trim();
@@ -155,6 +183,8 @@ export default function KanbanCardScreen() {
   const [saving, setSaving] = useState(false);
   const [checklistTitle, setChecklistTitle] = useState('');
   const [comment, setComment] = useState('');
+  /** Pessoas marcadas (@) no comentário em edição: id -> nome. */
+  const mentionPickedRef = useRef<Map<string, string>>(new Map());
   const [moveOpen, setMoveOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -196,6 +226,52 @@ export default function KanbanCardScreen() {
       : DEFAULT_KANBAN_LABEL_PRESETS;
   const labels = card?.labels ?? [];
   const attachments = card?.attachmentsList ?? [];
+
+  const usersQuery = useQuery({
+    queryKey: ['kanban-picker-users', card?.id ?? 'all'],
+    queryFn: () => fetchKanbanPickerUsers(card?.id),
+    staleTime: 60_000,
+  });
+  const mentionUsers = useMemo(
+    () =>
+      (usersQuery.data ?? []).filter(
+        (u) => u.name?.trim().toLowerCase() !== 'gennecy' && !u.email?.toLowerCase().includes('gennecy-bot'),
+      ),
+    [usersQuery.data],
+  );
+  const mentionNames = useMemo(() => mentionUsers.map((u) => u.name), [mentionUsers]);
+  // "@algo" no fim do texto abre a lista de pessoas.
+  const mentionQuery = MENTION_TOKEN_RE.exec(comment)?.[2] ?? null;
+  const mentionOptions = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.trim().toLowerCase();
+    return mentionUsers.filter((u) => !q || u.name.toLowerCase().includes(q)).slice(0, 5);
+  }, [mentionQuery, mentionUsers]);
+  const pickMention = (u: KanbanPickerUser) => {
+    mentionPickedRef.current.set(u.id, u.name);
+    setComment((curr) => curr.replace(MENTION_TOKEN_RE, `$1@${u.name} `));
+  };
+
+  // Rascunho do comentário: não se perde ao sair da tela, trocar de app ou recarregar.
+  const commentDraftKey = card?.id ? `kanban:draft:comment:${card.id}` : null;
+  const draftLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!commentDraftKey || draftLoadedFor.current === commentDraftKey) return;
+    draftLoadedFor.current = commentDraftKey;
+    void AsyncStorage.getItem(commentDraftKey)
+      .then((saved) => {
+        if (saved) setComment((curr) => curr || saved);
+      })
+      .catch(() => undefined);
+  }, [commentDraftKey]);
+  useEffect(() => {
+    if (!commentDraftKey || draftLoadedFor.current !== commentDraftKey) return;
+    const t = setTimeout(() => {
+      if (comment) void AsyncStorage.setItem(commentDraftKey, comment).catch(() => undefined);
+      else void AsyncStorage.removeItem(commentDraftKey).catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [commentDraftKey, comment]);
 
   useEffect(() => {
     if (card && !dirty) {
@@ -455,8 +531,14 @@ export default function KanbanCardScreen() {
     const content = comment.trim();
     if (!content || !card) return;
     try {
-      await createKanbanComment(card.id, content);
+      const mentioned: string[] = [];
+      mentionPickedRef.current.forEach((name, id) => {
+        if (content.includes(`@${name}`)) mentioned.push(id);
+      });
+      await createKanbanComment(card.id, content, mentioned);
       setComment('');
+      mentionPickedRef.current = new Map();
+      void AsyncStorage.removeItem(`kanban:draft:comment:${card.id}`).catch(() => undefined);
       await invalidate();
     } catch (e: any) {
       Toast.show({ type: 'error', text1: e?.message || 'Falha' });
@@ -478,9 +560,29 @@ export default function KanbanCardScreen() {
     });
     if (result.canceled || !result.assets?.length) return;
 
+    await uploadPicked(result.assets);
+  };
+
+  const takePhoto = async () => {
+    if (!card || readOnly) return;
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permissão', 'Precisamos da câmera para tirar a foto.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    await uploadPicked(result.assets);
+  };
+
+  const uploadPicked = async (assets: ImagePicker.ImagePickerAsset[]) => {
+    if (!card) return;
     setUploading(true);
     try {
-      const files = result.assets.map((asset, idx) => {
+      const files = assets.map((asset, idx) => {
         const uri = asset.uri;
         const name =
           asset.fileName ||
@@ -1150,6 +1252,14 @@ export default function KanbanCardScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.sectionAction}
+                    onPress={() => void takePhoto()}
+                    disabled={uploading}
+                    accessibilityLabel="Tirar foto"
+                  >
+                    <Camera size={14} color={colors.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.sectionAction}
                     onPress={() => setLinkOpen(true)}
                   >
                     <Text style={styles.sectionActionText}>Link</Text>
@@ -1168,6 +1278,8 @@ export default function KanbanCardScreen() {
                   >
                     {isKanbanLinkAttachment(att.mimeType) ? (
                       <LinkIcon size={16} color={colors.primary} />
+                    ) : att.mimeType?.startsWith('image/') && /^https?:\/\//i.test(att.fileUrl) ? (
+                      <Image source={{ uri: att.fileUrl }} style={styles.attachThumb} resizeMode="cover" />
                     ) : (
                       <Paperclip size={16} color={colors.primary} />
                     )}
@@ -1255,19 +1367,39 @@ export default function KanbanCardScreen() {
                         </TouchableOpacity>
                       ) : null}
                     </View>
-                    <Text style={styles.commentBody}>{c.content}</Text>
+                    <Text style={styles.commentBody}>
+                      {renderMentions(c.content, mentionNames, styles.mentionText)}
+                    </Text>
                   </View>
                 </View>
               );
             })
           )}
 
+          {!readOnly && mentionOptions.length > 0 ? (
+            <View style={styles.mentionList}>
+              {mentionOptions.map((u) => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.mentionItem}
+                  onPress={() => pickMention(u)}
+                  activeOpacity={0.7}
+                >
+                  <MemberAvatar name={u.name} photoUrl={u.profilePhotoUrl} size={26} />
+                  <Text style={styles.mentionName} numberOfLines={1}>
+                    {u.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
+
           {!readOnly ? (
             <View style={styles.addRow}>
               <TextInput
                 value={comment}
                 onChangeText={setComment}
-                placeholder="Escrever comentário..."
+                placeholder="Escrever comentário... (@ para marcar)"
                 placeholderTextColor={colors.textSecondary}
                 style={styles.addInput}
                 onSubmitEditing={() => void sendComment()}
@@ -1359,6 +1491,7 @@ export default function KanbanCardScreen() {
         onClose={() => setMembersOpen(false)}
         onSelect={addMember}
         excludeUserIds={members.map((m) => m.userId)}
+        cardId={card?.id}
         title="Adicionar pessoa ao card"
       />
 
@@ -1824,6 +1957,21 @@ function getStyles(colors: any, _isDark: boolean) {
       textDecorationLine: 'line-through',
       color: colors.textSecondary,
     },
+    mentionList: {
+      marginTop: 6,
+      borderRadius: 10,
+      backgroundColor: colors.background,
+      overflow: 'hidden',
+    },
+    mentionItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    mentionName: { flex: 1, fontSize: 14, color: colors.text },
+    mentionText: { color: colors.primary, fontWeight: '600' },
     addRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
     addInput: {
       flex: 1,
@@ -1859,6 +2007,7 @@ function getStyles(colors: any, _isDark: boolean) {
       gap: 10,
     },
     attachName: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.text },
+    attachThumb: { width: 36, height: 36, borderRadius: 6, backgroundColor: colors.background },
     comment: {
       backgroundColor: colors.background,
       borderRadius: 10,

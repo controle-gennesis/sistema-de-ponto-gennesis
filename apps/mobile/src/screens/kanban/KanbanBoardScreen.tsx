@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   FlatList,
+  ScrollView,
   TextInput,
   Modal,
   ActivityIndicator,
@@ -521,6 +522,33 @@ export default function KanbanBoardScreen() {
   });
 
   const board = boardQuery.data;
+
+  /** Filtro por atribuição: 'all', 'mine', 'none' (sem ninguém) ou o id de uma pessoa. */
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
+  const boardPeople = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const col of board?.columns ?? []) {
+      for (const c of col.cards ?? []) {
+        for (const m of c.members ?? []) {
+          if (!map.has(m.userId)) map.set(m.userId, { id: m.userId, name: m.name });
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [board]);
+  const visibleColumns = useMemo(() => {
+    const cols = board?.columns ?? [];
+    if (assigneeFilter === 'all') return cols;
+    const wanted = assigneeFilter === 'mine' ? user?.id : assigneeFilter;
+    return cols.map((col) => ({
+      ...col,
+      cards: (col.cards ?? []).filter((c) => {
+        const ms = c.members ?? [];
+        if (assigneeFilter === 'none') return ms.length === 0;
+        return !!wanted && ms.some((m) => m.userId === wanted);
+      }),
+    }));
+  }, [board, assigneeFilter, user?.id]);
   const readOnly = board?.canWrite === false;
   const displayTitle = board?.department || headerTitle;
   const boardQueryKey = useMemo(
@@ -682,9 +710,40 @@ export default function KanbanBoardScreen() {
           style={styles.boardArea}
           onLayout={(e) => setBoardAreaH(e.nativeEvent.layout.height)}
         >
+          <View style={styles.filterBar}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterBarContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {[
+                { id: 'all', label: 'Todos' },
+                { id: 'mine', label: 'Meus cards' },
+                { id: 'none', label: 'Sem atribuição' },
+                ...boardPeople
+                  .filter((p) => p.id !== user?.id)
+                  .map((p) => ({ id: p.id, label: p.name.split(' ')[0] })),
+              ].map((chip) => {
+                const on = assigneeFilter === chip.id;
+                return (
+                  <TouchableOpacity
+                    key={chip.id}
+                    onPress={() => setAssigneeFilter(chip.id)}
+                    activeOpacity={0.75}
+                    style={[styles.filterChip, on && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]} numberOfLines={1}>
+                      {chip.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
           <FlatList
             horizontal
-            data={board?.columns ?? []}
+            data={visibleColumns}
             keyExtractor={columnKeyExtractor}
             renderItem={renderColumn}
             style={styles.boardScroll}
@@ -974,6 +1033,19 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
     boardArea: {
       flex: 1,
     },
+    filterBar: { paddingTop: 8 },
+    filterBarContent: { paddingHorizontal: BOARD_GAP, gap: 8, alignItems: 'center' },
+    filterChip: {
+      paddingHorizontal: 14,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    },
+    filterChipOn: { backgroundColor: colors.primary },
+    filterChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+    filterChipTextOn: { color: '#fff' },
     boardScroll: {
       flex: 1,
     },

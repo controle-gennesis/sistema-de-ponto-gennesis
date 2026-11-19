@@ -963,7 +963,7 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
       'Acompanhe boletos por fornecedor, vencimento e confirmação de pagamento: lista, filtros, dashboard, gestores e importação de planilha.',
     setor: 'Financeiro',
     keywords: ['boletos', 'boleto', 'pagamento', 'vencimento', 'fornecedor', 'dashboard', 'planilha', 'importar', 'exportar', 'OC', 'NF', 'gestor', 'centro de custo'],
-    href: '/ponto/financeiro/controle-boletos',
+    href: '/ponto/controle-boletos',
     steps: [
       {
         title: 'Abra o Controle de Boletos',

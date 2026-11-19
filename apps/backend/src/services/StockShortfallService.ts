@@ -157,7 +157,42 @@ export class StockShortfallService {
   async syncForOrderNumber(orderNumber: string): Promise<void> {
     const trimmed = orderNumber.trim();
     if (!trimmed) return;
+    // Várias entradas da mesma OC chegam juntas: os recálculos rodam um depois do outro,
+    // para o último enxergar todas as entradas (senão um furo velho pode sobrar).
+    const prev = this.syncChains.get(trimmed) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.syncForOrderNumberNow(trimmed));
+    this.syncChains.set(trimmed, next);
+    try {
+      await next;
+    } finally {
+      if (this.syncChains.get(trimmed) === next) this.syncChains.delete(trimmed);
+    }
+  }
 
+  private syncChains = new Map<string, Promise<void>>();
+  private lastOpenRefreshAt = 0;
+
+  /** Reconfere as OCs com furo aberto (poucas), para limpar registros que já foram totalmente recebidos. */
+  private async refreshOpenOrders(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastOpenRefreshAt < 15_000) return;
+    this.lastOpenRefreshAt = now;
+    const rows = await prisma.stockShortfall.findMany({
+      where: { status: StockShortfallStatus.ABERTO },
+      select: { orderNumber: true },
+      distinct: ['orderNumber'],
+      take: 100
+    });
+    for (const r of rows) {
+      try {
+        await this.syncForOrderNumber(r.orderNumber);
+      } catch (err) {
+        console.error('[StockShortfall] refreshOpenOrders', r.orderNumber, err);
+      }
+    }
+  }
+
+  private async syncForOrderNumberNow(trimmed: string): Promise<void> {
     const po = await prisma.purchaseOrder.findUnique({
       where: { orderNumber: trimmed },
       include: {
@@ -211,6 +246,14 @@ export class StockShortfallService {
       where: { isActive: true },
       select: { id: true, name: true, unit: true, category: true }
     });
+    // Cadastros duplicados (mesmo nome, ids diferentes): a entrada pode ter sido lançada em qualquer um deles.
+    const idsByNormName = new Map<string, string[]>();
+    for (const cm of await prisma.constructionMaterial.findMany({ select: { id: true, name: true } })) {
+      const k = normalizeMaterialName(cm.name);
+      const arr = idsByNormName.get(k) ?? [];
+      arr.push(cm.id);
+      idsByNormName.set(k, arr);
+    }
     const cmByNormName = new Map<string, ConstructionMaterialRef>();
     const cmById = new Map<string, ConstructionMaterialRef>();
     for (const cm of constructionMaterials) {
@@ -242,7 +285,11 @@ export class StockShortfallService {
       if (!label) continue;
       const ordered = Number(item.quantity);
       if (!Number.isFinite(ordered) || ordered <= 0) continue;
-      const received = sumByConstructionMaterial.get(cm.id) || 0;
+      const sameNameIds = idsByNormName.get(normalizeMaterialName(cm.name)) ?? [cm.id];
+      const received = [...new Set([cm.id, ...sameNameIds])].reduce(
+        (sum, id) => sum + (sumByConstructionMaterial.get(id) || 0),
+        0
+      );
       const gap = Math.max(0, Math.round((ordered - received) * 1000) / 1000);
       lines.push({
         constructionMaterialId: cm.id,
@@ -467,6 +514,9 @@ export class StockShortfallService {
     skipRebuild?: boolean;
   }) {
     /** Rebuild/sync fica nas mutações de estoque — GET de listagem deve ser rápido. */
+    if (!params.skipRebuild && params.status !== 'RESOLVIDO') {
+      await this.refreshOpenOrders();
+    }
     const limit = Math.min(params.limit ?? 200, 500);
     const where: Prisma.StockShortfallWhereInput = {};
 

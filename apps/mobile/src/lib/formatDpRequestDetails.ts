@@ -260,15 +260,19 @@ export function formatDpRequestDetails(
             dataInicial: d.dataInicial,
             dataFinal: d.dataFinal,
             numeroDias: d.numeroDias,
+            codigoAtestado: d.codigoAtestado,
+            observacao: d.observacao,
           });
     return {
       sectionTitle: 'Detalhes do atestado',
-      items: listItems(
-        atestados,
-        nameById,
-        (row) =>
-          `${formatYmd(row.dataInicial)} à ${formatYmd(row.dataFinal)} — ${dash(str(row.numeroDias))} dia(s)`,
-      ),
+      items: listItems(atestados, nameById, (row) => {
+        const base = `${formatYmd(row.dataInicial)} à ${formatYmd(row.dataFinal)} — ${dash(str(row.numeroDias))} dia(s)`;
+        const codigo = str(row.codigoAtestado);
+        const obs = str(row.observacao);
+        return [base, codigo ? `Código: ${codigo}` : '', obs ? `Obs.: ${obs}` : '']
+          .filter(Boolean)
+          .join(' — ');
+      }),
     };
   }
 
@@ -291,7 +295,11 @@ export function formatDpRequestDetails(
     const horasExtras =
       parseObjectArray(d, 'horasExtras').length > 0
         ? parseObjectArray(d, 'horasExtras')
-        : legacyEmployeeRows(d, { datas: d.datas, justificativa: d.justificativa });
+        : legacyEmployeeRows(d, {
+            datas: d.datas,
+            tipoHoraExtra: d.tipoHoraExtra,
+            justificativa: d.justificativa,
+          });
     return {
       sectionTitle: 'Detalhes de hora extra',
       items: listItems(horasExtras, nameById, (row) => {
@@ -304,7 +312,9 @@ export function formatDpRequestDetails(
               ? formatDateTimeLocal(rawDatas)
               : '—';
         const just = str(row.justificativa);
-        return just ? `${periodo} — ${just}` : periodo;
+        const tipoRaw = str(row.tipoHoraExtra);
+        const tipo = tipoRaw === 'PAGAMENTO' ? 'Pagamento' : tipoRaw === 'BANCO_HORAS' ? 'Banco de horas' : '';
+        return [tipo, periodo, just].filter(Boolean).join(' — ');
       }),
     };
   }

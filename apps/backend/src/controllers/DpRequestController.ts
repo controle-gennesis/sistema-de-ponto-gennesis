@@ -146,6 +146,8 @@ const feedbackDpRequestSchema = z
     conclusionComment: z.string().optional(),
     responsibleNote: z.string().optional(),
     cancellationReason: z.string().optional(),
+    /** Só na conclusão de Hora Extra: como foi atendida. */
+    resultado: z.enum(['PAGO_FINANCEIRO', 'CREDITADO_BANCO']).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.nextStatus === 'CANCELLED' && !(data.cancellationReason || '').trim()) {
@@ -302,12 +304,52 @@ function stripInlineAttachmentData(value: unknown): unknown {
   return value;
 }
 
+/** Ids de colaboradores citados nos detalhes (itens com employeeId/employeeIds, ou no formato antigo plano). */
+function collectDetailsEmployeeIds(details: unknown): string[] {
+  const ids: string[] = [];
+  const push = (o: unknown) => {
+    if (!o || typeof o !== 'object') return;
+    const row = o as Record<string, unknown>;
+    if (typeof row.employeeId === 'string' && row.employeeId) ids.push(row.employeeId);
+    if (Array.isArray(row.employeeIds)) {
+      for (const v of row.employeeIds) if (typeof v === 'string' && v) ids.push(v);
+    }
+  };
+  if (!details || typeof details !== 'object') return ids;
+  push(details);
+  for (const v of Object.values(details as Record<string, unknown>)) {
+    if (Array.isArray(v)) v.forEach(push);
+  }
+  return ids;
+}
+
+/** Acrescenta `colaboradoresNomes`: quem é o colaborador de cada solicitação (HE, atestado etc.), para as listas. */
+async function attachColaboradoresNomes<T extends { details?: unknown }>(
+  rows: T[]
+): Promise<(T & { colaboradoresNomes: string[] })[]> {
+  const idsByRow = rows.map((r) => [...new Set(collectDetailsEmployeeIds(r.details))]);
+  const all = [...new Set(idsByRow.flat())];
+  const names = new Map<string, string>();
+  if (all.length) {
+    const emps = await prisma.employee.findMany({
+      where: { id: { in: all } },
+      select: { id: true, user: { select: { name: true } } },
+    });
+    for (const e of emps) names.set(e.id, (e.user?.name || '').trim());
+  }
+  return rows.map((r, i) => ({
+    ...r,
+    colaboradoresNomes: idsByRow[i].map((id) => names.get(id)).filter((n): n is string => !!n),
+  }));
+}
+
 async function attachDpContractSummaries<
   T extends {
     contractId: string | null;
     costCenterId?: string | null;
     managerApprovedBy?: string | null;
     statusHistory?: unknown;
+    details?: unknown;
   },
 >(
   rows: T[]
@@ -316,6 +358,7 @@ async function attachDpContractSummaries<
     contract: DpContractSummary | null;
     costCenter: DpCostCenterSummary | null;
     managerApprovedByName: string | null;
+    colaboradoresNomes: string[];
   })[]
 > {
   const contractIds = [...new Set(rows.map((r) => r.contractId).filter((id): id is string => !!id))];
@@ -376,7 +419,8 @@ async function attachDpContractSummaries<
     ])
   );
 
-  return rows.map((r) => {
+  const withNames = await attachColaboradoresNomes(rows);
+  return withNames.map((r) => {
     const contract = r.contractId
       ? contractById.get(r.contractId)
         ? {
@@ -811,11 +855,16 @@ export class DpRequestController {
       try {
       created = await prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${DP_DISPLAY_NUMBER_ADVISORY_LOCK})`);
-        const agg = await tx.dpRequest.aggregate({ _max: { displayNumber: true } });
+        // Contabilidade e Solicitações Internas têm cada uma a sua numeração.
+        const agg = await tx.dpRequest.aggregate({
+          where: { contabDireta: isAccountingDirect },
+          _max: { displayNumber: true },
+        });
         const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
         return tx.dpRequest.create({
           data: {
             displayNumber: nextDisplay,
+            contabDireta: isAccountingDirect,
             employeeId: employee.id,
             urgency: validated.urgency,
             requestType: validated.requestType,
@@ -1412,9 +1461,27 @@ export class DpRequestController {
       const responsible = (payload.responsibleNote || '').trim();
       const dpActorName = await getUserDisplayName(req.user.id);
       const cancellationReason = (payload.cancellationReason || '').trim();
+      const isHoraExtra = dpRequest.requestType === 'HORA_EXTRA';
+      if (isHoraExtra && next === 'CONCLUDED' && !payload.resultado) {
+        throw createError(
+          'Informe se a hora extra foi paga pelo financeiro ou creditada no banco de horas',
+          400
+        );
+      }
+      const resultadoLabel =
+        payload.resultado === 'PAGO_FINANCEIRO'
+          ? 'Pago pelo financeiro'
+          : payload.resultado === 'CREDITADO_BANCO'
+            ? 'Creditado no banco de horas'
+            : '';
       const historyNote =
         next === 'CONCLUDED'
-          ? (payload.conclusionComment || payload.feedback).trim()
+          ? [
+              resultadoLabel && isHoraExtra ? `Resultado: ${resultadoLabel}` : '',
+              (payload.conclusionComment || payload.feedback).trim(),
+            ]
+              .filter(Boolean)
+              .join('\n')
           : next === 'CANCELLED'
             ? [
                 `Motivo do cancelamento: ${cancellationReason}`,
@@ -1451,8 +1518,10 @@ export class DpRequestController {
       if (next === 'CONCLUDED') {
         data.dpConcludedAt = new Date();
         data.dpConclusionComment = (payload.conclusionComment || payload.feedback).trim();
+        data.dpResultado = isHoraExtra ? payload.resultado ?? null : null;
       } else {
         data.dpConcludedAt = null;
+        data.dpResultado = null;
       }
 
       if (next === 'CANCELLED') {
@@ -1558,6 +1627,81 @@ export class DpRequestController {
       }
       console.error('[dp-contabilidade] falha ao reenviar solicitação:', e);
       return res.status(500).json({ error: 'Erro ao reenviar à Contabilidade' });
+    }
+  }
+
+  /**
+   * Atualiza o código (CID) e a observação de um atestado. Pode quem abriu a solicitação ou quem
+   * gerencia o tipo (DP). Só mexe nesses dois campos e não vale para solicitação cancelada.
+   */
+  async updateAtestado(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const requestId = String(req.params.id || '').trim();
+      if (!requestId) throw createError('ID inválido', 400);
+
+      const payload = z
+        .object({
+          employeeId: z.string().min(1).optional(),
+          codigoAtestado: z.string().max(40).optional(),
+          observacao: z.string().max(1000).optional(),
+        })
+        .parse(req.body);
+
+      const dpRequest = await prisma.dpRequest.findUnique({
+        where: { id: requestId },
+        include: { employee: { select: { userId: true } } },
+      });
+      if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
+      if (dpRequest.requestType !== 'ATESTADO_MEDICO') {
+        throw createError('Esta solicitação não é um atestado', 400);
+      }
+      if (dpRequest.status === 'CANCELLED') {
+        throw createError('Solicitação cancelada não pode ser editada', 400);
+      }
+      const isOwner = dpRequest.employee?.userId === req.user.id;
+      if (!isOwner) {
+        await assertUserCanManageDpRequest(req.user.id, req.user.isAdmin, dpRequest.requestType);
+      }
+
+      const details = (dpRequest.details && typeof dpRequest.details === 'object'
+        ? { ...(dpRequest.details as Record<string, unknown>) }
+        : {}) as Record<string, unknown>;
+      const apply = (row: Record<string, unknown>) => {
+        const next = { ...row };
+        if (payload.codigoAtestado !== undefined) next.codigoAtestado = payload.codigoAtestado.trim();
+        if (payload.observacao !== undefined) next.observacao = payload.observacao.trim();
+        return next;
+      };
+      if (Array.isArray(details.atestados)) {
+        const lista = details.atestados as Record<string, unknown>[];
+        if (lista.length > 1 && !payload.employeeId) {
+          throw createError('Informe qual colaborador (atestado) será atualizado', 400);
+        }
+        details.atestados = lista.map((row) =>
+          !payload.employeeId || row.employeeId === payload.employeeId ? apply(row) : row
+        );
+      } else {
+        // Formato antigo (atestado do WhatsApp): campos direto em details.
+        Object.assign(details, apply({}));
+      }
+
+      const updated = await prisma.dpRequest.update({
+        where: { id: requestId },
+        data: { details: details as Prisma.InputJsonValue },
+        select: { id: true, details: true },
+      });
+      return res.json({
+        success: true,
+        data: { id: updated.id, details: stripInlineAttachmentData(updated.details) },
+      });
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Dados inválidos', details: e.issues });
+      }
+      const status = (e as { statusCode?: number })?.statusCode;
+      if (status) return res.status(status).json({ error: (e as Error).message });
+      return res.status(500).json({ error: 'Erro ao atualizar o atestado' });
     }
   }
 

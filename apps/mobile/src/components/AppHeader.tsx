@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Menu as MenuIcon, ArrowLeft, Bell } from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { useChromeVisibility } from '../navigation/ChromeVisibilityContext';
@@ -31,7 +32,7 @@ type AppHeaderProps = {
   rightAction?: React.ReactNode;
 };
 
-function HeaderIconButton({
+export function HeaderIconButton({
   onPress,
   accessibilityLabel,
   children,
@@ -40,14 +41,31 @@ function HeaderIconButton({
   accessibilityLabel: string;
   children: React.ReactNode;
 }) {
+  const { colors, isDark } = useTheme();
   return (
     <TouchableOpacity
       onPress={onPress}
       hitSlop={8}
       accessibilityLabel={accessibilityLabel}
-      style={styles.iconBtn}
+      style={[styles.iconBtn, styles.glassShadow]}
       activeOpacity={0.7}
     >
+      {/* Fundo em círculo, separado do conteúdo para a bolinha de notificações poder sair dele. */}
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          intensity={70}
+          tint={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+          style={[StyleSheet.absoluteFill, styles.glassBg, { borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.7)' }]}
+        />
+      ) : (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            styles.glassBg,
+            { backgroundColor: isDark ? colors.card : colors.surface, borderColor: isDark ? 'transparent' : 'rgba(15,23,42,0.08)' },
+          ]}
+        />
+      )}
       {children}
     </TouchableOpacity>
   );
@@ -101,15 +119,9 @@ export default function AppHeader({
       <View style={[styles.topSafe, { paddingTop: topPad }]}>
         <View style={styles.stackHeader}>
           <View style={styles.side}>
-            <TouchableOpacity
-              onPress={handleBack}
-              hitSlop={8}
-              accessibilityLabel="Voltar"
-              style={styles.iconBtn}
-              activeOpacity={0.7}
-            >
-              <ArrowLeft size={24} color={iconColor} strokeWidth={2.2} />
-            </TouchableOpacity>
+            <HeaderIconButton onPress={handleBack} accessibilityLabel="Voltar">
+              <ArrowLeft size={22} color={iconColor} strokeWidth={2.2} />
+            </HeaderIconButton>
           </View>
 
           <View style={styles.center} pointerEvents="none">
@@ -230,19 +242,33 @@ const styles = StyleSheet.create({
     minHeight: 52,
     backgroundColor: 'transparent',
   },
+  // Mesmas medidas da barra da tela inicial (menu e sino), para os botões ficarem no mesmo lugar.
   stackHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingTop: 2,
+    paddingHorizontal: 14,
+    paddingTop: 4,
     paddingBottom: HEADER_BOTTOM_PAD,
-    minHeight: 48,
+    minHeight: 52,
   },
   iconBtn: {
     width: 44,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  glassShadow: {
+    borderRadius: 22,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  glassBg: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
   },
   stackTitle: {
     fontSize: 18,

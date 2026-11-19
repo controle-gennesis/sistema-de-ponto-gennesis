@@ -138,6 +138,7 @@ import pncpRoutes from './routes/pncp';
 import { startPncpSyncScheduler } from './services/PncpIngestService';
 import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
+import { startGoogleCalendarWatchScheduler } from './services/googleCalendarWatch';
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
 import { startVehicleReservationBaixaReminderScheduler } from './services/VehicleReservationBaixaReminderScheduler';
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
@@ -841,6 +842,12 @@ try {
         startGoogleCalendarAutoSyncScheduler();
       } catch (e) {
         console.error('[google-sync] falha ao agendar:', e);
+      }
+
+      try {
+        startGoogleCalendarWatchScheduler();
+      } catch (e) {
+        console.error('[google-watch] falha ao agendar:', e);
       }
 
       try {

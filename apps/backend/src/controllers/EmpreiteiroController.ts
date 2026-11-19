@@ -7,7 +7,11 @@ import { gerarContratoDoServico } from '../lib/empreiteiroContractDocument';
 import { gerarTermoAditivo } from '../lib/empreiteiroAditivoDocument';
 import { ensureUnaccentExtension, textMatchesSearch } from '../lib/normalizeSearchText';
 import { PhotoService } from '../services/PhotoService';
-import { buscarStatusFluigPorNumeros, listarSolicitacoesFluigDaEmpreita } from '../lib/empreiteiroFluigSolicitacoes';
+import {
+  buscarStatusFluigPorNumeros,
+  conferirSolicitacaoParaEmpreita,
+  listarSolicitacoesFluigDaEmpreita,
+} from '../lib/empreiteiroFluigSolicitacoes';
 import { hashPassword } from '../lib/passwordHash';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import {
@@ -2246,6 +2250,43 @@ export class EmpreiteiroController {
       });
       if (!item) throw createError('Empreita não encontrada', 404);
       const data = await listarSolicitacoesFluigDaEmpreita(item);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Contratos para escolher ao criar/editar um serviço da empreita: TODOS os contratos, sem depender de o usuário
+   * ter o contrato liberado. Só id, nome e número — nada da ficha do contrato (valores etc.).
+   */
+  async contractOptions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await assertCanManageEmpreiteiros(req);
+      const data = await prisma.contract.findMany({
+        select: { id: true, name: true, number: true },
+        orderBy: { name: 'asc' },
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Confere um número de solicitação antes de ligar à parcela: acha no espelho ou, se não estiver lá, pergunta ao Fluig
+   * na hora (qualquer setor, criada hoje etc.) e confere o CPF/CNPJ do favorecido com o desta empreita.
+   */
+  async conferirSolicitacaoFluig(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id, numero } = req.params;
+      await assertCanAccessEmpreiteiro(req, id);
+      const item = await prisma.empreiteiro.findUnique({
+        where: { id },
+        select: { name: true, tradeName: true, document: true, cpf: true },
+      });
+      if (!item) throw createError('Empreita não encontrada', 404);
+      const data = await conferirSolicitacaoParaEmpreita(item, String(numero || ''));
       res.json({ success: true, data });
     } catch (error) {
       next(error);

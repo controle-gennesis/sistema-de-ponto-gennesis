@@ -38,6 +38,8 @@ export type ContratoVisaoGeral = {
     previsao: number;
     /** Mês já encerrado ou em andamento (meses futuros ficam sem barra). */
     decorrido: boolean;
+    /** Falso quando o mês está fora da vigência do contrato (não aparece no gráfico). */
+    vigente?: boolean;
   }>;
 };
 
@@ -149,7 +151,9 @@ export function ContratoResumoGraficoMeta({ data }: { data: ContratoVisaoGeral }
   const azul = '#60a5fa';
   const amarelo = '#f59e0b';
 
-  const chartData = meses.map((m) => ({
+  const chartData = meses
+    .filter((m) => m.vigente !== false)
+    .map((m) => ({
     mes: m.label,
     faturado: m.decorrido ? m.faturado : null,
     previsao: m.previsao > 0 ? m.previsao : null,

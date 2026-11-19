@@ -79,12 +79,15 @@ export function MemberPickerSheet({
   onSelect,
   excludeUserIds = [],
   title = 'Adicionar pessoa',
+  cardId,
 }: {
   visible: boolean;
   onClose: () => void;
   onSelect: (user: KanbanPickerUser) => void | Promise<void>;
   excludeUserIds?: string[];
   title?: string;
+  /** Card que vai receber a pessoa: limita a lista a quem tem acesso ao quadro dele. */
+  cardId?: string;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => getStyles(colors), [colors]);
@@ -92,8 +95,8 @@ export function MemberPickerSheet({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const usersQuery = useQuery({
-    queryKey: ['kanban-picker-users'],
-    queryFn: fetchKanbanPickerUsers,
+    queryKey: ['kanban-picker-users', cardId ?? 'all'],
+    queryFn: () => fetchKanbanPickerUsers(cardId),
     enabled: visible,
     staleTime: 60_000,
   });

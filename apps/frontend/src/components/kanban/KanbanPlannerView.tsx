@@ -35,6 +35,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { TimePickerField } from '@/components/ui/TimePickerField';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAgendaPush } from '@/hooks/useAgendaPush';
 import { useTheme } from '@/context/ThemeContext';
 import {
   createPlannerEvent,
@@ -1036,6 +1037,50 @@ export function KanbanPlannerView({
     rangeTo,
     queryClient,
   ]);
+
+  // Sincroniza com o Google sozinho enquanto a Agenda está aberta: a cada 5 segundos e ao voltar para a aba.
+  const lastSilentSyncRef = useRef(0);
+  const syncingSilentRef = useRef(false);
+  const rangeRef = useRef({ rangeFrom, rangeTo });
+  rangeRef.current = { rangeFrom, rangeTo };
+  useEffect(() => {
+    if (!isOwnerEffective) return;
+    if (!googleStatus?.configured || !googleStatus.connected) return;
+
+    const SYNC_EVERY_MS = 5 * 1000;
+    const runSilentSync = async () => {
+      if (syncingSilentRef.current) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (Date.now() - lastSilentSyncRef.current < SYNC_EVERY_MS - 2000) return;
+      syncingSilentRef.current = true;
+      lastSilentSyncRef.current = Date.now();
+      try {
+        const { rangeFrom: from, rangeTo: to } = rangeRef.current;
+        await syncGoogleCalendar(addDays(from, -7), addDays(to, 14));
+        queryClient.invalidateQueries({ queryKey: ['planner-events'] });
+      } catch {
+        /* automático e silencioso: o botão manual continua disponível */
+      } finally {
+        syncingSilentRef.current = false;
+      }
+    };
+
+    const timer = window.setInterval(() => void runSilentSync(), SYNC_EVERY_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void runSilentSync();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isOwnerEffective, googleStatus?.configured, googleStatus?.connected, queryClient]);
+
+  // Aviso instantâneo: o servidor manda um sinal quando o Google informa uma mudança nos eventos.
+  useAgendaPush(
+    !!isOwnerEffective && !!googleStatus?.configured && !!googleStatus.connected,
+    () => queryClient.invalidateQueries({ queryKey: ['planner-events'] })
+  );
 
   const handleGoogleSyncClick = async () => {
     if (!isOwnerEffective) {

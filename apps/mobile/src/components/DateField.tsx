@@ -28,6 +28,10 @@ type DateFieldProps = {
   placeholder?: string;
   minimumDate?: Date;
   maximumDate?: Date;
+  /** Sem os ícones do campo (calendário e seta). */
+  hideIcons?: boolean;
+  /** Mês abreviado e sem dia da semana (cabe em meia largura). */
+  compact?: boolean;
 };
 
 function pad(n: number) {
@@ -70,7 +74,7 @@ function parseValue(value: string, mode: Mode): Date {
   return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
-function displayLabel(value: string, mode: Mode): string {
+function displayLabel(value: string, mode: Mode, compact = false): string {
   if (!value) return '';
   const d = parseValue(value, mode);
   if (Number.isNaN(d.getTime())) return value;
@@ -82,6 +86,9 @@ function displayLabel(value: string, mode: Mode): string {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+  if (compact) {
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
   }
   return d.toLocaleDateString('pt-BR', {
     weekday: 'short',
@@ -100,6 +107,8 @@ export default function DateField({
   placeholder = 'Selecionar data',
   minimumDate,
   maximumDate,
+  hideIcons = false,
+  compact = false,
 }: DateFieldProps) {
   const { colors, isDark } = useTheme();
   const [open, setOpen] = useState(false);
@@ -108,7 +117,7 @@ export default function DateField({
   const [androidStep, setAndroidStep] = useState<'date' | 'time'>('date');
 
   const filled = !!value;
-  const shown = useMemo(() => displayLabel(value, mode), [value, mode]);
+  const shown = useMemo(() => displayLabel(value, mode, compact), [value, mode, compact]);
 
   const openPicker = () => {
     setTemp(parseValue(value, mode));
@@ -173,9 +182,11 @@ export default function DateField({
           },
         ]}
       >
-        <View style={[styles.iconChip, { backgroundColor: chipBg }]}>
-          <Calendar size={16} color={colors.primary} strokeWidth={2.2} />
-        </View>
+        {hideIcons ? null : (
+          <View style={[styles.iconChip, { backgroundColor: chipBg }]}>
+            <Calendar size={16} color={colors.primary} strokeWidth={2.2} />
+          </View>
+        )}
         <Text
           style={[
             styles.value,
@@ -188,9 +199,11 @@ export default function DateField({
         >
           {shown || placeholder}
         </Text>
-        <View style={[styles.iconChip, { backgroundColor: chipBg }]}>
-          <ChevronDown size={16} color={colors.textSecondary} strokeWidth={2.2} />
-        </View>
+        {hideIcons ? null : (
+          <View style={[styles.iconChip, { backgroundColor: chipBg }]}>
+            <ChevronDown size={16} color={colors.textSecondary} strokeWidth={2.2} />
+          </View>
+        )}
       </TouchableOpacity>
 
       {open && Platform.OS === 'android' ? (
@@ -271,6 +284,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 12,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,

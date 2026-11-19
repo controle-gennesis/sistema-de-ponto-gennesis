@@ -146,6 +146,12 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
+import { useKanbanColaboracao } from './useKanbanColaboracao';
+import {
+  KanbanPresenceBar,
+  presenceActionLabel,
+  type KanbanPresenceUser,
+} from '@/components/kanban/KanbanPresenceBar';
 
 const PRIORITY_CONFIG = KANBAN_PRIORITY_CONFIG;
 
@@ -1039,6 +1045,8 @@ interface KanbanCardItemProps {
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
   onDragEnd: () => void;
   isDragging: boolean;
+  /** Outras pessoas que estão com este cartão aberto ou arrastando agora. */
+  presence?: KanbanPresenceUser[];
 }
 
 function KanbanCardItem({
@@ -1057,6 +1065,7 @@ function KanbanCardItem({
   onDragStart,
   onDragEnd,
   isDragging,
+  presence,
 }: KanbanCardItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -1130,6 +1139,11 @@ function KanbanCardItem({
       }}
       role="button"
       tabIndex={0}
+      style={
+        presence && presence.length > 0
+          ? { boxShadow: `0 0 0 2px ${presence[0].color}` }
+          : undefined
+      }
       className={clsx(
         'group relative rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
         menuOpen && 'z-30',
@@ -1146,6 +1160,16 @@ function KanbanCardItem({
       )}
     >
       {paperConfettiHost}
+      {presence && presence.length > 0 ? (
+        <div
+          className="pointer-events-none absolute -top-2.5 right-3 z-20 max-w-[85%] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+          style={{ backgroundColor: presence[0].color }}
+          title={presence.map((p) => `${p.name} (${presenceActionLabel(p.state)})`).join(', ')}
+        >
+          {presence[0].name.trim().split(/\s+/)[0]} {presenceActionLabel(presence[0].state)}
+          {presence.length > 1 ? ` +${presence.length - 1}` : ''}
+        </div>
+      ) : null}
       {!readOnly && (
         <div
           className={clsx(
@@ -1320,6 +1344,7 @@ const KanbanCardItemMemo = React.memo(
     prev.onToggleCardComplete === next.onToggleCardComplete &&
     prev.onArchiveCard === next.onArchiveCard &&
     prev.labelPresets === next.labelPresets &&
+    prev.presence === next.presence &&
     kanbanCardBoardSnapshot(prev.card) === kanbanCardBoardSnapshot(next.card),
 );
 
@@ -1403,6 +1428,8 @@ interface KanbanColumnProps {
   onSortColumn: (columnId: string, mode: KanbanColumnSortMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** Quem está em cada cartão agora (id do cartão → pessoas). */
+  presenceByCard?: Record<string, KanbanPresenceUser[]>;
 }
 
 function KanbanColumnComponent({
@@ -1434,6 +1461,7 @@ function KanbanColumnComponent({
   onSortColumn,
   collapsed = false,
   onToggleCollapse,
+  presenceByCard,
 }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<'main' | 'sort'>('main');
@@ -1965,6 +1993,7 @@ function KanbanColumnComponent({
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 isDragging={dragState.draggingCardId === card.id}
+                presence={presenceByCard?.[card.id]}
               />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[3]">
                 <KanbanDropLine active={showLineAfter} />
@@ -3412,6 +3441,101 @@ function KanbanPage() {
     [queryClient, kanbanBoardQueryKey],
   );
 
+  // ── Colaboração em tempo real: quem está no quadro, em qual cartão, e atualização ao vivo ──
+  const remoteRefreshTimerRef = useRef<number | null>(null);
+  const pendingRemoteRefreshRef = useRef(false);
+
+  const runRemoteRefresh = useCallback(() => {
+    // Não troca o quadro debaixo do cartão que a pessoa está arrastando: espera soltar.
+    if (dragRef.current.draggingCardId || columnDragRef.current.draggingColumnId) {
+      pendingRemoteRefreshRef.current = true;
+      return;
+    }
+    pendingRemoteRefreshRef.current = false;
+    void queryClient.refetchQueries({ queryKey: kanbanBoardQueryKey });
+  }, [queryClient, kanbanBoardQueryKey]);
+
+  const handleBoardChangedByOther = useCallback(() => {
+    if (remoteRefreshTimerRef.current) window.clearTimeout(remoteRefreshTimerRef.current);
+    // Junta várias alterações seguidas numa atualização só.
+    remoteRefreshTimerRef.current = window.setTimeout(() => {
+      remoteRefreshTimerRef.current = null;
+      runRemoteRefresh();
+    }, 700);
+  }, [runRemoteRefresh]);
+
+  useEffect(
+    () => () => {
+      if (remoteRefreshTimerRef.current) window.clearTimeout(remoteRefreshTimerRef.current);
+    },
+    [],
+  );
+
+  const {
+    usuarios: presencaUsuarios,
+    meuId: presencaMeuId,
+    enviarPresenca,
+  } = useKanbanColaboracao({
+    boardId: board?.id,
+    onAlteradoPorOutro: handleBoardChangedByOther,
+  });
+
+  // Soltou o cartão: aplica a atualização que ficou esperando.
+  useEffect(() => {
+    if (!isKanbanDragging && pendingRemoteRefreshRef.current) runRemoteRefresh();
+  }, [isKanbanDragging, runRemoteRefresh]);
+
+  // Diz aos outros onde estou: arrastando um cartão, com um cartão aberto, ou só no quadro.
+  const openDetailCardId = cardModal?.mode === 'detail' ? cardModal.cardId : null;
+  useEffect(() => {
+    if (dragState.draggingCardId && !isOptimisticKanbanCardId(dragState.draggingCardId)) {
+      enviarPresenca({ state: 'dragging', cardId: dragState.draggingCardId });
+    } else if (openDetailCardId && !isOptimisticKanbanCardId(openDetailCardId)) {
+      enviarPresenca({ state: 'editing', cardId: openDetailCardId });
+    } else {
+      enviarPresenca({ state: 'viewing', cardId: null });
+    }
+  }, [dragState.draggingCardId, openDetailCardId, enviarPresenca]);
+
+  // Pessoas (sem mim) em cada cartão. Reaproveita o mesmo array quando nada mudou, para não redesenhar o quadro todo.
+  const presenceCacheRef = useRef<Record<string, { sig: string; users: KanbanPresenceUser[] }>>({});
+  const presenceByCard = useMemo(() => {
+    const grouped: Record<string, KanbanPresenceUser[]> = {};
+    for (const u of presencaUsuarios) {
+      if (u.userId === presencaMeuId || !u.cardId || u.state === 'viewing') continue;
+      (grouped[u.cardId] ??= []).push(u);
+    }
+    const next: Record<string, KanbanPresenceUser[]> = {};
+    const cache: Record<string, { sig: string; users: KanbanPresenceUser[] }> = {};
+    for (const [cardId, users] of Object.entries(grouped)) {
+      const sig = users.map((u) => `${u.userId}:${u.state}`).join('|');
+      const prev = presenceCacheRef.current[cardId];
+      const stable = prev && prev.sig === sig ? prev.users : users;
+      cache[cardId] = { sig, users: stable };
+      next[cardId] = stable;
+    }
+    presenceCacheRef.current = cache;
+    return next;
+  }, [presencaUsuarios, presencaMeuId]);
+
+  // Aviso: abri um cartão que outra pessoa também está com aberto.
+  const warnedPresenceCardRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openDetailCardId) {
+      warnedPresenceCardRef.current = null;
+      return;
+    }
+    if (warnedPresenceCardRef.current === openDetailCardId) return;
+    const editing = (presenceByCard[openDetailCardId] ?? []).filter((u) => u.state === 'editing');
+    if (editing.length === 0) return;
+    warnedPresenceCardRef.current = openDetailCardId;
+    const names = editing.map((u) => u.name.trim().split(/\s+/)[0]).join(', ');
+    toast(`${names} também está com este cartão aberto. Alterações salvas por um podem sobrescrever as do outro.`, {
+      icon: '👥',
+      duration: 6000,
+    });
+  }, [openDetailCardId, presenceByCard]);
+
   const beginBoardMutation = useCallback(() => ++boardMutationGenRef.current, []);
 
   const rollbackBoardMutation = useCallback(
@@ -4432,6 +4556,13 @@ function KanbanPage() {
                 archivedBoards={archivedBoardsList ?? []}
                 onRestoreBoard={handleRestoreBoard}
               />
+              <KanbanPresenceBar
+                users={presencaUsuarios}
+                selfId={presencaMeuId}
+                cardTitleById={(cardId) =>
+                  columns.flatMap((c) => c.cards).find((c) => c.id === cardId)?.title
+                }
+              />
               {boardReadOnly ? (
                 <span
                   title="Somente leitura"
@@ -4756,6 +4887,7 @@ function KanbanPage() {
                     onSortColumn={handleSortColumn}
                     collapsed={collapsedColumnIds.has(column.id)}
                     onToggleCollapse={() => toggleColumnCollapsed(column.id)}
+                    presenceByCard={presenceByCard}
                   />
                 </div>
               </React.Fragment>

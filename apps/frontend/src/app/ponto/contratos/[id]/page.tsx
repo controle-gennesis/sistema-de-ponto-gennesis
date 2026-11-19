@@ -3622,8 +3622,14 @@ export default function ContractDetailPage() {
       const decorrido = safeSelectedYear < anoAtual || (safeSelectedYear === anoAtual && i <= mesAtual);
       const faturadoMes = faturamentoPorMes[i] || 0;
       const eMesAtual = safeSelectedYear === anoAtual && i === mesAtual;
+      // O mês só entra no gráfico se coincide com a vigência do contrato.
+      const vigente = contractVigenciaDates
+        ? new Date(safeSelectedYear, i + 1, 0, 23, 59, 59).getTime() >= contractVigenciaDates.start.getTime() &&
+          new Date(safeSelectedYear, i, 1).getTime() <= contractVigenciaDates.end.getTime()
+        : true;
       return {
         label,
+        vigente,
         faturado: faturadoMes,
         meta: Number(meta) || 0,
         // Previsão (produção do mês) ainda não faturada, só no mês corrente.
@@ -3651,6 +3657,7 @@ export default function ContractDetailPage() {
     producaoPorMes,
     safeSelectedYear,
     valorMaisAditivosTotal,
+    contractVigenciaDates,
   ]);
 
   const resumoAlertas = useMemo((): ContratoResumoAlerta[] => {

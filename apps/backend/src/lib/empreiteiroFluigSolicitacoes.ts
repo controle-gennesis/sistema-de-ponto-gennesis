@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { fluigService } from '../controllers/FluigController';
 
 /** Datasets do espelho do Fluig (G5) onde ficam as solicitações de pagamento de empreitas. */
 const DATASET_JURIDICO = 'G5-Relatorio-DF-GO-JURIDICO';
@@ -133,6 +134,131 @@ export async function listarSolicitacoesFluigDaEmpreita(empreita: {
   return { itens, total, totalPago };
 }
 
+/** Solicitação como está AGORA no Fluig (dataset DS_SolicitacaoPorNumero), de qualquer setor ou CPF/CNPJ. */
+export type SolicitacaoFluigDireta = {
+  numero: string;
+  titulo: string;
+  fase: string;
+  cancelada: boolean;
+  valor: number;
+  vencimento: string | null;
+  pagamento: string | null;
+  favorecido: string;
+  /** CPF/CNPJ do favorecido, só dígitos ('' se o Fluig não informar). */
+  documento: string;
+};
+
+const CACHE_FLUIG_ENCONTRADA_MS = 5 * 60 * 1000;
+const CACHE_FLUIG_NAO_ENCONTRADA_MS = 60 * 1000;
+const cacheFluigDireto = new Map<string, { at: number; item: SolicitacaoFluigDireta | null }>();
+
+/**
+ * Consulta o Fluig direto (uma chamada para todos os números que não estão no cache de poucos minutos).
+ * Devolve só as que existem. Lança erro se o Fluig não responder.
+ */
+export async function consultarSolicitacoesNoFluig(numeros: string[]): Promise<Map<string, SolicitacaoFluigDireta>> {
+  const lista = [...new Set(numeros.map((n) => somenteDigitos(n)).filter(Boolean))].slice(0, 40);
+  const resultado = new Map<string, SolicitacaoFluigDireta>();
+  const agora = Date.now();
+  const faltando: string[] = [];
+  for (const numero of lista) {
+    const guardado = cacheFluigDireto.get(numero);
+    const validade = guardado?.item ? CACHE_FLUIG_ENCONTRADA_MS : CACHE_FLUIG_NAO_ENCONTRADA_MS;
+    if (guardado && agora - guardado.at < validade) {
+      if (guardado.item) resultado.set(numero, guardado.item);
+    } else {
+      faltando.push(numero);
+    }
+  }
+  if (faltando.length === 0) return resultado;
+
+  const linhas = await fluigService.getSolicitacoesPorNumero(faltando);
+  const achados = new Map<string, SolicitacaoFluigDireta>();
+  for (const p of linhas) {
+    const numero = somenteDigitos(p.NUM_PROCES);
+    if (!numero) continue;
+    const fase = texto(p.fase_Atual);
+    const cancelada = texto(p.STATUS) === '1' || /cancelad/i.test(fase);
+    achados.set(numero, {
+      numero,
+      titulo: texto(p.titulo_solicitacao),
+      fase,
+      cancelada,
+      valor: parseValorBr(p.Valor),
+      vencimento: dataIso(p.data_vencimento),
+      // Solicitação cancelada nunca conta como paga, mesmo que o formulário tenha data de pagamento.
+      pagamento: cancelada ? null : dataIso(p.data_pagamento),
+      favorecido: texto(p.favorecido),
+      documento: [p.CpfCnpj_favorecido, p.CNPJ, p.CPF].map(somenteDigitos).find((d) => d.length >= 11) ?? '',
+    });
+  }
+  for (const numero of faltando) {
+    const item = achados.get(numero) ?? null;
+    cacheFluigDireto.set(numero, { at: agora, item });
+    if (item) resultado.set(numero, item);
+  }
+  return resultado;
+}
+
+export type ConferenciaSolicitacao =
+  | {
+      estado: 'ok' | 'semDados';
+      /** De onde veio a conferência: espelho local ou consulta direta ao Fluig. */
+      origem: 'espelho' | 'fluig';
+      solicitacao: { numero: string; titulo: string; valor: number; fase: string; favorecido: string };
+    }
+  | { estado: 'naoExiste' }
+  | { estado: 'outroDocumento'; favorecido: string }
+  | { estado: 'indisponivel' };
+
+/**
+ * Confere se o número digitado pode ser ligado a uma parcela desta empreita:
+ * 1) está entre as solicitações dela no espelho → ok;
+ * 2) senão, consulta o Fluig na hora: não existe → naoExiste; é do mesmo CPF/CNPJ (ou do mesmo nome) → ok;
+ *    é de outro favorecido → outroDocumento; o Fluig não trouxe o favorecido → semDados (deixa ligar com aviso);
+ * 3) se o Fluig não responder → indisponivel (deixa ligar com aviso).
+ */
+export async function conferirSolicitacaoParaEmpreita(
+  empreita: { name: string; tradeName: string | null; document: string; cpf: string | null },
+  numeroBruto: string
+): Promise<ConferenciaSolicitacao> {
+  const numero = somenteDigitos(numeroBruto);
+  if (!numero) return { estado: 'naoExiste' };
+
+  const doEspelho = await listarSolicitacoesFluigDaEmpreita(empreita);
+  const achada = doEspelho.itens.find((i) => i.numero === numero);
+  if (achada) {
+    return {
+      estado: 'ok',
+      origem: 'espelho',
+      solicitacao: { numero, titulo: achada.titulo, valor: achada.valor, fase: achada.fase, favorecido: achada.favorecido },
+    };
+  }
+
+  let direta: SolicitacaoFluigDireta | undefined;
+  try {
+    direta = (await consultarSolicitacoesNoFluig([numero])).get(numero);
+  } catch {
+    return { estado: 'indisponivel' };
+  }
+  if (!direta) return { estado: 'naoExiste' };
+
+  const documentos = [somenteDigitos(empreita.document), somenteDigitos(empreita.cpf)].filter((d) => d.length >= 11);
+  const nomes = [normalizarNome(empreita.name), normalizarNome(empreita.tradeName)].filter((n) => n.length >= 4);
+  const solicitacao = {
+    numero,
+    titulo: direta.titulo,
+    valor: direta.valor,
+    fase: direta.fase,
+    favorecido: direta.favorecido,
+  };
+  if (!direta.documento && !direta.favorecido) return { estado: 'semDados', origem: 'fluig', solicitacao };
+  const mesmoDocumento = !!direta.documento && documentos.includes(direta.documento);
+  const mesmoNome = !!direta.favorecido && nomes.includes(normalizarNome(direta.favorecido));
+  if (mesmoDocumento || mesmoNome) return { estado: 'ok', origem: 'fluig', solicitacao };
+  return { estado: 'outroDocumento', favorecido: direta.favorecido };
+}
+
 export type FluigStatusParcela = {
   fase: string;
   /** AAAA-MM-DD */
@@ -179,6 +305,18 @@ export async function buscarStatusFluigPorNumeros(numeros: string[]): Promise<Re
   for (const [numero, valores] of valoresPorProcesso) {
     const alvo = resultado[numero];
     if (alvo) alvo.valor = Number([...valores].reduce((soma, v) => soma + v, 0).toFixed(2));
+  }
+  // Fora do espelho (criada hoje, de outro setor, cancelada...): pergunta ao Fluig na hora, numa chamada só.
+  const foraDoEspelho = lista.filter((n) => !resultado[n]);
+  if (foraDoEspelho.length > 0) {
+    try {
+      const diretas = await consultarSolicitacoesNoFluig(foraDoEspelho);
+      for (const [numero, s] of diretas) {
+        resultado[numero] = { fase: s.fase, vencimento: s.vencimento, pagamento: s.pagamento, valor: s.valor };
+      }
+    } catch {
+      // Fluig indisponível: segue só com o que o espelho tem.
+    }
   }
   return resultado;
 }

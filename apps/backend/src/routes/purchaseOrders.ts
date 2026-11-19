@@ -129,6 +129,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       req.user.id,
       !!req.user.isAdmin,
       gestorScope,
+      // Mapa de Cotação: as OCs dos contratos em que a pessoa é Comprador entram na conta de itens já comprados.
+      { paraMapaCotacao: String(req.query.paraMapaCotacao ?? '') === '1' },
     );
 
     const scoped = applyUnbCostCenterScopeToIdFilter(

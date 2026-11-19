@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
+  ChevronRight,
   ClipboardList,
   FilePlus2,
   Fuel,
@@ -532,6 +533,10 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
                   />
                   <Text style={styles.itemMeta}>{itemDateLabel(item)}</Text>
                 </View>
+                <View style={styles.detailsHint}>
+                  <Text style={styles.detailsHintText}>Ver detalhes</Text>
+                  <ChevronRight size={15} color={colors.primary} strokeWidth={2.4} />
+                </View>
               </View>
             </TouchableOpacity>
 
@@ -778,6 +783,17 @@ const getStyles = (colors: any, isDark: boolean) =>
       justifyContent: 'center',
       gap: 6,
     },
+    detailsHint: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+      marginTop: 2,
+      paddingVertical: 4,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      backgroundColor: isDark ? 'rgba(206,55,54,0.18)' : 'rgba(206,55,54,0.09)',
+    },
+    detailsHintText: { fontSize: 13, fontWeight: '700', color: colors.primary },
     itemMeta: {
       fontSize: 12,
       fontWeight: '500',

@@ -136,7 +136,7 @@ function ThemeToggle({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
 
 /** Páginas que são um desdobramento de outra: seta de voltar antes do breadcrumb. */
 const BACK_LINKS: Record<string, { href: string; label: string }> = {
-  '/ponto/financeiro/dashboard-boletos': { href: '/ponto/financeiro/controle-boletos', label: 'Voltar para Controle de Boletos' },
+  '/ponto/controle-boletos/dashboard': { href: '/ponto/controle-boletos', label: 'Voltar para Controle de Boletos' },
 };
 
 export function TopNavbar({
