@@ -130,20 +130,24 @@ function toHex(r: number, g: number, b: number) {
   return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** Fundo da coluna = tint da bolinha (mesmo mix do web). */
+/** Fundo da coluna = tint da bolinha, meio transparente (a cor deixa o fundo da tela aparecer, como no web). */
 function getKanbanColumnBg(color: string | null | undefined, isDark: boolean): string {
   const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
-  if (isDark) {
-    return toHex(
-      mixChannel(accent.r, 31, 0.28),
-      mixChannel(accent.g, 41, 0.28),
-      mixChannel(accent.b, 55, 0.28),
-    );
-  }
+  return `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${isDark ? 0.22 : 0.16})`;
+}
+
+/**
+ * Cor opaca equivalente ao fundo da coluna sobre o fundo da tela: usada só no esmaecido de baixo,
+ * que precisa esconder o fim dos cards (um fundo translúcido não esconderia nada).
+ */
+function getKanbanColumnFadeColor(color: string | null | undefined, isDark: boolean): string {
+  const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
+  const base = isDark ? { r: 17, g: 24, b: 39 } : { r: 244, g: 246, b: 248 };
+  const w = isDark ? 0.22 : 0.16;
   return toHex(
-    mixChannel(accent.r, 255, 0.22),
-    mixChannel(accent.g, 255, 0.22),
-    mixChannel(accent.b, 255, 0.22),
+    mixChannel(accent.r, base.r, w),
+    mixChannel(accent.g, base.g, w),
+    mixChannel(accent.b, base.b, w),
   );
 }
 
@@ -957,6 +961,7 @@ function ColumnBase({
   presenceByCard?: Record<string, KanbanPresence[]>;
 }) {
   const columnBg = getKanbanColumnBg(column.color, isDark);
+  const columnFadeColor = getKanbanColumnFadeColor(column.color, isDark);
   const cards = Array.isArray(column.cards) ? column.cards : [];
   const [showBottomFade, setShowBottomFade] = useState(false);
   const scrollH = useRef(0);
@@ -1037,7 +1042,7 @@ function ColumnBase({
           scrollEventThrottle={16}
         />
         {showBottomFade ? (
-          <ColumnBottomFade color={columnBg} fadeId={`kanban-fade-${column.id}`} />
+          <ColumnBottomFade color={columnFadeColor} fadeId={`kanban-fade-${column.id}`} />
         ) : null}
       </View>
 

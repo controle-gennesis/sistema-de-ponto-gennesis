@@ -676,8 +676,8 @@ function KanbanBoardSkeleton() {
           key={colIdx}
           className={clsx(
             'relative flex w-[340px] flex-shrink-0 flex-col rounded-2xl',
-            '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-            'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+            '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+            'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
           )}
           style={getKanbanColumnSurfaceStyle(col.color)}
         >
@@ -1605,8 +1605,8 @@ function KanbanColumnComponent({
         className={clsx(
           'group/collapsed relative flex h-auto w-full flex-shrink-0 flex-col items-center self-start',
           'rounded-2xl overflow-hidden',
-          '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-          'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+          '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+          'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
           'hover:brightness-[1.03] dark:hover:brightness-110',
           'transition-[filter,background-color,opacity] duration-200 ease-out motion-reduce:transition-none',
           onColumnDragStart && 'cursor-grab active:cursor-grabbing',
@@ -1689,8 +1689,8 @@ function KanbanColumnComponent({
       className={clsx(
         'relative flex w-full flex-shrink-0 flex-col rounded-2xl overflow-hidden',
         isChecklistView && 'h-full max-h-full min-h-0',
-        '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-        'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+        '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+        'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
         'transition-[opacity,box-shadow,background-color,filter] duration-200 ease-out motion-reduce:transition-none',
         onColumnDragStart && 'cursor-grab active:cursor-grabbing [&_[data-kanban-card]]:cursor-pointer',
         isColumnDragging && 'kanban-column-dragging',
