@@ -145,7 +145,7 @@ export async function notifyRequesterCancelledWhatsApp(params: {
 function pushBodyFromSubjectLine(subjectLine: string): string {
   return subjectLine
     .split(/\s+[·—–]\s+/)
-    .map((part) => part.replace(/^(Motorista|Solicitante|Obra|Fornecedor):\s*/i, '').trim())
+    .map((part) => part.replace(/^(Motorista|Solicitante|Obra|Fornecedor|Contrato):\s*/i, '').trim())
     .filter(Boolean)
     .join('\n');
 }

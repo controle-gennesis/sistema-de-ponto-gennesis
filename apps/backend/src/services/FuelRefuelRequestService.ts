@@ -322,7 +322,7 @@ export class FuelRefuelRequestService {
     const approverIds = await getFuelApprovalNotifyUserIds(contract.id);
     void notifyNewPendingApprovalWhatsApp(
       approverIds,
-      `Solicitação de abastecimento #${row.displayNumber} · Motorista: ${row.driverName}`
+      `Solicitação de abastecimento #${row.displayNumber} · Motorista: ${row.driverName} · Contrato: ${contract.name.trim() || contract.number}`
     );
 
     return row;
@@ -498,7 +498,7 @@ export class FuelRefuelRequestService {
     const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
     void notifyNewPendingApprovalWhatsApp(
       queueUserIds,
-      `Solicitação de abastecimento #${updated.displayNumber} · ${updated.driverName}`
+      `Solicitação de abastecimento #${updated.displayNumber} · ${updated.driverName} · Contrato: ${updated.contract?.name?.trim() || updated.contract?.number || '—'}`
     );
 
     return updated;

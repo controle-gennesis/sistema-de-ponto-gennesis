@@ -128,6 +128,18 @@ function parsePermission(value: unknown): PlannerAgendaSharePermission {
   return PlannerAgendaSharePermission.READ;
 }
 
+/** Endereço de retorno do app (esquema do aplicativo): só ele é aceito além das páginas do site. */
+const APP_RETURN_PREFIX = 'gennesis://';
+
+function appReturnUrl(returnTo: string | undefined, params: Record<string, string>): string | null {
+  if (!returnTo || !returnTo.startsWith(APP_RETURN_PREFIX)) return null;
+  const sep = returnTo.includes('?') ? '&' : '?';
+  const qs = Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  return `${returnTo}${sep}${qs}`;
+}
+
 type GoogleOAuthState = {
   userId: string;
   returnTo?: string;
@@ -620,28 +632,58 @@ export class PlannerEventController {
     }
   }
 
+  /**
+   * Página mínima para o retorno do app: o navegador do celular abre o aplicativo pelo esquema
+   * «gennesis://». Uma página intermediária evita que alguns navegadores bloqueiem o redirecionamento.
+   */
+  private appReturnPage(res: Response, url: string) {
+    const safe = url.replace(/"/g, '%22').replace(/</g, '%3C');
+    res
+      .status(200)
+      .type('html')
+      .send(
+        `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gennesis</title></head>` +
+          `<body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px 24px;color:#111827">` +
+          `<p style="font-size:18px;font-weight:600">Voltando para o aplicativo…</p>` +
+          `<p><a href="${safe}" style="color:#ce3736;font-weight:600">Toque aqui se não abrir sozinho</a></p>` +
+          `<script>setTimeout(function(){location.href="${safe}"},50)</script></body></html>`
+      );
+  }
+
   async googleCallback(req: AuthRequest, res: Response, _next: NextFunction) {
     const frontend = getFrontendOrigin().replace(/\/$/, '');
+    // Origem do pedido (site ou app): lida do state quando ele é válido.
+    let originReturn: string | undefined;
+    try {
+      const rawState = String(req.query.state || '');
+      if (rawState && process.env.JWT_SECRET) {
+        originReturn = (jwt.verify(rawState, process.env.JWT_SECRET) as GoogleOAuthState)?.returnTo;
+      }
+    } catch {
+      originReturn = undefined;
+    }
+    const fail = (reason: string) => {
+      const app = appReturnUrl(originReturn, { googleCalendar: 'error', reason });
+      if (app) return this.appReturnPage(res, app);
+      return res.redirect(
+        `${frontend}/ponto/agenda?googleCalendar=error&reason=${encodeURIComponent(reason)}`
+      );
+    };
     try {
       const code = String(req.query.code || '');
       const state = String(req.query.state || '');
       const oauthError = String(req.query.error || '');
 
-      if (oauthError) {
-        return res.redirect(
-          `${frontend}/ponto/agenda?googleCalendar=error&reason=${encodeURIComponent(oauthError)}`
-        );
-      }
-      if (!code || !state || !process.env.JWT_SECRET) {
-        return res.redirect(`${frontend}/ponto/agenda?googleCalendar=error&reason=invalid_callback`);
-      }
+      if (oauthError) return fail(oauthError);
+      if (!code || !state || !process.env.JWT_SECRET) return fail('invalid_callback');
 
       const payload = jwt.verify(state, process.env.JWT_SECRET) as GoogleOAuthState;
-      if (!payload?.userId) {
-        return res.redirect(`${frontend}/ponto/agenda?googleCalendar=error&reason=invalid_state`);
-      }
+      if (!payload?.userId) return fail('invalid_state');
 
       await handleGoogleOAuthCallback(payload.userId, code);
+
+      const app = appReturnUrl(payload.returnTo, { googleCalendar: 'connected' });
+      if (app) return this.appReturnPage(res, app);
 
       const returnTo = (payload.returnTo || '/ponto/agenda').startsWith('/')
         ? payload.returnTo || '/ponto/agenda'
@@ -650,9 +692,7 @@ export class PlannerEventController {
       return res.redirect(`${frontend}${returnTo}${sep}googleCalendar=connected`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'callback_failed';
-      return res.redirect(
-        `${frontend}/ponto/agenda?googleCalendar=error&reason=${encodeURIComponent(message)}`
-      );
+      return fail(message);
     }
   }
 
