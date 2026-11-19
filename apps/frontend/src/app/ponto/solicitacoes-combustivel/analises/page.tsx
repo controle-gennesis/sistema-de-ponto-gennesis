@@ -369,6 +369,7 @@ function WeeklyQuotaPanel({
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <th className="py-2 pr-3">Contrato</th>
+                <th className="w-[26%] py-2 px-3">Uso da cota</th>
                 <th className="py-2 px-3 text-right">Cota</th>
                 <th className="py-2 px-3 text-right">Urgência</th>
                 <th className="py-2 px-3 text-right">Usado</th>
@@ -404,20 +405,42 @@ function WeeklyQuotaPanel({
                           </div>
                         ))}
                       </div>
-                      {!g.unlimited && g.weeklyBudgetReais ? (
-                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
-                          <div
-                            className={`h-full rounded-full transition-[width] duration-500 ${
-                              over
-                                ? 'bg-red-500'
-                                : usedPct >= 80
-                                  ? 'bg-amber-500'
-                                  : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${barPct}%` }}
-                          />
+                      {quotaContractNames(g).length > 1 ? (
+                        <div className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+                          Dividem a mesma cota
                         </div>
                       ) : null}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      {!g.unlimited && g.weeklyBudgetReais ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-2.5 min-w-[80px] flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
+                            <div
+                              className={`h-full rounded-full transition-[width] duration-700 ${
+                                over || usedPct >= 90
+                                  ? 'bg-red-500'
+                                  : usedPct >= 70
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${barPct}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`w-10 shrink-0 text-right text-xs font-medium tabular-nums ${
+                              over || usedPct >= 90
+                                ? 'text-red-600 dark:text-red-400'
+                                : usedPct >= 70
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            {Math.round(usedPct)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
                       {g.unlimited ? 'Sem limite' : formatCurrency(g.weeklyBudgetReais ?? 0)}
@@ -438,9 +461,11 @@ function WeeklyQuotaPanel({
                       className={`whitespace-nowrap py-2.5 pl-3 text-right text-sm font-semibold tabular-nums ${
                         g.unlimited
                           ? 'text-gray-500 dark:text-gray-400'
-                          : over
+                          : over || usedPct >= 90
                             ? 'text-red-600 dark:text-red-400'
-                            : 'text-emerald-600 dark:text-emerald-400'
+                            : usedPct >= 70
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-emerald-600 dark:text-emerald-400'
                       }`}
                     >
                       {g.unlimited ? '—' : formatCurrency(remaining ?? 0)}
