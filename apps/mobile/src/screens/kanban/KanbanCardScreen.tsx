@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -40,6 +40,8 @@ import {
   X,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import { useKanbanCollab } from '../../lib/kanbanCollab';
+import { firstName } from '../../components/KanbanPresenceBar';
 import AppHeader from '../../components/AppHeader';
 import KanbanMaterialsSheet from '../../components/KanbanMaterialsSheet';
 import KanbanSheet from '../../components/KanbanSheet';
@@ -86,19 +88,42 @@ function escapeRe(v: string): string {
 }
 
 /** Texto do comentário com os "@Nome" destacados. */
-function renderMentions(content: string, names: string[], style: any): React.ReactNode {
+function renderMentions(
+  content: string,
+  names: string[],
+  style: any,
+  /** No campo de digitação: o «@» que ainda está sendo escrito (no fim do texto) também fica em destaque. */
+  liveTail = false,
+): React.ReactNode {
   const list = [...new Set(names.filter(Boolean))].sort((a, b) => b.length - a.length);
-  if (list.length === 0) return content;
-  const re = new RegExp(`(@(?:${list.map(escapeRe).join('|')}))(?![\\p{L}\\p{N}])`, 'gu');
-  return content.split(re).map((part, i) =>
-    part.startsWith('@') && list.includes(part.slice(1)) ? (
-      <Text key={i} style={style}>
-        {part}
-      </Text>
-    ) : (
-      part
-    ),
-  );
+  let nodes: React.ReactNode[] = [content];
+  if (list.length > 0) {
+    const re = new RegExp(`(@(?:${list.map(escapeRe).join('|')}))(?![\\p{L}\\p{N}])`, 'gu');
+    nodes = content.split(re).map((part, i) =>
+      part.startsWith('@') && list.includes(part.slice(1)) ? (
+        <Text key={i} style={style}>
+          {part}
+        </Text>
+      ) : (
+        part
+      ),
+    );
+  }
+  if (liveTail && nodes.length > 0) {
+    const last = nodes[nodes.length - 1];
+    if (typeof last === 'string') {
+      const m = /(@[^\s@]*)$/.exec(last);
+      if (m) {
+        nodes[nodes.length - 1] = last.slice(0, m.index);
+        nodes.push(
+          <Text key="live-tail" style={style}>
+            {m[1]}
+          </Text>,
+        );
+      }
+    }
+  }
+  return list.length === 0 && !liveTail ? content : nodes;
 }
 
 function labelTextColor(background: string): string {
@@ -220,6 +245,47 @@ export default function KanbanCardScreen() {
 
   const card = cardQuery.data;
   const readOnly = boardQuery.data?.canWrite === false;
+
+  // ── Tempo real: aviso de que estou neste cartão e atualização quando outra pessoa altera algo ──
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleChangedByOther = useCallback(() => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    // Junta várias alterações seguidas numa atualização só. O texto que estou digitando não é
+    // substituído (o formulário só se atualiza quando não há alteração minha pendente).
+    liveTimerRef.current = setTimeout(() => {
+      liveTimerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: ['kanban-card', cardId] });
+      void queryClient.invalidateQueries({ queryKey: ['kanban-card-materials', cardId] });
+      void queryClient.invalidateQueries({ queryKey: ['kanban-board', departmentKey ?? 'own'] });
+    }, 700);
+  }, [queryClient, cardId, departmentKey]);
+  useEffect(
+    () => () => {
+      if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    },
+    [],
+  );
+  const collab = useKanbanCollab({
+    boardId: boardQuery.data?.id,
+    onChangedByOther: handleChangedByOther,
+    presence: { state: 'editing', cardId },
+  });
+
+  // Aviso: abri um card que outra pessoa também está com aberto.
+  const warnedPresenceRef = useRef<string | null>(null);
+  useEffect(() => {
+    const editing = collab.users.filter(
+      (u) => u.userId !== collab.selfId && u.cardId === cardId && u.state === 'editing',
+    );
+    if (editing.length === 0 || warnedPresenceRef.current === cardId) return;
+    warnedPresenceRef.current = cardId;
+    Toast.show({
+      type: 'info',
+      text1: `${editing.map((u) => firstName(u.name)).join(', ')} também está com este card aberto`,
+      text2: 'Alterações salvas por um podem sobrescrever as do outro.',
+      visibilityTime: 6000,
+    });
+  }, [collab.users, collab.selfId, cardId]);
   const labelPresets =
     boardQuery.data?.labelPresets?.length
       ? boardQuery.data.labelPresets
@@ -872,7 +938,12 @@ export default function KanbanCardScreen() {
         onBack={() => navigation.goBack()}
       />
 
-      <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.pad}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets
+      >
         <View style={styles.metaRow}>
           <TouchableOpacity
             style={styles.columnChip}
@@ -1376,8 +1447,10 @@ export default function KanbanCardScreen() {
             })
           )}
 
-          {!readOnly && mentionOptions.length > 0 ? (
-            <View style={styles.mentionList}>
+          {!readOnly ? (
+            <View style={{ position: 'relative' }}>
+            {mentionOptions.length > 0 ? (
+              <View style={[styles.mentionList, styles.mentionFloat]}>
               {mentionOptions.map((u) => (
                 <TouchableOpacity
                   key={u.id}
@@ -1392,21 +1465,22 @@ export default function KanbanCardScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          ) : null}
+            ) : null}
 
-          {!readOnly ? (
             <View style={styles.addRow}>
               <TextInput
-                value={comment}
                 onChangeText={setComment}
                 placeholder="Escrever comentário... (@ para marcar)"
                 placeholderTextColor={colors.textSecondary}
                 style={styles.addInput}
                 onSubmitEditing={() => void sendComment()}
-              />
+              >
+                {renderMentions(comment, mentionNames, styles.mentionInputText, true)}
+              </TextInput>
               <TouchableOpacity style={styles.iconBtn} onPress={() => void sendComment()}>
                 <Send size={16} color="#fff" />
               </TouchableOpacity>
+            </View>
             </View>
           ) : null}
         </View>
@@ -1970,15 +2044,42 @@ function getStyles(colors: any, _isDark: boolean) {
       paddingHorizontal: 10,
       paddingVertical: 8,
     },
+    // Sobe por cima do conteúdo: abrir a lista de pessoas não empurra o campo de comentário para baixo do teclado.
+    mentionFloat: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 48,
+      marginTop: 0,
+      zIndex: 20,
+      maxHeight: 220,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: colors.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 6,
+    },
     mentionName: { flex: 1, fontSize: 14, color: colors.text },
-    mentionText: { color: colors.primary, fontWeight: '600' },
+    // @Nome em azul, como no site (azul sobre um fundo azul bem claro).
+    // No campo de digitação só a cor muda (sem fundo), para o cursor não desalinhar.
+    mentionInputText: { color: _isDark ? '#93c5fd' : '#1d4ed8', fontWeight: '600' },
+    mentionText: {
+      color: _isDark ? '#93c5fd' : '#1d4ed8',
+      backgroundColor: _isDark ? 'rgba(30,58,138,0.35)' : '#eff6ff',
+      fontWeight: '600',
+    },
     addRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
     addInput: {
       flex: 1,
-      minHeight: 42,
+      height: 42,
       borderRadius: 10,
       paddingHorizontal: 12,
-      paddingVertical: 12,
+      paddingTop: 0,
+      paddingBottom: 4,
+      textAlignVertical: 'center',
       fontSize: 15,
       backgroundColor: colors.background,
       color: colors.text,

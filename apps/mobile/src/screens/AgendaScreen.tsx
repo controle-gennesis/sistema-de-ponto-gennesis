@@ -1889,7 +1889,7 @@ export default function AgendaScreen() {
               onChangeText={setEventTitle}
               placeholder="Ex.: Reunião de obra"
               placeholderTextColor={colors.textSecondary}
-              style={styles.sheetInput}
+              style={[styles.sheetInput, styles.sheetInputSingle]}
             />
           </View>
 
@@ -2134,7 +2134,7 @@ export default function AgendaScreen() {
               onChangeText={setNewTaskTitle}
               placeholder="O que precisa ser feito?"
               placeholderTextColor={colors.textSecondary}
-              style={styles.sheetInput}
+              style={[styles.sheetInput, styles.sheetInputSingle]}
               autoFocus={!editingTask}
               returnKeyType="done"
             />
@@ -2270,7 +2270,7 @@ export default function AgendaScreen() {
             onChangeText={setNewListTitle}
             placeholder="Ex.: Pessoal"
             placeholderTextColor={colors.textSecondary}
-            style={styles.sheetInput}
+            style={[styles.sheetInput, styles.sheetInputSingle]}
             autoFocus
             returnKeyType="done"
             onSubmitEditing={() => void createList()}
@@ -3148,6 +3148,8 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.text,
       fontSize: 16,
     },
+    // Campos de uma linha: altura fixa e sem margem interna vertical, para texto e placeholder ficarem no meio.
+    sheetInputSingle: { height: 52, paddingTop: 0, paddingBottom: 5, textAlignVertical: 'center' },
     iconTile: {
       width: 46,
       height: 46,
