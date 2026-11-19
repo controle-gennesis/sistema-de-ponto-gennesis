@@ -86,14 +86,20 @@ function notifyParticipants(
   bodyText: string
 ) {
   void (async () => {
+    const accountingGroups = async () => [
+      await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY),
+      await userIdsWithModule(ACCOUNTING_PAGE_KEY),
+    ];
+    const direct = isAccountingDirectRequestType((row as { requestType: string }).requestType);
+    // Pedido criado direto para a Contabilidade não passa pelo DP: só a Contabilidade é avisada.
     const groups = isAdmRow(row)
       ? [await userIdsWithModule(ADM_MANAGE_KEY)]
-      : [
-          await userIdsWithModule(DP_MANAGE_KEY),
-          ...(involvesAccounting(row)
-            ? [await userIdsWithModule(DP_CONTABILIDADE_MODULE_KEY), await userIdsWithModule(ACCOUNTING_PAGE_KEY)]
-            : []),
-        ];
+      : direct
+        ? await accountingGroups()
+        : [
+            await userIdsWithModule(DP_MANAGE_KEY),
+            ...(involvesAccounting(row) ? await accountingGroups() : []),
+          ];
     const recipients = [...new Set(groups.flat())].filter((id) => id !== authorId);
     await sendPushToUsers(recipients, { title, body: bodyText, data: { type: 'dp-request-message', id: (row as { id: string }).id } });
   })().catch(() => undefined);
