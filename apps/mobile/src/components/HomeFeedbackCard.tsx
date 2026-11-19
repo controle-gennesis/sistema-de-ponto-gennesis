@@ -220,7 +220,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       justifyContent: 'center',
     },
     modalBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-    starsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+    starsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 },
     starItem: { flex: 1, alignItems: 'center', gap: 6 },
     starLabel: { fontSize: 11, fontWeight: '500', color: colors.textSecondary, textAlign: 'center' },
     starLabelActive: { color: colors.text, fontWeight: '700' },

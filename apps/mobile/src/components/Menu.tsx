@@ -22,6 +22,8 @@ import {
   X,
   Clock,
   SquareKanban,
+  CalendarDays,
+  ListChecks,
   BookOpen,
   ChevronRight,
 } from 'lucide-react-native';
@@ -164,6 +166,8 @@ export default function Menu({ visible, onClose }: MenuProps) {
 
   const links = [
     { key: 'tasks', label: 'Tasks', icon: SquareKanban, onPress: () => go('KanbanBoard') },
+    { key: 'agenda', label: 'Agenda', icon: CalendarDays, onPress: () => go('Agenda') },
+    { key: 'tarefas', label: 'Tarefas', icon: ListChecks, onPress: () => go('Tarefas') },
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => go('DiarioObra') }]
       : []),

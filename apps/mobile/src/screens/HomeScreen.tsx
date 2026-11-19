@@ -21,7 +21,7 @@ import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeAprovacoesCard from '../components/HomeAprovacoesCard';
-import HomeTarefasCard from '../components/HomeTarefasCard';
+import HomeTarefasResumo from '../components/HomeTarefasResumo';
 import HomeQuickAccess from '../components/HomeQuickAccess';
 import HomeFeedbackCard from '../components/HomeFeedbackCard';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
@@ -165,7 +165,7 @@ export default function HomeScreen() {
 
         <HomeAgendaCard />
 
-        <HomeTarefasCard />
+        <HomeTarefasResumo />
 
         <HomeFeedbackCard
           onInputFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 320)}

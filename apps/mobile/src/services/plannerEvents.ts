@@ -162,3 +162,37 @@ export async function fetchKanbanPickerUsers(): Promise<KanbanPickerUser[]> {
   const res = await api.get('/api/kanban/picker-users');
   return (await readApiData<KanbanPickerUser[]>(res)) || [];
 }
+
+export type GoogleCalendarStatus = { configured: boolean; connected: boolean };
+
+/** Esquema do aplicativo (app.json): o servidor devolve o usuário para cá depois do login do Google. */
+export const GOOGLE_RETURN_URL = 'gennesis://agenda';
+
+export async function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
+  const res = await api.get('/api/planner-events/google/status');
+  const data = await readApiData<GoogleCalendarStatus>(res);
+  return data ?? { configured: false, connected: false };
+}
+
+export async function fetchGoogleCalendarAuthUrl(): Promise<string> {
+  const qs = `?returnTo=${encodeURIComponent(GOOGLE_RETURN_URL)}`;
+  const res = await api.get(`/api/planner-events/google/auth-url${qs}`);
+  const data = await readApiData<{ url: string }>(res);
+  return data.url;
+}
+
+export async function syncGoogleCalendar(
+  from: Date,
+  to: Date,
+): Promise<{ imported: number; updated: number; skipped: number }> {
+  const res = await api.post('/api/planner-events/google/sync', {
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+  return readApiData(res);
+}
+
+export async function disconnectGoogleCalendar(): Promise<void> {
+  const res = await api.delete('/api/planner-events/google/disconnect');
+  await readApiJson(res);
+}

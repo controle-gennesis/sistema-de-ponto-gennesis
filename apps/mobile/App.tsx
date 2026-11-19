@@ -50,7 +50,8 @@ export type RootStackParamList = {
   FuelRequests: undefined;
   Profile: undefined;
   Pncp: undefined;
-  Agenda: { mode?: 'agenda' | 'tasks' } | undefined;
+  Agenda: undefined;
+  Tarefas: { filter?: 'today' | 'overdue' | 'starred' | 'all' } | undefined;
   DiarioObra: undefined;
   DiarioObraEditor: {
     obraId: string;
@@ -102,6 +103,7 @@ const OpaqueFuelRequestsScreen = withOpaqueBackground(FuelRequestsScreen);
 const OpaqueProfileScreen = withOpaqueBackground(ProfileScreen);
 const OpaquePncpLicitacoesScreen = withOpaqueBackground(PncpLicitacoesScreen);
 const OpaqueAgendaScreen = withOpaqueBackground(AgendaScreen);
+const OpaqueTarefasScreen = withOpaqueBackground(AgendaScreen);
 const OpaqueDiarioObraListScreen = withOpaqueBackground(DiarioObraListScreen);
 const OpaqueDiarioObraEditorScreen = withOpaqueBackground(DiarioObraEditorScreen);
 const OpaqueKanbanBoardsScreen = withOpaqueBackground(KanbanBoardsScreen);
@@ -236,6 +238,7 @@ function AppNavigator() {
               <Stack.Screen name="Profile" component={OpaqueProfileScreen} />
               <Stack.Screen name="Pncp" component={OpaquePncpLicitacoesScreen} />
               <Stack.Screen name="Agenda" component={OpaqueAgendaScreen} />
+              <Stack.Screen name="Tarefas" component={OpaqueTarefasScreen} />
               <Stack.Screen name="DiarioObra" component={OpaqueDiarioObraListScreen} />
               <Stack.Screen name="DiarioObraEditor" component={OpaqueDiarioObraEditorScreen} />
               <Stack.Screen name="KanbanBoards" component={OpaqueKanbanBoardsScreen} />

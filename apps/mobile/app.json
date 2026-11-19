@@ -2,6 +2,7 @@
   "expo": {
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
+    "scheme": "gennesis",
     "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/logo-ios.png",

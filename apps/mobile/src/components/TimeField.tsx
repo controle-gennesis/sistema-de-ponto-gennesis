@@ -5,11 +5,14 @@ import { Clock, X } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 
 type Props = {
-  label: string;
+  /** Sem rótulo: deixa só o espaço dele, para alinhar ao campo vizinho. */
+  label?: string;
   /** Horário em `HH:mm` (vazio = sem horário). */
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Sem os ícones do campo (limpar e relógio). */
+  hideIcons?: boolean;
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -25,7 +28,7 @@ function parse(value: string): Date {
 const format = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** Campo de horário no mesmo visual do DateField (seletor nativo; no iPhone abre numa folha com "Confirmar"). */
-export default function TimeField({ label, value, onChange, placeholder = '--:--' }: Props) {
+export default function TimeField({ label = '', value, onChange, placeholder = '--:--', hideIcons = false }: Props) {
   const { colors, isDark } = useTheme();
   const [open, setOpen] = useState(false);
   const [temp, setTemp] = useState(() => parse(value));
@@ -47,19 +50,21 @@ export default function TimeField({ label, value, onChange, placeholder = '--:--
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.field}>
-        <TouchableOpacity style={styles.main} activeOpacity={0.75} onPress={openPicker} accessibilityRole="button">
+      {label ? <Text style={styles.label}>{label}</Text> : <View style={{ height: 24 }} />}
+      <View style={[styles.field, hideIcons && { minHeight: 52 }]}>
+        <TouchableOpacity style={[styles.main, hideIcons && { minHeight: 52 }]} activeOpacity={0.75} onPress={openPicker} accessibilityRole="button">
           <Text style={[styles.value, !value && styles.placeholder]}>{value || placeholder}</Text>
         </TouchableOpacity>
-        {value ? (
+        {value && !hideIcons ? (
           <TouchableOpacity onPress={() => onChange('')} hitSlop={8} accessibilityLabel="Limpar horário">
             <X size={16} color={colors.textSecondary} strokeWidth={2.2} />
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity onPress={openPicker} hitSlop={8} accessibilityLabel="Escolher horário">
-          <Clock size={16} color={colors.textSecondary} strokeWidth={2.2} />
-        </TouchableOpacity>
+        {hideIcons ? null : (
+          <TouchableOpacity onPress={openPicker} hitSlop={8} accessibilityLabel="Escolher horário">
+            <Clock size={16} color={colors.textSecondary} strokeWidth={2.2} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {open && Platform.OS === 'android' ? (
