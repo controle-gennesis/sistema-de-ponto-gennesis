@@ -17,6 +17,8 @@ import FuelRequestsScreen from './src/screens/FuelRequestsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import PncpLicitacoesScreen from './src/screens/PncpLicitacoesScreen';
 import AgendaScreen from './src/screens/AgendaScreen';
+import ContractsScreen from './src/screens/ContractsScreen';
+import ContractSummaryScreen from './src/screens/ContractSummaryScreen';
 import DiarioObraListScreen from './src/screens/diarioObra/DiarioObraListScreen';
 import DiarioObraEditorScreen from './src/screens/diarioObra/DiarioObraEditorScreen';
 import KanbanBoardsScreen from './src/screens/kanban/KanbanBoardsScreen';
@@ -52,6 +54,8 @@ export type RootStackParamList = {
   Pncp: undefined;
   Agenda: undefined;
   Tarefas: { filter?: 'today' | 'overdue' | 'starred' | 'all' } | undefined;
+  Contratos: undefined;
+  ContratoResumo: { id: string; name?: string };
   DiarioObra: undefined;
   DiarioObraEditor: {
     obraId: string;
@@ -104,6 +108,8 @@ const OpaqueProfileScreen = withOpaqueBackground(ProfileScreen);
 const OpaquePncpLicitacoesScreen = withOpaqueBackground(PncpLicitacoesScreen);
 const OpaqueAgendaScreen = withOpaqueBackground(AgendaScreen);
 const OpaqueTarefasScreen = withOpaqueBackground(AgendaScreen);
+const OpaqueContratosScreen = withOpaqueBackground(ContractsScreen);
+const OpaqueContratoResumoScreen = withOpaqueBackground(ContractSummaryScreen);
 const OpaqueDiarioObraListScreen = withOpaqueBackground(DiarioObraListScreen);
 const OpaqueDiarioObraEditorScreen = withOpaqueBackground(DiarioObraEditorScreen);
 const OpaqueKanbanBoardsScreen = withOpaqueBackground(KanbanBoardsScreen);
@@ -239,6 +245,8 @@ function AppNavigator() {
               <Stack.Screen name="Pncp" component={OpaquePncpLicitacoesScreen} />
               <Stack.Screen name="Agenda" component={OpaqueAgendaScreen} />
               <Stack.Screen name="Tarefas" component={OpaqueTarefasScreen} />
+              <Stack.Screen name="Contratos" component={OpaqueContratosScreen} />
+              <Stack.Screen name="ContratoResumo" component={OpaqueContratoResumoScreen} />
               <Stack.Screen name="DiarioObra" component={OpaqueDiarioObraListScreen} />
               <Stack.Screen name="DiarioObraEditor" component={OpaqueDiarioObraEditorScreen} />
               <Stack.Screen name="KanbanBoards" component={OpaqueKanbanBoardsScreen} />

@@ -3,7 +3,7 @@
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
     "scheme": "gennesis",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/logo-ios.png",
     "userInterfaceStyle": "automatic",
@@ -24,10 +24,10 @@
         "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2"
+      "buildNumber": "1"
     },
     "android": {
-      "versionCode": 17,
+      "versionCode": 18,
       "icon": "./assets/logo-android.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-android.png",
